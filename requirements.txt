@@ -1,0 +1,15 @@
+arclet-entari[full]==0.17.4
+httpx>=0.24.0
+aiohttp>=3.8.0
+mcstatus
+lxml>=4.9.0
+pillow>=9.0
+pil-utils
+opencv-python>=4.5.0
+numpy>=1.21.0
+playwright>=1.30.0
+pydantic>=2.0.0
+pytz
+pypinyin
+apscheduler>=3.10.0
+PyYAML>=6.0

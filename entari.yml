@@ -1,0 +1,12 @@
+basic:
+  network:
+    - type: ws
+      host: "localhost"
+      port: 5500
+      path: ""
+      token: "CHANGE_ME"
+  ignore_self_message: true
+  log:
+    level: INFO
+  prefix: ["/"]
+plugins: {}

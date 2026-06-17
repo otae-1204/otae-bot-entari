@@ -1,0 +1,42 @@
+# ── Python ──
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.repair_backup/
+
+# ── Environment ──
+.env
+.env.prod
+.env.local
+
+# ── IDE ──
+.idea/
+.vscode/
+
+# ── Runtime data ──
+.runtime/
+data/
+*.db
+*.sqlite3
+
+# ── Assets temp ──
+assets/image/temp/
+assets/image/cache/
+assets/image/forkout/forkout_result.jpg
+
+# clade
+.claude
+
+# Project status (auto-generated)
+PROJECT_STATUS.md
+CURRENT_PROJECT_STATUS.md
+CURRENT_ENTARI_PROJECT_STATUS.md
+
+
+# ── OS ──
+.DS_Store
+Thumbs.db
