@@ -63,6 +63,8 @@ class MinecraftDataManager:
         pd = self.pl_data.plugin_data
         if 'group_server' not in pd:
             pd['group_server'] = {}
+        if 'group_settings' not in pd or not isinstance(pd.get('group_settings'), dict):
+            pd['group_settings'] = {}
 
         # 迁移旧格式：name-keyed → address-keyed
         for gid, servers in list(pd['group_server'].items()):
@@ -111,6 +113,15 @@ class MinecraftDataManager:
         if gid not in self.pl_data.plugin_data['group_server']:
             self.pl_data.plugin_data['group_server'][gid] = {}
         return self.pl_data.plugin_data['group_server'][gid]
+
+    def _settings(self, group_id: int | str) -> dict:
+        gid = self._vgroup(group_id)
+        settings = self.pl_data.plugin_data.setdefault('group_settings', {})
+        group_settings = settings.get(gid)
+        if not isinstance(group_settings, dict):
+            group_settings = {}
+            settings[gid] = group_settings
+        return group_settings
 
     def _find_by_name(self, group_id: str, name: str) -> Optional[tuple[str, dict]]:
         """按 name 字段查找，返回 (address, server_dict) 或 None."""
@@ -333,6 +344,32 @@ class MinecraftDataManager:
         return result
 
     # ── 玩家游戏时间 ──
+
+    def get_group_broadcast_interval(self, group_id: int | str, default: int | None = None) -> int | None:
+        value = self._settings(group_id).get('broadcast_interval')
+        try:
+            seconds = int(value)
+        except (TypeError, ValueError):
+            return default
+        return seconds if seconds > 0 else default
+
+    def set_group_broadcast_interval(self, group_id: int | str, seconds: int) -> bool:
+        seconds = int(seconds)
+        if seconds <= 0:
+            return False
+        self._settings(group_id)['broadcast_interval'] = seconds
+        self._save()
+        return True
+
+    def reset_group_broadcast_interval(self, group_id: int | str) -> bool:
+        gid = self._vgroup(group_id)
+        settings = self._settings(group_id)
+        existed = 'broadcast_interval' in settings
+        settings.pop('broadcast_interval', None)
+        if not settings:
+            self.pl_data.plugin_data.get('group_settings', {}).pop(gid, None)
+        self._save()
+        return existed
 
     def _gametime(self, group_id: str, addr: str) -> dict:
         s = self._group(group_id).get(addr)

@@ -45,6 +45,68 @@ def _load_module(name: str, relative_path: str):
     return module
 
 
+def _load_minecraft_broadcast_module(name: str):
+    previous_entari_native = sys.modules.get("utils.entari_native")
+    previous_arclet_entari = sys.modules.get("arclet.entari")
+    previous_arclet = sys.modules.get("arclet")
+    previous_pkg = sys.modules.get("plugins.minecraft_plugin")
+    previous_ping = sys.modules.get("plugins.minecraft_plugin.ping")
+
+    entari_native = types.ModuleType("utils.entari_native")
+    entari_native.listen_notice = lambda *args, **kwargs: types.SimpleNamespace(
+        handle=lambda: (lambda func: func),
+        finish=lambda *a, **kw: None,
+    )
+    entari_native.get_bot = lambda: None
+    entari_native.Pred = lambda func: func
+    entari_native.ChainMsg = types.SimpleNamespace(text=lambda text: types.SimpleNamespace(send=lambda *a, **kw: None))
+    entari_native.SendDest = lambda *args, **kwargs: (args, kwargs)
+    entari_native.account_adapter_name = lambda bot: ""
+    entari_native.timer = types.SimpleNamespace(
+        scheduled_job=lambda *args, **kwargs: (lambda func: func)
+    )
+
+    arclet = previous_arclet or types.ModuleType("arclet")
+    arclet_entari = types.ModuleType("arclet.entari")
+    arclet_entari.Account = object
+    arclet_entari.Event = object
+
+    sys.modules["utils.entari_native"] = entari_native
+    sys.modules["arclet"] = arclet
+    sys.modules["arclet.entari"] = arclet_entari
+    pkg = previous_pkg or types.ModuleType("plugins.minecraft_plugin")
+    pkg.__path__ = [str(ROOT / "plugins/minecraft_plugin")]
+    sys.modules["plugins.minecraft_plugin"] = pkg
+    ping_module = types.ModuleType("plugins.minecraft_plugin.ping")
+    async def fake_ping(*args, **kwargs):
+        return {"status": "error", "data": {}}
+    ping_module.ping = fake_ping
+    sys.modules["plugins.minecraft_plugin.ping"] = ping_module
+    try:
+        return _load_module(f"plugins.minecraft_plugin.{name}", "plugins/minecraft_plugin/broadcast.py")
+    finally:
+        if previous_entari_native is None:
+            sys.modules.pop("utils.entari_native", None)
+        else:
+            sys.modules["utils.entari_native"] = previous_entari_native
+        if previous_arclet_entari is None:
+            sys.modules.pop("arclet.entari", None)
+        else:
+            sys.modules["arclet.entari"] = previous_arclet_entari
+        if previous_arclet is None:
+            sys.modules.pop("arclet", None)
+        else:
+            sys.modules["arclet"] = previous_arclet
+        if previous_pkg is None:
+            sys.modules.pop("plugins.minecraft_plugin", None)
+        else:
+            sys.modules["plugins.minecraft_plugin"] = previous_pkg
+        if previous_ping is None:
+            sys.modules.pop("plugins.minecraft_plugin.ping", None)
+        else:
+            sys.modules["plugins.minecraft_plugin.ping"] = previous_ping
+
+
 def _load_steam_data_source():
     pkg_name = "steam_info_for_test"
     pkg = types.ModuleType(pkg_name)
@@ -3022,6 +3084,147 @@ remotePort = {{ $v.Second }}
         self.assertEqual(snapshot["data"]["players"], [])
         self.assertEqual(snapshot["data"]["online_players"], 3)
         self.assertTrue(snapshot["data"]["players_hidden"])
+
+    def test_minecraft_broadcast_playtime_uses_shared_manager_and_address(self):
+        data_source = _load_module(
+            "minecraft_data_source_for_broadcast_shared_test",
+            "plugins/minecraft_plugin/data_source.py",
+        )
+        broadcast_module = _load_minecraft_broadcast_module(
+            "minecraft_broadcast_for_shared_manager_test",
+        )
+
+        with TemporaryDirectory() as tmp:
+            cwd = Path.cwd()
+            os.chdir(tmp)
+            try:
+                manager = data_source.MinecraftDataManager()
+                manager.add_group_server("10001", "SameName", "a.example.net")
+                manager.add_group_server("10001", "samename", "b.example.net")
+
+                class BM:
+                    data_manager = manager
+
+                broadcast_module._bm = BM()
+                with patch.object(broadcast_module.time, "time", return_value=220):
+                    messages = broadcast_module._check_player_changes_simple(
+                        "samename",
+                        {"Steve": 100},
+                        [],
+                        10001,
+                        "b.example.net",
+                    )
+
+                self.assertIn("Steve", messages[0])
+                self.assertEqual(
+                    manager.get_server_player_gametimes("10001", "b.example.net"),
+                    {"Steve": 120},
+                )
+                self.assertEqual(manager.get_server_player_gametimes("10001", "a.example.net"), {})
+                self.assertEqual(manager.get_top_players_all_servers(10001)[0]["player_id"], "Steve")
+            finally:
+                broadcast_module._bm = None
+                os.chdir(cwd)
+
+    def test_minecraft_broadcast_cache_entry_initializes_visible_players(self):
+        broadcast_module = _load_minecraft_broadcast_module(
+            "minecraft_broadcast_for_cache_entry_test",
+        )
+
+        entry = broadcast_module._build_broadcast_cache_entry(
+            "mc.example.net",
+            "survival",
+            {
+                "status": "success",
+                "data": {
+                    "players": ["Steve", "Alex"],
+                    "players_hidden": False,
+                    "online_players": 2,
+                },
+            },
+            1000,
+        )
+
+        self.assertEqual(entry["players"], {"Steve": 1000, "Alex": 1000})
+        self.assertFalse(entry["players_hidden"])
+        self.assertEqual(entry["online_players"], 2)
+
+    def test_minecraft_group_broadcast_interval_settings(self):
+        data_source = _load_module(
+            "minecraft_data_source_for_interval_test",
+            "plugins/minecraft_plugin/data_source.py",
+        )
+
+        with TemporaryDirectory() as tmp:
+            cwd = Path.cwd()
+            os.chdir(tmp)
+            try:
+                manager = data_source.MinecraftDataManager()
+                self.assertIn("group_settings", manager.pl_data.plugin_data)
+                manager.add_group_server("10001", "survival", "mc.example.net")
+
+                self.assertEqual(manager.get_group_broadcast_interval("10001", 300), 300)
+                self.assertTrue(manager.set_group_broadcast_interval("10001", 600))
+                self.assertEqual(manager.get_group_broadcast_interval("10001", 300), 600)
+                self.assertIn("mc.example.net", manager.pl_data.plugin_data["group_server"]["10001"])
+
+                self.assertTrue(manager.reset_group_broadcast_interval("10001"))
+                self.assertEqual(manager.get_group_broadcast_interval("10001", 300), 300)
+            finally:
+                os.chdir(cwd)
+
+    def test_minecraft_group_broadcast_due_uses_group_interval(self):
+        data_source = _load_module(
+            "minecraft_data_source_for_interval_due_test",
+            "plugins/minecraft_plugin/data_source.py",
+        )
+        broadcast_module = _load_minecraft_broadcast_module(
+            "minecraft_broadcast_for_interval_due_test",
+        )
+
+        with TemporaryDirectory() as tmp:
+            cwd = Path.cwd()
+            os.chdir(tmp)
+            try:
+                manager = data_source.MinecraftDataManager()
+                manager.set_group_broadcast_interval("10001", 60)
+
+                class BM:
+                    data_manager = manager
+
+                broadcast_module._bm = BM()
+                broadcast_module._last_broadcast_at.clear()
+
+                self.assertTrue(broadcast_module._is_group_broadcast_due("10001", 1000))
+                broadcast_module._mark_group_broadcasted("10001", 1000)
+                self.assertFalse(broadcast_module._is_group_broadcast_due("10001", 1059))
+                self.assertTrue(broadcast_module._is_group_broadcast_due("10001", 1060))
+
+                broadcast_module._mark_group_broadcasted("10002", 1000)
+                self.assertFalse(broadcast_module._is_group_broadcast_due("10002", 1299))
+                self.assertTrue(broadcast_module._is_group_broadcast_due("10002", 1300))
+            finally:
+                broadcast_module._bm = None
+                broadcast_module._last_broadcast_at.clear()
+                os.chdir(cwd)
+
+    def test_minecraft_broadcast_interval_command_source_paths(self):
+        source = (ROOT / "plugins/minecraft_plugin/__init__.py").read_text(encoding="utf-8")
+        self.assertIn('broadcast_interval = _cmd("broadcastinterval"', source)
+        self.assertIn('if unit in {"", "m", "分", "分钟"}:', source)
+        self.assertIn("return value * 60", source)
+        self.assertIn('command_args.lower() in {"reset", "default", "默认", "重置"}', source)
+        self.assertIn("seconds < 60 or seconds > 24 * 3600", source)
+        self.assertIn("data_manager.set_group_broadcast_interval(group_id, seconds)", source)
+        self.assertIn("data_manager.reset_group_broadcast_interval(group_id)", source)
+
+    def test_minecraft_ping_group_name_prefers_event_guild_and_fallback(self):
+        source = (ROOT / "plugins/minecraft_plugin/__init__.py").read_text(encoding="utf-8")
+        self.assertIn("async def _get_group_name", source)
+        self.assertIn("guild_name = str(getattr(guild, \"name\", \"\") or \"\").strip()", source)
+        self.assertIn("full_guild = await guild_get(guild_id=str(group_id))", source)
+        self.assertIn("return str(group_id)", source)
+        self.assertIn("draw_server_list(imgs, await _get_group_name(event, group_id))", source)
 
     def test_broadcast_utils_merge_player_changes_and_throttle_errors(self):
         utils = _load_module("minecraft_broadcast_utils_for_test", "plugins/minecraft_plugin/broadcast_utils.py")

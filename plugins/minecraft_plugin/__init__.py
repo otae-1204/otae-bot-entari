@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import re
 import tempfile
 from typing import Dict, Optional, Any
 
@@ -11,10 +12,10 @@ from utils.entari_native import (
 )
 from arclet.alconna import Alconna, Args
 
-from utils.entari_native import cmd as _cmd, get_rest
+from utils.entari_native import cmd as _cmd, get_rest, get_bot
 from utils.temp_files import schedule_temp_file_cleanup
 
-from configs.config import Config
+from configs.config import Config, MC_BROADCAST_INTERVAL
 from plugins.minecraft_plugin.data_source import MinecraftDataManager, BroadcastManager
 from plugins.minecraft_plugin.draw import draw_server_info, draw_server_list, draw_server_players, draw_player_leaderboard
 from plugins.minecraft_plugin.broadcast import (
@@ -42,6 +43,26 @@ def _get_group_id(event: Event) -> str:
     return str(guild.id) if (guild and guild.id) else str(event_user_id(event))
 
 
+async def _get_group_name(event: Event, group_id: str) -> str:
+    guild = getattr(event, "guild", None)
+    guild_name = str(getattr(guild, "name", "") or "").strip() if guild else ""
+    if guild_name:
+        return guild_name
+
+    try:
+        bot = get_bot()
+        guild_get = getattr(bot, "guild_get", None)
+        if callable(guild_get):
+            full_guild = await guild_get(guild_id=str(group_id))
+            full_name = str(getattr(full_guild, "name", "") or "").strip()
+            if full_name:
+                return full_name
+    except Exception:
+        pass
+
+    return str(group_id)
+
+
 def _to_image(output) -> ChainImage:
     """将 BytesIO 写入临时文件，返回 Satori 兼容的 Image 段。"""
     import tempfile
@@ -50,6 +71,33 @@ def _to_image(output) -> ChainImage:
         f.flush()
         schedule_temp_file_cleanup(f.name)
         return ChainImage(path=f.name)
+
+
+def _format_interval(seconds: int | None) -> str:
+    if seconds is None:
+        return "未设置"
+    seconds = int(seconds)
+    if seconds % 3600 == 0:
+        return f"{seconds // 3600}小时"
+    if seconds % 60 == 0:
+        return f"{seconds // 60}分钟"
+    return f"{seconds}秒"
+
+
+def _parse_interval_seconds(raw: str) -> int | None:
+    text = (raw or "").strip().lower()
+    match = re.fullmatch(r"(\d+)\s*(s|m|h|秒|分|分钟|小时)?", text)
+    if not match:
+        return None
+    value = int(match.group(1))
+    unit = match.group(2)
+    if unit in {"", "m", "分", "分钟"}:
+        return value * 60
+    if unit in {"s", "秒"}:
+        return value
+    if unit in {"h", "小时"}:
+        return value * 3600
+    return None
 
 
 # 命令定义，用户消息仍使用 entari.yml 中配置的 / 前缀
@@ -83,6 +131,9 @@ update_broadcast_name = _cmd("updatebroadcastname", aliases={
     "editbroadcastname", "edit_broadcast_name", "ebn", "修改播报服务器名称",
 }, priority=5, block=True)
 broadcast_list = _cmd("broadcastlist", aliases={"Broadcastlist", "broadcast_list", "bl", "BL", "播报服务器列表"}, priority=5, block=True)
+broadcast_interval = _cmd("broadcastinterval", aliases={
+    "Broadcastinterval", "broadcast_interval", "bi", "BI", "播报间隔"
+}, priority=5, block=True)
 online_rank = _cmd("online", aliases={"Online", "ol", "在线", "排行榜", "rank"}, priority=5, block=True)
 
 
@@ -116,7 +167,7 @@ async def handle_ping_command(event: Event, rest: ArgVal[str]):
 
         # 多个服务器全部传入，draw_server_info 会处理离线状态
         imgs = [draw_server_info(r) for r in responses]
-        output = draw_server_list(imgs, "群聊")
+        output = draw_server_list(imgs, await _get_group_name(event, group_id))
         await server_ping.finish(ChainMsg([_to_image(output)]))
         return
 
@@ -360,6 +411,8 @@ async def handle_broadcast_list_command(event: Event, rest: ArgVal[str]):
         await broadcast_list.finish("当前群没有播报服务器。")
 
     lines = ["当前群的播报服务器:"]
+    current_interval = data_manager.get_group_broadcast_interval(group_id, MC_BROADCAST_INTERVAL)
+    lines.append(f"播报间隔: {_format_interval(current_interval)}")
     for name, info in servers.items():
         addr = info.get("address", "未知") if isinstance(info, dict) else str(info)
         lines.append(f"  {name} - {addr}")
@@ -367,6 +420,35 @@ async def handle_broadcast_list_command(event: Event, rest: ArgVal[str]):
 
 
 # online 排行榜
+
+@broadcast_interval.handle()
+async def handle_broadcast_interval_command(event: Event, rest: ArgVal[str]):
+    command_args = get_rest(rest).strip()
+    group_id = _get_group_id(event)
+    current = data_manager.get_group_broadcast_interval(group_id, MC_BROADCAST_INTERVAL)
+
+    if not command_args:
+        await broadcast_interval.finish(
+            f"当前群播报间隔: {_format_interval(current)}\n"
+            f"全局默认间隔: {_format_interval(MC_BROADCAST_INTERVAL)}"
+        )
+
+    if command_args.lower() in {"reset", "default", "默认", "重置"}:
+        data_manager.reset_group_broadcast_interval(group_id)
+        await broadcast_interval.finish(
+            f"已恢复全局默认播报间隔: {_format_interval(MC_BROADCAST_INTERVAL)}"
+        )
+
+    seconds = _parse_interval_seconds(command_args)
+    if seconds is None:
+        await broadcast_interval.finish("格式错误，请使用 60s、5m、1h，或裸数字表示分钟。")
+
+    if seconds < 60 or seconds > 24 * 3600:
+        await broadcast_interval.finish("播报间隔必须在 60 秒到 24 小时之间。")
+
+    data_manager.set_group_broadcast_interval(group_id, seconds)
+    await broadcast_interval.finish(f"已设置当前群播报间隔为: {_format_interval(seconds)}")
+
 
 @online_rank.handle()
 async def handle_online_command(event: Event, rest: ArgVal[str]):

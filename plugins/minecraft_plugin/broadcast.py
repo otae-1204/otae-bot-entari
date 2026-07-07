@@ -35,6 +35,8 @@ _broadcast_lock = asyncio.Lock()
 _kicked_groups: set[str] = set()
 _last_error_digest_at: dict[str, int] = {}
 ERROR_DIGEST_COOLDOWN = 600
+BROADCAST_TICK_SECONDS = 30
+_last_broadcast_at: dict[str, int] = {}
 
 
 # ── 监听 bot 重新入群 → 清除踢出标记 ──
@@ -67,17 +69,23 @@ async def safe_ping(server_address: str, server_type: str = "java") -> dict:
 
 
 def _check_player_changes_simple(
-    server_name: str, previous_players: dict, current_players: list[str] | None, group_id: int,
+    server_name: str,
+    previous_players: dict,
+    current_players: list[str] | None,
+    group_id: int,
+    server_identifier: str | None = None,
 ) -> list:
     """对比新旧玩家列表，生成变化消息."""
-    player_game_time_manager = PlayerGameTimeManager()
     messages, playtime_deltas = build_player_change_messages(
         server_name, previous_players, current_players, int(time.time())
     )
+    data_manager = getattr(_bm, "data_manager", None) if _bm is not None else None
+    player_game_time_manager = PlayerGameTimeManager(data_manager)
+    identifier = server_identifier or server_name
     for player, duration in playtime_deltas.items():
         player_game_time_manager.add_player_gametime(
             player_name=player, group_id=group_id,
-            server_name=server_name, gametime=duration,
+            server_name=identifier, gametime=duration,
         )
     return messages
 
@@ -100,6 +108,54 @@ async def _ping_with_timeout(addr: str, timeout: float = 5) -> dict:
         return await asyncio.wait_for(ping(addr, "java"), timeout=timeout)
     except (asyncio.TimeoutError, Exception):
         return {"status": "error", "data": {}}
+
+
+def _build_broadcast_cache_entry(addr: str, name: str, ping_result: dict, now: int) -> dict:
+    """Build one in-memory broadcast cache entry from a ping result."""
+    if ping_result.get("status") == "success":
+        data = ping_result.get("data", {})
+        if not isinstance(data, dict):
+            data = {}
+        player_list = data.get("players", [])
+        players_hidden = bool(data.get("players_hidden"))
+        online_players = int(data.get("online_players", 0) or 0)
+    else:
+        player_list = None
+        players_hidden = False
+        online_players = 0
+
+    return {
+        "name": name,
+        "address": addr,
+        "players": (
+            {}
+            if players_hidden
+            else {p: now for p in player_list}
+            if player_list is not None
+            else None
+        ),
+        "players_hidden": players_hidden,
+        "online_players": online_players,
+    }
+
+
+def _get_group_broadcast_interval(group_id: str) -> int:
+    data_manager = getattr(_bm, "data_manager", None) if _bm is not None else None
+    if data_manager is None:
+        return MC_BROADCAST_INTERVAL
+    return int(data_manager.get_group_broadcast_interval(group_id, MC_BROADCAST_INTERVAL))
+
+
+def _is_group_broadcast_due(group_id: str, now: int) -> bool:
+    gid = str(group_id)
+    last = _last_broadcast_at.get(gid)
+    if last is None:
+        return True
+    return now - last >= _get_group_broadcast_interval(gid)
+
+
+def _mark_group_broadcasted(group_id: str, now: int) -> None:
+    _last_broadcast_at[str(group_id)] = now
 
 
 async def init_broadcast(bm):
@@ -126,28 +182,7 @@ async def init_broadcast(bm):
             group[addr]["name"] = name
             group[addr]["address"] = addr
             continue
-        if result.get("status") == "success":
-            data = result.get("data", {})
-            player_list = data.get("players", [])
-            players_hidden = bool(data.get("players_hidden"))
-            online_players = int(data.get("online_players", 0) or 0)
-        else:
-            player_list = None
-            players_hidden = False
-            online_players = 0
-        group[addr] = {
-            "name": name,
-            "address": addr,
-            "players": (
-                {}
-                if players_hidden
-                else {p: int(time.time()) for p in player_list}
-                if player_list is not None
-                else None
-            ),
-            "players_hidden": players_hidden,
-            "online_players": online_players,
-        }
+        group[addr] = _build_broadcast_cache_entry(addr, name, result, int(time.time()))
     logger.info("Broadcast server cache initialized: %s servers", len(entries))
 
 
@@ -157,6 +192,7 @@ async def _sync_server_list():
         return
     try:
         db_servers = await _bm.get_all_broadcast_servers()
+        new_entries: list[tuple[str, str, str]] = []
         async with _broadcast_lock:
             # 移除 DB 中已删除的服务器（按 address key 比对）
             for gid in list(__BroadcastInfo.keys()):
@@ -171,18 +207,22 @@ async def _sync_server_list():
                 __BroadcastInfo.setdefault(gid, {})
                 for addr, si in _normalize_servers(servers).items():
                     if addr not in __BroadcastInfo[gid]:
-                        __BroadcastInfo[gid][addr] = {
-                            "name": si.get("name", addr),
-                            "address": addr,
-                            "players": None,
-                            "players_hidden": False,
-                            "online_players": 0,
-                        }
+                        new_entries.append((gid, addr, si.get("name", addr)))
+                    else:
+                        __BroadcastInfo[gid][addr]["name"] = si.get("name", addr)
+                        __BroadcastInfo[gid][addr]["address"] = addr
+        if new_entries:
+            now = int(time.time())
+            results = await asyncio.gather(*[_ping_with_timeout(addr) for _, addr, _ in new_entries])
+            async with _broadcast_lock:
+                for (gid, addr, name), result in zip(new_entries, results):
+                    if gid in __BroadcastInfo and addr not in __BroadcastInfo[gid]:
+                        __BroadcastInfo[gid][addr] = _build_broadcast_cache_entry(addr, name, result, now)
     except Exception:
         pass
 
 
-@timer.scheduled_job("interval", seconds=MC_BROADCAST_INTERVAL, misfire_grace_time=30, max_instances=1)
+@timer.scheduled_job("interval", seconds=BROADCAST_TICK_SECONDS, misfire_grace_time=30, max_instances=1)
 async def broadcast():
     """定时轮询所有服务器，检测玩家变化并播报（同时同步 DB 配置）."""
     await _sync_server_list()
@@ -206,6 +246,9 @@ async def broadcast():
     for group_id, group_servers in snapshot.items():
         if str(group_id) in _kicked_groups:
             continue
+        if not _is_group_broadcast_due(str(group_id), now):
+            continue
+        _mark_group_broadcasted(str(group_id), now)
         group_messages: list[str] = []
         for addr, server_info in group_servers.items():
             try:
@@ -265,7 +308,9 @@ async def broadcast():
                     continue
 
                 group_messages.extend(
-                    _check_player_changes_simple(server_name, previous_players, current_players, group_id)
+                    _check_player_changes_simple(
+                        server_name, previous_players, current_players, group_id, addr
+                    )
                 )
 
                 async with _broadcast_lock:
