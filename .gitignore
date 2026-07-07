@@ -19,6 +19,7 @@ venv/
 
 # ── Runtime data ──
 .runtime/
+.codex_preview/
 data/
 *.db
 *.sqlite3
@@ -35,6 +36,7 @@ assets/image/forkout/forkout_result.jpg
 PROJECT_STATUS.md
 CURRENT_PROJECT_STATUS.md
 CURRENT_ENTARI_PROJECT_STATUS.md
+CURRENT_ENDFIELD_PROJECT_STATUS.md
 
 
 # ── OS ──

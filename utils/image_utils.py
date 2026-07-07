@@ -83,6 +83,7 @@ async def screenshot_web_element(
     viewport: tuple[int, int] = (1280, 900),
     timeout_ms: int = 15000,
     max_height: int = 20000,
+    device_scale_factor: float = 1.0,
 ) -> bytes:
     """Screenshot a single page element using a reusable browser."""
     loop = asyncio.get_running_loop()
@@ -94,6 +95,7 @@ async def screenshot_web_element(
         viewport,
         timeout_ms,
         max_height,
+        device_scale_factor,
     )
 
 
@@ -103,11 +105,12 @@ def _screenshot_web_element_sync(
     viewport: tuple[int, int],
     timeout_ms: int,
     max_height: int,
+    device_scale_factor: float,
 ) -> bytes:
     browser = _get_browser()
     context = browser.new_context(
         viewport={"width": viewport[0], "height": viewport[1]},
-        device_scale_factor=1,
+        device_scale_factor=device_scale_factor,
     )
     page = context.new_page()
     try:
