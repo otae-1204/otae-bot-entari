@@ -10,6 +10,8 @@ import numpy as np
 import asyncio
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
 
 
 _playwright_manager = None
@@ -17,6 +19,12 @@ _browser = None
 _browser_lock = threading.Lock()
 _browser_executor = None
 _browser_executor_lock = threading.Lock()
+
+
+@dataclass(frozen=True, slots=True)
+class BrowserResource:
+    content: bytes
+    content_type: str = "application/octet-stream"
 
 
 def _playwright_proxy_conf():
@@ -84,6 +92,11 @@ async def screenshot_web_element(
     timeout_ms: int = 15000,
     max_height: int = 20000,
     device_scale_factor: float = 1.0,
+    settle_ms: int = 300,
+    resources: Mapping[str, BrowserResource] | None = None,
+    wait_for_images: bool = False,
+    strict_max_height: bool = False,
+    overflow_selectors: Sequence[str] = (),
 ) -> bytes:
     """Screenshot a single page element using a reusable browser."""
     loop = asyncio.get_running_loop()
@@ -96,6 +109,11 @@ async def screenshot_web_element(
         timeout_ms,
         max_height,
         device_scale_factor,
+        settle_ms,
+        dict(resources or {}),
+        wait_for_images,
+        strict_max_height,
+        tuple(overflow_selectors),
     )
 
 
@@ -106,6 +124,11 @@ def _screenshot_web_element_sync(
     timeout_ms: int,
     max_height: int,
     device_scale_factor: float,
+    settle_ms: int,
+    resources: dict[str, BrowserResource],
+    wait_for_images: bool,
+    strict_max_height: bool,
+    overflow_selectors: tuple[str, ...],
 ) -> bytes:
     browser = _get_browser()
     context = browser.new_context(
@@ -115,7 +138,14 @@ def _screenshot_web_element_sync(
     page = context.new_page()
     try:
         def _route_handler(route):
-            if route.request.resource_type in {"media", "font"}:
+            resource = resources.get(route.request.url)
+            if resource is not None:
+                route.fulfill(
+                    status=200,
+                    body=resource.content,
+                    content_type=resource.content_type,
+                )
+            elif route.request.resource_type in {"media", "font"}:
                 route.abort()
             else:
                 route.continue_()
@@ -128,6 +158,20 @@ def _screenshot_web_element_sync(
         except Exception:
             page.wait_for_selector("body", timeout=timeout_ms)
             locator = page.locator("body").first
+
+        if wait_for_images:
+            page.evaluate(
+                """async () => {
+                    const images = Array.from(document.images);
+                    await Promise.all(images.map(image => {
+                        if (image.complete) return Promise.resolve();
+                        return new Promise(resolve => {
+                            image.addEventListener('load', resolve, {once: true});
+                            image.addEventListener('error', resolve, {once: true});
+                        });
+                    }));
+                }"""
+            )
 
         size = locator.evaluate(
             """el => ({
@@ -143,10 +187,30 @@ def _screenshot_web_element_sync(
                 ))
             })"""
         )
+        measured_height = max(1, int(size["height"]))
+        if strict_max_height and measured_height > max_height:
+            raise RuntimeError(
+                f"Screenshot element height {measured_height}px exceeds limit {max_height}px"
+            )
         target_width = max(viewport[0], min(max(1, int(size["width"])), 4000))
-        target_height = max(viewport[1], min(max(1, int(size["height"])), max_height))
+        target_height = max(viewport[1], min(measured_height, max_height))
         page.set_viewport_size({"width": target_width, "height": target_height})
-        page.wait_for_timeout(300)
+        if settle_ms > 0:
+            page.wait_for_timeout(settle_ms)
+
+        if overflow_selectors:
+            overflows = page.evaluate(
+                """selectors => selectors.flatMap(selector =>
+                    Array.from(document.querySelectorAll(selector)).flatMap((element, index) => {
+                        const vertical = element.scrollHeight > element.clientHeight + 1;
+                        const horizontal = element.scrollWidth > element.clientWidth + 1;
+                        return vertical || horizontal ? [{selector, index, vertical, horizontal}] : [];
+                    })
+                )""",
+                list(overflow_selectors),
+            )
+            if overflows:
+                raise RuntimeError(f"Screenshot layout overflow detected: {overflows}")
 
         box = locator.bounding_box()
         if not box:

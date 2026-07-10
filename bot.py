@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 from pathlib import Path
 
-from arclet.entari import Entari, WS, load_plugin
+from arclet.entari import Cleanup, Entari, WS, listen, load_plugin
 
 import configs.config  # noqa: F401 - load .env before Entari starts
 from configs.config import SATORI_CLIENTS
+from utils.entari_native import close_scheduled_jobs
+from utils.http_client import close_http_client
+from utils.image_executor import close_image_executor
+from utils.image_utils import close_browser
 
 
 def _acquire_run_lock():
@@ -58,6 +63,16 @@ if __name__ == "__main__":
 
 
 app = Entari(_network())
+
+
+@listen(Cleanup)
+async def _cleanup_shared_resources():
+    await close_scheduled_jobs()
+    await asyncio.gather(
+        close_http_client(),
+        close_image_executor(),
+        close_browser(),
+    )
 
 # Load migrated plugins that have a real package entrypoint. Directories without
 # __init__.py are preserved assets/examples and should not be registered.

@@ -4,6 +4,11 @@ from typing import Any
 
 import httpx
 
+from utils.http_client import fetch_json
+
+
+API_CACHE_NAMESPACE = "endfield-api"
+
 
 class WarfarinAPIError(Exception):
     pass
@@ -31,6 +36,12 @@ class WarfarinClient:
     async def operators(self, *, lang: str = "cn") -> dict[str, Any]:
         return await self._get_json(f"{self.BASE_URL}/{lang}/operators")
 
+    async def weapons(self, *, lang: str = "cn") -> dict[str, Any]:
+        return await self._get_json(f"{self.BASE_URL}/{lang}/weapons")
+
+    async def weapon_detail(self, slug: str, *, lang: str = "cn") -> dict[str, Any]:
+        return await self._get_json(f"{self.BASE_URL}/{lang}/weapons/{slug}")
+
     async def fz_article_by_title(self, title: str, *, ns: int = 0, with_revision: bool = True) -> dict[str, Any]:
         return await self._get_json(
             f"{self.FZ_BASE_URL}/articles/by-title",
@@ -40,28 +51,30 @@ class WarfarinClient:
     async def fz_article_summaries(self, prefix: str, *, ns: int = 0) -> dict[str, Any]:
         return await self._get_json(f"{self.FZ_BASE_URL}/articles/summaries", params={"ns": ns, "prefix": prefix})
 
+    async def fz_search(self, query: str, *, limit: int = 8) -> dict[str, Any]:
+        return await self._get_json(f"{self.FZ_BASE_URL}/search", params={"q": query, "limit": limit})
+
     async def fz_game_richtext(self) -> dict[str, Any]:
         return await self._get_json(f"{self.FZ_BASE_URL}/game-richtext")
 
     async def _get_json(self, url: str, *, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        source = "FZ Wiki" if url.startswith(self.FZ_BASE_URL) else "Warfarin Wiki"
         try:
-            async with httpx.AsyncClient(
+            data = await fetch_json(
+                url,
+                namespace=API_CACHE_NAMESPACE,
+                params=params,
                 headers=self.headers,
-                timeout=self.timeout,
-                follow_redirects=True,
-                trust_env=False,
-            ) as client:
-                response = await client.get(url, params=params)
-                response.raise_for_status()
-                data = response.json()
+                timeout_seconds=self.timeout,
+            )
         except httpx.TimeoutException as exc:
-            raise WarfarinAPIError("Warfarin Wiki 请求超时") from exc
+            raise WarfarinAPIError(f"{source} 请求超时") from exc
         except httpx.HTTPStatusError as exc:
-            raise WarfarinAPIError(f"Warfarin Wiki HTTP {exc.response.status_code}") from exc
+            raise WarfarinAPIError(f"{source} HTTP {exc.response.status_code}") from exc
         except ValueError as exc:
-            raise WarfarinAPIError("Warfarin Wiki 返回了无法解析的 JSON") from exc
+            raise WarfarinAPIError(f"{source} 返回了无法解析的 JSON") from exc
         except httpx.HTTPError as exc:
-            raise WarfarinAPIError(f"Warfarin Wiki 请求失败: {exc}") from exc
+            raise WarfarinAPIError(f"{source} 请求失败: {exc}") from exc
         if not isinstance(data, dict):
-            raise WarfarinAPIError("Warfarin Wiki 返回结构异常")
+            raise WarfarinAPIError(f"{source} 返回结构异常")
         return data

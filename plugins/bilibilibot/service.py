@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import re
 import time
 import tempfile
+from time import perf_counter
 from typing import Iterable
 
 from arclet.entari import Account as Bot
@@ -28,8 +30,6 @@ KIND_ALIASES = {
     "dynamic": KIND_DYNAMIC,
     "动态": KIND_DYNAMIC,
 }
-
-
 def expand_kinds(raw: str) -> list[str]:
     kind = KIND_ALIASES.get(raw.lower(), KIND_ALIASES.get(raw))
     if kind == "all":
@@ -40,10 +40,17 @@ def expand_kinds(raw: str) -> list[str]:
 
 
 class BiliService:
-    def __init__(self, store: BiliStore, client: BiliClient):
+    def __init__(self, store: BiliStore, client: BiliClient, *, poll_concurrency: int = 4):
         self.store = store
         self.client = client
+        self.poll_concurrency = max(1, int(poll_concurrency))
         self._video_failure_log_cache: dict[str, tuple[str, int]] = {}
+        self._poll_locks = {
+            KIND_LIVE: asyncio.Lock(),
+            KIND_VIDEO: asyncio.Lock(),
+            KIND_DYNAMIC: asyncio.Lock(),
+        }
+        self._broadcast_locks: dict[tuple[str, str], asyncio.Lock] = {}
 
     async def follow(self, kind_arg: str, values: list[str], subscriber_type: str, subscriber_id: str) -> tuple[list[str], list[str]]:
         ok: list[str] = []
@@ -118,103 +125,139 @@ class BiliService:
         await self.check_dynamic()
 
     async def check_live(self) -> None:
-        for target in self.store.list_active_targets(KIND_LIVE):
-            try:
-                latest = await self.client.latest_live_state(target)
-                if latest.is_live != target.is_live:
-                    card = BiliCard(
-                        "live_on" if latest.is_live else "live_off",
-                        latest.last_title or target.last_title or "直播状态变化",
-                        author=target.name,
-                        subtitle="正在直播" if latest.is_live else "直播已结束",
-                        cover_url=latest.last_cover or target.last_cover,
-                        avatar_url=target.avatar_url,
-                        url=f"https://live.bilibili.com/{latest.room_id or target.room_id}",
-                        badge="LIVE" if latest.is_live else "ENDED",
-                        uid=target.uid,
-                        room_id=latest.room_id or target.room_id,
-                    )
-                    await self.broadcast(target.kind, target.uid, card)
-                self.store.upsert_target(latest)
-            except Exception as exc:
-                logger.warning(f"[bilibilibot] live check failed for {target.uid}: {exc}")
+        await self._poll_targets(KIND_LIVE, self._check_live_target)
+
+    async def _check_live_target(self, target: TargetInfo) -> None:
+        latest = await self.client.latest_live_state(target)
+        if latest.is_live != target.is_live:
+            card = BiliCard(
+                "live_on" if latest.is_live else "live_off",
+                latest.last_title or target.last_title or "直播状态变化",
+                author=target.name,
+                subtitle="正在直播" if latest.is_live else "直播已结束",
+                cover_url=latest.last_cover or target.last_cover,
+                avatar_url=target.avatar_url,
+                url=f"https://live.bilibili.com/{latest.room_id or target.room_id}",
+                badge="LIVE" if latest.is_live else "ENDED",
+                uid=target.uid,
+                room_id=latest.room_id or target.room_id,
+            )
+            await self.broadcast(target.kind, target.uid, card)
+        self.store.upsert_target(latest)
 
     async def check_video(self) -> None:
-        for target in self.store.list_active_targets(KIND_VIDEO):
-            try:
-                card = await self.client.latest_video(target.uid)
-                next_name = self._refined_name(target.name, target.uid, card.author)
-                next_avatar = target.avatar_url or card.avatar_url
-                if card.item_id and card.item_id != target.latest_id and not self.store.has_seen(KIND_VIDEO, target.uid, card.item_id):
-                    card.author = card.author or next_name or target.uid
-                    card.avatar_url = card.avatar_url or next_avatar
-                    await self.broadcast(KIND_VIDEO, target.uid, card)
-                    self.store.mark_seen(KIND_VIDEO, target.uid, card.item_id, card.published_at)
-                self.store.upsert_target(
-                    TargetInfo(
-                        KIND_VIDEO,
-                        target.uid,
-                        name=next_name,
-                        avatar_url=next_avatar,
-                        latest_id=card.item_id or target.latest_id,
-                        latest_ts=card.published_at or target.latest_ts,
-                        last_title=card.title or target.last_title,
-                        last_cover=card.cover_url or target.last_cover,
-                        last_desc=card.description or target.last_desc,
-                    )
+        await self._poll_targets(KIND_VIDEO, self._check_video_target)
+
+    async def _check_video_target(self, target: TargetInfo) -> None:
+        try:
+            card = await self.client.latest_video(target.uid)
+            next_name = self._refined_name(target.name, target.uid, card.author)
+            next_avatar = target.avatar_url or card.avatar_url
+            if card.item_id and card.item_id != target.latest_id and not self.store.has_seen(KIND_VIDEO, target.uid, card.item_id):
+                card.author = card.author or next_name or target.uid
+                card.avatar_url = card.avatar_url or next_avatar
+                await self.broadcast(KIND_VIDEO, target.uid, card)
+                self.store.mark_seen(KIND_VIDEO, target.uid, card.item_id, card.published_at)
+            self.store.upsert_target(
+                TargetInfo(
+                    KIND_VIDEO,
+                    target.uid,
+                    name=next_name,
+                    avatar_url=next_avatar,
+                    latest_id=card.item_id or target.latest_id,
+                    latest_ts=card.published_at or target.latest_ts,
+                    last_title=card.title or target.last_title,
+                    last_cover=card.cover_url or target.last_cover,
+                    last_desc=card.description or target.last_desc,
                 )
-            except Exception as exc:
-                self._log_video_check_failure(target.uid, exc)
+            )
+        except Exception as exc:
+            self._log_video_check_failure(target.uid, exc)
+            raise
 
     async def check_dynamic(self) -> None:
-        for target in self.store.list_active_targets(KIND_DYNAMIC):
-            try:
-                items = await self.client.dynamic_items(target.uid)
-                cards = [self.client._dynamic_card_from_item(item, target.uid) for item in items[:5]]
-                cards.sort(key=lambda item: item.published_at)
-                newest_ts = target.latest_ts
-                newest_id = target.latest_id
-                next_name = target.name
-                next_avatar = target.avatar_url
-                for card in cards:
-                    next_name = self._refined_name(next_name, target.uid, card.author)
-                    next_avatar = next_avatar or card.avatar_url
-                    if not card.item_id or card.published_at <= target.latest_ts or self.store.has_seen(KIND_DYNAMIC, target.uid, card.item_id):
-                        continue
-                    newest_ts = max(newest_ts, card.published_at)
-                    newest_id = card.item_id
-                    if self._should_skip_video_dynamic(target.uid, card):
-                        self.store.mark_seen(KIND_DYNAMIC, target.uid, card.item_id, card.published_at)
-                        continue
-                    card.author = card.author or next_name or target.uid
-                    card.avatar_url = card.avatar_url or next_avatar
-                    await self.broadcast(KIND_DYNAMIC, target.uid, card)
-                    self.store.mark_seen(KIND_DYNAMIC, target.uid, card.item_id, card.published_at)
-                if cards:
-                    latest = max(cards, key=lambda item: item.published_at)
-                    self.store.upsert_target(
-                        TargetInfo(
-                            KIND_DYNAMIC,
-                            target.uid,
-                            name=next_name,
-                            avatar_url=next_avatar,
-                            latest_id=newest_id or latest.item_id or target.latest_id,
-                            latest_ts=newest_ts or latest.published_at or target.latest_ts,
-                            last_title=latest.title or target.last_title,
-                            last_cover=latest.cover_url or target.last_cover,
-                            last_desc=latest.description or target.last_desc,
+        await self._poll_targets(KIND_DYNAMIC, self._check_dynamic_target)
+
+    async def _check_dynamic_target(self, target: TargetInfo) -> None:
+        items = await self.client.dynamic_items(target.uid)
+        cards = [self.client._dynamic_card_from_item(item, target.uid) for item in items[:5]]
+        cards.sort(key=lambda item: item.published_at)
+        newest_ts = target.latest_ts
+        newest_id = target.latest_id
+        next_name = target.name
+        next_avatar = target.avatar_url
+        for card in cards:
+            next_name = self._refined_name(next_name, target.uid, card.author)
+            next_avatar = next_avatar or card.avatar_url
+            if not card.item_id or card.published_at <= target.latest_ts or self.store.has_seen(KIND_DYNAMIC, target.uid, card.item_id):
+                continue
+            newest_ts = max(newest_ts, card.published_at)
+            newest_id = card.item_id
+            if self._should_skip_video_dynamic(target.uid, card):
+                self.store.mark_seen(KIND_DYNAMIC, target.uid, card.item_id, card.published_at)
+                continue
+            card.author = card.author or next_name or target.uid
+            card.avatar_url = card.avatar_url or next_avatar
+            await self.broadcast(KIND_DYNAMIC, target.uid, card)
+            self.store.mark_seen(KIND_DYNAMIC, target.uid, card.item_id, card.published_at)
+        if cards:
+            latest = max(cards, key=lambda item: item.published_at)
+            self.store.upsert_target(
+                TargetInfo(
+                    KIND_DYNAMIC,
+                    target.uid,
+                    name=next_name,
+                    avatar_url=next_avatar,
+                    latest_id=newest_id or latest.item_id or target.latest_id,
+                    latest_ts=newest_ts or latest.published_at or target.latest_ts,
+                    last_title=latest.title or target.last_title,
+                    last_cover=latest.cover_url or target.last_cover,
+                    last_desc=latest.description or target.last_desc,
+                )
+            )
+
+    async def _poll_targets(self, kind: str, worker) -> None:
+        lock = self._poll_locks[kind]
+        if lock.locked():
+            logger.info(f"[bilibilibot] poll kind={kind} skipped=overlap")
+            return
+        async with lock:
+            started = perf_counter()
+            targets = list(self.store.list_active_targets(kind))
+            semaphore = asyncio.Semaphore(self.poll_concurrency)
+            successes = 0
+            failures = 0
+
+            async def run_target(target: TargetInfo) -> None:
+                nonlocal successes, failures
+                try:
+                    async with semaphore:
+                        await worker(target)
+                        successes += 1
+                except Exception as exc:
+                    failures += 1
+                    if kind != KIND_VIDEO:
+                        logger.warning(
+                            f"[bilibilibot] {kind} check failed for {target.uid}: {exc}"
                         )
-                    )
-            except Exception as exc:
-                logger.warning(f"[bilibilibot] dynamic check failed for {target.uid}: {exc}")
+
+            await asyncio.gather(*(run_target(target) for target in targets))
+            logger.info(
+                f"[bilibilibot] poll kind={kind} targets={len(targets)} "
+                f"success={successes} failed={failures} "
+                f"elapsed={perf_counter() - started:.3f}s"
+            )
 
     async def broadcast(self, kind: str, uid: str, card: BiliCard) -> None:
         bot = get_bot()
         image = await self.card_to_segment(card)
         for sub in self.store.subscriptions_for_target(kind, uid):
             target = self._target(bot, sub.subscriber_type, sub.subscriber_id)
+            lock_key = (sub.subscriber_type, sub.subscriber_id)
+            lock = self._broadcast_locks.setdefault(lock_key, asyncio.Lock())
             try:
-                await ChainMsg([image]).send(target, bot)
+                async with lock:
+                    await ChainMsg([image]).send(target, bot)
             except Exception as exc:
                 logger.warning(f"[bilibilibot] send to {sub.subscriber_type}:{sub.subscriber_id} failed: {exc}")
 

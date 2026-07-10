@@ -26,7 +26,10 @@ class BiliStore:
         self.migrate_legacy_if_needed()
 
     def close(self) -> None:
-        self.conn.close()
+        connection = self.conn
+        self.conn = None
+        if connection is not None:
+            connection.close()
 
     def init_schema(self) -> None:
         cur = self.conn.cursor()

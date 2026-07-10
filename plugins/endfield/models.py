@@ -60,6 +60,7 @@ class OperatorView:
     damage_type: str = "未知属性"
     weapon_type: str = "未知武器"
     species: str = "未知种族"
+    species_label: str = "种族"
     tags: list[str] = field(default_factory=list)
     icon_url: str = ""
     round_icon_url: str = ""
@@ -89,9 +90,12 @@ class WeaponView:
     name: str
     slug: str
     title: str
+    weapon_id: str = ""
+    source_name: str = "api.fz.wiki"
     english_name: str = ""
     rarity: int = 0
     weapon_type: str = "未知武器"
+    operator_names: list[str] = field(default_factory=list)
     max_level: int = 0
     max_atk: int | str = "--"
     icon_url: str = ""

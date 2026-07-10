@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 from dataclasses import dataclass
 from datetime import timedelta
 from io import BytesIO
 from pathlib import Path
+from time import perf_counter
 from typing import Any, Callable
 
 from arclet.alconna import Alconna, Arparma, Args, Empty, MultiVar
@@ -26,6 +28,7 @@ from arclet.entari import (
     scheduler as entari_scheduler,
 )
 from arclet.entari.command import Match as CommandMatch
+from loguru import logger
 from nepattern import AnyString
 from satori import ChannelType
 
@@ -182,35 +185,116 @@ class _EventHook:
         return decorator
 
 
+@dataclass
+class _ManagedJob:
+    job_id: str
+    subscriber: Any
+    active_tasks: set[asyncio.Task[Any]]
+    max_instances: int
+
+
 class _Scheduler:
+    def __init__(self):
+        self._jobs: dict[str, _ManagedJob] = {}
+        self._retired_tasks: set[asyncio.Task[Any]] = set()
+
     def scheduled_job(self, trigger: str, **kwargs):
-        seconds = _seconds(trigger, kwargs)
-
         def decorator(func: Callable[..., Any]):
-            async def _job():
-                result = func()
-                if inspect.isawaitable(result):
-                    return await result
-                return result
-
-            _job.__module__ = func.__module__
-            entari_scheduler.schedule(lambda: timedelta(seconds=seconds))(_job)
+            self._register(
+                func,
+                trigger,
+                kwargs,
+                handler_module=getattr(func, "__module__", __name__),
+            )
             return func
 
         return decorator
 
     def add_job(self, func: Callable[..., Any], trigger: str, **kwargs):
+        return self._register(
+            func,
+            trigger,
+            kwargs,
+            handler_module=_plugin_module(getattr(func, "__module__", __name__)),
+        )
+
+    def _register(
+        self,
+        func: Callable[..., Any],
+        trigger: str,
+        kwargs: dict[str, Any],
+        *,
+        handler_module: str,
+    ):
         seconds = _seconds(trigger, kwargs)
+        job_id = str(kwargs.get("id") or f"{handler_module}.{func.__qualname__}")
+        max_instances = max(1, int(kwargs.get("max_instances", 1)))
+        replace_existing = bool(kwargs.get("replace_existing", True))
+
+        existing = self._jobs.get(job_id)
+        if existing is not None:
+            if not replace_existing:
+                raise ValueError(f"scheduled job already exists: {job_id}")
+            self._dispose_job(existing)
+
+        managed = _ManagedJob(job_id, None, set(), max_instances)
 
         async def _job():
-            result = func()
-            if inspect.isawaitable(result):
-                return await result
-            return result
+            if len(managed.active_tasks) >= managed.max_instances:
+                logger.debug(f"[scheduler] skipped overlapping job id={job_id}")
+                return None
+            task = asyncio.create_task(self._run_job(job_id, func))
+            managed.active_tasks.add(task)
+            task.add_done_callback(managed.active_tasks.discard)
+            return None
 
-        _job.__module__ = _plugin_module(getattr(func, "__module__", __name__))
-        entari_scheduler.schedule(lambda: timedelta(seconds=seconds))(_job)
+        _job.__module__ = handler_module
+        managed.subscriber = entari_scheduler.schedule(
+            lambda: timedelta(seconds=seconds)
+        )(_job)
+        self._jobs[job_id] = managed
         return _job
+
+    async def _run_job(self, job_id: str, func: Callable[..., Any]) -> None:
+        started = perf_counter()
+        try:
+            if inspect.iscoroutinefunction(func):
+                result = func()
+            else:
+                result = await asyncio.to_thread(func)
+            if inspect.isawaitable(result):
+                await result
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception(f"[scheduler] job failed id={job_id}")
+        finally:
+            logger.debug(
+                f"[scheduler] job completed id={job_id} elapsed={perf_counter() - started:.3f}s"
+            )
+
+    def _dispose_job(self, job: _ManagedJob) -> None:
+        if job.subscriber is not None:
+            job.subscriber.dispose()
+        for task in tuple(job.active_tasks):
+            task.cancel()
+            self._retired_tasks.add(task)
+            task.add_done_callback(self._retired_tasks.discard)
+        job.active_tasks.clear()
+
+    async def close(self) -> None:
+        jobs = list(self._jobs.values())
+        self._jobs.clear()
+        tasks = [task for job in jobs for task in job.active_tasks]
+        tasks.extend(self._retired_tasks)
+        self._retired_tasks.clear()
+        for job in jobs:
+            if job.subscriber is not None:
+                job.subscriber.dispose()
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
 
 _SESSION_STACK: list[Session] = []
@@ -236,16 +320,20 @@ def _takes_two_args(func: Callable[..., Any]) -> bool:
     return len(positional) >= 2
 
 
-def _seconds(trigger: str, kwargs: dict[str, Any]) -> int:
+def _seconds(trigger: str, kwargs: dict[str, Any]) -> float:
     if trigger != "interval":
-        return 60
+        return 60.0
     if "seconds" in kwargs:
-        return int(kwargs["seconds"])
+        return float(kwargs["seconds"])
     if "minutes" in kwargs:
-        return int(kwargs["minutes"]) * 60
+        return float(kwargs["minutes"]) * 60
     if "hours" in kwargs:
-        return int(kwargs["hours"]) * 3600
-    return 60
+        return float(kwargs["hours"]) * 3600
+    return 60.0
+
+
+async def close_scheduled_jobs() -> None:
+    await timer.close()
 
 
 def _plugin_module(module: str) -> str:

@@ -3,8 +3,9 @@ from __future__ import annotations
 import os
 
 from arclet.alconna import Alconna, Args, MultiVar
+from arclet.entari import Cleanup, listen
 from nepattern import AnyString
-from utils.entari_native import listen_message, on_ready, get_plaintext
+from utils.entari_native import close_scheduled_jobs, listen_message, on_ready, get_plaintext
 from arclet.entari import Account as Bot, Event
 from loguru import logger
 from utils.entari_native import Pred
@@ -30,6 +31,12 @@ client = BiliClient(
     ],
 )
 service = BiliService(store, client)
+
+
+@listen(Cleanup)
+async def _close_bilibili_store():
+    await close_scheduled_jobs()
+    store.close()
 
 
 def _subscriber(event: Event) -> tuple[str, str]:

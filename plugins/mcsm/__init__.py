@@ -10,7 +10,7 @@ import tempfile
 import time
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from utils.entari_native import listen_message, prompt
 from arclet.entari import Account as Bot, Event
@@ -25,6 +25,7 @@ from utils.entari_native import (
 from arclet.alconna import Args, MultiVar
 from nepattern import AnyString
 from utils.entari_native import cmd_with_args as _cmd, get_rest
+from utils.image_executor import run_image_render
 from utils.temp_files import schedule_temp_file_cleanup
 
 from configs.config import Config as GlobalConfig
@@ -241,8 +242,15 @@ def _to_image_segment(output: BytesIO) -> ChainImage:
         return ChainImage(path=f.name)
 
 
-async def _finish_image_or_text(matcher, output: BytesIO, fallback: str) -> None:
+async def _finish_image_or_text(
+    matcher,
+    renderer: Callable[..., BytesIO],
+    fallback: str,
+    *args: Any,
+    **kwargs: Any,
+) -> None:
     try:
+        output = await run_image_render(renderer, *args, **kwargs)
         message = ChainMsg([_to_image_segment(output)])
     except Exception as exc:
         logger.warning(f"[MCSM] render image failed, fallback to text: {exc}")
@@ -258,9 +266,18 @@ def _private_target(bot: Bot, user_id: str) -> SendDest:
     )
 
 
-async def _finish_dm_image_or_text(matcher, bot: Bot, user_id: str, output: BytesIO, fallback: str) -> None:
+async def _finish_dm_image_or_text(
+    matcher,
+    bot: Bot,
+    user_id: str,
+    renderer: Callable[..., BytesIO],
+    fallback: str,
+    *args: Any,
+    **kwargs: Any,
+) -> None:
     target = _private_target(bot, user_id)
     try:
+        output = await run_image_render(renderer, *args, **kwargs)
         message = ChainMsg([_to_image_segment(output)])
     except Exception as exc:
         logger.warning(f"[MCSM] render DM image failed, fallback to text: {exc}")
@@ -281,11 +298,11 @@ async def _finish_notice(matcher, title: str, lines: List[str] | tuple[str, ...]
     fallback = title
     if lines:
         fallback += "\n" + "\n".join(lines)
-    await _finish_image_or_text(matcher, draw_notice(title, lines, level=level), fallback)
+    await _finish_image_or_text(matcher, draw_notice, fallback, title, lines, level=level)
 
 
 async def _finish_error(matcher, message: str) -> None:
-    await _finish_image_or_text(matcher, draw_error(message), message)
+    await _finish_image_or_text(matcher, draw_error, message, message)
 
 
 async def _finish_dm_notice(
@@ -299,7 +316,16 @@ async def _finish_dm_notice(
     fallback = title
     if lines:
         fallback += "\n" + "\n".join(lines)
-    await _finish_dm_image_or_text(matcher, bot, user_id, draw_notice(title, lines, level=level), fallback)
+    await _finish_dm_image_or_text(
+        matcher,
+        bot,
+        user_id,
+        draw_notice,
+        fallback,
+        title,
+        lines,
+        level=level,
+    )
 
 
 # DM API Key 接收处理器
@@ -1810,7 +1836,7 @@ async def _cmd_bind_instance(
 
     _store.bind_instance(group_id, alias, uuid, daemon_id)
     fallback = f"绑定成功\n别名: {alias}\nUUID: {uuid}\n节点: {daemon_id[:24]}...\n\n/mcsm admin add @某人  添加本群 MCSM 管理员"
-    await _finish_image_or_text(mcsm, draw_bind_result(alias, uuid, daemon_id), fallback)
+    await _finish_image_or_text(mcsm, draw_bind_result, fallback, alias, uuid, daemon_id)
 
 
 # bind instance
@@ -2001,13 +2027,12 @@ async def _cmd_list(
     fallback = "\n".join(fallback_lines)
     await _finish_image_or_text(
         mcsm,
-        draw_panel_overview(
-            daemon_map,
-            panel_url,
-            is_superuser=can_manage_group,
-            show_all=show_all,
-        ),
+        draw_panel_overview,
         fallback,
+        daemon_map,
+        panel_url,
+        is_superuser=can_manage_group,
+        show_all=show_all,
     )
 # status
 
@@ -2108,7 +2133,14 @@ async def _cmd_status(bot: Bot, event: Event, group_id: str, alias: str):
     lines.append("")
     lines.append("/mcsm start|stop|restart|kill|cmd|log")
 
-    await _finish_image_or_text(mcsm, draw_status(alias, detail, status_bind_info), "\n".join(lines))
+    await _finish_image_or_text(
+        mcsm,
+        draw_status,
+        "\n".join(lines),
+        alias,
+        detail,
+        status_bind_info,
+    )
 
 
 # instance action (start/stop/restart/kill/cmd)
@@ -2189,8 +2221,13 @@ async def _cmd_instance_action(
             fallback = f"{alias} 控制台输出\n{'-' * 30}\n{fallback_output}"
             await _finish_image_or_text(
                 mcsm,
-                draw_console_output(alias, extra, raw_output, show_command=True, empty_text="(无新增输出)"),
+                draw_console_output,
                 fallback,
+                alias,
+                extra,
+                raw_output,
+                show_command=True,
+                empty_text="(无新增输出)",
             )
         else:
             await _finish_notice(mcsm, "Operation succeeded", (f"{alias} {op_name} completed",), "success")
@@ -2290,8 +2327,14 @@ async def _cmd_log(bot: Bot, event: Event, group_id: str, user_id: str, alias: s
     fallback = f"{alias} 控制台日志\n{'-' * 30}\n{fallback_output}"
     await _finish_image_or_text(
         mcsm,
-        draw_console_output(alias, "", raw, max_entries=log_limit, display_line_limit=None, mode="log"),
+        draw_console_output,
         fallback,
+        alias,
+        "",
+        raw,
+        max_entries=log_limit,
+        display_line_limit=None,
+        mode="log",
     )
 
 
@@ -2351,7 +2394,7 @@ async def _cmd_admin(
     if action == "list":
         admins = _store.get_admins(group_id)
         fallback = "本群 MCSM 管理员\n" + ("\n".join(f"  {a}" for a in admins) if admins else "  (未设置)")
-        await _finish_image_or_text(mcsm, draw_admin_list("本群", admins), fallback)
+        await _finish_image_or_text(mcsm, draw_admin_list, fallback, "本群", admins)
         return
 
     perm_err = await _require_group_manager(bot, event, group_id, user_id)

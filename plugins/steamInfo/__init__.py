@@ -69,6 +69,7 @@ from arclet.entari import Event, Account as Bot, Image
 from configs.config import SYSTEM_PROXY, Config as GlobalConfig, _env
 from configs.path_config import IMAGE_PATH
 from utils.entari_native import cmd as _cmd, get_rest
+from utils.image_executor import run_image_render
 from utils.temp_files import schedule_temp_file_cleanup
 
 # alconna/aptimer 已在 bot.py 中预加载，localstore 由 import 自动加载
@@ -286,11 +287,30 @@ async def _resolve_parent_info(
 
 
 def _to_image_segment(image: PILImage.Image):
+    return _image_bytes_to_segment(image_to_bytes(image))
+
+
+def _image_bytes_to_segment(data: bytes):
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
-        f.write(image_to_bytes(image))
+        f.write(data)
         f.flush()
         schedule_temp_file_cleanup(f.name)
         return make_image(path=f.name)
+
+
+def _render_image_bytes(renderer, *args, **kwargs) -> bytes:
+    return image_to_bytes(renderer(*args, **kwargs))
+
+
+async def _render_image_segment(renderer, *args, **kwargs):
+    data = await run_image_render(_render_image_bytes, renderer, *args, **kwargs)
+    return _image_bytes_to_segment(data)
+
+
+def _render_start_gaming_cards(entries: list[tuple[PILImage.Image, str, str]]) -> bytes:
+    images = [draw_start_gaming(avatar, name, game_name) for avatar, name, game_name in entries]
+    image = vertically_concatenate_images(images) if len(images) > 1 else images[0]
+    return image_to_bytes(image)
 
 
 def _play_time_text(start_time: Optional[int]) -> Optional[str]:
@@ -692,27 +712,33 @@ async def broadcast_steam_info(parent_id: str, steam_info: PlayerSummaries):
             steam_status_data.append(item)
 
         parent_avatar, parent_name = await _resolve_parent_info(bot, parent_id)
-        image = draw_friends_status(
-            parent_avatar, parent_name, steam_status_data)
         uni_msg = ChainMsg(
-            [Text("\n".join(msg)), _to_image_segment(image)])
+            [
+                Text("\n".join(msg)),
+                await _render_image_segment(
+                    draw_friends_status,
+                    parent_avatar,
+                    parent_name,
+                    steam_status_data,
+                ),
+            ]
+        )
     elif config.steam_broadcast_type == "part":
-        images = [
-            draw_start_gaming(
-                (await fetch_avatar(entry["player"], avatar_path, _steam_proxy())),
+        entries = [
+            (
+                await fetch_avatar(entry["player"], avatar_path, _steam_proxy()),
                 _display_name(parent_id, entry["player"]),
                 entry["player"]["gameextrainfo"],
             )
             for entry in play_data
             if entry["type"] == "start"
         ]
-        if images == []:
+        if entries == []:
             uni_msg = ChainMsg([Text("\n".join(msg))])
         else:
-            image = vertically_concatenate_images(
-                images) if len(images) > 1 else images[0]
+            image_data = await run_image_render(_render_start_gaming_cards, entries)
             uni_msg = ChainMsg(
-                [Text("\n".join(msg)), _to_image_segment(image)])
+                [Text("\n".join(msg)), _image_bytes_to_segment(image_data)])
     else:
         uni_msg = ChainMsg([Text("\n".join(msg))])
 
@@ -968,7 +994,8 @@ async def info_handle(
         for game in player_data["game_data"]
     ]
 
-    image = draw_player_status(
+    image = await _render_image_segment(
+        draw_player_status,
         player_data["background"],
         player_data["avatar"],
         player_data["player_name"],
@@ -978,7 +1005,7 @@ async def info_handle(
         draw_data,
     )
 
-    await ChainMsg([_to_image_segment(image)]).send(target, bot)
+    await ChainMsg([image]).send(target, bot)
     await info.finish()
 
 
@@ -1011,9 +1038,14 @@ async def check_handle(
         item["name"] = _display_name(parent_id, player)
         steam_status_data.append(item)
 
-    image = draw_friends_status(parent_avatar, parent_name, steam_status_data)
+    image = await _render_image_segment(
+        draw_friends_status,
+        parent_avatar,
+        parent_name,
+        steam_status_data,
+    )
 
-    await ChainMsg([_to_image_segment(image)]).send(target, bot)
+    await ChainMsg([image]).send(target, bot)
 
 
 @game.handle()
@@ -1141,7 +1173,8 @@ async def game_handle(
         }
         for item in rows[:20]
     ]
-    image = draw_game_stats(
+    image = await _render_image_segment(
+        draw_game_stats,
         parent_avatar,
         parent_name,
         game_icon,
@@ -1154,7 +1187,7 @@ async def game_handle(
         image_rows,
     )
 
-    await ChainMsg([_to_image_segment(image)]).send(target, bot)
+    await ChainMsg([image]).send(target, bot)
     await game.finish()
 
 

@@ -1307,7 +1307,10 @@ class CoreLogicTests(unittest.TestCase):
         self.assertNotIn("raw = raw[-7000:]", log_source)
         self.assertIn('get_instance_output(info["uuid"], info["daemonId"], size=2048)', log_source)
         self.assertIn("render_console_text(raw, max_entries=log_limit, mode=\"log\"", log_source)
-        self.assertIn("draw_console_output(alias, \"\", raw, max_entries=log_limit, display_line_limit=None, mode=\"log\")", log_source)
+        self.assertIn("await _finish_image_or_text(", log_source)
+        self.assertIn("draw_console_output,", log_source)
+        self.assertIn("display_line_limit=None", log_source)
+        self.assertIn('mode="log"', log_source)
 
     def test_mcsm_log_route_parses_all_and_custom_limits_source_paths(self):
         source = (ROOT / "plugins/mcsm/__init__.py").read_text(encoding="utf-8")
@@ -3049,9 +3052,10 @@ remotePort = {{ $v.Second }}
         end = source.index("# ── add_server", start)
         direct_address_source = source[start:end]
 
-        self.assertIn('if r.get("status") == "success":', direct_address_source)
-        self.assertIn("output = draw_server_players(info)", direct_address_source)
-        self.assertIn('output = draw_server_list([draw_server_info(info)], "Ping")', direct_address_source)
+        self.assertIn("output = await run_image_render(_draw_ping_result, info)", direct_address_source)
+        self.assertIn('if info.get("status") == "success":', source)
+        self.assertIn("return draw_server_players(info)", source)
+        self.assertIn('return draw_server_list([draw_server_info(info)], "Ping")', source)
 
     def test_minecraft_server_info_draws_motd_prefix_source_paths(self):
         source = (ROOT / "plugins/minecraft_plugin/draw.py").read_text(encoding="utf-8")
@@ -3224,7 +3228,9 @@ remotePort = {{ $v.Second }}
         self.assertIn("guild_name = str(getattr(guild, \"name\", \"\") or \"\").strip()", source)
         self.assertIn("full_guild = await guild_get(guild_id=str(group_id))", source)
         self.assertIn("return str(group_id)", source)
-        self.assertIn("draw_server_list(imgs, await _get_group_name(event, group_id))", source)
+        self.assertIn("group_name = await _get_group_name(event, group_id)", source)
+        self.assertIn("_draw_server_list_from_responses", source)
+        self.assertIn("run_image_render(", source)
 
     def test_broadcast_utils_merge_player_changes_and_throttle_errors(self):
         utils = _load_module("minecraft_broadcast_utils_for_test", "plugins/minecraft_plugin/broadcast_utils.py")

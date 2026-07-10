@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import textwrap
 from datetime import datetime
 from io import BytesIO
 
-import httpx
 from PIL import Image, ImageDraw, ImageFont
+
+from utils.http_client import fetch_bytes
+from utils.image_executor import run_image_render
 
 from .models import BiliCard
 
@@ -43,8 +46,20 @@ FONT_BADGE = _font(18, True)
 
 
 async def draw_bili_card(card: BiliCard) -> bytes:
-    cover = await _fetch_image(card.cover_url, (360, 210))
-    avatar = await _fetch_image(card.avatar_url, (72, 72), circle=True)
+    cover_bytes, avatar_bytes = await asyncio.gather(
+        _fetch_image_bytes(card.cover_url),
+        _fetch_image_bytes(card.avatar_url),
+    )
+    return await run_image_render(_render_bili_card, card, cover_bytes, avatar_bytes)
+
+
+def _render_bili_card(
+    card: BiliCard,
+    cover_bytes: bytes | None,
+    avatar_bytes: bytes | None,
+) -> bytes:
+    cover = _decode_image(cover_bytes, (360, 210))
+    avatar = _decode_image(avatar_bytes, (72, 72), circle=True)
 
     desc = _clip(card.description, 160)
     title_lines = _wrap(card.title or "Bilibili", FONT_TITLE, CANVAS_W - PADDING * 2 - 120, max_lines=2)
@@ -105,14 +120,29 @@ async def draw_bili_card(card: BiliCard) -> bytes:
     return out.getvalue()
 
 
-async def _fetch_image(url: str, size: tuple[int, int], circle: bool = False) -> Image.Image | None:
+async def _fetch_image_bytes(url: str) -> bytes | None:
     if not url:
         return None
     try:
-        async with httpx.AsyncClient(timeout=8, follow_redirects=True, trust_env=False) as client:
-            resp = await client.get(url)
-            resp.raise_for_status()
-        image = Image.open(BytesIO(resp.content)).convert("RGB")
+        resource = await fetch_bytes(
+            url,
+            namespace="bilibilibot-assets",
+            timeout_seconds=8.0,
+        )
+        return resource.content
+    except Exception:
+        return None
+
+
+def _decode_image(
+    content: bytes | None,
+    size: tuple[int, int],
+    circle: bool = False,
+) -> Image.Image | None:
+    if not content:
+        return None
+    try:
+        image = Image.open(BytesIO(content)).convert("RGB")
         image = _fit_cover(image, *size)
         if circle:
             mask = Image.new("L", size, 0)

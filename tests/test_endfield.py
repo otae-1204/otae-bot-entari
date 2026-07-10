@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import importlib.util
 import asyncio
+import io
+import struct
 import sys
 import types
 import unittest
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
+
+from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -28,6 +33,8 @@ def _load_endfield_module(module_name: str):
     sys.modules[pkg_name] = pkg
     _load_module(f"{pkg_name}.models", "plugins/endfield/models.py")
     _load_module(f"{pkg_name}.client", "plugins/endfield/client.py")
+    if module_name == "commands":
+        return _load_module(f"{pkg_name}.commands", "plugins/endfield/commands.py")
     if module_name == "draw":
         return _load_module(f"{pkg_name}.draw", "plugins/endfield/draw.py")
     if module_name == "service":
@@ -37,6 +44,7 @@ def _load_endfield_module(module_name: str):
 
 draw = _load_endfield_module("draw")
 service = _load_endfield_module("service")
+commands = _load_endfield_module("commands")
 models = sys.modules["endfield_for_test.models"]
 
 render_operator_card_html = draw.render_operator_card_html
@@ -45,6 +53,129 @@ LEVEL_COLUMNS = models.LEVEL_COLUMNS
 build_operator_view = service.build_operator_view
 build_weapon_view = service.build_weapon_view
 clean_text = service.clean_text
+
+
+class EndfieldCommandParserTests(unittest.TestCase):
+    def test_handler_does_not_report_session_stop_as_failure(self):
+        source = (ROOT / "plugins/endfield/__init__.py").read_text(encoding="utf-8")
+        start = source.index("async def _handle_command")
+        end = source.index("async def _collect_candidates", start)
+        handler_source = source[start:end]
+
+        self.assertIn("from arclet.letoderea.exceptions import _ExitException", source)
+        exit_index = handler_source.index("except _ExitException:")
+        api_error_index = handler_source.index("except WarfarinAPIError as exc:", exit_index)
+        generic_index = handler_source.index("except Exception as exc:", api_error_index)
+        self.assertLess(exit_index, generic_index)
+        self.assertIn("raise", handler_source[exit_index:api_error_index])
+
+    def test_handler_reports_image_send_failure_separately(self):
+        source = (ROOT / "plugins/endfield/__init__.py").read_text(encoding="utf-8")
+        start = source.index("async def _handle_command")
+        end = source.index("async def _collect_candidates", start)
+        handler_source = source[start:end]
+
+        self.assertIn("[endfield] send failed", handler_source)
+        self.assertIn("图片发送失败，请稍后重试", handler_source)
+
+    def test_root_aliases_include_zmd(self):
+        self.assertIn("zmd", commands.ROOT_ALIASES)
+        self.assertIn("终末地", commands.ROOT_ALIASES)
+
+    def test_score_candidate_handles_typo_and_pinyin(self):
+        exact = commands.score_candidate("弭弗", "弭弗")
+        typo = commands.score_candidate("弥弗", "弭弗")
+        weak = commands.score_candidate("陈千语", "弭弗")
+
+        self.assertGreaterEqual(typo, commands.CANDIDATE_SCORE_THRESHOLD)
+        self.assertGreater(exact, typo)
+        self.assertGreater(typo, weak)
+        self.assertLess(weak, commands.CLEAR_SCORE)
+        self.assertGreaterEqual(commands.score_candidate("赤樱", "赤缨"), commands.CANDIDATE_SCORE_THRESHOLD)
+
+    def test_default_query_uses_all_scope(self):
+        parsed = commands.parse_command("陈千语")
+        self.assertEqual(parsed.action, "query")
+        self.assertEqual(parsed.scope, "all")
+        self.assertEqual(parsed.query, "陈千语")
+
+    def test_operator_query_aliases(self):
+        parsed = commands.parse_command("干员 陈千语")
+        self.assertEqual(parsed.action, "query")
+        self.assertEqual(parsed.scope, "operator")
+        self.assertEqual(parsed.query, "陈千语")
+
+        parsed = commands.parse_command("op 陈千语")
+        self.assertEqual(parsed.scope, "operator")
+        self.assertEqual(parsed.query, "陈千语")
+
+    def test_weapon_query_aliases(self):
+        parsed = commands.parse_command("武器 赤缨")
+        self.assertEqual(parsed.action, "query")
+        self.assertEqual(parsed.scope, "weapon")
+        self.assertEqual(parsed.query, "赤缨")
+
+        parsed = commands.parse_command("wp 赤缨")
+        self.assertEqual(parsed.scope, "weapon")
+        self.assertEqual(parsed.query, "赤缨")
+
+    def test_search_aliases_and_scopes(self):
+        parsed = commands.parse_command("搜索 陈")
+        self.assertEqual(parsed.action, "search")
+        self.assertEqual(parsed.scope, "all")
+        self.assertEqual(parsed.query, "陈")
+
+        parsed = commands.parse_command("搜索 干员 陈")
+        self.assertEqual(parsed.action, "search")
+        self.assertEqual(parsed.scope, "operator")
+        self.assertEqual(parsed.query, "陈")
+
+    def test_shortcuts_map_to_internal_commands(self):
+        parsed = commands.parse_shortcut_command("efop", "陈千语")
+        self.assertEqual(parsed.action, "query")
+        self.assertEqual(parsed.scope, "operator")
+        self.assertEqual(parsed.query, "陈千语")
+
+        parsed = commands.parse_shortcut_command("efwp", "赤缨")
+        self.assertEqual(parsed.scope, "weapon")
+        self.assertEqual(parsed.query, "赤缨")
+
+        parsed = commands.parse_shortcut_command("efs", "陈")
+        self.assertEqual(parsed.action, "search")
+        self.assertEqual(parsed.scope, "all")
+        self.assertEqual(parsed.query, "陈")
+
+    def test_choose_candidate_clear_and_ambiguous_and_missing(self):
+        best = commands.EndfieldCandidate("operator", "chen-qianyu", "陈千语", 100)
+        weak = commands.EndfieldCandidate("weapon", "武器/赤缨", "赤缨", 70)
+        selected, ambiguous = commands.choose_candidate([weak, best])
+        self.assertEqual(selected, best)
+        self.assertEqual(ambiguous, [])
+
+        other = commands.EndfieldCandidate("weapon", "武器/陈千语", "陈千语", 95)
+        selected, ambiguous = commands.choose_candidate([best, other])
+        self.assertIsNone(selected)
+        self.assertEqual(ambiguous, [best, other])
+
+        selected, ambiguous = commands.choose_candidate([
+            commands.EndfieldCandidate("operator", "x", "x", 20)
+        ])
+        self.assertIsNone(selected)
+        self.assertEqual(len(ambiguous), 1)
+
+    def test_dev_visibility_uses_superusers(self):
+        self.assertTrue(commands.dev_visible_for_user("246", ["100", "246"]))
+        self.assertFalse(commands.dev_visible_for_user("135", ["100", "246"]))
+
+    def test_dev_command_parses_action_and_args(self):
+        parsed = commands.parse_command("dev resolve 陈千语")
+        self.assertEqual(parsed.action, "dev")
+        self.assertEqual(parsed.dev_action, "resolve")
+        self.assertEqual(parsed.args, ("陈千语",))
+
+    def test_source_help_lists_warfarin_weapon_fallback(self):
+        text = commands.format_source()
+        self.assertIn("武器：FZ Wiki、Warfarin Wiki", text)
 
 
 def _sample_operator(levels: tuple[int, ...] = (9, 10, 11, 12)):
@@ -233,6 +364,150 @@ def _sample_operator(levels: tuple[int, ...] = (9, 10, 11, 12)):
     }
 
 
+def _sample_fz_operator():
+    data_url = "data:image/png;base64,"
+
+    def levels(*, cooldown=0, cost=0):
+        return [
+            {
+                "level": level,
+                "desc": "攻击倍率 {display_atk_scale:0%}，失衡值 {poise:0}。",
+                "values": {
+                    "atb": 0,
+                    "poise": 8 + level,
+                    "atk_scale": 0.2 + level / 100,
+                    "display_atk_scale": 0.3 + level / 100,
+                    "usp": 2 + level,
+                    "duration": 1 + level / 10,
+                    "CoolDown": cooldown,
+                },
+                "cooldown": cooldown,
+                "cost": cost,
+            }
+            for level in range(1, 11)
+        ]
+
+    return {
+        "article": {"title": "干员/佩丽卡", "updatedAt": "2026-07-02T11:55:21.758Z"},
+        "revision": {
+            "contentJson": {
+                "content": [
+                    {
+                        "attrs": {
+                            "hero": {
+                                "name": "佩丽卡",
+                                "nameEn": "Perlica",
+                                "rarity": 5,
+                                "profession": "术师",
+                                "element": "电磁",
+                                "faction": "终末地工业",
+                                "meta": [{"label": "所属", "value": "终末地工业"}],
+                                "weaponType": "施术单元",
+                                "tags": ["电磁附着", "导电"],
+                                "iconUrl": data_url,
+                                "portraitFile": data_url,
+                            },
+                            "archive": {
+                                "archive": [
+                                    {
+                                        "body": "【代号】佩丽卡\n【性别】女\n【身份认证】终末地工业\n【生日】3月16日\n【种族】黎博利\n【矿石病感染情况】\n参照医学检测报告，确认为非感染者。"
+                                    }
+                                ]
+                            },
+                            "skills": {
+                                "skills": [
+                                    {
+                                        "name": "协议α·突破",
+                                        "desc": "普通攻击造成<#ba.pulse>电磁伤害</>。",
+                                        "icon": {"glyph": {"url": data_url}},
+                                        "levels": levels(),
+                                    },
+                                    {
+                                        "name": "协议ω·雷击",
+                                        "desc": "攻击倍率 {display_atk_scale:0%}。",
+                                        "icon": {"glyph": {"url": data_url}},
+                                        "levels": levels(),
+                                        "paramTable": {
+                                            "rows": [
+                                                {"label": "技力消耗", "values": ["100"] * 10},
+                                                {"label": "攻击倍率", "values": ["200%"] * 10},
+                                                {"label": "消耗一层破防时技力恢复", "values": ["5"] * 10},
+                                                {"label": "消耗二层破防时技力恢复", "values": ["15"] * 10},
+                                            ]
+                                        },
+                                    },
+                                    {
+                                        "name": "即时协议·闪链",
+                                        "desc": "造成<#ba.conduct>导电</>，持续{duration:0}秒。",
+                                        "icon": {"glyph": {"url": data_url}},
+                                        "levels": levels(cooldown=15),
+                                        "paramTable": {
+                                            "rows": [
+                                                {"label": "第一段技力恢复", "values": ["5"] * 10},
+                                                {"label": "第二段技力恢复", "values": ["7"] * 10},
+                                            ]
+                                        },
+                                    },
+                                    {
+                                        "name": "协议ε·70.41κ",
+                                        "desc": "终结技能量 {usp:0}。",
+                                        "icon": {"glyph": {"url": data_url}},
+                                        "levels": levels(cooldown=20, cost=80),
+                                        "paramTable": {
+                                            "rows": [
+                                                {"label": "所需终结技能量", "values": ["80"] * 10},
+                                                {"label": "冷却", "values": ["10s"] * 10},
+                                                {"label": "伤害倍率", "values": [f"{100 + i * 100}%" for i in range(10)]},
+                                                {"label": "失衡值", "values": ["20"] * 10},
+                                            ]
+                                        },
+                                    },
+                                ]
+                            },
+                            "talents": {
+                                "talents": [
+                                    {
+                                        "name": "歼灭协议",
+                                        "level": 1,
+                                        "desc": "对<@ba.poise>失衡</>的敌人造成的伤害<@ba.vup>+{dmg:0%}</>。",
+                                        "values": {"dmg": 0.2},
+                                        "iconUrl": data_url,
+                                    },
+                                    {
+                                        "name": "歼灭协议",
+                                        "level": 2,
+                                        "desc": "对<@ba.poise>失衡</>的敌人造成的伤害<@ba.vup>+{dmg:0%}</>。",
+                                        "values": {"dmg": 0.3},
+                                        "iconUrl": data_url,
+                                    },
+                                ]
+                            },
+                            "potentials": {
+                                "potentials": [
+                                    {
+                                        "name": "危机处理",
+                                        "level": 1,
+                                        "desc": "连携技<@ba.key>即时协议·闪链</>施加的<#ba.conduct>导电</>持续时间<@ba.vup>+{duration-1:0%}</>。",
+                                        "values": {"duration": 1.75},
+                                        "iconUrl": data_url,
+                                    },
+                                    {
+                                        "name": "谈判策略",
+                                        "level": 2,
+                                        "desc": "终结技<@ba.key>协议ε·70.41κ</>所需的终结技能量<@ba.vup>-{1-costvalue:0%}</>。",
+                                        "values": {"CostValue": 0.85},
+                                        "iconUrl": data_url,
+                                    },
+                                ]
+                            },
+                        }
+                    }
+                ]
+            }
+        },
+    }
+
+
 def _sample_weapon():
     return {
         "article": {
@@ -269,6 +544,7 @@ def _sample_weapon():
                                     },
                                     {
                                         "name": "巧技·赤断",
+                                        "skillId": "sk_wpn_claym_0017",
                                         "description": "物理伤害 {damage:0.0%}。装备者施加<#ba.physicalvul>物理脆弱</>时，造成<#ba.noguard>破防</>。",
                                         "levels": [{"level": i, "values": {"damage": 0.1 + i / 100}} for i in range(1, 10)],
                                     },
@@ -286,12 +562,22 @@ def _sample_richtext():
     return {
         "RICH_TEXT_STYLES": {
             "ba.phy": {"id": "ba.phy", "color": "#bd7f42"},
+            "ba.vup": {"id": "ba.vup", "color": "#9eb7ff"},
+            "ba.key": {"id": "ba.key", "color": "#33c2ff"},
+            "ba.pulse": {"id": "ba.pulse", "color": "#ffcc00"},
+            "ba.poise": {"id": "ba.poise", "color": "#ffd399"},
         },
         "HYPERLINK_TEXTS": {
             "ba.physicalvul": {
                 "id": "ba.physicalvul",
                 "iconPath": "https://assets.fz.wiki/c40f3979bc72cf80/e82f5eb3144df5e3.png",
                 "richTextId": "ba.phy",
+            },
+            "ba.conduct": {
+                "id": "ba.conduct",
+                "iconPath": "data:image/png;base64,",
+                "richTextId": "ba.pulse",
+                "name": "导电",
             },
             "ba.noguard": {
                 "id": "ba.noguard",
@@ -302,9 +588,104 @@ def _sample_richtext():
     }
 
 
+def _sample_warfarin_weapon():
+    return {
+        "meta": {
+            "id": "wpn_claym_0004",
+            "slug": "exemplar",
+            "name": "典范",
+            "version": "1.3",
+        },
+        "data": {
+            "weaponBasicTable": {
+                "engName": "Exemplar",
+                "maxLv": 90,
+                "rarity": 6,
+                "weaponId": "wpn_claym_0004",
+                "weaponSkillList": ["wpn_attr_main_high", "sk_wpn_claym_0004"],
+                "weaponType": 3,
+            },
+            "itemTable": {
+                "iconId": "wpn_claym_0004",
+                "name": "典范",
+                "rarity": 6,
+            },
+            "weaponUpgradeTemplateTable": {
+                "list": [{"weaponLv": 1, "baseAtk": 51}, {"weaponLv": 90, "baseAtk": 512}],
+            },
+            "skillPatchTable": {
+                "wpn_attr_main_high": {
+                    "SkillPatchDataBundle": [
+                        {
+                            "level": 1,
+                            "skillName": "主能力提升·大",
+                            "description": "主能力值<@ba.vup>+{mainattr}</>",
+                            "blackboard": [{"key": "mainattr", "value": 17, "valueStr": ""}],
+                        },
+                        {
+                            "level": 9,
+                            "skillName": "主能力提升·大",
+                            "description": "主能力值<@ba.vup>+{mainattr}</>",
+                            "blackboard": [{"key": "mainattr", "value": 132, "valueStr": ""}],
+                        },
+                    ]
+                },
+                "sk_wpn_claym_0004": {
+                    "SkillPatchDataBundle": [
+                        {
+                            "level": 1,
+                            "skillName": "典雅准则",
+                            "description": "物理伤害<#ba.physicalvul>提升</> {damage:0.0%}",
+                            "blackboard": [{"key": "damage", "value": 0.1, "valueStr": ""}],
+                        }
+                    ]
+                },
+            },
+        },
+        "refs": {
+            "weaponTypes": {"3": "双手剑"},
+            "richTextStyleTable": {
+                "ba.vup": {"id": "ba.vup", "preDef": ["<color=#24a148>"], "postDef": ["</color>"]},
+                "ba.phy": {"id": "ba.phy", "preDef": ["<color=#bd7f42>"], "postDef": ["</color>"]},
+            },
+            "hyperlinkTextTable": {
+                "ba.physicalvul": {
+                    "id": "ba.physicalvul",
+                    "iconPath": "https://assets.example/physicalvul.png",
+                    "richTextId": "ba.phy",
+                }
+            },
+        },
+    }
+
+
 class EndfieldServiceTests(unittest.TestCase):
     def test_clean_text_removes_warfarin_rich_text_tags(self):
         self.assertEqual(clean_text("造成<#ba.damage>物理伤害</>。"), "造成物理伤害。")
+
+    def test_fz_rich_text_preserves_adjacent_high_index_tags(self):
+        prefix = "".join(f"<@ba.key>{index}</>" for index in range(7))
+        text = prefix + "额外<#ba.return>返还</><@ba.vup>5</>点技力。"
+        cleaned = service._clean_fz_rich_text(text)
+
+        self.assertIn("<#ba.return>返还</><@ba.vup>5</>点技力。", cleaned)
+        self.assertNotIn("\x00", cleaned)
+
+    def test_fz_template_supports_scalar_multiplication(self):
+        rendered = service._format_fz_template(
+            "无视<@ba.vup>{100*ignore_fire_resist:0}</>点抗性。",
+            {"ignore_fire_resist": 0.2},
+        )
+
+        self.assertEqual(rendered, "无视<@ba.vup>20</>点抗性。")
+
+    def test_fz_template_supports_constant_minus_negative_value(self):
+        rendered = service._format_fz_template(
+            "虚弱效果<@ba.vup>+{0-weak_scale:0%}</>。",
+            {"weak_scale": -0.05},
+        )
+
+        self.assertEqual(rendered, "虚弱效果<@ba.vup>+5%</>。")
 
     def test_build_operator_view_extracts_four_skill_levels(self):
         view = build_operator_view(_sample_operator())
@@ -344,7 +725,8 @@ class EndfieldServiceTests(unittest.TestCase):
 
     def test_render_operator_card_html_contains_fixed_columns_and_values(self):
         view = build_operator_view(_sample_operator())
-        html = asyncio.run(render_operator_card_html(view))
+        with patch.object(draw, "fetch_many", AsyncMock(return_value={})):
+            html = asyncio.run(render_operator_card_html(view))
 
         for _, label in LEVEL_COLUMNS:
             self.assertIn(label, html)
@@ -366,7 +748,7 @@ class EndfieldServiceTests(unittest.TestCase):
         self.assertIn("物理伤害", html)
         self.assertIn("击飞", html)
         self.assertIn("寒冷附着", html)
-        self.assertIn("#30d6e0", html)
+        self.assertIn(draw.normalize_rich_color("#30d6e0"), html)
         self.assertIn("归穹宇", html)
         self.assertNotIn("S01", html)
 
@@ -374,17 +756,36 @@ class EndfieldServiceTests(unittest.TestCase):
         view = build_weapon_view(_sample_weapon(), _sample_richtext())
 
         self.assertEqual(view.name, "赤缨")
+        self.assertEqual(view.weapon_id, "wpn_claym_0017")
         self.assertEqual(view.english_name, "Amaranthine Tassel")
         self.assertEqual(view.weapon_type, "双手剑")
         self.assertEqual(view.rarity, 6)
         self.assertEqual(view.max_atk, 510)
+        self.assertEqual(view.icon_url, "https://assets.fz.wiki/c3338b6b5f3d4283/ddd4730dd6caaff8.png@raw")
+        self.assertEqual(
+            view.rich_text_links["ba.physicalvul"]["iconPath"],
+            "https://assets.fz.wiki/c40f3979bc72cf80/e82f5eb3144df5e3.png@raw",
+        )
+        self.assertEqual(view.rich_text_links["ba.conduct"]["iconPath"], "data:image/png;base64,")
         self.assertEqual(len(view.skills), 3)
         self.assertEqual(view.skills[2].title, "巧技·赤断")
         self.assertIn("ba.physicalvul", view.rich_text_links)
 
+    def test_build_warfarin_weapon_view_extracts_backup_data(self):
+        view = service.build_warfarin_weapon_view(_sample_warfarin_weapon())
+
+        self.assertEqual(view.name, "典范")
+        self.assertEqual(view.source_name, "Warfarin Wiki")
+        self.assertEqual(view.weapon_type, "双手剑")
+        self.assertEqual(view.max_atk, 512)
+        self.assertEqual(view.icon_url, "https://static.warfarin.wiki/v4/itemicon/wpn_claym_0004.webp")
+        self.assertEqual(view.skills[0].levels[-1].values["mainattr"], 132)
+        self.assertIn("ba.physicalvul", view.rich_text_links)
+
     def test_render_weapon_card_html_contains_preview_layout_and_rich_icons(self):
         view = build_weapon_view(_sample_weapon(), _sample_richtext())
-        html = asyncio.run(render_weapon_card_html(view))
+        with patch.object(draw, "fetch_many", AsyncMock(return_value={})):
+            html = asyncio.run(render_weapon_card_html(view))
 
         self.assertIn("weapon-card", html)
         self.assertIn("武器数据详表", html)
@@ -445,20 +846,401 @@ class EndfieldServiceTests(unittest.TestCase):
         self.assertIn("icon_term_ba_naturalinflict", style.icon_url)
         self.assertNotIn("icon_term_ba_corrupt", style.icon_url)
 
+    def test_build_fz_operator_view_extracts_supported_schema(self):
+        view = service.build_fz_operator_view(
+            {
+                "article": {"title": "干员/陈千语", "updatedAt": "2026-07-08T00:00:00.000Z"},
+                "revision": {
+                    "contentJson": {
+                        "content": [
+                            {
+                                "attrs": {
+                                    "hero": {
+                                        "name": "陈千语",
+                                        "nameEn": "Chen Qianyu",
+                                        "rarity": 5,
+                                        "profession": "近卫",
+                                        "damageType": "物理",
+                                        "weaponType": "单手剑",
+                                        "tags": ["输出"],
+                                    },
+                                    "skills": {
+                                        "skills": [
+                                            {
+                                                "name": "归穹宇",
+                                                "description": "造成物理伤害。",
+                                                "levels": [
+                                                    {
+                                                        "level": 9,
+                                                        "values": {"damage": "100%"},
+                                                        "cooldown": 12,
+                                                        "cost": 18,
+                                                    }
+                                                ],
+                                            }
+                                        ]
+                                    },
+                                }
+                            }
+                        ]
+                    }
+                },
+            }
+        )
+
+        self.assertEqual(view.name, "陈千语")
+        self.assertEqual(view.profession, "近卫")
+        self.assertEqual(view.source_version, "2026-07-08")
+        self.assertEqual(view.skills[0].title, "归穹宇")
+
+    def test_build_fz_operator_view_maps_perlica_schema(self):
+        view = service.build_fz_operator_view(_sample_fz_operator(), _sample_richtext())
+
+        self.assertEqual(view.name, "佩丽卡")
+        self.assertEqual(view.english_name, "Perlica")
+        self.assertEqual(view.profession, "术师")
+        self.assertEqual(view.damage_type, "电磁")
+        self.assertEqual(view.weapon_type, "施术单元")
+        self.assertEqual(view.species_label, "种族")
+        self.assertEqual(view.species, "黎博利")
+        self.assertEqual(view.tags, ["电磁附着", "导电"])
+        self.assertEqual(view.portrait_url, "data:image/png;base64,")
+        self.assertEqual([skill.category for skill in view.skills], ["普攻", "战技", "连携技", "终结技"])
+        self.assertEqual(view.skills[0].icon_id, "data:image/png;base64,")
+        self.assertEqual([level.label for level in view.skills[0].levels], ["Lv7", "Lv8", "Lv9", "Lv10"])
+
+        metric_names = set()
+        for skill in view.skills:
+            for level in skill.levels:
+                metric_names.update(level.values)
+        self.assertIn("攻击倍率", metric_names)
+        self.assertIn("失衡值", metric_names)
+        self.assertIn("持续时间", metric_names)
+        self.assertIn("技力", metric_names)
+        self.assertNotIn("atk_scale", metric_names)
+        self.assertNotIn("poise", metric_names)
+        self.assertNotIn("usp", metric_names)
+        self.assertNotIn("atb", metric_names)
+        self.assertIn("37%", view.skills[0].levels[0].values["攻击倍率"])
+        self.assertEqual(view.skills[3].levels[-1].cost, "80")
+        self.assertEqual(view.skills[3].levels[-1].cooldown, "10s")
+        self.assertEqual(view.skills[3].levels[-1].values["所需能量"], "80")
+        self.assertEqual(view.skills[3].levels[-1].values["冷却"], "10s")
+        self.assertEqual(view.skills[3].levels[-1].values["攻击倍率"], "1000%")
+        self.assertNotIn("关键数值", view.skills[1].description)
+        combat_rows = dict(draw.skill_metric_rows(view.skills[1]))
+        self.assertEqual(combat_rows["消耗一层破防时技力恢复"][-1], "5")
+        self.assertEqual(combat_rows["消耗二层破防时技力恢复"][-1], "15")
+        self.assertNotIn("关键数值", view.skills[2].description)
+        combo_rows = dict(draw.skill_metric_rows(view.skills[2]))
+        self.assertEqual(combo_rows["第一段技力恢复"][-1], "5")
+        self.assertEqual(combo_rows["第二段技力恢复"][-1], "7")
+        self.assertEqual(view.term_styles["ba.vup"].color, "#9eb7ff")
+        self.assertEqual(view.term_styles["ba.conduct"].icon_url, "data:image/png;base64,")
+
+    def test_fz_skill_metric_rows_keep_specific_param_table_rows(self):
+        raw = _sample_fz_operator()
+        skills = raw["revision"]["contentJson"]["content"][0]["attrs"]["skills"]["skills"]
+        skills[0]["paramTable"] = {
+            "rows": [
+                {"label": "普攻第一段倍率", "values": ["36%"] * 10},
+                {"label": "普攻第二段倍率", "values": ["54%"] * 10},
+                {"label": "普攻第三段倍率", "values": ["56%"] * 10},
+                {"label": "普攻第四段倍率", "values": ["88%"] * 10},
+                {"label": "普攻第五段倍率", "values": ["119%"] * 10},
+                {"label": "处决攻击倍率", "values": ["900%"] * 10},
+                {"label": "下落攻击倍率", "values": ["180%"] * 10},
+            ]
+        }
+        skills[1]["paramTable"] = {
+            "rows": [
+                {"label": "技力消耗", "values": ["100"] * 10},
+                {"label": "初始爆炸伤害倍率", "values": ["140%"] * 10},
+                {"label": "初始爆炸失衡值", "values": ["10"] * 10},
+                {"label": "持续伤害每段倍率", "values": ["14%"] * 10},
+                {"label": "追加伤害倍率", "values": ["770%"] * 10},
+                {"label": "追加攻击获得终结技能量", "values": ["100"] * 10},
+            ]
+        }
+        skills[2]["paramTable"] = {
+            "rows": [
+                {"label": "冷却", "values": ["9s"] * 10},
+                {"label": "攻击倍率", "values": ["540%"] * 10},
+                {"label": "失衡值", "values": ["10"] * 10},
+                {"label": "命中1个敌人获得终结技能量", "values": ["25"] * 10},
+            ]
+        }
+        skills[3]["paramTable"] = {
+            "rows": [
+                {"label": "所需终结技能量", "values": ["300"] * 10},
+                {"label": "冷却", "values": ["10s"] * 10},
+                {"label": "持续时间（秒）", "values": ["15"] * 10},
+                {"label": "强化普攻第一段倍率", "values": ["146%"] * 10},
+            ]
+        }
+        view = service.build_fz_operator_view(raw, _sample_richtext())
+
+        normal_rows = dict(draw.skill_metric_rows(view.skills[0]))
+        self.assertIn("普攻第五段倍率", normal_rows)
+        self.assertIn("处决攻击倍率", normal_rows)
+        self.assertIn("下落攻击倍率", normal_rows)
+        self.assertNotIn("攻击倍率", normal_rows)
+
+        combat_rows = dict(draw.skill_metric_rows(view.skills[1]))
+        self.assertIn("初始爆炸伤害倍率", combat_rows)
+        self.assertIn("持续伤害每段倍率", combat_rows)
+        self.assertIn("追加伤害倍率", combat_rows)
+        self.assertIn("追加攻击获得终结技能量", combat_rows)
+        self.assertNotIn("攻击倍率", combat_rows)
+
+        combo_row_list = draw.skill_metric_rows(view.skills[2])
+        self.assertEqual(combo_row_list[0][0], "冷却")
+        combo_rows = dict(combo_row_list)
+        self.assertEqual(combo_rows["冷却"][-1], "9s")
+        self.assertEqual(combo_rows["攻击倍率"][-1], "540%")
+        self.assertEqual(combo_rows["失衡值"][-1], "10")
+        self.assertEqual(combo_rows["命中1个敌人获得终结技能量"][-1], "25")
+
+        ultimate_rows = dict(draw.skill_metric_rows(view.skills[3]))
+        self.assertIn("持续时间（秒）", ultimate_rows)
+        self.assertIn("强化普攻第一段倍率", ultimate_rows)
+        self.assertNotIn("所需能量", ultimate_rows)
+        self.assertNotIn("冷却", ultimate_rows)
+        self.assertNotIn("持续时间", ultimate_rows)
+
+    def test_build_fz_operator_view_uses_raw_fz_asset_urls(self):
+        raw = _sample_fz_operator()
+        attrs = raw["revision"]["contentJson"]["content"][0]["attrs"]
+        hero = attrs["hero"]
+        hero["iconUrl"] = "https://assets.fz.wiki/upload/characters/icon/yvonne.png"
+        hero["roundIconUrl"] = "https://assets.fz.wiki/upload/characters/round/yvonne.png?size=round"
+        hero["portraitFile"] = "https://assets.fz.wiki/upload/characters/illust/yvonne.png@raw"
+        attrs["skills"]["skills"][0]["icon"]["glyph"]["url"] = "https://assets.fz.wiki/upload/skills/yvonne_s1.png"
+        for talent in attrs["talents"]["talents"]:
+            talent["iconUrl"] = "https://assets.fz.wiki/upload/talents/yvonne_talent.png"
+        attrs["potentials"]["potentials"][0]["iconUrl"] = "https://assets.fz.wiki/upload/potentials/yvonne_p1.png"
+
+        view = service.build_fz_operator_view(raw, _sample_richtext())
+
+        self.assertEqual(view.icon_url, "https://assets.fz.wiki/upload/characters/icon/yvonne.png@raw")
+        self.assertEqual(view.round_icon_url, "https://assets.fz.wiki/upload/characters/round/yvonne.png@raw?size=round")
+        self.assertEqual(view.portrait_url, "https://assets.fz.wiki/upload/characters/illust/yvonne.png@raw")
+        self.assertEqual(view.skills[0].icon_id, "https://assets.fz.wiki/upload/skills/yvonne_s1.png@raw")
+        self.assertEqual(view.talents[0].icon_url, "https://assets.fz.wiki/upload/talents/yvonne_talent.png@raw")
+        self.assertEqual(view.potentials[0].icon_url, "https://assets.fz.wiki/upload/potentials/yvonne_p1.png@raw")
+        self.assertEqual(
+            view.term_styles["ba.physicalvul"].icon_url,
+            "https://assets.fz.wiki/c40f3979bc72cf80/e82f5eb3144df5e3.png@raw",
+        )
+        self.assertEqual(view.term_styles["ba.conduct"].icon_url, "data:image/png;base64,")
+
+    def test_build_fz_operator_view_falls_back_to_faction_without_archive_species(self):
+        raw = _sample_fz_operator()
+        attrs = raw["revision"]["contentJson"]["content"][0]["attrs"]
+        attrs.pop("archive")
+
+        view = service.build_fz_operator_view(raw)
+
+        self.assertEqual(view.species_label, "所属")
+        self.assertEqual(view.species, "终末地工业")
+
+    def test_build_fz_operator_view_formats_talents_and_potentials(self):
+        view = service.build_fz_operator_view(_sample_fz_operator())
+
+        self.assertEqual([talent.title for talent in view.talents], ["歼灭协议"])
+        self.assertIn("+30%", view.talents[0].description)
+        self.assertNotIn("{dmg:0%}", view.talents[0].description)
+        self.assertEqual(view.potentials[0].title, "P1 危机处理")
+        self.assertEqual(view.potentials[1].title, "P2 谈判策略")
+        self.assertIn("+75%", view.potentials[0].description)
+        self.assertIn("-15%", view.potentials[1].description)
+        for effect in [*view.talents, *view.potentials]:
+            self.assertNotIn("{", effect.description)
+            self.assertNotIn("}", effect.description)
+
+    def test_render_fz_operator_card_html_uses_dynamic_level_labels(self):
+        view = service.build_fz_operator_view(_sample_fz_operator(), _sample_richtext())
+        with patch.object(draw, "fetch_many", AsyncMock(return_value={})):
+            html = asyncio.run(render_operator_card_html(view))
+
+        self.assertIn("Lv7", html)
+        self.assertIn("Lv8", html)
+        self.assertIn("Lv9", html)
+        self.assertIn("Lv10", html)
+        self.assertNotIn("<span>M1</span>", html)
+        self.assertNotIn("<span>M2</span>", html)
+        self.assertNotIn("<span>M3</span>", html)
+        self.assertIn("攻击倍率", html)
+        self.assertNotIn("atk_scale", html)
+        self.assertIn("所需能量 <strong>80</strong>", html)
+        self.assertIn("冷却 <strong>10s</strong>", html)
+        self.assertIn("种族", html)
+        self.assertIn("黎博利", html)
+        ultimate_html = html[html.index('alt="协议ε·70.41κ"'):]
+        ultimate_html = ultimate_html[: ultimate_html.index("</article>")]
+        self.assertNotIn('<div class="metric-name">所需能量</div>', ultimate_html)
+        self.assertNotIn('<div class="metric-name">冷却</div>', ultimate_html)
+        self.assertIn(draw.normalize_rich_color("#9eb7ff"), html)
+        self.assertIn(draw.normalize_rich_color("#33c2ff"), html)
+        self.assertIn(draw.normalize_rich_color("#ffcc00"), html)
+        self.assertIn("term-icon", html)
+        self.assertNotIn("&lt;@ba.vup", html)
+        self.assertNotIn("<@ba.vup", html)
+        self.assertNotIn("margin-top: auto", html)
+        self.assertIn(f"left: {draw.OPERATOR_ACCENT_LEFT}px", html)
+        self.assertIn(f"height: {draw.OPERATOR_RAIL_HEIGHT}px", html)
+        self.assertIn("align-content: start", html)
+        self.assertNotIn("align-content: space-between", html)
+        self.assertNotIn("flex: 1 1 auto", html)
+        self.assertIn("align-self: start", html)
+        self.assertIn(str(draw.OPERATOR_RAIL_HEIGHT + 56), html)
+        self.assertNotIn("max-height: calc(100% - 56px)", html)
+        self.assertNotIn("min-height: 244px", html)
+
+    def test_rich_colors_meet_card_contrast_requirement(self):
+        normalized = draw.normalize_rich_color("#9eb7ff")
+        red, green, blue = (int(normalized[index:index + 2], 16) / 255 for index in (1, 3, 5))
+        background = (247 / 255, 248 / 255, 246 / 255)
+        self.assertGreaterEqual(draw._contrast_ratio((red, green, blue), background), 4.49)
+
+    def test_metric_label_width_uses_three_display_width_buckets(self):
+        short = models.SkillView("short", "短", levels=[models.SkillLevelView("Lv1", 1, {"倍率": "1"})])
+        medium = models.SkillView("medium", "中", levels=[models.SkillLevelView("Lv1", 1, {"处决攻击倍率": "1"})])
+        long = models.SkillView("long", "长", levels=[models.SkillLevelView("Lv1", 1, {"终结技期间燃烧失衡值": "1"})])
+        self.assertEqual(draw.metric_label_width(short), 92)
+        self.assertEqual(draw.metric_label_width(medium), 108)
+        self.assertEqual(draw.metric_label_width(long), 124)
+
+    def test_weapon_width_uses_all_four_complexity_buckets(self):
+        def weapon(description, *, skills=3):
+            return models.WeaponView(
+                name="测试",
+                slug="test",
+                title="武器/测试",
+                skills=[
+                    models.WeaponSkillView(
+                        f"技能{index}",
+                        description,
+                        [models.WeaponSkillLevelView(level, {}) for level in range(1, 10)],
+                    )
+                    for index in range(skills)
+                ],
+            )
+
+        self.assertEqual(draw.weapon_card_width(weapon("短文本", skills=2)), 1360)
+        self.assertEqual(draw.weapon_card_width(weapon("中" * 30)), 1440)
+        self.assertEqual(draw.weapon_card_width(weapon("长" * 40)), 1520)
+        self.assertEqual(draw.weapon_card_width(weapon("极长" * 25)), 1600)
+
+    def test_weapon_operator_names_keep_owner_box_compact(self):
+        self.assertEqual(draw.weapon_operator_names([]), "通用")
+        self.assertEqual(draw.weapon_operator_names(["弭弗"]), "弭弗")
+        self.assertEqual(draw.weapon_operator_names(["弭弗", "余烬", "昼雪"]), "弭弗、余烬、昼雪")
+        self.assertEqual(draw.weapon_operator_names(["余烬", "昼雪", "别礼", "大潘"]), "余烬、昼雪等4名")
+
+    def test_portrait_override_and_analysis_stay_within_bounds(self):
+        override = asyncio.run(draw._portrait_layout(models.OperatorView("莱万汀", "", ""), b"ignored"))
+        self.assertEqual(override, draw.PortraitLayout(50.0, 46.0, 1.12))
+        buffer = io.BytesIO()
+        Image.new("RGBA", (120, 200), (0, 0, 0, 0)).save(buffer, format="PNG")
+        image = Image.open(io.BytesIO(buffer.getvalue()))
+        for x in range(35, 85):
+            for y in range(30, 180):
+                image.putpixel((x, y), (255, 80, 60, 255))
+        rendered = io.BytesIO()
+        image.save(rendered, format="PNG")
+        layout = draw._analyze_portrait_layout(rendered.getvalue())
+        self.assertTrue(35 <= layout.x <= 65)
+        self.assertTrue(30 <= layout.y <= 58)
+        self.assertTrue(1.05 <= layout.scale <= 1.18)
+
+    def test_png_container_optimization_is_lossless(self):
+        buffer = io.BytesIO()
+        Image.new("RGB", (32, 24), "#f5c900").save(buffer, format="PNG", pnginfo=None)
+        original = buffer.getvalue()
+        optimized = draw.optimize_png_container(original)
+        self.assertEqual(Image.open(io.BytesIO(original)).tobytes(), Image.open(io.BytesIO(optimized)).tobytes())
+        self.assertTrue(optimized.startswith(b"\x89PNG"))
+
 
 class _FakeWarfarinClient:
-    def __init__(self, *, search_data=None, operators_data=None):
+    def __init__(
+        self,
+        *,
+        search_data=None,
+        operators_data=None,
+        weapons_data=None,
+        operator_detail_data=None,
+        operator_details_data=None,
+        weapon_detail_data=None,
+        fz_summaries_data=None,
+        fz_search_data=None,
+        fz_article_data=None,
+        fz_richtext_data=None,
+    ):
         self._search = search_data if search_data is not None else {}
         self._operators = operators_data if operators_data is not None else {}
+        self._weapons = weapons_data if weapons_data is not None else {}
+        self._operator_detail = operator_detail_data if operator_detail_data is not None else {}
+        self._operator_details = operator_details_data if operator_details_data is not None else {}
+        self._weapon_detail = weapon_detail_data if weapon_detail_data is not None else {}
+        self._fz_summaries = fz_summaries_data if fz_summaries_data is not None else {}
+        self._fz_search = fz_search_data if fz_search_data is not None else {}
+        self._fz_article = fz_article_data if fz_article_data is not None else {}
+        self._fz_richtext = fz_richtext_data if fz_richtext_data is not None else {}
 
     async def search(self, query, *, lang="cn"):
         return self._search
 
+    async def operator_detail(self, slug, *, lang="cn"):
+        if slug in self._operator_details:
+            detail = self._operator_details[slug]
+            if isinstance(detail, Exception):
+                raise detail
+            return detail
+        return self._operator_detail
+
+    async def weapon_detail(self, slug, *, lang="cn"):
+        return self._weapon_detail
+
     async def operators(self, *, lang="cn"):
         return self._operators
 
+    async def weapons(self, *, lang="cn"):
+        return self._weapons
+
+    async def fz_article_summaries(self, prefix, *, ns=0):
+        if isinstance(self._fz_summaries, Exception):
+            raise self._fz_summaries
+        return self._fz_summaries
+
+    async def fz_search(self, query, *, limit=8):
+        if isinstance(self._fz_search, Exception):
+            raise self._fz_search
+        return self._fz_search
+
+    async def fz_article_by_title(self, title, *, ns=0, with_revision=True):
+        if isinstance(self._fz_article, Exception):
+            raise self._fz_article
+        return self._fz_article
+
+    async def fz_game_richtext(self):
+        if isinstance(self._fz_richtext, Exception):
+            raise self._fz_richtext
+        return self._fz_richtext
+
 
 class EndfieldSlugResolutionTests(unittest.TestCase):
+    @staticmethod
+    def _weapon_operator_detail(name, *, default_weapon="", recommended=()):
+        return {
+            "meta": {"name": name},
+            "data": {
+                "characterTable": {"defaultWeaponId": default_weapon},
+                "charWpnRecommendTable": {"weaponIds1": list(recommended)},
+            },
+        }
+
     def test_slug_input_returns_directly(self):
         client = _FakeWarfarinClient()
         svc = service.EndfieldService(client)
@@ -484,6 +1266,30 @@ class EndfieldSlugResolutionTests(unittest.TestCase):
         svc = service.EndfieldService(client)
         self.assertEqual(asyncio.run(svc.find_operator_slug("卡缪")), "camille")
 
+    def test_operator_list_fallback_accepts_fuzzy_name(self):
+        client = _FakeWarfarinClient(
+            search_data={"results": []},
+            operators_data={"data": [{"slug": "mifu", "name": "弭弗"}]},
+        )
+        svc = service.EndfieldService(client)
+        self.assertEqual(asyncio.run(svc.find_operator_slug("弥弗")), "mifu")
+
+    def test_weapon_list_fallback_accepts_fuzzy_name(self):
+        client = _FakeWarfarinClient(
+            search_data={"results": []},
+            weapons_data={"data": [{"slug": "chiying", "name": "赤缨"}]},
+        )
+        svc = service.EndfieldService(client)
+        self.assertEqual(asyncio.run(svc.find_weapon_slug("赤樱")), "chiying")
+
+    def test_list_fallback_rejects_ambiguous_fuzzy_name(self):
+        client = _FakeWarfarinClient(
+            search_data={"results": []},
+            operators_data={"data": [{"slug": "mifu", "name": "弭弗"}, {"slug": "mifu-alt", "name": "米弗"}]},
+        )
+        svc = service.EndfieldService(client)
+        self.assertIsNone(asyncio.run(svc.find_operator_slug("弥弗")))
+
     def test_no_match_returns_none(self):
         client = _FakeWarfarinClient(
             search_data={"results": []},
@@ -491,6 +1297,96 @@ class EndfieldSlugResolutionTests(unittest.TestCase):
         )
         svc = service.EndfieldService(client)
         self.assertIsNone(asyncio.run(svc.find_operator_slug("不存在")))
+
+    def test_fz_operator_title_prefers_fz_summaries(self):
+        client = _FakeWarfarinClient(
+            fz_summaries_data={"articles": [{"title": "干员/陈千语"}]},
+            fz_search_data={"hits": []},
+        )
+        svc = service.EndfieldService(client)
+        self.assertEqual(asyncio.run(svc.find_fz_operator_title("陈千语")), "干员/陈千语")
+
+    def test_fz_operator_view_loads_richtext_styles(self):
+        client = _FakeWarfarinClient(
+            fz_article_data=_sample_fz_operator(),
+            fz_richtext_data=_sample_richtext(),
+        )
+        svc = service.EndfieldService(client)
+        view = asyncio.run(svc.get_operator_view_from_fz("佩丽卡"))
+
+        self.assertIsNotNone(view)
+        self.assertEqual(view.term_styles["ba.key"].color, "#33c2ff")
+        self.assertEqual(view.term_styles["ba.conduct"].icon_url, "data:image/png;base64,")
+
+    def test_weapon_operator_names_prefer_default_weapon_users(self):
+        client = _FakeWarfarinClient(
+            weapons_data={"data": [{"id": "wpn_claym_0017", "name": "赤缨", "weaponType": 3}]},
+            operators_data={
+                "data": [
+                    {"slug": "ember", "name": "余烬", "weaponType": 3},
+                    {"slug": "mifu", "name": "弭弗", "weaponType": 3},
+                    {"slug": "perlica", "name": "佩丽卡", "weaponType": 1},
+                ]
+            },
+            operator_details_data={
+                "ember": self._weapon_operator_detail("余烬", default_weapon="wpn_claym_0017"),
+                "mifu": self._weapon_operator_detail("弭弗", recommended=("wpn_claym_0017",)),
+            },
+        )
+        svc = service.EndfieldService(client)
+        view = models.WeaponView("赤缨", "amaranthine-tassel", "武器/赤缨", weapon_id="wpn_claym_0017")
+
+        self.assertEqual(asyncio.run(svc.find_weapon_operator_names(view)), ["余烬"])
+
+    def test_weapon_operator_names_fall_back_to_recommendations(self):
+        client = _FakeWarfarinClient(
+            weapons_data={"data": [{"id": "wpn_claym_0017", "name": "赤缨", "weaponType": 3}]},
+            operators_data={"data": [{"slug": "mifu", "name": "弭弗", "weaponType": 3}]},
+            operator_details_data={
+                "mifu": self._weapon_operator_detail("弭弗", recommended=("wpn_claym_0017",)),
+            },
+        )
+        svc = service.EndfieldService(client)
+        view = models.WeaponView("赤缨", "amaranthine-tassel", "武器/赤缨")
+
+        self.assertEqual(asyncio.run(svc.find_weapon_operator_names(view)), ["弭弗"])
+
+    def test_weapon_card_uses_generic_owner_when_relation_lookup_fails(self):
+        view = build_weapon_view(_sample_weapon(), _sample_richtext())
+        with patch.object(draw, "fetch_many", AsyncMock(return_value={})):
+            html = asyncio.run(render_weapon_card_html(view))
+
+        self.assertIn("所属干员", html)
+        self.assertIn("通用", html)
+        self.assertNotIn("稀有度", html)
+        self.assertEqual(html.count('class="rarity-star"'), view.rarity)
+
+    def test_operator_view_falls_back_to_warfarin_when_fz_fails(self):
+        client = _FakeWarfarinClient(
+            search_data={"results": [{"slug": "chen-qianyu", "type": "operators"}]},
+            operators_data={"data": []},
+            operator_detail_data=_sample_operator(),
+            fz_article_data=service.WarfarinAPIError("FZ down"),
+        )
+        svc = service.EndfieldService(client)
+        view = asyncio.run(svc.get_operator_view("干员/陈千语"))
+
+        self.assertIsNotNone(view)
+        self.assertEqual(view.name, "陈千语")
+
+    def test_weapon_view_falls_back_to_warfarin_when_fz_fails(self):
+        client = _FakeWarfarinClient(
+            search_data={"results": [{"slug": "exemplar", "name": "典范", "type": "weapons"}]},
+            weapons_data={"data": []},
+            weapon_detail_data=_sample_warfarin_weapon(),
+            fz_article_data=service.WarfarinAPIError("FZ down"),
+        )
+        svc = service.EndfieldService(client)
+        view = asyncio.run(svc.get_weapon_view("武器/典范"))
+
+        self.assertIsNotNone(view)
+        self.assertEqual(view.name, "典范")
+        self.assertEqual(view.source_name, "Warfarin Wiki")
 
 
 if __name__ == "__main__":

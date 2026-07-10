@@ -13,6 +13,7 @@ from utils.entari_native import (
 from arclet.alconna import Alconna, Args
 
 from utils.entari_native import cmd as _cmd, get_rest, get_bot
+from utils.image_executor import run_image_render
 from utils.temp_files import schedule_temp_file_cleanup
 
 from configs.config import Config, MC_BROADCAST_INTERVAL
@@ -71,6 +72,16 @@ def _to_image(output) -> ChainImage:
         f.flush()
         schedule_temp_file_cleanup(f.name)
         return ChainImage(path=f.name)
+
+
+def _draw_server_list_from_responses(responses: list[dict], group_name: str):
+    return draw_server_list([draw_server_info(response) for response in responses], group_name)
+
+
+def _draw_ping_result(info: dict):
+    if info.get("status") == "success":
+        return draw_server_players(info)
+    return draw_server_list([draw_server_info(info)], "Ping")
 
 
 def _format_interval(seconds: int | None) -> str:
@@ -161,13 +172,17 @@ async def handle_ping_command(event: Event, rest: ArgVal[str]):
         responses = await asyncio.gather(*[_ping_one(s) for s in server_list])
         if len(responses) == 1:
             # draw_server_players 会处理离线状态
-            output = draw_server_players(responses[0])
+            output = await run_image_render(draw_server_players, responses[0])
             await server_ping.finish(ChainMsg([_to_image(output)]))
             return
 
         # 多个服务器全部传入，draw_server_info 会处理离线状态
-        imgs = [draw_server_info(r) for r in responses]
-        output = draw_server_list(imgs, await _get_group_name(event, group_id))
+        group_name = await _get_group_name(event, group_id)
+        output = await run_image_render(
+            _draw_server_list_from_responses,
+            responses,
+            group_name,
+        )
         await server_ping.finish(ChainMsg([_to_image(output)]))
         return
 
@@ -181,7 +196,7 @@ async def handle_ping_command(event: Event, rest: ArgVal[str]):
         info = {"status": r.get("status"), "address": server.get("address"),
                 "data": r.get("data", {}), "name": server.get("name", "未知"),
                 "nickname": server.get("nickname")}
-        output = draw_server_players(info)
+        output = await run_image_render(draw_server_players, info)
         await server_ping.finish(ChainMsg([_to_image(output)]))
         return
 
@@ -189,10 +204,7 @@ async def handle_ping_command(event: Event, rest: ArgVal[str]):
     r = await ping(command_args, "java")
     info = {"status": r.get("status"), "address": command_args,
             "data": r.get("data", {}), "name": "Unknown Server", "nickname": None}
-    if r.get("status") == "success":
-        output = draw_server_players(info)
-    else:
-        output = draw_server_list([draw_server_info(info)], "Ping")
+    output = await run_image_render(_draw_ping_result, info)
     await server_ping.finish(ChainMsg([_to_image(output)]))
 
 
@@ -529,6 +541,6 @@ async def handle_online_command(event: Event, rest: ArgVal[str]):
         },
     }
 
-    output = draw_player_leaderboard(server_info)
+    output = await run_image_render(draw_player_leaderboard, server_info)
     await online_rank.finish(ChainMsg([_to_image(output)]))
 
