@@ -3337,6 +3337,24 @@ remotePort = {{ $v.Second }}
                 b"http-data",
             )
 
+    def test_steam_initial_refresh_error_does_not_log_traceback_or_secret(self):
+        import plugins.steamInfo as steam_plugin
+
+        secret_key = "do-not-log-this-key"
+
+        class FailedTask:
+            def result(self):
+                raise RuntimeError(f"request failed?key={secret_key}")
+
+        with patch.object(steam_plugin.logger, "error") as error, patch.object(
+            steam_plugin.logger, "exception"
+        ) as exception:
+            steam_plugin._log_init_steam_info_result(FailedTask())
+
+        exception.assert_not_called()
+        error.assert_called_once()
+        self.assertNotIn(secret_key, str(error.call_args))
+
     def test_steam_compare_detects_start_stop_and_change(self):
         steam_data = _load_steam_data_source()
         with TemporaryDirectory() as tmp:
@@ -4089,6 +4107,35 @@ remotePort = {{ $v.Second }}
 
         self.assertEqual(result["response"]["players"][0]["steamid"], "123")
         self.assertEqual(calls, ["http://127.0.0.1:7890", None])
+
+    def test_steam_player_summaries_handles_timeout_without_leaking_key(self):
+        steam = _load_steam_module()
+        calls = []
+        secret_key = "do-not-log-this-key"
+
+        class FakeSession:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return None
+
+            def get(self, url, **kwargs):
+                calls.append(kwargs.get("proxy"))
+                raise asyncio.TimeoutError()
+
+        with patch.object(
+            steam.aiohttp, "ClientSession", return_value=FakeSession()
+        ), patch.object(steam.logger, "warning") as warning:
+            result = asyncio.run(
+                steam.get_steam_users_info(
+                    ["123"], [secret_key], "http://127.0.0.1:7890"
+                )
+            )
+
+        self.assertEqual(result, {"response": {"players": []}})
+        self.assertEqual(calls, ["http://127.0.0.1:7890", None])
+        self.assertNotIn(secret_key, " ".join(map(str, warning.call_args_list)))
 
     def test_steam_app_list_prefers_official_store_service_with_api_key(self):
         steam = _load_steam_module()

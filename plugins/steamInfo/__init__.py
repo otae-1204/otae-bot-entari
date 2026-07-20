@@ -786,8 +786,10 @@ def _log_init_steam_info_result(task: asyncio.Task):
         task.result()
     except asyncio.CancelledError:
         return
-    except Exception:
-        logger.exception("[steamInfo] initial Steam refresh failed")
+    except Exception as exc:
+        logger.error(
+            f"[steamInfo] initial Steam refresh failed: {type(exc).__name__}"
+        )
 
 
 def _start_init_steam_info():

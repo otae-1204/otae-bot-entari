@@ -149,8 +149,12 @@ async def get_steam_users_info(
                                 f"{resp.status}, {response_text}"
                             )
                             break
-            except aiohttp.ClientError as exc:
-                logger.warning(f"Steam player summaries request failed: {exc}")
+            except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+                route = "proxy" if request_proxy else "direct"
+                logger.warning(
+                    f"Steam player summaries {route} request failed: "
+                    f"{type(exc).__name__}"
+                )
                 break
         else:
             break
