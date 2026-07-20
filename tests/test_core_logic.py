@@ -3976,6 +3976,55 @@ remotePort = {{ $v.Second }}
         self.assertLess(elapsed, 1)
         self.assertEqual(candidates, [])
 
+    def test_steam_player_summaries_uses_https_params_and_configured_proxy(self):
+        steam = _load_steam_module()
+        calls = []
+
+        class FakeResponse:
+            status = 200
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return None
+
+            async def json(self):
+                return {"response": {"players": [{"steamid": "123"}]}}
+
+        class FakeSession:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return None
+
+            def get(self, url, **kwargs):
+                calls.append((url, kwargs))
+                return FakeResponse()
+
+        with patch.object(steam.aiohttp, "ClientSession", return_value=FakeSession()):
+            result = asyncio.run(
+                steam.get_steam_users_info(
+                    ["123"], ["test-key"], "http://127.0.0.1:7890"
+                )
+            )
+
+        self.assertEqual(result["response"]["players"][0]["steamid"], "123")
+        self.assertEqual(calls[0][0], steam.STEAM_PLAYER_SUMMARIES_URL)
+        self.assertTrue(calls[0][0].startswith("https://"))
+        self.assertEqual(
+            calls[0][1]["params"], {"key": "test-key", "steamids": "123"}
+        )
+        self.assertEqual(calls[0][1]["proxy"], "http://127.0.0.1:7890")
+
+    def test_steam_authenticated_web_api_urls_use_https(self):
+        steam = _load_steam_module()
+
+        self.assertTrue(steam.STEAM_PLAYER_SUMMARIES_URL.startswith("https://"))
+        self.assertTrue(steam.STEAM_OWNED_GAMES_URL.startswith("https://"))
+        self.assertTrue(steam.STEAM_PLAYER_ACHIEVEMENTS_URL.startswith("https://"))
+
     def test_steam_app_list_prefers_official_store_service_with_api_key(self):
         steam = _load_steam_module()
 

@@ -24,6 +24,15 @@ STEAM_LLM_WEB_EVIDENCE_TIMEOUT = aiohttp.ClientTimeout(total=5)
 STEAM_CANDIDATE_NETWORK_BUDGET_SECONDS = 2.5
 STEAM_APP_ALIAS_FILE = Path(JSON_PATH) / "steamInfo/steam_app_aliases.json"
 STEAM_APP_AMBIGUOUS_FILE_NAME = "steam_app_ambiguous_cache.json"
+STEAM_PLAYER_SUMMARIES_URL = (
+    "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/"
+)
+STEAM_OWNED_GAMES_URL = (
+    "https://api.steampowered.com/IPlayerService/GetOwnedGames/v0001/"
+)
+STEAM_PLAYER_ACHIEVEMENTS_URL = (
+    "https://api.steampowered.com/ISteamUserStats/GetPlayerAchievements/v0001/"
+)
 STEAM_APP_LIST_URLS = (
     "https://cdn.jsdelivr.net/gh/dgibbs64/SteamCMD-AppID-List@master/steamcmd_appid.json",
     "https://raw.githubusercontent.com/dgibbs64/SteamCMD-AppID-List/master/steamcmd_appid.json",
@@ -117,24 +126,32 @@ async def get_steam_users_info(
         logger.error("Steam API key is not configured.")
         return {"response": {"players": []}}
 
-    url = "http://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/"
+    url = STEAM_PLAYER_SUMMARIES_URL
     for api_key in api_keys:
         for request_proxy in _request_proxy_candidates(url, proxy):
             try:
                 async with aiohttp.ClientSession(timeout=STEAM_REQUEST_TIMEOUT) as session:
                     async with session.get(
-                        f'{url}?key={api_key}&steamids={",".join(steam_ids)}',
+                        url,
+                        params={"key": api_key, "steamids": ",".join(steam_ids)},
                         proxy=request_proxy,
                     ) as resp:
                         if resp.status == 200:
                             return await resp.json()
-                        logger.warning(
-                            f"Steam API key failed: {resp.status}, {await resp.text()}"
-                        )
+                        response_text = await resp.text()
+                        if resp.status in {401, 403}:
+                            logger.warning(
+                                f"Steam API key rejected: {resp.status}, {response_text}"
+                            )
+                        else:
+                            logger.warning(
+                                f"Steam player summaries request failed: "
+                                f"{resp.status}, {response_text}"
+                            )
             except aiohttp.ClientError as exc:
-                logger.warning(f"Steam API key request failed: {exc}")
+                logger.warning(f"Steam player summaries request failed: {exc}")
 
-    logger.error("All Steam API keys failed to get player summaries.")
+    logger.error("All Steam API attempts failed to get player summaries.")
     return {"response": {"players": []}}
 
 
@@ -1642,7 +1659,7 @@ async def get_owned_game(
         "appids_filter[0]": app_id,
     }
 
-    url = "http://api.steampowered.com/IPlayerService/GetOwnedGames/v0001/"
+    url = STEAM_OWNED_GAMES_URL
     for api_key in api_keys:
         for request_proxy in _request_proxy_candidates(url, proxy):
             try:
@@ -1723,7 +1740,7 @@ async def get_player_achievement_summary(
         "format": "json",
     }
 
-    url = "http://api.steampowered.com/ISteamUserStats/GetPlayerAchievements/v0001/"
+    url = STEAM_PLAYER_ACHIEVEMENTS_URL
     for api_key in api_keys:
         for request_proxy in _request_proxy_candidates(url, proxy):
             try:
