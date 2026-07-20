@@ -1,15 +1,17 @@
 from mcstatus import JavaServer, BedrockServer
 import asyncio
+import logging
 import re
 import base64
 import time
 from PIL import Image
 from PIL.Image import Image as PILImage
 from io import BytesIO
-import traceback
+from dns.exception import DNSException
 
 
 ANONYMOUS_PLAYER_NAMES = {"anonymous player"}
+logger = logging.getLogger(__name__)
 
 
 def _extract_player_sample(players_data: dict) -> tuple[list[str], bool]:
@@ -100,11 +102,15 @@ async def ping(server_address: str, server_type: str = "java") -> dict:
         }
         return {"status": "success", "data": server_info}
 
-    except OSError:
+    except DNSException:
+        return {"status": "error", "data": "DNS 解析超时或失败，请检查服务器地址后重试"}
+    except (OSError, ValueError):
         return {"status": "error", "data": "服务器未开启或服务器地址错误"}
     except Exception:
-        traceback.print_exc()
+        logger.exception("Minecraft ping failed unexpectedly for %s", server_address)
         return {"status": "error", "data": "出现未知错误"}
+
+
 def base64_to_image(base64_str: str) -> PILImage:
     """
     将base64字符串转换为PIL Image对象

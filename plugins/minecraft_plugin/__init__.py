@@ -186,10 +186,8 @@ async def handle_ping_command(event: Event, rest: ArgVal[str]):
         await server_ping.finish(ChainMsg([_to_image(output)]))
         return
 
-    # 按地址或昵称查找
-    server = data_manager.get_server_by_name(group_id, command_args)
-    if not server:
-        server = data_manager.get_server_by_nickname(group_id, command_args)
+    # 优先按已保存的地址、名称或昵称查找
+    server = data_manager.get_server_by_identifier(group_id, command_args)
 
     if server:
         r = await ping(server.get("address"), "java")

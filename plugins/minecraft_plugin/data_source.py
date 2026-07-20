@@ -125,21 +125,25 @@ class MinecraftDataManager:
 
     def _find_by_name(self, group_id: str, name: str) -> Optional[tuple[str, dict]]:
         """按 name 字段查找，返回 (address, server_dict) 或 None."""
-        name_lower = name.lower()
+        normalized_name = name.strip().casefold()
         # 精确匹配
         for addr, s in self._group(group_id).items():
-            if s.get('name', '').lower() == name_lower:
+            if str(s.get('name', '')).strip().casefold() == normalized_name:
                 return addr, s
         # 模糊匹配
         for addr, s in self._group(group_id).items():
-            if name_lower in s.get('name', '').lower():
+            if normalized_name in str(s.get('name', '')).strip().casefold():
                 return addr, s
         return None
 
     def _find_by_nickname(self, group_id: str, nick: str) -> Optional[tuple[str, dict]]:
         """按 nickname 查找."""
+        normalized_nick = nick.strip().casefold()
         for addr, s in self._group(group_id).items():
-            if nick in s.get('nickname', []):
+            nicknames = s.get('nickname', [])
+            if isinstance(nicknames, str):
+                nicknames = [nicknames]
+            if any(str(item).strip().casefold() == normalized_nick for item in nicknames):
                 return addr, s
         return None
 
@@ -151,6 +155,10 @@ class MinecraftDataManager:
         group = self._group(group_id)
         if ident in group:
             return ident, group[ident]
+        normalized_ident = ident.casefold()
+        for addr, server in group.items():
+            if addr.casefold() == normalized_ident:
+                return addr, server
         found = self._find_by_name(group_id, ident)
         if found:
             return found
