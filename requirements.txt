@@ -5,6 +5,7 @@ mcstatus
 lxml>=4.9.0
 pillow>=9.0
 pil-utils
+skia-python==138.0
 opencv-python>=4.5.0
 numpy>=1.21.0
 playwright>=1.30.0

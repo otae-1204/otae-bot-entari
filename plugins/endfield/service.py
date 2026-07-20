@@ -8,19 +8,41 @@ from urllib.parse import urlsplit, urlunsplit
 from .client import WarfarinAPIError, WarfarinClient
 from .commands import AMBIGUITY_MARGIN, CLEAR_SCORE, score_candidate
 from .models import (
+    EquipmentCatalogAttributeView,
+    EquipmentCatalogGroupView,
+    EquipmentCatalogItemView,
+    EquipmentCatalogView,
+    EquipmentPieceView,
+    EquipmentStatView,
+    EquipmentView,
     EffectView,
     LEVEL_COLUMNS,
+    OperatorCatalogElementView,
+    OperatorCatalogItemView,
+    OperatorCatalogProfessionView,
+    OperatorCatalogView,
     OperatorView,
     SkillLevelView,
     SkillView,
     TermStyleView,
     WeaponSkillLevelView,
     WeaponSkillView,
+    WeaponCatalogGroupView,
+    WeaponCatalogItemView,
+    WeaponCatalogView,
     WeaponView,
 )
 from .sources import source_order
 
 
+INDEPENDENT_EQUIPMENT_GROUP_NAMES = frozenset({"纾难装备组", "涉渊装备组"})
+OPERATOR_ELEMENT_ORDER = {name: index for index, name in enumerate(("物理", "灼热", "电磁", "寒冷", "自然"))}
+OPERATOR_PROFESSION_ORDER = {
+    name: index for index, name in enumerate(("近卫", "术师", "突击", "先锋", "重装", "辅助"))
+}
+WEAPON_TYPE_ORDER = {
+    name: index for index, name in enumerate(("单手剑", "双手剑", "施术单元", "长柄武器", "手铳"))
+}
 STATIC_BASE = "https://static.warfarin.wiki/v4"
 FZ_ASSET_HOST = "assets.fz.wiki"
 WEAPON_OPTIONS = ("单手剑", "双手剑", "施术单元", "长枪", "手铳")
@@ -61,6 +83,39 @@ TERM_SUFFIXES = (
     "失衡",
     "消耗",
 )
+
+WARFARIN_METRIC_LABELS = {
+    "atk_scale": "攻击倍率",
+    "atk_scale_will": "阵诀·意伤害倍率",
+    "atk_scale_wisd": "阵诀·智伤害倍率",
+    "atk_scale_touch": "触碰伤害倍率",
+    "atk_scale_boom": "爆发伤害倍率",
+    "atk_scale_laser": "集束打击伤害倍率",
+    "atk_scale_laser_will": "阵诀·意集束打击倍率",
+    "atk_scale_laser1": "第一段集束打击倍率",
+    "atk_scale_laser2": "第二段诀明伤害倍率",
+    "poise": "失衡值",
+    "poise_touch": "触碰失衡值",
+    "poise_boom": "爆发失衡值",
+    "poise_laser": "集束打击失衡值",
+    "laser_count": "集束打击次数",
+    "usp": "获得终结技能量",
+    "atb": "技力",
+    "duration": "持续时间（秒）",
+    "duration2": "阵法持续时间（秒）",
+    "duration_will": "阵诀·意持续时间（秒）",
+    "duration_wisd": "阵诀·智持续时间（秒）",
+    "spell_vul_per_will": "每点意志脆弱效果",
+    "rate_pre": "基础脆弱效果",
+    "atb_return_wisd": "阵诀·智技力返还",
+    "max_spell_vul_will": "阵诀·意最大脆弱效果",
+}
+
+WARFARIN_PERCENT_METRIC_KEYS = {
+    "spell_vul_per_will",
+    "rate_pre",
+    "max_spell_vul_will",
+}
 
 
 class EndfieldService:
@@ -131,6 +186,46 @@ class EndfieldService:
         view.operator_names = await self.find_weapon_operator_names(view)
         return view
 
+    async def get_equipment_view(self, query: str) -> EquipmentView | None:
+        for source in source_order("equipment"):
+            try:
+                if source == "fz":
+                    view = await self.get_equipment_view_from_fz(query)
+                else:
+                    continue
+            except (WarfarinAPIError, ValueError, KeyError, TypeError):
+                continue
+            if view is not None:
+                return view
+        return None
+
+    async def get_equipment_view_from_fz(self, query: str) -> EquipmentView | None:
+        title = await self.find_equipment_title(query)
+        if not title:
+            return None
+        raw, richtext = await _fz_article_and_richtext(self.client, title)
+        return build_fz_equipment_view(raw, richtext)
+
+    async def get_equipment_catalog_view(
+        self,
+        group_name: str = "",
+        rarity_filter: str = "gold",
+    ) -> EquipmentCatalogView:
+        raw = await self.client.fz_article_by_title("装备")
+        return build_fz_equipment_catalog_view(raw, group_name, rarity_filter)
+
+    async def get_operator_catalog_view(
+        self,
+        element: str = "",
+        profession: str = "",
+    ) -> OperatorCatalogView:
+        raw = await self.client.fz_article_by_title("干员")
+        return build_fz_operator_catalog_view(raw, element, profession)
+
+    async def get_weapon_catalog_view(self, weapon_type: str = "") -> WeaponCatalogView:
+        raw = await self.client.fz_article_by_title("武器")
+        return build_fz_weapon_catalog_view(raw, weapon_type)
+
     async def find_weapon_operator_names(self, view: WeaponView) -> list[str]:
         try:
             weapons_data, operators_data = await asyncio.gather(
@@ -189,6 +284,30 @@ class EndfieldService:
             summaries = await self.client.fz_article_summaries("武器/")
         except Exception:
             return exact_title
+        lowered = query.lower()
+        for item in summaries.get("articles") or []:
+            title = str(item.get("title") or "")
+            name = title.split("/", 1)[-1]
+            if name == query or name.lower() == lowered:
+                return title
+        for item in summaries.get("articles") or []:
+            title = str(item.get("title") or "")
+            name = title.split("/", 1)[-1]
+            if query in name or lowered in name.lower():
+                return title
+        return exact_title
+
+    async def find_equipment_title(self, query: str) -> str | None:
+        query = query.strip()
+        if not query:
+            return None
+        if query.startswith("装备/"):
+            return query
+        exact_title = f"装备/{query}"
+        try:
+            summaries = await self.client.fz_article_summaries("装备/")
+        except WarfarinAPIError:
+            summaries = {}
         lowered = query.lower()
         for item in summaries.get("articles") or []:
             title = str(item.get("title") or "")
@@ -334,7 +453,7 @@ def build_operator_view(raw: dict[str, Any]) -> OperatorView:
         tags=tags[:4],
         icon_url=f"{STATIC_BASE}/charicon/icon_{operator_id}.webp" if operator_id else "",
         round_icon_url=f"{STATIC_BASE}/charroundicon/icon_round_{operator_id}.webp" if operator_id else "",
-        portrait_url=f"{STATIC_BASE}/charsplash/{operator_id}.webp" if operator_id else "",
+        portrait_url=f"{STATIC_BASE}/characterportrait/{operator_id}.webp" if operator_id else "",
         skills=_build_skills(data.get("skillPatchTable") or {}, growth.get("skillGroupMap") or {}),
         talents=_build_talents(
             data.get("potentialTalentEffectTable") or {},
@@ -386,6 +505,349 @@ def build_fz_operator_view(raw: dict[str, Any], richtext: dict[str, Any] | None 
         term_styles=_build_fz_term_styles(richtext or {}),
         source_version=str(article.get("updatedAt") or "")[:10],
     )
+
+
+def build_fz_equipment_view(raw: dict[str, Any], richtext: dict[str, Any] | None = None) -> EquipmentView:
+    article = raw.get("article") or {}
+    attrs = _fz_template_attrs(raw)
+    hero = attrs.get("hero") if isinstance(attrs.get("hero"), dict) else {}
+    if not hero:
+        raise ValueError("FZ equipment article does not match the supported card schema")
+
+    title = str(article.get("title") or "")
+    name = _first_text(hero, "name", "title") or title.split("/", 1)[-1]
+    if not name:
+        raise ValueError("FZ equipment article is missing name")
+
+    stats_raw = attrs.get("stats") if isinstance(attrs.get("stats"), dict) else {}
+    stats: list[EquipmentStatView] = []
+    for row in stats_raw.get("rows") or []:
+        if not isinstance(row, dict):
+            continue
+        label = _first_text(row, "label", "name")
+        raw_values = row.get("values") or []
+        value = raw_values[0] if isinstance(raw_values, list) and raw_values else row.get("value")
+        if not label or value in (None, ""):
+            continue
+        formatted_values = [
+            _format_equipment_stat(item, bool(row.get("isPercent")))
+            for item in (raw_values[:4] if isinstance(raw_values, list) else [value])
+        ]
+        while len(formatted_values) < 4:
+            formatted_values.append(formatted_values[-1] if formatted_values else "--")
+        stats.append(
+            EquipmentStatView(
+                label=label,
+                value=formatted_values[0],
+                values=formatted_values,
+                icon_key=str(row.get("attrType") or ""),
+            )
+        )
+
+    suit = attrs.get("suit") if isinstance(attrs.get("suit"), dict) else {}
+    bonus = suit.get("bonus") if isinstance(suit.get("bonus"), dict) else {}
+    bonus_levels = _unwrap_fz_list(bonus.get("levels"), "levels", "items", "list")
+    bonus_level = bonus_levels[-1] if bonus_levels and isinstance(bonus_levels[-1], dict) else {}
+    bonus_values = _first_value(bonus_level, "values", "blackboard", "params")
+    suit_description = _format_fz_template(
+        _first_text(bonus, "description", "desc"),
+        bonus_values,
+    )
+    suit_required_count = _to_int(_first_value(suit, "equipCnt", "requiredCount"))
+    suit_name = _first_text(suit, "suitName", "name") or _first_text(hero, "suitName")
+    group_name = _first_text(suit, "groupName") or _first_text(hero, "groupName")
+    has_suit_effect = bool(clean_text(suit_description))
+    pieces: list[EquipmentPieceView] = []
+    self_equipment_id = str(suit.get("selfEquipId") or "")
+    for piece in suit.get("pieces") or []:
+        if not isinstance(piece, dict):
+            continue
+        piece_id = str(piece.get("equipId") or "")
+        if piece_id and piece_id == self_equipment_id:
+            continue
+        piece_name = _first_text(piece, "name", "title")
+        if not piece_name:
+            continue
+        pieces.append(
+            EquipmentPieceView(
+                name=piece_name.split("/", 1)[-1],
+                slot_type=_first_text(piece, "slotType", "partType") or "装备",
+                icon_url=_fz_asset_raw_url(_first_text(piece, "iconUrl", "icon")),
+            )
+        )
+    if not has_suit_effect:
+        suit_name = "独立装备"
+        group_name = "独立装备套组"
+        suit_required_count = 0
+        pieces = []
+
+    materials = attrs.get("materials") if isinstance(attrs.get("materials"), dict) else {}
+    return EquipmentView(
+        name=name,
+        title=title or f"装备/{name}",
+        equipment_id=self_equipment_id,
+        rarity=_to_int(_first_value(hero, "rarity", "star", "stars")),
+        max_level=_to_int(_first_value(hero, "level", "maxLevel", "maxLv")),
+        part_type=_first_text(hero, "partType"),
+        slot_type=_first_text(hero, "slotType", "type") or "装备",
+        suit_name=suit_name,
+        group_name=group_name,
+        description=_clean_fz_rich_text(_first_text(hero, "description", "desc")),
+        flavor=_clean_fz_rich_text(_first_text(hero, "flavor", "quote")),
+        icon_url=_fz_asset_raw_url(_first_text(hero, "iconUrl", "icon")),
+        stats=stats,
+        suit_required_count=suit_required_count,
+        suit_description=suit_description,
+        suit_pieces=pieces,
+        acquisition=_equipment_acquisition(materials),
+        term_styles=_build_fz_term_styles(richtext or {}),
+        source_version=str(article.get("updatedAt") or "")[:10],
+    )
+
+
+def build_fz_equipment_catalog_view(
+    raw: dict[str, Any],
+    group_name: str = "",
+    rarity_filter: str = "gold",
+) -> EquipmentCatalogView:
+    article = raw.get("article") or {}
+    entries = _fz_equipment_roster_entries(raw)
+    if not entries:
+        raise ValueError("FZ equipment roster does not match the supported catalog schema")
+
+    normalized_group_name = _normalize_equipment_group_name(group_name)
+    grouped: dict[str, list[EquipmentCatalogItemView]] = {}
+    rarity_value = {"gold": 5, "purple": 4, "blue": 3}.get(rarity_filter)
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        if rarity_value is not None and _to_int(entry.get("rarity")) != rarity_value:
+            continue
+        name = _first_text(entry, "name", "title")
+        title = _first_text(entry, "title") or (f"装备/{name}" if name else "")
+        current_group = _normalize_equipment_group_name(_first_text(entry, "group")) or "独立装备套组"
+        if not name or not title:
+            continue
+        attributes = [
+            EquipmentCatalogAttributeView(
+                label=_first_text(attribute, "label", "name"),
+                value=clean_text(_first_value(attribute, "value", "text")),
+            )
+            for attribute in (entry.get("attrList") or [])
+            if isinstance(attribute, dict) and _first_text(attribute, "label", "name")
+        ]
+        grouped.setdefault(current_group, []).append(
+            EquipmentCatalogItemView(
+                name=name,
+                title=title,
+                group_name=current_group,
+                equipment_id=str(entry.get("equipId") or ""),
+                level=_to_int(entry.get("level")),
+                rarity=_to_int(entry.get("rarity")),
+                slot_type=_first_text(entry, "slotType", "partType") or "装备",
+                icon_url=_fz_asset_raw_url(_first_text(entry, "iconUrl", "icon")),
+                attributes=attributes,
+            )
+        )
+
+    slot_order = {"护甲": 0, "护手": 1, "配件": 2}
+    groups: list[EquipmentCatalogGroupView] = []
+    for current_group, items in grouped.items():
+        if normalized_group_name and current_group != normalized_group_name:
+            continue
+        items.sort(key=lambda item: (slot_order.get(item.slot_type, 9), item.name))
+        groups.append(EquipmentCatalogGroupView(current_group, items))
+    if normalized_group_name and not groups:
+        raise ValueError(f"FZ equipment group not found: {group_name}")
+
+    total_count = sum(len(group.items) for group in groups)
+    return EquipmentCatalogView(
+        title=normalized_group_name or "全部装备套组",
+        groups=groups,
+        total_count=total_count,
+        rarity_filter=rarity_filter,
+        source_version=str(article.get("updatedAt") or "")[:10],
+    )
+
+
+def build_fz_operator_catalog_view(
+    raw: dict[str, Any],
+    element_filter: str = "",
+    profession_filter: str = "",
+) -> OperatorCatalogView:
+    article = raw.get("article") or {}
+    entries = _fz_overview_entries(raw)
+    if not entries:
+        raise ValueError("FZ operator roster does not match the supported catalog schema")
+
+    element_filter = clean_text(element_filter)
+    profession_filter = clean_text(profession_filter)
+    grouped: dict[str, dict[str, list[OperatorCatalogItemView]]] = {}
+    element_meta: dict[str, tuple[str, str]] = {}
+    profession_icons: dict[str, str] = {}
+    for entry in entries:
+        name = _first_text(entry, "name")
+        title = _first_text(entry, "title") or (f"干员/{name}" if name else "")
+        element = _first_text(entry, "element") or "未知元素"
+        profession = _first_text(entry, "profession") or "未知职业"
+        if not name or not title:
+            continue
+        if element_filter and element != element_filter:
+            continue
+        if profession_filter and profession != profession_filter:
+            continue
+        element_icon_url = _fz_asset_raw_url(_first_text(entry, "elementIconUrl"))
+        profession_icon_url = _fz_asset_raw_url(_first_text(entry, "professionIconUrl"))
+        item = OperatorCatalogItemView(
+            name=name,
+            title=title,
+            operator_id=str(entry.get("charId") or ""),
+            english_name=_first_text(entry, "nameEn", "englishName"),
+            rarity=_to_int(entry.get("rarity")),
+            element=element,
+            element_color=_first_text(entry, "elementColor") or "#888888",
+            profession=profession,
+            weapon_type=_first_text(entry, "weaponType"),
+            icon_url=_fz_asset_raw_url(_first_text(entry, "iconUrl", "icon")),
+            element_icon_url=element_icon_url,
+            profession_icon_url=profession_icon_url,
+            weapon_type_icon_url=_fz_asset_raw_url(_first_text(entry, "weaponTypeIconUrl")),
+        )
+        grouped.setdefault(element, {}).setdefault(profession, []).append(item)
+        element_meta.setdefault(element, (item.element_color, element_icon_url))
+        profession_icons.setdefault(profession, profession_icon_url)
+
+    elements: list[OperatorCatalogElementView] = []
+    for element, professions in grouped.items():
+        profession_views: list[OperatorCatalogProfessionView] = []
+        for profession, items in professions.items():
+            items.sort(key=lambda item: (-item.rarity, item.name))
+            profession_views.append(
+                OperatorCatalogProfessionView(profession, profession_icons.get(profession, ""), items)
+            )
+        profession_views.sort(key=lambda group: (OPERATOR_PROFESSION_ORDER.get(group.name, 99), group.name))
+        color, icon_url = element_meta.get(element, ("#888888", ""))
+        elements.append(OperatorCatalogElementView(element, color, icon_url, profession_views))
+    elements.sort(key=lambda group: (OPERATOR_ELEMENT_ORDER.get(group.name, 99), group.name))
+    total_count = sum(len(profession.items) for element in elements for profession in element.professions)
+    if (element_filter or profession_filter) and not elements:
+        raise ValueError(f"FZ operator catalog filter not found: {element_filter} {profession_filter}".strip())
+    if element_filter and profession_filter:
+        title = f"{element_filter} · {profession_filter}"
+    elif element_filter:
+        title = f"{element_filter}干员"
+    elif profession_filter:
+        title = f"{profession_filter}干员"
+    else:
+        title = "全部干员"
+    return OperatorCatalogView(
+        title=title,
+        elements=elements,
+        total_count=total_count,
+        element_filter=element_filter,
+        profession_filter=profession_filter,
+        source_version=str(article.get("updatedAt") or "")[:10],
+    )
+
+
+def build_fz_weapon_catalog_view(
+    raw: dict[str, Any],
+    weapon_type_filter: str = "",
+) -> WeaponCatalogView:
+    article = raw.get("article") or {}
+    entries = _fz_overview_entries(raw)
+    if not entries:
+        raise ValueError("FZ weapon roster does not match the supported catalog schema")
+
+    weapon_type_filter = clean_text(weapon_type_filter)
+    grouped: dict[str, list[WeaponCatalogItemView]] = {}
+    type_icons: dict[str, str] = {}
+    for entry in entries:
+        name = _first_text(entry, "name")
+        title = _first_text(entry, "title") or (f"武器/{name}" if name else "")
+        weapon_type = _first_text(entry, "weaponType") or "未知武器"
+        if not name or not title:
+            continue
+        if weapon_type_filter and weapon_type != weapon_type_filter:
+            continue
+        type_icon_url = _fz_asset_raw_url(_first_text(entry, "weaponTypeIconUrl"))
+        grouped.setdefault(weapon_type, []).append(
+            WeaponCatalogItemView(
+                name=name,
+                title=title,
+                weapon_id=str(entry.get("weaponId") or ""),
+                english_name=_first_text(entry, "nameEn", "englishName"),
+                rarity=_to_int(entry.get("rarity")),
+                weapon_type=weapon_type,
+                max_level=_to_int(_first_value(entry, "maxLv", "maxLevel")),
+                max_atk=_to_int(_first_value(entry, "maxAtk", "attack")) or "--",
+                icon_url=_fz_asset_raw_url(_first_text(entry, "iconUrl", "icon")),
+                weapon_type_icon_url=type_icon_url,
+                substrate_icon_url=_fz_asset_raw_url(_first_text(entry, "substrateIconUrl")),
+                terms_main=[clean_text(value) for value in (entry.get("termsMain") or []) if clean_text(value)],
+                terms_sub=[clean_text(value) for value in (entry.get("termsSub") or []) if clean_text(value)],
+                terms_skill=[clean_text(value) for value in (entry.get("termsSkill") or []) if clean_text(value)],
+            )
+        )
+        type_icons.setdefault(weapon_type, type_icon_url)
+
+    groups: list[WeaponCatalogGroupView] = []
+    for weapon_type, items in grouped.items():
+        items.sort(key=lambda item: (-item.rarity, -(_to_int(item.max_atk)), item.name))
+        groups.append(WeaponCatalogGroupView(weapon_type, type_icons.get(weapon_type, ""), items))
+    groups.sort(key=lambda group: (WEAPON_TYPE_ORDER.get(group.name, 99), group.name))
+    total_count = sum(len(group.items) for group in groups)
+    if weapon_type_filter and not groups:
+        raise ValueError(f"FZ weapon type not found: {weapon_type_filter}")
+    return WeaponCatalogView(
+        title=f"{weapon_type_filter}武器" if weapon_type_filter else "全部武器",
+        groups=groups,
+        total_count=total_count,
+        weapon_type_filter=weapon_type_filter,
+        source_version=str(article.get("updatedAt") or "")[:10],
+    )
+
+
+def _normalize_equipment_group_name(name: str) -> str:
+    name = clean_text(name)
+    if name in INDEPENDENT_EQUIPMENT_GROUP_NAMES or "独立装备组" in name or "独立装备套组" in name:
+        return "独立装备套组"
+    return name
+
+
+def _fz_equipment_roster_entries(raw: dict[str, Any]) -> list[dict[str, Any]]:
+    return _fz_overview_entries(raw)
+
+
+def _fz_overview_entries(raw: dict[str, Any]) -> list[dict[str, Any]]:
+    content = ((raw.get("revision") or {}).get("contentJson") or {}).get("content") or []
+    for node in content:
+        if not isinstance(node, dict):
+            continue
+        attrs = node.get("attrs") or {}
+        roster = attrs.get("roster") if isinstance(attrs, dict) else None
+        if isinstance(roster, dict) and isinstance(roster.get("entries"), list):
+            return [entry for entry in roster["entries"] if isinstance(entry, dict)]
+    return []
+
+
+def _format_equipment_stat(value: Any, is_percent: bool) -> str:
+    number = _to_float(value)
+    if number is None:
+        return clean_text(value) or "--"
+    if is_percent:
+        if abs(number) <= 2:
+            number *= 100
+        return f"{number:.1f}".rstrip("0").rstrip(".") + "%"
+    return _format_plain_number(number)
+
+
+def _equipment_acquisition(materials: dict[str, Any]) -> str:
+    unlock_type = str(materials.get("unlockType") or "").strip()
+    return {
+        "EquipFormulaChest": "装备制造",
+        "DomainShop": "地区商店",
+    }.get(unlock_type, clean_text(unlock_type) or "未知方式")
 
 
 def _fz_template_attrs(raw: dict[str, Any]) -> dict[str, Any]:
@@ -477,9 +939,35 @@ def _build_fz_operator_skills(raw: Any) -> list[SkillView]:
                     _first_text(item, "description", "desc"),
                     _first_value(best_level, "values", "blackboard", "params"),
                 ),
+                form_descriptions=_build_fz_skill_form_descriptions(
+                    item,
+                    _first_value(best_level, "values", "blackboard", "params"),
+                ),
                 levels=levels,
             )
         )
+    return result
+
+
+def _build_fz_skill_form_descriptions(item: dict[str, Any], values: Any) -> list[tuple[str, str]]:
+    result: list[tuple[str, str]] = []
+    for condition in _unwrap_fz_list(item.get("conditions"), "conditions", "items", "list"):
+        if not isinstance(condition, dict):
+            continue
+        name = _first_text(condition, "name", "title", "label")
+        raw_desc = _first_value(condition, "postDesc", "description", "desc")
+        if not name or not raw_desc:
+            continue
+        raw_desc = re.sub(r"(?m)^\s*-\s*", "", str(raw_desc))
+        description = _format_fz_template(raw_desc, values)
+        description = re.sub(
+            rf"(?:<[@#][A-Za-z0-9_.-]+>)?{re.escape(name)}(?:</>)?\s*[：:]\s*",
+            "",
+            description,
+            count=1,
+        ).strip()
+        if description:
+            result.append((name, description))
     return result
 
 
@@ -1275,6 +1763,7 @@ def _build_skills(skill_table: dict[str, Any], skill_group_map: dict[str, Any]) 
         if not records:
             continue
         levels = [_build_level(records, level, label, category) for level, label in LEVEL_COLUMNS]
+        _merge_additional_skill_levels(levels, skill_table, skill_ids[1:], category)
         sample = _record_by_level(records, 9) or records[0]
         skill_id = str(skill_ids[0] if skill_ids else sample.get("skillId") or group.get("skillGroupId") or "")
         title = clean_text(group.get("name")) or category or "技能"
@@ -1285,11 +1774,30 @@ def _build_skills(skill_table: dict[str, Any], skill_group_map: dict[str, Any]) 
                 icon_id=str(group.get("icon") or sample.get("iconId") or ""),
                 category=category,
                 description=_format_skill_desc(group.get("desc") or sample.get("description"), group_records or records, category),
+                form_descriptions=_build_skill_form_descriptions(group, group_records or records, category),
                 levels=levels,
                 extra_levels=_build_extra_levels(skill_table, skill_ids, category),
             )
         )
     return sorted(items, key=lambda item: (SKILL_CATEGORY_ORDER.get(item.category, 99), item.skill_id))
+
+
+def _build_skill_form_descriptions(
+    group: dict[str, Any],
+    records: list[dict[str, Any]],
+    category: str,
+) -> list[tuple[str, str]]:
+    result: list[tuple[str, str]] = []
+    for index in (1, 2):
+        name = clean_text(group.get(f"conditionName{index}"))
+        raw_desc = group.get(f"conditionPostDesc{index}")
+        if not name or not raw_desc:
+            continue
+        description = _format_skill_desc(raw_desc, records, category)
+        description = clean_text(description.replace(f"{name}：", "", 1))
+        if description:
+            result.append((name, description))
+    return result
 
 
 def _build_extra_levels(skill_table: dict[str, Any], skill_ids: list[str], category: str) -> dict[str, list[SkillLevelView]]:
@@ -1302,6 +1810,26 @@ def _build_extra_levels(skill_table: dict[str, Any], skill_ids: list[str], categ
         if records:
             result[skill_id] = [_build_level(records, level, label, category) for level, label in LEVEL_COLUMNS]
     return result
+
+
+def _merge_additional_skill_levels(
+    levels: list[SkillLevelView],
+    skill_table: dict[str, Any],
+    skill_ids: list[str],
+    category: str,
+) -> None:
+    if category != "终结技":
+        return
+    levels_by_number = {level.level: level for level in levels}
+    for skill_id in skill_ids:
+        bundle = skill_table.get(skill_id) or {}
+        records = list(bundle.get("SkillPatchDataBundle") or [])
+        for level_number, label in LEVEL_COLUMNS:
+            target = levels_by_number.get(level_number)
+            if target is None:
+                continue
+            additional = _build_level(records, level_number, label, category)
+            target.values.update(additional.values)
 
 
 def _build_talents(effect_table: dict[str, Any], talent_node_map: dict[str, Any]) -> list[EffectView]:
@@ -1380,7 +1908,8 @@ def _extract_values(record: dict[str, Any], category: str = "") -> dict[str, str
         key = str(item.get("key") or "").strip()
         if not key or key.startswith("display_"):
             continue
-        values[_metric_label_from_key(key)] = _format_blackboard_value(key, item.get("value"), item.get("valueStr"))
+        label = _metric_label_from_key(key, category, str(record.get("skillId") or ""))
+        values[label] = _format_blackboard_value(key, item.get("value"), item.get("valueStr"))
     return values
 
 
@@ -1392,16 +1921,12 @@ def _format_effect_desc(effect: dict[str, Any]) -> str:
         expr = match.group(1)
         key, _, fmt = expr.partition(":")
         key = key.strip()
-        if key.startswith("1-"):
-            base_key = key[2:]
-            value = 1 - float(values.get(base_key, 0))
-        else:
-            value = values.get(key)
-            if value is None:
-                value = values.get(_alias_key(key))
+        value = _template_expression_value(key, values)
         return _format_template_value(value, fmt)
 
-    return clean_text(re.sub(r"\{([^{}]+)\}", replace, desc))
+    rendered = re.sub(r"\{([^{}]+)\}", replace, desc)
+    rendered = re.sub(r"(?m)^\s*-\s*", "", rendered)
+    return clean_text(rendered)
 
 
 def _format_skill_desc(desc: Any, records: list[dict[str, Any]], category: str = "") -> str:
@@ -1412,12 +1937,12 @@ def _format_skill_desc(desc: Any, records: list[dict[str, Any]], category: str =
         expr = match.group(1)
         key, _, fmt = expr.partition(":")
         key = key.strip()
-        value = values.get(key)
-        if value is None:
-            value = values.get(_alias_key(key))
+        value = _template_expression_value(key, values)
         return _format_template_value(value, fmt)
 
-    return clean_text(re.sub(r"\{([^{}]+)\}", replace, text))
+    rendered = re.sub(r"\{([^{}]+)\}", replace, text)
+    rendered = re.sub(r"(?m)^\s*-\s*", "", rendered)
+    return clean_text(rendered)
 
 
 def _primary_skill_desc(desc: str, category: str) -> str:
@@ -1453,7 +1978,9 @@ def _skill_template_values(records: list[dict[str, Any]]) -> dict[str, float]:
                 value = float(item.get("value"))
             except (TypeError, ValueError):
                 continue
-            values.setdefault(key, value)
+            current = values.get(key)
+            if current is None or (abs(current) < 0.0001 and abs(value) >= 0.0001):
+                values[key] = value
     return values
 
 
@@ -1469,6 +1996,8 @@ def _effect_values(effect: dict[str, Any]) -> dict[str, float]:
         attr_value = attr.get("attrValue")
         if attr_type and attr_value not in (None, ""):
             _store_effect_value(values, _attribute_placeholder(attr_type), attr_value)
+            if attr_type in {41, 42}:
+                _store_effect_value(values, "Will", attr_value)
         skill_bb = item.get("skillBbModifier") or {}
         _store_effect_value(values, skill_bb.get("bbKey"), skill_bb.get("floatValue"))
         skill_param = item.get("skillParamModifier") or {}
@@ -1494,18 +2023,52 @@ def _attribute_placeholder(attr_type: int) -> str:
         39: "Str",
         40: "Agi",
         41: "Int",
-        42: "Wil",
+        42: "Will",
         50: "PhysicalDamageIncrease",
         51: "FireDamageIncrease",
         52: "PulseDamageIncrease",
         53: "CrystDamageIncrease",
         54: "NaturalDamageIncrease",
         55: "EtherDamageIncrease",
+        87: "PhysicalAndSpellInflictionEnhance",
     }.get(attr_type, f"attr_{attr_type}")
 
 
 def _alias_key(key: str) -> str:
-    return {"costValue": "costvalue"}.get(key, key)
+    return {
+        "costValue": "costvalue",
+        "Wil": "Will",
+    }.get(key, key)
+
+
+def _template_expression_value(expr: str, values: dict[str, float]) -> float | None:
+    direct = values.get(expr)
+    if direct is not None:
+        return direct
+    alias = values.get(_alias_key(expr))
+    if alias is not None:
+        return alias
+    match = re.fullmatch(
+        r"([A-Za-z_][A-Za-z0-9_]*|-?\d+(?:\.\d+)?)\s*([+-])\s*([A-Za-z_][A-Za-z0-9_]*|-?\d+(?:\.\d+)?)",
+        expr,
+    )
+    if not match:
+        return None
+
+    def operand(token: str) -> float | None:
+        try:
+            return float(token)
+        except ValueError:
+            value = values.get(token)
+            if value is None:
+                value = values.get(_alias_key(token))
+            return value
+
+    left = operand(match.group(1))
+    right = operand(match.group(3))
+    if left is None or right is None:
+        return None
+    return left + right if match.group(2) == "+" else left - right
 
 
 def _format_template_value(value: Any, fmt: str) -> str:
@@ -1514,10 +2077,12 @@ def _format_template_value(value: Any, fmt: str) -> str:
     except (TypeError, ValueError):
         return "--"
     if "%" in fmt:
-        decimals = 1 if ".0" in fmt else 0
+        decimal_match = re.search(r"\.(0+)%", fmt)
+        decimals = len(decimal_match.group(1)) if decimal_match else 0
         return f"{number * 100:.{decimals}f}%"
-    if ".0" in fmt:
-        return f"{number:.1f}"
+    decimal_match = re.search(r"\.(0+)$", fmt)
+    if decimal_match:
+        return f"{number:.{len(decimal_match.group(1))}f}"
     if abs(number - round(number)) < 0.0001:
         return str(int(round(number)))
     return f"{number:.2f}".rstrip("0").rstrip(".")
@@ -1549,8 +2114,26 @@ def _effect_sort_key(effect_id: str) -> tuple[int, ...]:
     return tuple(numbers or [999])
 
 
-def _metric_label_from_key(key: str) -> str:
-    return key.replace("_", " ").strip()
+def _metric_label_from_key(key: str, category: str = "", skill_id: str = "") -> str:
+    if category == "普攻" and key == "atk_scale":
+        if "power_attack" in skill_id:
+            return "处决攻击倍率"
+        if "plunging_attack" in skill_id:
+            return "下落攻击倍率"
+        return "普攻倍率"
+    if category == "终结技" and "lizhiyan" in skill_id:
+        if "ultimate_skill2" in skill_id:
+            if key == "atk_scale":
+                return "阵诀·智诀明伤害倍率"
+            if key == "atk_scale_will":
+                return "阵诀·意诀明伤害倍率"
+        if key == "atk_scale":
+            return "破晦阵伤害倍率"
+        if key == "atk_scale_laser":
+            return "阵诀·智集束打击倍率"
+        if key == "atk_scale_laser_will":
+            return "阵诀·意集束打击倍率"
+    return WARFARIN_METRIC_LABELS.get(key, key.replace("_", " ").strip())
 
 
 def _format_blackboard_value(key: str, value: Any, value_str: Any = "") -> str:
@@ -1560,9 +2143,22 @@ def _format_blackboard_value(key: str, value: Any, value_str: Any = "") -> str:
         number = float(value)
     except (TypeError, ValueError):
         return clean_text(value)
-    if any(token in key for token in ("scale", "rate", "ratio")):
-        return f"{number * 100:.0f}%"
-    return _format_plain_number(number)
+    key_parts = set(key.lower().split("_"))
+    if key_parts.intersection({"scale", "rate", "ratio", "vul"}) or key in WARFARIN_PERCENT_METRIC_KEYS:
+        return _format_percent(number)
+    return _format_metric_number(number)
+
+
+def _format_percent(number: float) -> str:
+    return f"{number * 100:.4f}".rstrip("0").rstrip(".") + "%"
+
+
+def _format_metric_number(number: float) -> str:
+    if abs(number) < 0.0001:
+        return "--"
+    if number.is_integer():
+        return str(int(number))
+    return f"{number:.4f}".rstrip("0").rstrip(".")
 
 
 def _format_plain_number(value: Any) -> str:

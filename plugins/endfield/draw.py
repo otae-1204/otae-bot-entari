@@ -28,7 +28,23 @@ from utils.image_executor import run_image_render
 from utils.image_utils import BrowserResource, screenshot_web_element
 from utils.temp_files import schedule_temp_file_cleanup
 
-from .models import EffectView, LEVEL_COLUMNS, OperatorView, SkillView, TermStyleView, WeaponSkillView, WeaponView
+from .models import (
+    EffectView,
+    EquipmentCatalogAttributeView,
+    EquipmentCatalogItemView,
+    EquipmentCatalogView,
+    EquipmentView,
+    LEVEL_COLUMNS,
+    OperatorCatalogItemView,
+    OperatorCatalogView,
+    OperatorView,
+    SkillView,
+    TermStyleView,
+    WeaponSkillView,
+    WeaponCatalogItemView,
+    WeaponCatalogView,
+    WeaponView,
+)
 
 
 OPERATOR_CARD_WIDTH = 1600
@@ -158,6 +174,131 @@ async def draw_weapon_card(view: WeaponView) -> bytes:
         schedule_temp_file_cleanup(html_path, delay_seconds=30)
 
 
+async def draw_equipment_card(view: EquipmentView) -> bytes:
+    started = perf_counter()
+    prepared = await prepare_equipment_card_html(view)
+    html_path = _write_temp_html(prepared.html)
+    assets_seconds = perf_counter() - started
+    try:
+        screenshot_started = perf_counter()
+        output = await screenshot_web_element(
+            html_path.resolve().as_uri(),
+            ".equipment-card",
+            viewport=(prepared.width, 1),
+            timeout_ms=15000,
+            max_height=CARD_MAX_HEIGHT,
+            device_scale_factor=2.0,
+            settle_ms=50,
+            resources=prepared.resources,
+            wait_for_images=True,
+            strict_max_height=True,
+            overflow_selectors=(
+                ".equipment-left",
+                ".equipment-right",
+                ".equipment-stat",
+                ".equipment-piece",
+            ),
+        )
+        optimize_started = perf_counter()
+        optimized = await run_image_render(optimize_png_container, output)
+        logger.info(
+            f"[endfield] draw kind=equipment assets={assets_seconds:.3f}s "
+            f"screenshot={optimize_started - screenshot_started:.3f}s "
+            f"png_optimize={perf_counter() - optimize_started:.3f}s "
+            f"bytes={len(output)}->{len(optimized)}"
+        )
+        return optimized
+    finally:
+        schedule_temp_file_cleanup(html_path, delay_seconds=30)
+
+
+async def draw_equipment_catalog_card(view: EquipmentCatalogView) -> bytes:
+    started = perf_counter()
+    prepared = await prepare_equipment_catalog_card_html(view)
+    html_path = _write_temp_html(prepared.html)
+    assets_seconds = perf_counter() - started
+    try:
+        screenshot_started = perf_counter()
+        output = await screenshot_web_element(
+            html_path.resolve().as_uri(),
+            ".equipment-catalog-card",
+            viewport=(prepared.width, 1),
+            timeout_ms=20000,
+            max_height=12000,
+            device_scale_factor=1.5,
+            settle_ms=50,
+            resources=prepared.resources,
+            wait_for_images=True,
+            strict_max_height=True,
+            overflow_selectors=(
+                ".equipment-catalog-group",
+                ".equipment-catalog-item",
+            ),
+        )
+        optimize_started = perf_counter()
+        optimized = await run_image_render(optimize_png_container, output)
+        logger.info(
+            f"[endfield] draw kind=equipment_catalog assets={assets_seconds:.3f}s "
+            f"screenshot={optimize_started - screenshot_started:.3f}s "
+            f"png_optimize={perf_counter() - optimize_started:.3f}s "
+            f"bytes={len(output)}->{len(optimized)}"
+        )
+        return optimized
+    finally:
+        schedule_temp_file_cleanup(html_path, delay_seconds=30)
+
+
+async def draw_operator_catalog_card(view: OperatorCatalogView) -> bytes:
+    return await _draw_gallery_catalog(
+        await prepare_operator_catalog_card_html(view),
+        ".operator-catalog-card",
+        (".operator-element", ".operator-catalog-item"),
+        "operator_catalog",
+    )
+
+
+async def draw_weapon_catalog_card(view: WeaponCatalogView) -> bytes:
+    return await _draw_gallery_catalog(
+        await prepare_weapon_catalog_card_html(view),
+        ".weapon-catalog-card",
+        (".weapon-catalog-group", ".weapon-catalog-item"),
+        "weapon_catalog",
+    )
+
+
+async def _draw_gallery_catalog(
+    prepared: PreparedCardHtml,
+    selector: str,
+    overflow_selectors: tuple[str, ...],
+    kind: str,
+) -> bytes:
+    html_path = _write_temp_html(prepared.html)
+    try:
+        screenshot_started = perf_counter()
+        output = await screenshot_web_element(
+            html_path.resolve().as_uri(),
+            selector,
+            viewport=(prepared.width, 1),
+            timeout_ms=25000,
+            max_height=12000,
+            device_scale_factor=1.25,
+            settle_ms=50,
+            resources=prepared.resources,
+            wait_for_images=True,
+            strict_max_height=True,
+            overflow_selectors=overflow_selectors,
+        )
+        optimize_started = perf_counter()
+        optimized = await run_image_render(optimize_png_container, output)
+        logger.info(
+            f"[endfield] draw kind={kind} screenshot={optimize_started - screenshot_started:.3f}s "
+            f"png_optimize={perf_counter() - optimize_started:.3f}s bytes={len(output)}->{len(optimized)}"
+        )
+        return optimized
+    finally:
+        schedule_temp_file_cleanup(html_path, delay_seconds=30)
+
+
 async def render_operator_card_html(view: OperatorView) -> str:
     return (await _prepare_operator_card_html(view, inline=True)).html
 
@@ -167,7 +308,9 @@ async def prepare_operator_card_html(view: OperatorView) -> PreparedCardHtml:
 
 
 async def _prepare_operator_card_html(view: OperatorView, *, inline: bool) -> PreparedCardHtml:
-    portrait_url = view.portrait_url or view.round_icon_url or view.icon_url
+    portrait_candidates = tuple(
+        dict.fromkeys(url for url in (view.portrait_url, view.icon_url, view.round_icon_url) if url)
+    )
     skill_urls = {skill.icon_id: skill_icon_url(skill.icon_id) for skill in view.skills if skill.icon_id}
     talent_urls = {effect.effect_id: effect.icon_url for effect in view.talents if effect.icon_url}
     term_styles = merged_term_styles(view)
@@ -178,10 +321,11 @@ async def _prepare_operator_card_html(view: OperatorView, *, inline: bool) -> Pr
         if style.icon_url and term in used_terms
     }
     assets = await _prepare_assets(
-        [portrait_url, *skill_urls.values(), *talent_urls.values(), *term_urls.values()]
+        [*portrait_candidates, *skill_urls.values(), *talent_urls.values(), *term_urls.values()]
         ,
         inline=inline,
     )
+    portrait_url = next((url for url in portrait_candidates if assets.urls.get(url)), "")
     portrait = assets.urls.get(portrait_url, "")
     skill_icons = {key: assets.urls.get(url, "") for key, url in skill_urls.items()}
     talent_icons = {key: assets.urls.get(url, "") for key, url in talent_urls.items()}
@@ -213,6 +357,120 @@ async def _prepare_weapon_card_html(view: WeaponView, *, inline: bool) -> Prepar
         assets.resources,
         width,
     )
+
+
+async def render_equipment_card_html(view: EquipmentView) -> str:
+    return (await _prepare_equipment_card_html(view, inline=True)).html
+
+
+async def prepare_equipment_card_html(view: EquipmentView) -> PreparedCardHtml:
+    return await _prepare_equipment_card_html(view, inline=False)
+
+
+async def _prepare_equipment_card_html(view: EquipmentView, *, inline: bool) -> PreparedCardHtml:
+    piece_urls = [piece.icon_url for piece in view.suit_pieces if piece.icon_url]
+    used_text = view.suit_description
+    term_urls = {
+        key: style.icon_url
+        for key, style in view.term_styles.items()
+        if style.icon_url and (key in used_text or style.term in used_text)
+    }
+    assets = await _prepare_assets(
+        [view.icon_url, *piece_urls, *term_urls.values()],
+        inline=inline,
+    )
+    equipment_img = assets.urls.get(view.icon_url, "")
+    piece_icons = {url: assets.urls.get(url, "") for url in piece_urls}
+    term_icons = {key: assets.urls.get(url, "") for key, url in term_urls.items()}
+    return PreparedCardHtml(
+        _render_equipment_html(view, equipment_img, piece_icons, term_icons),
+        assets.resources,
+        1500,
+    )
+
+
+async def render_equipment_catalog_card_html(view: EquipmentCatalogView) -> str:
+    return (await _prepare_equipment_catalog_card_html(view, inline=True)).html
+
+
+async def prepare_equipment_catalog_card_html(view: EquipmentCatalogView) -> PreparedCardHtml:
+    return await _prepare_equipment_catalog_card_html(view, inline=False)
+
+
+async def _prepare_equipment_catalog_card_html(
+    view: EquipmentCatalogView,
+    *,
+    inline: bool,
+) -> PreparedCardHtml:
+    icon_urls = [
+        item.icon_url
+        for group in view.groups
+        for item in group.items
+        if item.icon_url
+    ]
+    assets = await _prepare_assets(icon_urls, inline=inline)
+    item_icons = {url: assets.urls.get(url, "") for url in icon_urls}
+    card_width, columns = equipment_catalog_layout(view)
+    return PreparedCardHtml(
+        _render_equipment_catalog_html(view, item_icons, card_width, columns),
+        assets.resources,
+        card_width,
+    )
+
+
+async def render_operator_catalog_card_html(view: OperatorCatalogView) -> str:
+    return (await _prepare_operator_catalog_card_html(view, inline=True)).html
+
+
+async def prepare_operator_catalog_card_html(view: OperatorCatalogView) -> PreparedCardHtml:
+    return await _prepare_operator_catalog_card_html(view, inline=False)
+
+
+async def _prepare_operator_catalog_card_html(
+    view: OperatorCatalogView,
+    *,
+    inline: bool,
+) -> PreparedCardHtml:
+    icon_urls = list(dict.fromkeys(
+        url
+        for element in view.elements
+        for profession in element.professions
+        for item in profession.items
+        for url in (
+            item.icon_url,
+            item.element_icon_url,
+            item.profession_icon_url,
+            item.weapon_type_icon_url,
+        )
+        if url
+    ))
+    assets = await _prepare_assets(icon_urls, inline=inline)
+    icon_map = {url: assets.urls.get(url, "") for url in icon_urls}
+    return PreparedCardHtml(_render_operator_catalog_html(view, icon_map), assets.resources, 1900)
+
+
+async def render_weapon_catalog_card_html(view: WeaponCatalogView) -> str:
+    return (await _prepare_weapon_catalog_card_html(view, inline=True)).html
+
+
+async def prepare_weapon_catalog_card_html(view: WeaponCatalogView) -> PreparedCardHtml:
+    return await _prepare_weapon_catalog_card_html(view, inline=False)
+
+
+async def _prepare_weapon_catalog_card_html(
+    view: WeaponCatalogView,
+    *,
+    inline: bool,
+) -> PreparedCardHtml:
+    icon_urls = list(dict.fromkeys(
+        url
+        for group in view.groups
+        for url in (group.icon_url, *(item.icon_url for item in group.items))
+        if url
+    ))
+    assets = await _prepare_assets(icon_urls, inline=inline)
+    icon_map = {url: assets.urls.get(url, "") for url in icon_urls}
+    return PreparedCardHtml(_render_weapon_catalog_html(view, icon_map), assets.resources, 1900)
 
 
 def _render_html(
@@ -271,7 +529,8 @@ html, body {{
   top: 28px;
   z-index: 3;
   width: 390px;
-  height: {OPERATOR_RAIL_HEIGHT}px;
+  min-height: {OPERATOR_RAIL_HEIGHT}px;
+  height: auto;
   padding: 20px 22px;
   display: flex;
   flex-direction: column;
@@ -282,8 +541,8 @@ html, body {{
 .kicker {{ font-size: 17px; font-weight: 800; color: #6a7278; }}
 .name {{ margin-top: 10px; font-size: 54px; line-height: .96; font-weight: 900; letter-spacing: 0; }}
 .eng {{ margin-top: 6px; font-size: 17px; color: #5d656b; font-weight: 700; }}
-.stars {{ display: flex; align-items: center; gap: 5px; margin-top: 10px; min-height: 34px; color: transparent; font-size: 0; line-height: 1; }}
-.rarity-star {{ width: 32px; height: 32px; object-fit: contain; flex: 0 0 auto; filter: drop-shadow(0 1px 0 rgba(255,255,255,.65)) drop-shadow(0 2px 2px rgba(23,27,31,.22)); }}
+.stars {{ display: flex; align-items: center; gap: 6px; margin-top: 10px; min-height: 42px; color: transparent; font-size: 0; line-height: 1; }}
+.rarity-star {{ width: 40px; height: 40px; object-fit: contain; flex: 0 0 auto; filter: drop-shadow(0 1px 0 rgba(255,255,255,.65)) drop-shadow(0 2px 2px rgba(23,27,31,.22)); }}
 .info-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 13px; }}
 .info-box {{ min-height: 50px; border-left: 5px solid #171b1f; background: rgba(255,255,255,.58); padding: 6px 8px; overflow: visible; }}
 .info-label {{ font-size: 12px; color: #697279; font-weight: 800; }}
@@ -368,16 +627,25 @@ html, body {{
 .skill-name {{ font-size: 19px; line-height: 1.08; font-weight: 900; white-space: normal; overflow-wrap: anywhere; }}
 .skill-cat {{ font-size: 12px; color: #6b7379; font-weight: 900; margin-top: 2px; }}
 .skill-desc {{ margin: 7px 0 0 13px; color: #303941; font-size: 13px; line-height: 1.28; font-weight: 700; overflow: visible; }}
+.skill-desc:empty {{ display: none; }}
+.skill-form-list {{ margin: 6px 0 0 13px; display: grid; gap: 5px; }}
+.skill-form-desc {{ padding: 5px 7px; border-left: 4px solid #ffd000; background: rgba(23,27,31,.055); }}
+.skill-form-name {{ color: #171b1f; font-size: 13px; line-height: 1.15; font-weight: 900; }}
+.skill-form-text {{ margin-top: 2px; color: #364047; font-size: 12.5px; line-height: 1.25; font-weight: 700; }}
 .skill-meta {{ margin: 6px 0 0 13px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; }}
 .skill-meta:empty {{ display: none; }}
 .skill-meta span {{ min-height: 22px; padding: 3px 5px; background: rgba(23,27,31,.08); color: #313940; font-size: 12.5px; font-weight: 900; text-align: center; white-space: normal; overflow-wrap: anywhere; }}
 .skill-meta strong {{ color: #11161a; background: #ffd000; padding: 0 3px; }}
 .metric-table {{ --metric-label-width: 92px; margin: 6px 0 0 13px; display: grid; grid-template-columns: var(--metric-label-width) repeat(4, minmax(46px, 1fr)); grid-auto-rows: minmax(22px, auto); border-top: 1px solid rgba(23,27,31,.2); border-left: 1px solid rgba(23,27,31,.2); }}
 .metric-table div {{ min-height: 22px; padding: 3px 4px; border-right: 1px solid rgba(23,27,31,.2); border-bottom: 1px solid rgba(23,27,31,.2); font-size: 12.5px; font-weight: 800; line-height: 1.1; overflow: visible; }}
+.metric-group {{ grid-column: 1 / -1; min-height: 27px !important; padding: 5px 8px !important; display: flex; align-items: center; justify-content: space-between; gap: 10px; background: #20252a; color: #ffd000; border-right: 0 !important; font-size: 14px !important; font-weight: 900 !important; }}
+.metric-group::before {{ content: ""; width: 5px; height: 16px; flex: 0 0 auto; background: #ffd000; }}
+.metric-group-name {{ margin-right: auto; }}
+.metric-group-note {{ color: #e1e5e7; font-size: 11px; font-weight: 800; }}
 .metric-name {{ background: rgba(23,27,31,.08); color: #313940; white-space: normal; overflow-wrap: anywhere; word-break: break-word; display: flex; align-items: center; }}
 .metric-name.long {{ font-size: 11.5px; line-height: 1.08; }}
 .metric-value {{ background: #f9fbfa; text-align: center; color: #171b1f; display: flex; align-items: center; justify-content: center; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }}
-.metric-value.strong {{ background: #171b1f; color: #ffd000; font-weight: 900; }}
+.metric-value.strong {{ background: #f9fbfa; color: #a86500; font-weight: 900; }}
 .effect-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 7px 10px; align-items: start; }}
 .effect-card {{ align-self: start; display: grid; grid-template-columns: 40px 1fr; gap: 8px; border: 1px solid rgba(23,27,31,.24); background: rgba(255,255,255,.62); padding: 7px; }}
 .effect-title {{ font-size: 16px; line-height: 1.1; font-weight: 900; white-space: normal; overflow-wrap: anywhere; }}
@@ -429,7 +697,7 @@ html, body {{
   if (!card || !rail || !panel) return;
   const cardHeight = Math.max(
     {CARD_MIN_HEIGHT},
-    {OPERATOR_RAIL_HEIGHT + 56},
+    Math.ceil(rail.scrollHeight) + 56,
     Math.ceil(panel.scrollHeight) + 56
   );
   card.style.height = cardHeight + 'px';
@@ -455,7 +723,7 @@ html, body {{ margin:0; width:{card_width}px; min-height:{card_min_height}px; ba
 .weapon-card {{ position:relative; width:{card_width}px; min-height:{card_min_height}px; overflow:visible; background:linear-gradient(90deg,rgba(29,34,39,.075) 1px,transparent 1px) 0 0/40px 40px,linear-gradient(0deg,rgba(29,34,39,.075) 1px,transparent 1px) 0 0/40px 40px,linear-gradient(135deg,#f7f8f4 0%,#e8ebed 58%,#cfd5d9 100%); }}
 .rail {{ position:absolute; z-index:3; left:28px; top:28px; bottom:28px; width:{rail_width}px; padding:20px 20px; overflow:visible; border:1px solid rgba(29,34,39,.30); background:rgba(247,248,246,.93); }}
 .kicker {{ font-size:16px; font-weight:950; color:#687177; }} .name {{ margin-top:10px; font-size:56px; line-height:.96; font-weight:950; letter-spacing:-.04em; }} .eng {{ margin-top:6px; font-size:17px; color:#586168; font-weight:850; }}
-.stars {{ display:flex; gap:5px; margin-top:14px; }} .rarity-star {{ width:31px; height:31px; object-fit:contain; filter:drop-shadow(0 2px 2px rgba(23,27,31,.25)); }}
+.stars {{ display:flex; align-items:center; gap:6px; min-height:42px; margin-top:14px; }} .rarity-star {{ width:40px; height:40px; object-fit:contain; flex:0 0 auto; filter:drop-shadow(0 2px 2px rgba(23,27,31,.25)); }}
 .meta-grid {{ display:grid; grid-template-columns:minmax(86px,.9fr) minmax(132px,1.5fr) minmax(88px,1fr); gap:8px; margin-top:18px; width:100%; }} .info-box {{ min-height:56px; border-left:5px solid #171b1f; background:rgba(255,255,255,.58); padding:7px 9px; overflow:visible; }} .info-label {{ font-size:12px; color:#697279; font-weight:950; }} .info-value {{ margin-top:3px; font-size:19px; line-height:1.1; font-weight:950; white-space:normal; overflow-wrap:anywhere; }}
 .visual {{ position:absolute; z-index:4; left:54px; top:318px; bottom:55px; width:{rail_width - 50}px; height:auto; pointer-events:none; }} .visual-frame {{ position:absolute; left:0; top:0; width:100%; height:100%; border:0; background:linear-gradient(180deg,rgba(255,255,255,.16),rgba(0,0,0,.015)); clip-path:polygon(0 0,93% 0,100% 7%,100% 100%,7% 100%,0 93%); }} .weapon-orbit {{ position:absolute; left:6%; top:9%; width:88%; height:76%; border:0; transform:skewY(-5deg); background:radial-gradient(circle at 52% 48%,rgba(255,255,255,.78),rgba(255,255,255,0) 58%); }}
 .weapon-img {{ position:absolute; left:0; top:0; width:100%; height:100%; object-fit:contain; object-position:center center; filter:drop-shadow(0 32px 20px rgba(23,27,31,.30)); transform:rotate(-7deg); }}
@@ -512,6 +780,592 @@ html, body {{ margin:0; width:{card_width}px; min-height:{card_min_height}px; ba
 }})();
 </script>
 </body></html>"""
+
+
+def _render_equipment_html(
+    view: EquipmentView,
+    equipment_img: str,
+    piece_icons: dict[str, str],
+    term_icons: dict[str, str],
+) -> str:
+    card_width = 1500
+    card_min_height = 920
+    equipment_image = image(equipment_img, view.name)
+    if equipment_image:
+        equipment_image = equipment_image.replace("<img ", '<img class="equipment-image" ', 1)
+    else:
+        equipment_image = f'<div class="equipment-image-fallback">{esc(view.name)}</div>'
+    suit_description = highlight_terms(
+        view.suit_description,
+        view.term_styles,
+        term_icons,
+    )
+    description = esc(view.description).replace("\n", "<br>")
+    flavor = esc(view.flavor).replace("\n", "<br>")
+    css = f"""
+* {{ box-sizing:border-box; }}
+html,body {{ margin:0; width:{card_width}px; min-height:{card_min_height}px; background:#d9dde0; font-family:"Microsoft YaHei","PingFang SC","Noto Sans SC",Arial,sans-serif; color:#171b1f; }}
+.equipment-card {{ position:relative; width:{card_width}px; min-height:{card_min_height}px; overflow:visible; background:linear-gradient(90deg,rgba(29,34,39,.07) 1px,transparent 1px) 0 0/40px 40px,linear-gradient(0deg,rgba(29,34,39,.07) 1px,transparent 1px) 0 0/40px 40px,linear-gradient(135deg,#f7f8f4 0%,#e7eaeb 62%,#cfd5d9 100%); }}
+.equipment-left,.equipment-right {{ position:absolute; z-index:2; top:28px; height:auto; overflow:visible; border:1px solid rgba(23,27,31,.28); background:rgba(248,249,247,.94); }}
+    .equipment-left {{ left:28px; width:650px; min-height:864px; padding:22px 24px 20px; }}
+    .equipment-right {{ left:700px; width:772px; min-height:864px; padding:22px 24px 18px; display:flex; flex-direction:column; box-shadow:-12px 18px 44px rgba(23,27,31,.12); }}
+.equipment-name {{ font-size:50px; line-height:1; font-weight:950; letter-spacing:-.035em; overflow-wrap:anywhere; }}
+.equipment-group {{ margin-top:6px; color:#687177; font-size:19px; font-weight:900; }}
+.equipment-meta {{ display:flex; align-items:center; gap:12px; margin-top:13px; padding-bottom:10px; border-bottom:4px solid #171b1f; }}
+.equipment-slot {{ padding:7px 13px; border-left:6px solid #ffd000; background:#20252a; color:#fff; font-size:18px; font-weight:950; }}
+.equipment-copy {{ margin-top:12px; color:#3b444b; font-size:17px; line-height:1.42; font-weight:750; }}
+.equipment-flavor {{ margin-top:7px; padding-left:13px; border-left:4px solid #c7ccd0; color:#71797e; font-size:15px; line-height:1.36; font-weight:750; }}
+.equipment-stage {{ position:relative; height:485px; margin-top:8px; overflow:hidden; background:radial-gradient(circle at 50% 48%,rgba(255,255,255,.98) 0,rgba(255,255,255,.62) 29%,rgba(236,239,239,.12) 67%,transparent 68%); }}
+.equipment-stage::before,.equipment-stage::after {{ content:""; position:absolute; left:50%; top:50%; border:1px solid rgba(82,93,100,.11); border-radius:50%; transform:translate(-50%,-50%); }}
+.equipment-stage::before {{ width:430px; height:430px; box-shadow:0 0 0 28px rgba(82,93,100,.025),0 0 0 76px rgba(82,93,100,.018); }}
+.equipment-stage::after {{ width:275px; height:275px; border-style:dashed; }}
+.equipment-image {{ position:absolute; z-index:2; left:50%; top:50%; width:470px; height:420px; object-fit:contain; transform:translate(-50%,-50%); filter:drop-shadow(0 30px 22px rgba(23,27,31,.28)); }}
+.equipment-image-fallback {{ position:absolute; z-index:2; left:0; right:0; top:45%; text-align:center; color:#899197; font-size:26px; font-weight:950; }}
+.equipment-section {{ margin-top:15px; }}
+.equipment-section:first-child {{ margin-top:0; }}
+    .equipment-section-title {{ display:flex; align-items:center; gap:10px; padding:0 0 10px; border-bottom:4px solid #20252a; font-size:29px; line-height:1; font-weight:950; }}
+    .equipment-section-title::before {{ content:""; width:9px; height:30px; background:#ffd000; }}
+    .equipment-level {{ display:flex; align-items:end; gap:10px; padding:14px 10px 8px; }}
+    .equipment-level-number {{ font-size:60px; line-height:.9; font-weight:950; }}
+    .equipment-level-label {{ margin-bottom:7px; padding:2px 8px; background:#aeb4b7; color:#fff; font-size:12px; font-weight:900; text-transform:uppercase; }}
+    .equipment-stats {{ display:grid; gap:5px; }}
+    .equipment-forge-head,.equipment-stat {{ display:grid; grid-template-columns:minmax(230px,1fr) repeat(4,108px); align-items:stretch; }}
+    .equipment-forge-head {{ min-height:38px; background:#20252a; color:#fff; }}
+    .equipment-forge-head span {{ display:grid; place-items:center; border-left:1px solid rgba(255,255,255,.14); font-size:14px; font-weight:900; }}
+.equipment-forge-head span:first-child {{ justify-content:start; padding-left:12px; border-left:0; color:#ffd000; }}
+    .equipment-stat {{ min-height:72px; background:rgba(23,27,31,.075); }}
+    .equipment-stat-main {{ display:flex; align-items:center; gap:11px; padding:9px 12px; border-left:7px solid #20252a; }}
+    .equipment-stat-icon {{ width:41px; height:41px; flex:0 0 auto; display:grid; place-items:center; color:#687177; }}
+    .equipment-stat-icon svg,.equipment-stat-icon-img {{ width:40px; height:40px; display:block; object-fit:contain; }}
+.equipment-stat-icon-img {{ filter:brightness(0) saturate(100%); opacity:.54; }}
+    .equipment-stat-name {{ color:#3b444b; font-size:23px; line-height:1.12; font-weight:900; }}
+    .equipment-stat-value {{ display:grid; place-items:center; min-width:0; padding:7px 3px; border-left:1px solid rgba(23,27,31,.15); color:#171b1f; font-size:25px; font-weight:950; }}
+.equipment-stat-value.strong {{ color:#a86500; }}
+    .suit-bar {{ display:flex; align-items:center; justify-content:space-between; gap:14px; margin-top:12px; padding:9px 14px; border-radius:22px; background:#d9dcde; font-size:24px; font-weight:950; }}
+    .suit-count {{ color:#697279; font-size:16px; }}
+    .suit-description {{ margin-top:11px; color:#263038; font-size:20px; line-height:1.42; font-weight:800; }}
+.suit-description strong {{ color:#286cd6; background:transparent; padding:0 1px; }}
+.term {{ color:var(--term-color,#286cd6); font-weight:950; white-space:nowrap; }}
+.term-plain {{ color:inherit; font-weight:950; text-decoration:underline; text-underline-offset:2px; }}
+.term-icon {{ width:17px; height:17px; object-fit:contain; vertical-align:-3px; margin:0 2px 0 1px; }}
+.rich-style,.vup,.info-note {{ font-weight:950; }}
+    .equipment-pieces {{ display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:7px; margin-top:12px; }}
+    .equipment-piece {{ min-height:76px; display:grid; grid-template-columns:52px minmax(0,1fr); align-items:center; gap:7px; padding:7px; border:1px solid rgba(23,27,31,.18); background:rgba(255,255,255,.72); }}
+    .equipment-piece-icon {{ width:50px; height:50px; display:grid; place-items:center; background:radial-gradient(circle,#fff,#e8ebec); }}
+    .equipment-piece-icon img {{ width:48px; height:48px; object-fit:contain; }}
+    .equipment-piece-name {{ font-size:14px; line-height:1.14; font-weight:900; overflow-wrap:anywhere; }}
+    .equipment-piece-slot {{ margin-top:4px; color:#778087; font-size:12px; font-weight:850; }}
+    .piece-summary {{ margin-top:8px; color:#7c848a; font-size:13px; text-align:right; font-weight:850; }}
+    .equipment-footer {{ margin-top:auto; padding-top:14px; display:flex; justify-content:space-between; color:#727a80; font-size:13px; font-weight:850; }}
+"""
+    return f"""<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><style>{css}</style></head><body>
+<div class="equipment-card">
+  <section class="equipment-left">
+    <div class="equipment-name">{esc(view.name)}</div>
+    <div class="equipment-group">{esc(view.group_name or view.suit_name or "独立装备")}</div>
+    <div class="equipment-meta"><div class="equipment-slot">{esc(view.slot_type)}</div></div>
+    <div class="equipment-copy">{description or "暂无装备简介。"}</div>
+    <div class="equipment-flavor">{flavor or "暂无档案记录。"}</div>
+    <div class="equipment-stage">{equipment_image}</div>
+  </section>
+  <section class="equipment-right">
+    <div class="equipment-section">
+      <div class="equipment-section-title">装备属性</div>
+      <div class="equipment-level"><div class="equipment-level-number">{esc(view.max_level or "--")}</div><div class="equipment-level-label">LEVEL</div></div>
+      <div class="equipment-stats"><div class="equipment-forge-head"><span>锻造等级</span><span>0锻</span><span>1锻</span><span>2锻</span><span>3锻</span></div>{equipment_stat_rows(view)}</div>
+    </div>
+    <div class="equipment-section">
+      <div class="equipment-section-title">装备套组效果</div>
+      <div class="suit-bar"><span>{esc(view.suit_name or "无套装")}</span><span class="suit-count">{esc(view.suit_required_count or "--")}件套</span></div>
+      <div class="suit-description">{suit_description or "该装备没有套装效果。"}</div>
+      {equipment_piece_cards(view, piece_icons)}
+    </div>
+    <div class="equipment-footer"><span>数据来源 api.fz.wiki</span><span>更新 {esc(view.source_version or "--")}</span></div>
+  </section>
+</div>
+<script>
+(function() {{
+  const card=document.querySelector('.equipment-card');
+  const left=document.querySelector('.equipment-left');
+  const right=document.querySelector('.equipment-right');
+  if(!card||!left||!right)return;
+  const height=Math.max({card_min_height},Math.ceil(left.scrollHeight)+56,Math.ceil(right.scrollHeight)+56);
+  card.style.height=height+'px';
+  document.documentElement.style.height=height+'px';
+  document.body.style.height=height+'px';
+}})();
+</script>
+</body></html>"""
+
+
+def equipment_stat_rows(view: EquipmentView) -> str:
+    if not view.stats:
+        return '<div class="equipment-stat"><div class="equipment-stat-main"><span class="equipment-stat-name">暂无属性</span></div>' + '<strong class="equipment-stat-value">--</strong>' * 4 + '</div>'
+    rows = []
+    for stat in view.stats:
+        values = stat.values[:4] or [stat.value]
+        while len(values) < 4:
+            values.append(values[-1] if values else "--")
+        strong_index = max(
+            range(len(values)),
+            key=lambda index: (_numeric_signal(values[index]), index),
+        )
+        rendered_values = "".join(
+            f'<strong class="equipment-stat-value{" strong" if index == strong_index else ""}">'
+            f'{esc(_equipment_signed_value(value))}</strong>'
+            for index, value in enumerate(values)
+        )
+        rows.append(
+            '<div class="equipment-stat">'
+            '<div class="equipment-stat-main">'
+            f'<span class="equipment-stat-icon">{equipment_stat_icon(stat.icon_key, stat.label)}</span>'
+            f'<span class="equipment-stat-name">{esc(stat.label)}</span></div>'
+            f'{rendered_values}'
+            '</div>'
+        )
+    return "".join(rows)
+
+
+def _equipment_signed_value(value: str) -> str:
+    value = str(value or "--")
+    if value not in {"--", "0", "0%"} and not value.startswith(("+", "-")):
+        return f"+{value}"
+    return value
+
+
+def equipment_stat_icon(icon_key: str, label: str) -> str:
+    normalized = f"{icon_key} {label}".lower()
+    if "def" in normalized or "防御" in normalized:
+        filename = "icon_attribute_def.png"
+        body = '<path d="M12 2.5 20 5.8v5.8c0 5-3.2 8.2-8 10.4-4.8-2.2-8-5.4-8-10.4V5.8L12 2.5Z"/><path d="M12 6.2v11.7"/>'
+    elif "will" in normalized or "意志" in normalized:
+        filename = "icon_attribute_will.png"
+        body = '<path d="M12 3.2c2.2 2.4 3.2 4.4 3.2 6.1 0 1.8-1.4 3.2-3.2 3.2s-3.2-1.4-3.2-3.2c0-1.7 1-3.7 3.2-6.1Z"/><path d="M4 11.5c3.2.2 5.1 1 6 2.4.9 1.5.4 3.4-1.1 4.3-1.5.9-3.4.4-4.3-1.1-.9-1.4-1.1-3.3-.6-5.6Zm16 0c-3.2.2-5.1 1-6 2.4-.9 1.5-.4 3.4 1.1 4.3 1.5.9 3.4.4 4.3-1.1.9-1.4 1.1-3.3.6-5.6Z"/>'
+    elif "ultimate" in normalized or "终结技" in normalized or "充能" in normalized:
+        filename = "icon_ultimate_sp_gain_scalar.png"
+        body = '<path d="M6 3h12M6 21h12M8 4c0 4 1.5 5.3 4 8-2.5 2.7-4 4-4 8m8-16c0 4-1.5 5.3-4 8 2.5 2.7 4 4 4 8"/>'
+    else:
+        filename = ""
+        body = '<path d="m12 3 8 9-8 9-8-9 8-9Z"/><path d="M8 12h8M12 8v8"/>'
+    url = _local_image_data_url(ASSET_DIR / "equipment" / filename) if filename else ""
+    if url:
+        return f'<img class="equipment-stat-icon-img" src="{esc_attr(url)}" alt="">'
+    return f'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{body}</svg>'
+
+
+def equipment_piece_cards(view: EquipmentView, piece_icons: dict[str, str]) -> str:
+    pieces = view.suit_pieces[:4]
+    if not pieces:
+        return ""
+    cards = []
+    for piece in pieces:
+        icon_url = piece_icons.get(piece.icon_url, "")
+        icon = image(icon_url, piece.name) or "--"
+        cards.append(
+            '<div class="equipment-piece">'
+            f'<div class="equipment-piece-icon">{icon}</div>'
+            f'<div><div class="equipment-piece-name">{esc(piece.name)}</div>'
+            f'<div class="equipment-piece-slot">{esc(piece.slot_type)}</div></div>'
+            '</div>'
+        )
+    summary = f'<div class="piece-summary">同套装另有 {len(view.suit_pieces)} 件装备</div>'
+    return '<div class="equipment-pieces">' + "".join(cards) + "</div>" + summary
+
+
+def _render_equipment_catalog_html(
+    view: EquipmentCatalogView,
+    item_icons: dict[str, str],
+    card_width: int,
+    columns: int,
+) -> str:
+    rarity_labels = {
+        "gold": "金色装备",
+        "purple": "紫色装备",
+        "blue": "蓝色装备",
+        "all": "全部稀有度",
+    }
+    accent_colors = {
+        "gold": "#c88a00",
+        "purple": "#7446bc",
+        "blue": "#2874b8",
+        "all": "#20252a",
+    }
+    rarity_label = rarity_labels.get(view.rarity_filter, "金色装备")
+    accent = accent_colors.get(view.rarity_filter, "#c88a00")
+    css = f"""
+* {{ box-sizing:border-box; }}
+    html,body {{ margin:0; width:{card_width}px; min-height:520px; background:#d9dde0; font-family:"Microsoft YaHei","PingFang SC","Noto Sans SC",Arial,sans-serif; color:#171b1f; }}
+    .equipment-catalog-card {{ --catalog-accent:{accent}; width:{card_width}px; min-height:520px; padding:28px; overflow:visible; background:linear-gradient(90deg,rgba(29,34,39,.065) 1px,transparent 1px) 0 0/40px 40px,linear-gradient(0deg,rgba(29,34,39,.065) 1px,transparent 1px) 0 0/40px 40px,linear-gradient(135deg,#f8f9f6,#e6eaeb); }}
+.catalog-header {{ padding:22px 25px 18px; border:1px solid rgba(23,27,31,.28); background:rgba(249,250,248,.96); }}
+.catalog-title-row {{ display:flex; align-items:end; justify-content:space-between; gap:20px; }}
+.catalog-title {{ font-size:48px; line-height:1; font-weight:950; letter-spacing:-.035em; }}
+.catalog-filter {{ padding:7px 13px; border-left:6px solid var(--catalog-accent); background:#20252a; color:#fff; font-size:16px; font-weight:950; }}
+.catalog-subtitle {{ margin-top:8px; color:#667077; font-size:15px; font-weight:850; }}
+.catalog-legend {{ display:flex; flex-wrap:wrap; gap:5px 8px; margin-top:14px; padding-top:12px; border-top:3px solid #20252a; }}
+.catalog-legend-item {{ height:28px; display:flex; align-items:center; gap:4px; padding:3px 7px; background:#eceeed; color:#4d575e; font-size:11px; font-weight:850; }}
+.catalog-legend-icon,.catalog-attr-icon {{ display:block; object-fit:contain; filter:brightness(0) saturate(100%); opacity:.58; }}
+.catalog-legend-icon {{ width:20px; height:20px; }}
+.catalog-attr-icon {{ width:23px; height:23px; }}
+.catalog-legend-fallback,.catalog-attr-fallback {{ display:grid; place-items:center; border:1px solid currentColor; color:#687177; font-weight:950; }}
+.catalog-legend-fallback {{ width:20px; height:20px; font-size:9px; }}
+.catalog-attr-fallback {{ width:23px; height:23px; font-size:10px; }}
+.equipment-catalog-group {{ margin-top:12px; padding:11px; border:1px solid rgba(23,27,31,.25); background:rgba(249,250,248,.95); overflow:visible; }}
+.catalog-group-header {{ min-height:36px; display:flex; align-items:center; justify-content:space-between; gap:16px; padding:6px 10px; border-left:8px solid var(--catalog-accent); border-bottom:3px solid #20252a; }}
+.catalog-group-name {{ font-size:21px; font-weight:950; }}
+.catalog-group-meta {{ color:#727b81; font-size:12px; font-weight:850; }}
+    .catalog-items {{ display:grid; grid-template-columns:repeat({columns},minmax(0,1fr)); gap:7px; margin-top:8px; }}
+.equipment-catalog-item {{ position:relative; min-height:104px; display:grid; grid-template-columns:70px minmax(0,1fr); gap:7px; padding:8px; overflow:visible; border:1px solid rgba(23,27,31,.17); background:#f4f6f5; }}
+.equipment-catalog-item.rarity-5 {{ border-top:4px solid #c88a00; }}
+.equipment-catalog-item.rarity-4 {{ border-top:4px solid #7446bc; }}
+.equipment-catalog-item.rarity-3 {{ border-top:4px solid #2874b8; }}
+.catalog-item-image {{ width:68px; height:68px; display:grid; place-items:center; align-self:start; background:radial-gradient(circle,#fff,#e5e8e9); }}
+.catalog-item-image img {{ width:66px; height:66px; object-fit:contain; }}
+.catalog-item-image-fallback {{ color:#9aa1a6; font-size:11px; font-weight:900; }}
+.catalog-item-main {{ min-width:0; display:flex; flex-direction:column; }}
+.catalog-item-name {{ min-height:32px; font-size:13px; line-height:1.16; font-weight:950; overflow-wrap:anywhere; }}
+.catalog-item-meta {{ margin-top:2px; display:flex; align-items:center; justify-content:space-between; gap:5px; color:#778087; font-size:10px; font-weight:850; }}
+.catalog-item-slot {{ padding:2px 5px; background:#dfe3e4; color:#465158; }}
+.catalog-attributes {{ display:flex; flex-wrap:wrap; gap:3px; margin-top:auto; padding-top:5px; }}
+.catalog-attribute {{ width:27px; height:27px; display:grid; place-items:center; background:#e5e8e8; }}
+.catalog-footer {{ margin-top:12px; padding:10px 12px; display:flex; justify-content:space-between; border-top:3px solid #20252a; color:#6c757b; font-size:12px; font-weight:850; }}
+"""
+    return f"""<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><style>{css}</style></head><body>
+<div class="equipment-catalog-card">
+  <header class="catalog-header">
+    <div class="catalog-title-row"><div class="catalog-title">{esc(view.title)}</div><div class="catalog-filter">{esc(rarity_label)}</div></div>
+    <div class="catalog-subtitle">{len(view.groups)} 个套组 · {view.total_count} 件装备 · 词条按装备数据顺序显示</div>
+    {equipment_catalog_legend(view)}
+  </header>
+  {equipment_catalog_groups(view, item_icons)}
+  <footer class="catalog-footer"><span>数据来源 api.fz.wiki</span><span>更新 {esc(view.source_version or "--")}</span></footer>
+</div>
+</body></html>"""
+
+
+def equipment_catalog_groups(view: EquipmentCatalogView, item_icons: dict[str, str]) -> str:
+    groups = []
+    for group in view.groups:
+        slot_counts: dict[str, int] = {}
+        for item in group.items:
+            slot_counts[item.slot_type] = slot_counts.get(item.slot_type, 0) + 1
+        meta = " · ".join(f"{slot}{count}" for slot, count in slot_counts.items())
+        items = "".join(equipment_catalog_item(item, item_icons) for item in group.items)
+        groups.append(
+            '<section class="equipment-catalog-group">'
+            '<div class="catalog-group-header">'
+            f'<div class="catalog-group-name">{esc(group.name)}</div>'
+            f'<div class="catalog-group-meta">共 {len(group.items)} 件 · {esc(meta)}</div>'
+            '</div>'
+            f'<div class="catalog-items">{items}</div>'
+            '</section>'
+        )
+    return "".join(groups)
+
+
+def equipment_catalog_item(
+    item: EquipmentCatalogItemView,
+    item_icons: dict[str, str],
+) -> str:
+    icon_url = item_icons.get(item.icon_url, "")
+    icon = image(icon_url, item.name)
+    if not icon:
+        icon = '<span class="catalog-item-image-fallback">暂无图标</span>'
+    attributes = "".join(
+        '<span class="catalog-attribute" '
+        f'title="{esc_attr(attribute.label)} {esc_attr(attribute.value)}">'
+        f'{equipment_catalog_attribute_icon(attribute)}</span>'
+        for attribute in item.attributes
+        if equipment_catalog_attribute_visible(attribute.label)
+    )
+    return (
+        f'<article class="equipment-catalog-item rarity-{item.rarity}">'
+        f'<div class="catalog-item-image">{icon}</div>'
+        '<div class="catalog-item-main">'
+        f'<div class="catalog-item-name">{esc(item.name)}</div>'
+        f'<div class="catalog-item-meta"><span class="catalog-item-slot">{esc(item.slot_type)}</span><span>Lv{esc(item.level or "--")}</span></div>'
+        f'<div class="catalog-attributes">{attributes}</div>'
+        '</div></article>'
+    )
+
+
+def equipment_catalog_legend(view: EquipmentCatalogView) -> str:
+    labels = list(dict.fromkeys(
+        attribute.label
+        for group in view.groups
+        for item in group.items
+        for attribute in item.attributes
+        if equipment_catalog_attribute_visible(attribute.label)
+    ))
+    items = "".join(
+        '<span class="catalog-legend-item">'
+        f'{equipment_attribute_icon(label, "catalog-legend-icon", "catalog-legend-fallback")}'
+        f'<span>{esc(label)}</span></span>'
+        for label in labels
+    )
+    return f'<div class="catalog-legend">{items}</div>' if items else ""
+
+
+def equipment_catalog_layout(view: EquipmentCatalogView) -> tuple[int, int]:
+    is_specific_group = len(view.groups) == 1 and view.title == view.groups[0].name
+    if not is_specific_group:
+        return 1900, 8
+    columns = 5 if len(view.groups[0].items) >= 5 else 4
+    return (1260 if columns == 5 else 1040), columns
+
+
+def equipment_catalog_attribute_visible(label: str) -> bool:
+    normalized = "".join(str(label or "").split())
+    return normalized not in {"防御", "防御力"}
+
+
+def _render_operator_catalog_html(view: OperatorCatalogView, icon_map: dict[str, str]) -> str:
+    css = """
+* { box-sizing:border-box; }
+html,body { margin:0; width:1900px; min-height:680px; background:#d9dde0; font-family:"Microsoft YaHei","PingFang SC","Noto Sans SC",Arial,sans-serif; color:#171b1f; }
+.operator-catalog-card { width:1900px; min-height:680px; padding:30px; overflow:visible; background:linear-gradient(90deg,rgba(29,34,39,.065) 1px,transparent 1px) 0 0/40px 40px,linear-gradient(0deg,rgba(29,34,39,.065) 1px,transparent 1px) 0 0/40px 40px,linear-gradient(135deg,#f8f9f6,#e6eaeb); }
+.gallery-header { padding:24px 28px 20px; border:1px solid rgba(23,27,31,.28); background:rgba(249,250,248,.96); box-shadow:0 12px 32px rgba(23,27,31,.10); }
+.gallery-title-row { display:flex; align-items:end; justify-content:space-between; gap:20px; }
+.gallery-title { font-size:50px; line-height:1; font-weight:950; letter-spacing:-.035em; }
+.gallery-count { padding:8px 14px; border-left:6px solid #ffd000; background:#20252a; color:#fff; font-size:17px; font-weight:950; }
+.gallery-subtitle { margin-top:9px; color:#667077; font-size:16px; font-weight:800; }
+.operator-element { --element-color:#888; margin-top:18px; padding:14px; border:1px solid rgba(23,27,31,.25); background:rgba(249,250,248,.95); overflow:visible; }
+.operator-element-header { min-height:52px; display:flex; align-items:center; justify-content:space-between; gap:16px; padding:8px 14px; border-left:10px solid var(--element-color); border-bottom:3px solid #20252a; background:#f4f6f5; }
+.operator-element-name { display:flex; align-items:center; gap:10px; font-size:27px; font-weight:950; }
+.operator-element-icon,.operator-profession-icon { width:30px; height:30px; object-fit:contain; filter:brightness(0) saturate(100%); opacity:.62; }
+.operator-element-meta { color:#727b81; font-size:14px; font-weight:850; }
+.operator-profession-summary { display:flex; flex-wrap:wrap; gap:7px; margin-top:10px; padding:9px 10px; border:1px solid rgba(23,27,31,.16); background:#eef0ef; }
+.operator-profession-chip { min-height:31px; display:flex; align-items:center; gap:6px; padding:4px 8px; border-left:4px solid var(--element-color); background:#dfe3e4; color:#465158; font-size:13px; font-weight:900; }
+.operator-profession-icon { width:22px; height:22px; }
+.operator-grid { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:11px; margin-top:10px; }
+.operator-catalog-item { position:relative; min-height:370px; overflow:hidden; border:1px solid rgba(23,27,31,.22); border-bottom:8px solid var(--element-color); background:#f4f6f5; }
+.operator-catalog-item.rarity-6 { box-shadow:inset 0 4px 0 #ff3c2e; }
+.operator-catalog-item.rarity-5 { box-shadow:inset 0 4px 0 #e59a18; }
+.operator-catalog-item.rarity-4 { box-shadow:inset 0 4px 0 #8a56d6; }
+.operator-portrait { position:relative; height:272px; overflow:hidden; background:radial-gradient(circle at 50% 42%,#fff 0,#edf0ef 58%,#e1e5e5 100%); }
+.operator-portrait img { width:100%; height:100%; object-fit:contain; object-position:center center; display:block; }
+.operator-image-fallback { height:100%; display:grid; place-items:center; color:#667177; font-size:15px; font-weight:900; }
+.operator-card-body { position:relative; padding:10px 11px 9px; }
+.operator-name-row { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.operator-name { min-width:0; font-size:22px; line-height:1.08; font-weight:950; overflow-wrap:anywhere; }
+.rarity-chip { flex:0 0 auto; padding:3px 6px; background:#20252a; color:#ffd55a; font-size:12px; font-weight:950; }
+.operator-english { margin-top:5px; color:#6e787e; font-size:12px; line-height:1.1; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.operator-meta-icons { display:flex; align-items:center; gap:6px; margin-top:9px; }
+.operator-meta-icon { width:27px; height:27px; padding:2px; object-fit:contain; background:transparent; filter:brightness(0) saturate(100%); opacity:.62; }
+.operator-meta-text { margin-left:auto; color:#727b81; font-size:12px; font-weight:850; }
+.operator-profession-badge { color:#3e484e; font-size:12px; font-weight:950; }
+.gallery-footer { margin-top:18px; padding:12px 14px; display:flex; justify-content:space-between; border-top:3px solid #20252a; color:#6c757b; font-size:13px; font-weight:850; }
+"""
+    return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><style>{css}</style></head><body>
+<div class="operator-catalog-card">
+  <header class="gallery-header">
+    <div class="gallery-title-row"><div class="gallery-title">{esc(view.title)}</div><div class="gallery-count">{view.total_count} 位干员</div></div>
+    <div class="gallery-subtitle">默认按元素分类，并在元素内按职业划分子类</div>
+  </header>
+  {_operator_catalog_elements(view, icon_map)}
+  <footer class="gallery-footer"><span>数据来源 api.fz.wiki</span><span>更新 {esc(view.source_version or "--")}</span></footer>
+</div></body></html>"""
+
+
+def _operator_catalog_elements(view: OperatorCatalogView, icon_map: dict[str, str]) -> str:
+    sections = []
+    for element in view.elements:
+        count = sum(len(profession.items) for profession in element.professions)
+        element_icon = _gallery_icon(icon_map, element.icon_url, "operator-element-icon", element.name)
+        profession_chips = "".join(
+            '<span class="operator-profession-chip">'
+            f'{_gallery_icon(icon_map, profession.icon_url, "operator-profession-icon", profession.name)}'
+            f'<span>{esc(profession.name)} · {len(profession.items)}</span></span>'
+            for profession in element.professions
+        )
+        sorted_items = sorted(
+            (item for profession in element.professions for item in profession.items),
+            key=lambda item: (-item.rarity, item.profession, item.name),
+        )
+        items = "".join(_operator_catalog_item(item, element.color, icon_map) for item in sorted_items)
+        sections.append(
+            f'<section class="operator-element" style="--element-color:{esc_attr(normalize_rich_color(element.color))}">'
+            '<div class="operator-element-header">'
+            f'<div class="operator-element-name">{element_icon}<span>{esc(element.name)}</span></div>'
+            f'<div class="operator-element-meta">{count} 位 · {len(element.professions)} 个职业</div>'
+            '</div>'
+            f'<div class="operator-profession-summary">{profession_chips}</div>'
+            f'<div class="operator-grid">{items}</div></section>'
+        )
+    return "".join(sections)
+
+
+def _operator_catalog_item(
+    item: OperatorCatalogItemView,
+    element_color: str,
+    icon_map: dict[str, str],
+) -> str:
+    portrait = _gallery_image(icon_map, item.icon_url, "", item.name)
+    if not portrait:
+        portrait = '<div class="operator-image-fallback">暂无头像</div>'
+    icons = "".join(
+        _gallery_icon(icon_map, url, "operator-meta-icon", label)
+        for url, label in (
+            (item.profession_icon_url, item.profession),
+            (item.weapon_type_icon_url, item.weapon_type),
+            (item.element_icon_url, item.element),
+        )
+        if url
+    )
+    return (
+        f'<article class="operator-catalog-item rarity-{item.rarity}" style="--element-color:{esc_attr(normalize_rich_color(element_color))}">'
+        f'<div class="operator-portrait">{portrait}</div>'
+        '<div class="operator-card-body">'
+        f'<div class="operator-name-row"><div class="operator-name">{esc(item.name)}</div><span class="rarity-chip">{item.rarity}★</span></div>'
+        f'<div class="operator-english">// {esc(item.english_name or item.operator_id or "--")}</div>'
+        f'<div class="operator-meta-icons">{icons}<span class="operator-profession-badge">{esc(item.profession)}</span><span class="operator-meta-text">{esc(item.weapon_type)}</span></div>'
+        '</div></article>'
+    )
+
+
+def _render_weapon_catalog_html(view: WeaponCatalogView, icon_map: dict[str, str]) -> str:
+    css = """
+* { box-sizing:border-box; }
+html,body { margin:0; width:1900px; min-height:680px; background:#d9dde0; font-family:"Microsoft YaHei","PingFang SC","Noto Sans SC",Arial,sans-serif; color:#171b1f; }
+.weapon-catalog-card { width:1900px; min-height:680px; padding:30px; overflow:visible; background:linear-gradient(90deg,rgba(29,34,39,.065) 1px,transparent 1px) 0 0/40px 40px,linear-gradient(0deg,rgba(29,34,39,.065) 1px,transparent 1px) 0 0/40px 40px,linear-gradient(135deg,#f8f9f6,#e6eaeb); }
+.gallery-header { padding:24px 28px 20px; border:1px solid rgba(23,27,31,.28); background:rgba(249,250,248,.96); box-shadow:0 12px 32px rgba(23,27,31,.10); }
+.gallery-title-row { display:flex; align-items:end; justify-content:space-between; gap:20px; }
+.gallery-title { font-size:50px; line-height:1; font-weight:950; letter-spacing:-.035em; }
+.gallery-count { padding:8px 14px; border-left:6px solid #ffd000; background:#20252a; color:#fff; font-size:17px; font-weight:950; }
+.gallery-subtitle { margin-top:9px; color:#667077; font-size:16px; font-weight:800; }
+.weapon-catalog-group { margin-top:18px; padding:14px; border:1px solid rgba(23,27,31,.25); background:rgba(249,250,248,.95); overflow:visible; }
+.weapon-group-header { min-height:52px; display:flex; align-items:center; justify-content:space-between; gap:16px; padding:8px 14px; border-left:10px solid #d49400; border-bottom:3px solid #20252a; background:#f4f6f5; }
+.weapon-group-name { display:flex; align-items:center; gap:10px; font-size:27px; font-weight:950; }
+.weapon-group-icon { width:32px; height:32px; object-fit:contain; filter:brightness(0) saturate(100%); opacity:.62; }
+.weapon-group-meta { color:#727b81; font-size:14px; font-weight:850; }
+.weapon-grid { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:11px; margin-top:11px; }
+.weapon-catalog-item { position:relative; min-height:322px; overflow:hidden; border:1px solid rgba(23,27,31,.22); border-bottom:8px solid #7b8489; background:#f4f6f5; }
+.weapon-catalog-item.rarity-6 { border-bottom-color:#ff3c2e; box-shadow:inset 0 4px 0 #ff3c2e; }
+.weapon-catalog-item.rarity-5 { border-bottom-color:#e59a18; box-shadow:inset 0 4px 0 #e59a18; }
+.weapon-catalog-item.rarity-4 { border-bottom-color:#8a56d6; box-shadow:inset 0 4px 0 #8a56d6; }
+.weapon-catalog-item.rarity-3 { border-bottom-color:#2d82c9; box-shadow:inset 0 4px 0 #2d82c9; }
+.weapon-image { position:relative; height:216px; padding:12px; overflow:hidden; background:radial-gradient(circle at 50% 45%,#fff 0,#edf0ef 58%,#e1e5e5 100%); }
+.weapon-image img { width:100%; height:100%; object-fit:contain; display:block; filter:drop-shadow(0 18px 12px rgba(23,27,31,.28)); }
+.weapon-image-fallback { height:100%; display:grid; place-items:center; color:#667177; font-size:15px; font-weight:900; }
+.weapon-card-body { padding:10px 11px 9px; }
+.weapon-name-row { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.weapon-name { min-width:0; font-size:21px; line-height:1.08; font-weight:950; overflow-wrap:anywhere; }
+.rarity-chip { flex:0 0 auto; padding:3px 6px; background:#20252a; color:#ffd55a; font-size:12px; font-weight:950; }
+.weapon-english { margin-top:5px; color:#6e787e; font-size:12px; line-height:1.1; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.weapon-meta { display:flex; align-items:center; gap:6px; margin-top:8px; }
+.weapon-atk { margin-left:auto; color:#273138; font-size:13px; font-weight:950; }
+.weapon-terms { display:flex; gap:4px; margin-top:7px; min-height:22px; overflow:hidden; }
+.weapon-term { max-width:31%; padding:3px 5px; background:#dfe3e4; color:#4d575e; font-size:10px; line-height:1.2; font-weight:850; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.gallery-footer { margin-top:18px; padding:12px 14px; display:flex; justify-content:space-between; border-top:3px solid #20252a; color:#6c757b; font-size:13px; font-weight:850; }
+"""
+    return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><style>{css}</style></head><body>
+<div class="weapon-catalog-card">
+  <header class="gallery-header">
+    <div class="gallery-title-row"><div class="gallery-title">{esc(view.title)}</div><div class="gallery-count">{view.total_count} 件武器</div></div>
+    <div class="gallery-subtitle">按武器类型分类，展示星级、攻击力与核心词条</div>
+  </header>
+  {_weapon_catalog_groups(view, icon_map)}
+  <footer class="gallery-footer"><span>数据来源 api.fz.wiki</span><span>更新 {esc(view.source_version or "--")}</span></footer>
+</div></body></html>"""
+
+
+def _weapon_catalog_groups(view: WeaponCatalogView, icon_map: dict[str, str]) -> str:
+    sections = []
+    for group in view.groups:
+        group_icon = _gallery_icon(icon_map, group.icon_url, "weapon-group-icon", group.name)
+        items = "".join(_weapon_catalog_item(item, icon_map) for item in group.items)
+        sections.append(
+            '<section class="weapon-catalog-group">'
+            '<div class="weapon-group-header">'
+            f'<div class="weapon-group-name">{group_icon}<span>{esc(group.name)}</span></div>'
+            f'<div class="weapon-group-meta">共 {len(group.items)} 件</div>'
+            '</div>'
+            f'<div class="weapon-grid">{items}</div></section>'
+        )
+    return "".join(sections)
+
+
+def _weapon_catalog_item(item: WeaponCatalogItemView, icon_map: dict[str, str]) -> str:
+    weapon_image = _gallery_image(icon_map, item.icon_url, "", item.name)
+    if not weapon_image:
+        weapon_image = '<div class="weapon-image-fallback">暂无武器图</div>'
+    terms = [*item.terms_main[:1], *item.terms_sub[:1], *item.terms_skill[:1]]
+    term_html = "".join(f'<span class="weapon-term" title="{esc_attr(term)}">{esc(term)}</span>' for term in terms)
+    return (
+        f'<article class="weapon-catalog-item rarity-{item.rarity}">'
+        f'<div class="weapon-image">{weapon_image}</div>'
+        '<div class="weapon-card-body">'
+        f'<div class="weapon-name-row"><div class="weapon-name">{esc(item.name)}</div><span class="rarity-chip">{item.rarity}★</span></div>'
+        f'<div class="weapon-english">// {esc(item.english_name or item.weapon_id or "--")}</div>'
+        f'<div class="weapon-meta"><span class="weapon-atk">ATK {esc(item.max_atk)}</span></div>'
+        f'<div class="weapon-terms">{term_html}</div>'
+        '</div></article>'
+    )
+
+
+def _gallery_image(icon_map: dict[str, str], source_url: str, class_name: str, alt: str) -> str:
+    rendered = image(icon_map.get(source_url, ""), alt)
+    if rendered and class_name:
+        return rendered.replace("<img ", f'<img class="{class_name}" ', 1)
+    return rendered
+
+
+def _gallery_icon(icon_map: dict[str, str], source_url: str, class_name: str, alt: str) -> str:
+    return _gallery_image(icon_map, source_url, class_name, alt)
+
+
+def equipment_catalog_attribute_icon(attribute: EquipmentCatalogAttributeView) -> str:
+    return equipment_attribute_icon(
+        attribute.label,
+        "catalog-attr-icon",
+        "catalog-attr-fallback",
+    )
+
+
+def equipment_attribute_icon(label: str, image_class: str, fallback_class: str) -> str:
+    filename = _equipment_attribute_icon_filename(label)
+    url = _local_image_data_url(ASSET_DIR / "equipment" / filename) if filename else ""
+    if url:
+        return f'<img class="{image_class}" src="{esc_attr(url)}" alt="">'
+    fallback = clean_attribute_label(label)
+    return f'<span class="{fallback_class}">{esc(fallback)}</span>'
+
+
+def clean_attribute_label(label: str) -> str:
+    for token in ("伤害加成", "效率加成", "加成", "效率", "能力"):
+        label = label.replace(token, "")
+    return label[:2] or "属"
+
+
+def _equipment_attribute_icon_filename(label: str) -> str:
+    exact = {
+        "防御力": "icon_attribute_def.png",
+        "力量": "icon_attribute_str.png",
+        "敏捷": "icon_attribute_agi.png",
+        "智识": "icon_attribute_wisd.png",
+        "意志": "icon_attribute_will.png",
+        "攻击力": "icon_attribute_atk.png",
+        "攻击力加成": "icon_attribute_atk.png",
+        "生命值": "icon_attribute_maxHp.png",
+        "生命值加成": "icon_attribute_maxHp.png",
+        "源石技艺强度": "icon_originium_arts.png",
+        "终结技充能效率": "icon_ultimate_sp_gain_scalar.png",
+        "普通攻击伤害加成": "icon_normal_atk_efficiency.png",
+        "治疗效率加成": "icon_heal_output_increase.png",
+        "终结技伤害加成": "icon_ultimate_skill_efficiency.png",
+        "战技伤害加成": "icon_normal_skill_efficiency.png",
+        "物理伤害加成": "icon_physical_damage_increase.png",
+        "连携技伤害加成": "icon_combo_skill_efficiency.png",
+        "所有技能伤害加成": "icon_normal_skill_efficiency.png",
+        "寒冷和电磁伤害加成": "icon_cryst_damage_increase.png",
+        "暴击率": "icon_attribute_criticalRate.png",
+        "灼热和自然伤害加成": "icon_fire_damage_increase.png",
+        "对失衡目标伤害加成": "icon_attr_damage_to_broken_unit_increase.png",
+        "全伤害减免": "icon_attribute_def.png",
+        "法术伤害加成": "icon_originium_arts.png",
+    }
+    return exact.get(label, "")
 
 
 def _write_temp_html(content: str) -> Path:
@@ -904,29 +1758,45 @@ def skill_card(skill: SkillView, index: int, icon_url: str, term_styles: dict[st
     <div><div class="skill-name">{esc(skill.title)}</div><div class="skill-cat">{esc(skill.category)}</div></div>
   </div>
   <div class="skill-desc">{highlight_terms(skill.description, term_styles, term_icons)}</div>
+  {skill_form_descriptions(skill, term_styles, term_icons)}
   {skill_meta(skill)}
   {metric_table(skill)}
 </article>"""
 
 
 def metric_table(skill: SkillView) -> str:
-    metric_rows = skill_metric_rows(skill)
+    common_rows, form_groups = skill_metric_row_groups(skill)
     label_width = metric_label_width(skill)
     cells: list[str] = []
-    for name, values in metric_rows:
+
+    def append_row(name: str, values: list[str], label: str | None = None) -> None:
         strong_index = _strong_value_index(skill, name, values)
-        metric_class = "metric-name long" if len(name) > 10 else "metric-name"
-        cells.append(f'<div class="{metric_class}">{esc(skill_metric_label(skill, name))}</div>')
+        rendered_label = label or skill_metric_label(skill, name)
+        metric_class = "metric-name long" if len(rendered_label) > 10 else "metric-name"
+        cells.append(f'<div class="{metric_class}">{esc(rendered_label)}</div>')
         for index, value in enumerate(values):
             strong = " strong" if index == strong_index and value != "--" else ""
             cells.append(f'<div class="metric-value{strong}">{esc(value or "--")}</div>')
+
+    for name, values in common_rows:
+        append_row(name, values)
+    for group_name, note, rows in form_groups:
+        cells.append(
+            f'<div class="metric-group"><span class="metric-group-name">{esc(group_name)}</span>'
+            f'<span class="metric-group-note">{esc(note)}</span></div>'
+        )
+        for name, label, values in rows:
+            append_row(name, values, label)
     if not cells:
         cells = ['<div class="metric-name">效果</div>'] + ['<div class="metric-value">--</div>' for _ in skill_level_labels(skill)]
     return f'<div class="metric-table" style="--metric-label-width:{label_width}px">' + "".join(cells) + "</div>"
 
 
 def metric_label_width(skill: SkillView) -> int:
-    labels = [skill_metric_label(skill, name) for name, _ in skill_metric_rows(skill)] or ["效果"]
+    common_rows, form_groups = skill_metric_row_groups(skill)
+    labels = [skill_metric_label(skill, name) for name, _ in common_rows]
+    labels.extend(label for _, _, rows in form_groups for _, label, _ in rows)
+    labels = labels or ["效果"]
     display_width = max(_text_display_width(label) for label in labels)
     if display_width <= 8:
         return 92
@@ -954,6 +1824,23 @@ def potential_items(effects: Iterable[EffectView], term_styles: dict[str, TermSt
 </article>"""
         )
     return "".join(cards) if cards else '<div class="potential-item"><div class="potential-icon">--</div><div class="potential-title">暂无数据</div></div>'
+
+
+def skill_form_descriptions(
+    skill: SkillView,
+    term_styles: dict[str, TermStyleView],
+    term_icons: dict[str, str],
+) -> str:
+    if not skill.form_descriptions:
+        return ""
+    items = [
+        '<div class="skill-form-desc">'
+        f'<div class="skill-form-name">{esc(name)}</div>'
+        f'<div class="skill-form-text">{highlight_terms(description, term_styles, term_icons)}</div>'
+        '</div>'
+        for name, description in skill.form_descriptions
+    ]
+    return '<div class="skill-form-list">' + "".join(items) + "</div>"
 
 
 def effect_cards(effects: Iterable[EffectView], fallback: str, icons: dict[str, str], term_styles: dict[str, TermStyleView], term_icons: dict[str, str]) -> str:
@@ -1004,6 +1891,32 @@ def skill_metric_rows(skill: SkillView) -> list[tuple[str, list[str]]]:
     if skill.category == "连携技":
         rows = _prioritize_combo_metric_rows(rows)
     return _prefer_specific_metric_rows(rows)
+
+
+def skill_metric_row_groups(
+    skill: SkillView,
+) -> tuple[list[tuple[str, list[str]]], list[tuple[str, str, list[tuple[str, str, list[str]]]]]]:
+    rows = skill_metric_rows(skill)
+    form_definitions = (
+        ("阵诀·智", "智识值 ≥ 意志值"),
+        ("阵诀·意", "意志值 > 智识值"),
+    )
+    grouped: dict[str, list[tuple[str, str, list[str]]]] = {name: [] for name, _ in form_definitions}
+    common: list[tuple[str, list[str]]] = []
+    for name, values in rows:
+        group_name = next((prefix for prefix, _ in form_definitions if name.startswith(prefix)), "")
+        if not group_name:
+            common.append((name, values))
+            continue
+        label = name[len(group_name):].strip(" ·：:") or "效果"
+        grouped[group_name].append((name, label, values))
+    if not all(grouped[name] for name, _ in form_definitions):
+        return rows, []
+    groups = [
+        (name, note, grouped[name])
+        for name, note in form_definitions
+    ]
+    return common, groups
 
 
 def _rows_for_metric_names(skill: SkillView, names: list[str]) -> list[tuple[str, list[str]]]:
@@ -1296,9 +2209,9 @@ def stars(rarity: int) -> str:
 
 def potential_star(level: str) -> str:
     try:
-        number = max(1, min(5, int(level)))
+        number = max(0, min(5, int(level)))
     except (TypeError, ValueError):
-        number = 1
+        number = 0
     url = _local_image_data_url(ASSET_DIR / "potential" / f"wpn_potential_{number:02d}.png")
     if not url:
         return "--"

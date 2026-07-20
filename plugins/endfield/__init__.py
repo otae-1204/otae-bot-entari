@@ -27,6 +27,7 @@ from .commands import (
     choose_candidate,
     dev_visible_for_user,
     format_candidates,
+    format_error,
     format_help,
     format_not_found,
     format_source,
@@ -35,8 +36,15 @@ from .commands import (
     parse_shortcut_command,
     score_candidate,
 )
-from .draw import draw_operator_card, draw_weapon_card
-from .service import EndfieldService
+from .draw import (
+    draw_equipment_card,
+    draw_equipment_catalog_card,
+    draw_operator_card,
+    draw_operator_catalog_card,
+    draw_weapon_card,
+    draw_weapon_catalog_card,
+)
+from .service import EndfieldService, build_fz_operator_catalog_view, build_fz_weapon_catalog_view
 from .sources import source_label, source_order
 
 
@@ -44,7 +52,7 @@ client = WarfarinClient()
 service = EndfieldService(client)
 CARD_CACHE_TTL_SECONDS = 600.0
 CARD_CACHE_MAX_BYTES = 48 * 1024 * 1024
-CARD_RENDER_VERSION = "endfield-card-v7"
+CARD_RENDER_VERSION = "endfield-card-v25"
 CardCacheKey = tuple[str, str, str, str]
 _CARD_CACHE: AsyncTTLCache[CardCacheKey, bytes] = AsyncTTLCache(
     ttl_seconds=CARD_CACHE_TTL_SECONDS,
@@ -53,18 +61,23 @@ _CARD_CACHE: AsyncTTLCache[CardCacheKey, bytes] = AsyncTTLCache(
     sizeof=len,
 )
 
-Resolver = Callable[[str], Awaitable[list[EndfieldCandidate]]]
-Renderer = Callable[[str], Awaitable[bytes | None]]
+Resolver = Callable[..., Awaitable[list[EndfieldCandidate]]]
+Renderer = Callable[[str, str], Awaitable[bytes | None]]
 
 
 CONTENT_RESOLVERS: dict[str, Resolver] = {
     "operator": lambda query: _resolve_candidates_from_sources("operator", query),
     "weapon": lambda query: _resolve_candidates_from_sources("weapon", query),
+    "equipment": lambda query: _resolve_candidates_from_sources("equipment", query),
 }
 
 CONTENT_RENDERERS: dict[str, Renderer] = {
-    "operator": lambda key: _render_operator(key),
-    "weapon": lambda key: _render_weapon(key),
+    "operator": lambda key, source: _render_operator(key, source),
+    "operator_catalog": lambda key, source: _render_operator_catalog(key, source),
+    "weapon": lambda key, source: _render_weapon(key, source),
+    "weapon_catalog": lambda key, source: _render_weapon_catalog(key, source),
+    "equipment": lambda key, source: _render_equipment(key, source),
+    "equipment_catalog": lambda key, source: _render_equipment_catalog(key, source),
 }
 
 SOURCE_CANDIDATE_RESOLVERS: dict[str, dict[str, Resolver]] = {
@@ -75,6 +88,9 @@ SOURCE_CANDIDATE_RESOLVERS: dict[str, dict[str, Resolver]] = {
     "weapon": {
         "fz": lambda query: _resolve_weapon_candidates_fz(query),
         "warfarin": lambda query: _resolve_weapon_candidates_warfarin(query),
+    },
+    "equipment": {
+        "fz": lambda query, rarity: _resolve_equipment_candidates_fz(query, rarity),
     },
 }
 
@@ -92,6 +108,11 @@ endfield_operator_shortcut = on_alconna(
 )
 endfield_weapon_shortcut = on_alconna(
     Alconna(["efwp", "efweapon", "终末地武器"], Args["rest;?", MultiVar(AnyString)]),
+    priority=5,
+    block=True,
+)
+endfield_equipment_shortcut = on_alconna(
+    Alconna(["efeq", "efequipment", "终末地装备"], Args["rest;?", MultiVar(AnyString)]),
     priority=5,
     block=True,
 )
@@ -117,12 +138,19 @@ async def handle_endfield_weapon_shortcut(event: Event, rest: ArgVal):
     await _handle_command(endfield_weapon_shortcut, event, parse_shortcut_command("efwp", _rest(rest)))
 
 
+@endfield_equipment_shortcut.handle()
+async def handle_endfield_equipment_shortcut(event: Event, rest: ArgVal):
+    await _handle_command(endfield_equipment_shortcut, event, parse_shortcut_command("efeq", _rest(rest)))
+
+
 @endfield_search_shortcut.handle()
 async def handle_endfield_search_shortcut(event: Event, rest: ArgVal):
     await _handle_command(endfield_search_shortcut, event, parse_shortcut_command("efs", _rest(rest)))
 
 
 async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand) -> None:
+    if command.error:
+        return await matcher.finish(format_error(command.error))
     if command.action == "help":
         return await matcher.finish(format_help())
     if command.action == "source":
@@ -134,12 +162,21 @@ async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand)
     if command.action not in {"query", "search"}:
         return await matcher.finish(format_unknown())
     if not command.query:
-        return await matcher.finish(format_help())
+        if command.action == "query" and command.scope in {"operator", "weapon", "equipment"}:
+            command = ParsedEndfieldCommand(
+                "query",
+                scope=command.scope,
+                query="__all__",
+                source=command.source,
+                rarity=command.rarity,
+            )
+        else:
+            return await matcher.finish(format_help())
 
     started = perf_counter()
     try:
         candidate_started = perf_counter()
-        candidates = await _collect_candidates(command.scope, command.query)
+        candidates = await _collect_candidates(command.scope, command.query, command.source, command.rarity)
         candidate_seconds = perf_counter() - candidate_started
         if command.action == "search":
             title = "搜索结果" if candidates else "未找到相关结果"
@@ -156,7 +193,7 @@ async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand)
             return await matcher.finish(format_not_found(command.scope, command.query))
 
         render_started = perf_counter()
-        png = await _render_candidate(selected)
+        png = await _render_candidate(selected, command.source)
         render_seconds = perf_counter() - render_started
         if png is None:
             return await matcher.finish(format_not_found(selected.kind, command.query))
@@ -182,9 +219,14 @@ async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand)
         return await matcher.finish("图片生成失败")
 
 
-async def _collect_candidates(scope: str, query: str) -> list[EndfieldCandidate]:
-    resolver_items = CONTENT_RESOLVERS.items() if scope == "all" else [(scope, CONTENT_RESOLVERS.get(scope))]
-    tasks = [resolver(query) for _, resolver in resolver_items if resolver is not None]
+async def _collect_candidates(
+    scope: str,
+    query: str,
+    source: str = "",
+    rarity: str = "",
+) -> list[EndfieldCandidate]:
+    kinds = CONTENT_RESOLVERS if scope == "all" else (scope,)
+    tasks = [_resolve_candidates_from_sources(kind, query, source, rarity) for kind in kinds]
     if not tasks:
         return []
     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -203,15 +245,21 @@ async def _collect_candidates(scope: str, query: str) -> list[EndfieldCandidate]
     return _dedupe_candidates(candidates)
 
 
-async def _resolve_candidates_from_sources(kind: str, query: str) -> list[EndfieldCandidate]:
+async def _resolve_candidates_from_sources(
+    kind: str,
+    query: str,
+    requested_source: str = "",
+    rarity: str = "",
+) -> list[EndfieldCandidate]:
     resolvers = SOURCE_CANDIDATE_RESOLVERS.get(kind, {})
     errors: list[WarfarinAPIError] = []
-    for source in source_order(kind):
+    sources = (requested_source,) if requested_source else source_order(kind)
+    for source in sources:
         resolver = resolvers.get(source)
         if resolver is None:
             continue
         try:
-            candidates = await resolver(query)
+            candidates = await resolver(query, rarity) if kind == "equipment" else await resolver(query)
         except WarfarinAPIError as exc:
             errors.append(exc)
             logger.warning(f"[endfield] {source_label(source)} resolver failed for {kind} {query}: {exc}")
@@ -230,6 +278,17 @@ async def _resolve_operator_candidates_fz(query: str) -> list[EndfieldCandidate]
     query = query.strip()
     if not query:
         return []
+    if query == "__all__":
+        return [
+            EndfieldCandidate(
+                kind="operator_catalog",
+                key=_operator_catalog_key("", ""),
+                display_name="全部干员",
+                score=100,
+                source="fz",
+                reason="catalog",
+            )
+        ]
     title_prefix = "干员/"
     if query.startswith(title_prefix):
         name = query.split("/", 1)[-1]
@@ -245,6 +304,56 @@ async def _resolve_operator_candidates_fz(query: str) -> list[EndfieldCandidate]
         ]
 
     candidates: list[EndfieldCandidate] = []
+    professions: dict[str, str] = {}
+    try:
+        catalog = build_fz_operator_catalog_view(await client.fz_article_by_title("干员"))
+    except Exception:
+        catalog = None
+    if catalog is not None:
+        for element in catalog.elements:
+            element_score = score_candidate(query, element.name, f"{element.name}干员")
+            if element_score >= CANDIDATE_SCORE_THRESHOLD:
+                candidates.append(
+                    EndfieldCandidate(
+                        kind="operator_catalog",
+                        key=_operator_catalog_key(element.name, ""),
+                        display_name=f"{element.name}干员",
+                        score=element_score,
+                        source="fz",
+                        reason="element",
+                    )
+                )
+            for profession in element.professions:
+                professions.setdefault(profession.name, profession.name)
+                for item in profession.items:
+                    score = score_candidate(query, item.name, item.english_name, item.title)
+                    if score >= CANDIDATE_SCORE_THRESHOLD:
+                        candidates.append(
+                            EndfieldCandidate(
+                                kind="operator",
+                                key=item.title,
+                                display_name=item.name,
+                                score=score,
+                                source="fz",
+                                reason="catalog-item",
+                            )
+                        )
+    for profession in professions:
+        profession_score = score_candidate(query, profession, f"{profession}干员")
+        if profession_score >= CANDIDATE_SCORE_THRESHOLD:
+            candidates.append(
+                EndfieldCandidate(
+                    kind="operator_catalog",
+                    key=_operator_catalog_key("", profession),
+                    display_name=f"{profession}干员",
+                    score=profession_score,
+                    source="fz",
+                    reason="profession",
+                )
+            )
+    if candidates:
+        return candidates
+
     errors: list[WarfarinAPIError] = []
     try:
         summaries = await client.fz_article_summaries(title_prefix)
@@ -359,6 +468,17 @@ async def _resolve_weapon_candidates_fz(query: str) -> list[EndfieldCandidate]:
     query = query.strip()
     if not query:
         return []
+    if query == "__all__":
+        return [
+            EndfieldCandidate(
+                kind="weapon_catalog",
+                key="",
+                display_name="全部武器",
+                score=100,
+                source="fz",
+                reason="catalog",
+            )
+        ]
     title_prefix = "武器/"
     if query.startswith(title_prefix):
         name = query.split("/", 1)[-1]
@@ -373,25 +493,34 @@ async def _resolve_weapon_candidates_fz(query: str) -> list[EndfieldCandidate]:
             )
         ]
 
-    summaries = await client.fz_article_summaries(title_prefix)
+    catalog = build_fz_weapon_catalog_view(await client.fz_article_by_title("武器"))
     candidates: list[EndfieldCandidate] = []
-    for item in summaries.get("articles") or []:
-        title = str(item.get("title") or "").strip()
-        if not title:
-            continue
-        name = title.split("/", 1)[-1]
-        score = score_candidate(query, name, title)
-        if score >= CANDIDATE_SCORE_THRESHOLD:
+    for group in catalog.groups:
+        group_score = score_candidate(query, group.name, f"{group.name}武器")
+        if group_score >= CANDIDATE_SCORE_THRESHOLD:
             candidates.append(
                 EndfieldCandidate(
-                    kind="weapon",
-                    key=title,
-                    display_name=name,
-                    score=score,
+                    kind="weapon_catalog",
+                    key=group.name,
+                    display_name=f"{group.name}武器",
+                    score=group_score,
                     source="fz",
-                    reason="title",
+                    reason="weapon-type",
                 )
             )
+        for item in group.items:
+            score = score_candidate(query, item.name, item.english_name, item.title)
+            if score >= CANDIDATE_SCORE_THRESHOLD:
+                candidates.append(
+                    EndfieldCandidate(
+                        kind="weapon",
+                        key=item.title,
+                        display_name=item.name,
+                        score=score,
+                        source="fz",
+                        reason="catalog-item",
+                    )
+                )
     return candidates
 
 
@@ -452,14 +581,81 @@ async def _resolve_weapon_candidates_warfarin(query: str) -> list[EndfieldCandid
     return candidates
 
 
-async def _render_candidate(candidate: EndfieldCandidate) -> bytes | None:
+async def _resolve_equipment_candidates_fz(
+    query: str,
+    rarity_filter: str = "",
+) -> list[EndfieldCandidate]:
+    query = query.strip()
+    rarity_filter = rarity_filter or "gold"
+    if not query:
+        return []
+    if query == "__all__":
+        return [
+            EndfieldCandidate(
+                kind="equipment_catalog",
+                key=_equipment_catalog_key("", rarity_filter),
+                display_name="全部装备套组",
+                score=100,
+                source="fz",
+                reason="catalog",
+            )
+        ]
+    title_prefix = "装备/"
+    if query.startswith(title_prefix):
+        name = query.split("/", 1)[-1]
+        return [
+            EndfieldCandidate(
+                kind="equipment",
+                key=query,
+                display_name=name,
+                score=100,
+                source="fz",
+                reason="title",
+            )
+        ]
+
+    catalog = await service.get_equipment_catalog_view(rarity_filter=rarity_filter)
+    candidates: list[EndfieldCandidate] = []
+    for group in catalog.groups:
+        group_base = _equipment_group_base(group.name)
+        score = score_candidate(query, group.name, group_base, f"{group_base}套装")
+        if score >= CANDIDATE_SCORE_THRESHOLD:
+            candidates.append(
+                EndfieldCandidate(
+                    kind="equipment_catalog",
+                    key=_equipment_catalog_key(group.name, rarity_filter),
+                    display_name=group.name,
+                    score=score,
+                    source="fz",
+                    reason="group",
+                )
+            )
+        for item in group.items:
+            item_score = score_candidate(query, item.name, item.title)
+            if item_score < CANDIDATE_SCORE_THRESHOLD:
+                continue
+            candidates.append(
+                EndfieldCandidate(
+                    kind="equipment",
+                    key=item.title,
+                    display_name=item.name,
+                    score=item_score,
+                    source="fz",
+                    reason="title",
+                )
+            )
+    return candidates
+
+
+async def _render_candidate(candidate: EndfieldCandidate, requested_source: str = "") -> bytes | None:
     renderer = CONTENT_RENDERERS.get(candidate.kind)
     if renderer is None:
         return None
-    cache_key = (CARD_RENDER_VERSION, candidate.kind, candidate.source, candidate.key)
+    cache_source = requested_source or "auto"
+    cache_key = (CARD_RENDER_VERSION, candidate.kind, cache_source, candidate.key)
 
     async def render() -> bytes:
-        output = await renderer(candidate.key)
+        output = await renderer(candidate.key, requested_source)
         if output is None:
             raise _CardNotFound
         return output
@@ -469,15 +665,20 @@ async def _render_candidate(candidate: EndfieldCandidate) -> bytes | None:
     except _CardNotFound:
         return None
     logger.info(
-        f"[endfield] card-cache kind={candidate.kind} source={candidate.source} "
+        f"[endfield] card-cache kind={candidate.kind} source={cache_source} "
         f"hit={str(cache_hit).lower()} bytes={len(output)}"
     )
     return output
 
 
-async def _render_operator(key: str) -> bytes | None:
+async def _render_operator(key: str, source: str = "") -> bytes | None:
     started = perf_counter()
-    view = await service.get_operator_view(key)
+    if source == "fz":
+        view = await service.get_operator_view_from_fz(key)
+    elif source == "warfarin":
+        view = await service.get_operator_view_from_warfarin(key)
+    else:
+        view = await service.get_operator_view(key)
     if view is None:
         return None
     data_seconds = perf_counter() - started
@@ -490,9 +691,14 @@ async def _render_operator(key: str) -> bytes | None:
     return output
 
 
-async def _render_weapon(key: str) -> bytes | None:
+async def _render_weapon(key: str, source: str = "") -> bytes | None:
     started = perf_counter()
-    view = await service.get_weapon_view(key)
+    if source == "fz":
+        view = await service.get_weapon_view_from_fz(key)
+    elif source == "warfarin":
+        view = await service.get_weapon_view_from_warfarin(key)
+    else:
+        view = await service.get_weapon_view(key)
     if view is None:
         return None
     data_seconds = perf_counter() - started
@@ -500,6 +706,57 @@ async def _render_weapon(key: str) -> bytes | None:
     output = await draw_weapon_card(view)
     logger.info(
         f"[endfield] render kind=weapon data={data_seconds:.3f}s "
+        f"draw={perf_counter() - draw_started:.3f}s"
+    )
+    return output
+
+
+async def _render_equipment(key: str, source: str = "") -> bytes | None:
+    if source and source != "fz":
+        return None
+    started = perf_counter()
+    if source == "fz":
+        view = await service.get_equipment_view_from_fz(key)
+    else:
+        view = await service.get_equipment_view(key)
+    if view is None:
+        return None
+    data_seconds = perf_counter() - started
+    draw_started = perf_counter()
+    output = await draw_equipment_card(view)
+    logger.info(
+        f"[endfield] render kind=equipment data={data_seconds:.3f}s "
+        f"draw={perf_counter() - draw_started:.3f}s"
+    )
+    return output
+
+
+async def _render_operator_catalog(key: str, source: str = "") -> bytes | None:
+    if source and source != "fz":
+        return None
+    element, profession = _parse_operator_catalog_key(key)
+    view = await service.get_operator_catalog_view(element, profession)
+    return await draw_operator_catalog_card(view)
+
+
+async def _render_weapon_catalog(key: str, source: str = "") -> bytes | None:
+    if source and source != "fz":
+        return None
+    view = await service.get_weapon_catalog_view(key)
+    return await draw_weapon_catalog_card(view)
+
+
+async def _render_equipment_catalog(key: str, source: str = "") -> bytes | None:
+    if source and source != "fz":
+        return None
+    started = perf_counter()
+    group_name, rarity_filter = _parse_equipment_catalog_key(key)
+    view = await service.get_equipment_catalog_view(group_name, rarity_filter)
+    data_seconds = perf_counter() - started
+    draw_started = perf_counter()
+    output = await draw_equipment_catalog_card(view)
+    logger.info(
+        f"[endfield] render kind=equipment_catalog data={data_seconds:.3f}s "
         f"draw={perf_counter() - draw_started:.3f}s"
     )
     return output
@@ -538,7 +795,7 @@ async def _handle_dev_command(command: ParsedEndfieldCommand) -> str:
     if command.dev_action == "refresh":
         scope = _normalize_cache_scope(command.args[0] if command.args else "all")
         if scope is None or scope == "icon":
-            return "用法：/ef dev refresh <all|干员|武器> [关键词]"
+            return "用法：/ef dev refresh <all|干员|武器|装备> [关键词]"
         query = " ".join(command.args[1:]).strip()
         removed = await _clear_endfield_caches(scope)
         if not query:
@@ -559,7 +816,7 @@ async def _handle_dev_command(command: ParsedEndfieldCommand) -> str:
         if action == "clear":
             scope = _normalize_cache_scope(command.args[1] if len(command.args) > 1 else "all")
             if scope is None:
-                return "用法：/ef dev cache clear <all|operator|weapon|icon>"
+                return "用法：/ef dev cache clear <all|operator|weapon|equipment|icon>"
             removed = await _clear_endfield_caches(scope)
             return f"已清理 {scope} 缓存，共 {removed} 项。"
         return "\n".join(await _cache_status_lines())
@@ -578,6 +835,8 @@ def _normalize_cache_scope(value: str) -> str | None:
         return "operator"
     if normalized in {"weapon", "wp", "武器"}:
         return "weapon"
+    if normalized in {"equipment", "equip", "eq", "装备"}:
+        return "equipment"
     if normalized in {"icon", "icons", "图标", "素材"}:
         return "icon"
     return None
@@ -590,8 +849,9 @@ async def _clear_endfield_caches(scope: str) -> int:
         removed += await clear_http_cache("endfield-")
     elif scope == "icon":
         removed += await clear_http_cache("endfield-assets")
-    elif scope in {"operator", "weapon"}:
-        removed += await _CARD_CACHE.clear(lambda key: key[1] == scope)
+    elif scope in {"operator", "weapon", "equipment"}:
+        cache_kinds = {scope, "equipment_catalog"} if scope == "equipment" else {scope}
+        removed += await _CARD_CACHE.clear(lambda key: key[1] in cache_kinds)
         removed += await clear_http_cache("endfield-api")
     return removed
 
@@ -634,6 +894,31 @@ def _strip_title_prefix(query: str, prefix: str) -> str:
     if query.startswith(prefix):
         return query[len(prefix):]
     return query
+
+
+def _equipment_group_base(name: str) -> str:
+    name = str(name or "").strip()
+    return name[:-3] if name.endswith("装备组") else name
+
+
+def _operator_catalog_key(element: str, profession: str) -> str:
+    return f"{element}::{profession}"
+
+
+def _parse_operator_catalog_key(key: str) -> tuple[str, str]:
+    element, separator, profession = str(key or "").partition("::")
+    return (element, profession) if separator else (element, "")
+
+
+def _equipment_catalog_key(group_name: str, rarity_filter: str) -> str:
+    return f"{rarity_filter or 'gold'}::{group_name}"
+
+
+def _parse_equipment_catalog_key(key: str) -> tuple[str, str]:
+    rarity_filter, separator, group_name = str(key or "").partition("::")
+    if not separator:
+        return ("" if key == "__all__" else str(key or ""), "gold")
+    return group_name, rarity_filter or "gold"
 
 
 def _rest(match: ArgVal) -> str:

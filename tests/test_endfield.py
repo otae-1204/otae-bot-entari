@@ -49,9 +49,17 @@ models = sys.modules["endfield_for_test.models"]
 
 render_operator_card_html = draw.render_operator_card_html
 render_weapon_card_html = draw.render_weapon_card_html
+render_equipment_card_html = draw.render_equipment_card_html
+render_equipment_catalog_card_html = draw.render_equipment_catalog_card_html
+render_operator_catalog_card_html = draw.render_operator_catalog_card_html
+render_weapon_catalog_card_html = draw.render_weapon_catalog_card_html
 LEVEL_COLUMNS = models.LEVEL_COLUMNS
 build_operator_view = service.build_operator_view
 build_weapon_view = service.build_weapon_view
+build_fz_equipment_view = service.build_fz_equipment_view
+build_fz_equipment_catalog_view = service.build_fz_equipment_catalog_view
+build_fz_operator_catalog_view = service.build_fz_operator_catalog_view
+build_fz_weapon_catalog_view = service.build_fz_weapon_catalog_view
 clean_text = service.clean_text
 
 
@@ -68,6 +76,7 @@ class EndfieldCommandParserTests(unittest.TestCase):
         generic_index = handler_source.index("except Exception as exc:", api_error_index)
         self.assertLess(exit_index, generic_index)
         self.assertIn("raise", handler_source[exit_index:api_error_index])
+        self.assertIn('command.scope in {"operator", "weapon", "equipment"}', handler_source)
 
     def test_handler_reports_image_send_failure_separately(self):
         source = (ROOT / "plugins/endfield/__init__.py").read_text(encoding="utf-8")
@@ -115,6 +124,43 @@ class EndfieldCommandParserTests(unittest.TestCase):
         self.assertEqual(parsed.scope, "weapon")
         self.assertEqual(parsed.query, "赤缨")
 
+    def test_equipment_query_aliases(self):
+        parsed = commands.parse_command("装备 长息轻护甲")
+        self.assertEqual(parsed.action, "query")
+        self.assertEqual(parsed.scope, "equipment")
+        self.assertEqual(parsed.query, "长息轻护甲")
+
+        role_catalog = commands.parse_command("角色")
+        self.assertEqual(role_catalog.scope, "operator")
+        self.assertEqual(role_catalog.query, "")
+
+    def test_equipment_catalog_rarity_options(self):
+        default = commands.parse_command("装备")
+        self.assertEqual(default.scope, "equipment")
+        self.assertEqual(default.query, "")
+        self.assertEqual(default.rarity, "")
+
+        all_items = commands.parse_command("装备 --all")
+        self.assertEqual(all_items.scope, "equipment")
+        self.assertEqual(all_items.query, "")
+        self.assertEqual(all_items.rarity, "all")
+
+        purple = commands.parse_command("装备 长息 --rarity purple")
+        self.assertEqual(purple.query, "长息")
+        self.assertEqual(purple.rarity, "purple")
+
+        blue = commands.parse_shortcut_command("efeq", "巡行信使 --rarity=blue")
+        self.assertEqual(blue.query, "巡行信使")
+        self.assertEqual(blue.rarity, "blue")
+
+        invalid = commands.parse_command("装备 --rarity orange")
+        self.assertEqual(invalid.action, "invalid")
+        self.assertIn("装备稀有度", invalid.error)
+
+        parsed = commands.parse_command("eq 长息轻护甲")
+        self.assertEqual(parsed.scope, "equipment")
+        self.assertEqual(parsed.query, "长息轻护甲")
+
         parsed = commands.parse_command("wp 赤缨")
         self.assertEqual(parsed.scope, "weapon")
         self.assertEqual(parsed.query, "赤缨")
@@ -130,6 +176,41 @@ class EndfieldCommandParserTests(unittest.TestCase):
         self.assertEqual(parsed.scope, "operator")
         self.assertEqual(parsed.query, "陈")
 
+    def test_query_accepts_source_option_before_or_after_query(self):
+        parsed = commands.parse_command("--source warfarin 干员 陈千语")
+        self.assertEqual(parsed.action, "query")
+        self.assertEqual(parsed.scope, "operator")
+        self.assertEqual(parsed.query, "陈千语")
+        self.assertEqual(parsed.source, "warfarin")
+
+        parsed = commands.parse_command("武器 赤缨 --source=fz")
+        self.assertEqual(parsed.scope, "weapon")
+        self.assertEqual(parsed.query, "赤缨")
+        self.assertEqual(parsed.source, "fz")
+
+    def test_source_option_supports_short_form_and_alias(self):
+        parsed = commands.parse_command("搜索 陈 -s wf")
+        self.assertEqual(parsed.action, "search")
+        self.assertEqual(parsed.query, "陈")
+        self.assertEqual(parsed.source, "warfarin")
+
+        shortcut = commands.parse_shortcut_command("efop", "陈千语 -s fz-wiki")
+        self.assertEqual(shortcut.query, "陈千语")
+        self.assertEqual(shortcut.source, "fz")
+
+    def test_source_option_rejects_missing_unknown_and_conflicting_values(self):
+        missing = commands.parse_command("陈千语 --source")
+        self.assertEqual(missing.action, "invalid")
+        self.assertIn("需要数据源名称", missing.error)
+
+        unknown = commands.parse_command("陈千语 --source skland")
+        self.assertEqual(unknown.action, "invalid")
+        self.assertIn("不支持的数据源", unknown.error)
+
+        conflicting = commands.parse_command("陈千语 -s fz --source warfarin")
+        self.assertEqual(conflicting.action, "invalid")
+        self.assertIn("只能指定一个数据源", conflicting.error)
+
     def test_shortcuts_map_to_internal_commands(self):
         parsed = commands.parse_shortcut_command("efop", "陈千语")
         self.assertEqual(parsed.action, "query")
@@ -139,6 +220,10 @@ class EndfieldCommandParserTests(unittest.TestCase):
         parsed = commands.parse_shortcut_command("efwp", "赤缨")
         self.assertEqual(parsed.scope, "weapon")
         self.assertEqual(parsed.query, "赤缨")
+
+        parsed = commands.parse_shortcut_command("efeq", "长息轻护甲")
+        self.assertEqual(parsed.scope, "equipment")
+        self.assertEqual(parsed.query, "长息轻护甲")
 
         parsed = commands.parse_shortcut_command("efs", "陈")
         self.assertEqual(parsed.action, "search")
@@ -176,6 +261,12 @@ class EndfieldCommandParserTests(unittest.TestCase):
     def test_source_help_lists_warfarin_weapon_fallback(self):
         text = commands.format_source()
         self.assertIn("武器：FZ Wiki、Warfarin Wiki", text)
+        self.assertIn("装备：FZ Wiki", text)
+
+    def test_help_documents_source_option(self):
+        text = commands.format_help()
+        self.assertIn("--source <fz|warfarin>", text)
+        self.assertIn("-s/--source", text)
 
 
 def _sample_operator(levels: tuple[int, ...] = (9, 10, 11, 12)):
@@ -508,6 +599,259 @@ def _sample_fz_operator():
     }
 
 
+def _sample_fz_equipment():
+    return {
+        "article": {
+            "title": "装备/长息轻护甲",
+            "updatedAt": "2026-07-19T15:05:51.395Z",
+        },
+        "revision": {
+            "contentJson": {
+                "content": [
+                    {
+                        "attrs": {
+                            "hero": {
+                                "name": "长息轻护甲",
+                                "level": 70,
+                                "flavor": "某位疯狂天师的遗世之作。",
+                                "rarity": 5,
+                                "iconUrl": "https://assets.fz.wiki/equipment.png",
+                                "partType": "Body",
+                                "slotType": "护甲",
+                                "suitName": "长息",
+                                "groupName": "长息装备组",
+                                "description": "本装备由宏山选剑局设计。",
+                            },
+                            "suit": {
+                                "bonus": {
+                                    "name": "长息",
+                                    "levels": [
+                                        {
+                                            "level": 1,
+                                            "values": {"hp_up": 1000, "dmg_up": 0.16, "duration": 15},
+                                        }
+                                    ],
+                                    "description": "3件套组效果：生命值<@ba.vup>+{hp_up}</>，伤害<@ba.vup>+{dmg_up:0%}</>，持续{duration}秒。",
+                                },
+                                "pieces": [
+                                    {
+                                        "name": "长息轻护甲",
+                                        "equipId": "equip_self",
+                                        "slotType": "护甲",
+                                        "iconUrl": "https://assets.fz.wiki/equipment.png",
+                                    },
+                                    {
+                                        "name": "长息护手",
+                                        "equipId": "equip_hand",
+                                        "slotType": "护手",
+                                        "iconUrl": "https://assets.fz.wiki/hand.png",
+                                    },
+                                ],
+                                "equipCnt": 3,
+                                "suitName": "长息",
+                                "groupName": "长息装备组",
+                                "selfEquipId": "equip_self",
+                            },
+                            "stats": {
+                                "rows": [
+                                    {"label": "防御力", "values": [56, 56, 56, 56], "isPercent": False, "attrType": "Def"},
+                                    {"label": "意志", "values": [110, 121, 132, 143], "isPercent": False, "attrType": "Will"},
+                                    {"label": "终结技充能效率", "values": [0.123214, 0.1355, 0.1479, 0.1602], "isPercent": True, "attrType": "UltimateSpGainScalar"},
+                                ]
+                            },
+                            "materials": {"unlockType": "EquipFormulaChest"},
+                        }
+                    }
+                ]
+            }
+        },
+    }
+
+
+def _sample_fz_equipment_catalog():
+    def entry(name, group, rarity, slot, icon, attributes):
+        return {
+            "name": name,
+            "group": group,
+            "level": 70,
+            "title": f"装备/{name}",
+            "rarity": rarity,
+            "equipId": f"equip_{name}",
+            "iconUrl": icon,
+            "slotType": slot,
+            "attrList": [
+                {"label": label, "value": value}
+                for label, value in attributes
+            ],
+        }
+
+    return {
+        "article": {"title": "装备", "updatedAt": "2026-07-20T00:00:00.000Z"},
+        "revision": {
+            "contentJson": {
+                "content": [
+                    {
+                        "attrs": {
+                            "roster": {
+                                "entries": [
+                                    entry(
+                                        "长息轻护甲",
+                                        "长息装备组",
+                                        5,
+                                        "护甲",
+                                        "https://assets.fz.wiki/gold-body.png",
+                                        [("防御力", "56"), ("意志", "110→143"), ("终结技充能效率", "12.3%→16.0%")],
+                                    ),
+                                    entry(
+                                        "长息护手",
+                                        "长息装备组",
+                                        5,
+                                        "护手",
+                                        "https://assets.fz.wiki/gold-hand.png",
+                                        [("攻击力", "42"), ("力量", "87→113")],
+                                    ),
+                                    entry(
+                                        "巡行信使护甲",
+                                        "巡行信使装备组",
+                                        4,
+                                        "护甲",
+                                        "https://assets.fz.wiki/purple-body.png",
+                                        [("防御力", "48"), ("敏捷", "74→96")],
+                                    ),
+                                    entry(
+                                        "巡行信使护手",
+                                        "巡行信使装备组",
+                                        3,
+                                        "护手",
+                                        "https://assets.fz.wiki/blue-hand.png",
+                                        [("攻击力", "30"), ("智识", "40→52")],
+                                    ),
+                                ]
+                            }
+                        }
+                    }
+                ]
+            }
+        },
+    }
+
+
+def _sample_fz_operator_catalog():
+    return {
+        "article": {"title": "干员", "updatedAt": "2026-07-17T02:35:44.255Z"},
+        "revision": {
+            "contentJson": {
+                "content": [
+                    {
+                        "attrs": {
+                            "roster": {
+                                "entries": [
+                                    {
+                                        "name": "陈千语",
+                                        "title": "干员/陈千语",
+                                        "charId": "chr_0005_chen",
+                                        "nameEn": "Chen Qianyu",
+                                        "rarity": 5,
+                                        "element": "物理",
+                                        "elementColor": "#888888",
+                                        "profession": "近卫",
+                                        "weaponType": "单手剑",
+                                        "iconUrl": "https://assets.fz.wiki/chen.png",
+                                        "elementIconUrl": "https://assets.fz.wiki/physical.png",
+                                        "professionIconUrl": "https://assets.fz.wiki/guard.png",
+                                        "weaponTypeIconUrl": "https://assets.fz.wiki/sword.png",
+                                    },
+                                    {
+                                        "name": "狼卫",
+                                        "title": "干员/狼卫",
+                                        "charId": "chr_0006_wolfgd",
+                                        "nameEn": "Wulfgard",
+                                        "rarity": 5,
+                                        "element": "灼热",
+                                        "elementColor": "#FF623D",
+                                        "profession": "术师",
+                                        "weaponType": "手铳",
+                                        "iconUrl": "https://assets.fz.wiki/wolfgd.png",
+                                        "elementIconUrl": "https://assets.fz.wiki/fire.png",
+                                        "professionIconUrl": "https://assets.fz.wiki/caster.png",
+                                        "weaponTypeIconUrl": "https://assets.fz.wiki/pistol.png",
+                                    },
+                                    {
+                                        "name": "秋栗",
+                                        "title": "干员/秋栗",
+                                        "charId": "chr_0019_karin",
+                                        "nameEn": "Akekuri",
+                                        "rarity": 4,
+                                        "element": "灼热",
+                                        "elementColor": "#FF623D",
+                                        "profession": "先锋",
+                                        "weaponType": "单手剑",
+                                        "iconUrl": "https://assets.fz.wiki/karin.png",
+                                        "elementIconUrl": "https://assets.fz.wiki/fire.png",
+                                        "professionIconUrl": "https://assets.fz.wiki/vanguard.png",
+                                        "weaponTypeIconUrl": "https://assets.fz.wiki/sword.png",
+                                    },
+                                ]
+                            }
+                        }
+                    }
+                ]
+            }
+        },
+    }
+
+
+def _sample_fz_weapon_catalog():
+    return {
+        "article": {"title": "武器", "updatedAt": "2026-07-17T02:37:36.799Z"},
+        "revision": {
+            "contentJson": {
+                "content": [
+                    {
+                        "attrs": {
+                            "roster": {
+                                "entries": [
+                                    {
+                                        "name": "狼之绯",
+                                        "title": "武器/狼之绯",
+                                        "weaponId": "wpn_sword_0022",
+                                        "nameEn": "Lupine Scarlet",
+                                        "rarity": 6,
+                                        "weaponType": "单手剑",
+                                        "maxLv": 90,
+                                        "maxAtk": 505,
+                                        "iconUrl": "https://assets.fz.wiki/lupine.png",
+                                        "weaponTypeIconUrl": "https://assets.fz.wiki/sword.png",
+                                        "substrateIconUrl": "https://assets.fz.wiki/crit.png",
+                                        "termsMain": ["敏捷提升"],
+                                        "termsSub": ["暴击率提升"],
+                                        "termsSkill": ["切骨"],
+                                    },
+                                    {
+                                        "name": "工业零点一",
+                                        "title": "武器/工业零点一",
+                                        "weaponId": "wpn_claym_0003",
+                                        "nameEn": "Industry 0.1",
+                                        "rarity": 4,
+                                        "weaponType": "双手剑",
+                                        "maxLv": 70,
+                                        "maxAtk": 410,
+                                        "iconUrl": "https://assets.fz.wiki/industry.png",
+                                        "weaponTypeIconUrl": "https://assets.fz.wiki/claymore.png",
+                                        "termsMain": ["力量提升"],
+                                        "termsSub": ["攻击提升"],
+                                        "termsSkill": [],
+                                    },
+                                ]
+                            }
+                        }
+                    }
+                ]
+            }
+        },
+    }
+
+
 def _sample_weapon():
     return {
         "article": {
@@ -696,6 +1040,10 @@ class EndfieldServiceTests(unittest.TestCase):
         self.assertEqual(view.tags, ["输出"])
         self.assertEqual(view.weapon_type, "单手剑")
         self.assertEqual(view.species, "龙")
+        self.assertEqual(
+            view.portrait_url,
+            "https://static.warfarin.wiki/v4/characterportrait/chr_0005_chen.webp",
+        )
         self.assertEqual(len(view.skills), 4)
         self.assertEqual(len(view.talents), 2)
         self.assertEqual(len(view.potentials), 1)
@@ -722,6 +1070,203 @@ class EndfieldServiceTests(unittest.TestCase):
         view = build_operator_view(_sample_operator(levels=(9, 10)))
         values = [level.values.get("伤害倍率", "--") for level in view.skills[1].levels]
         self.assertEqual(values, ["90%", "100%", "--", "--"])
+
+    def test_warfarin_arcane_blackboard_metrics_are_localized_with_correct_units(self):
+        normal = service._extract_values(
+            {
+                "skillId": "chr_0032_lizhiyan_attack5",
+                "blackboard": [{"key": "atk_scale", "value": 0.85}],
+            },
+            "普攻",
+        )
+        ultimate = service._extract_values(
+            {
+                "skillId": "chr_0032_lizhiyan_ultimate_skill",
+                "blackboard": [
+                    {"key": "atk_scale", "value": 1.44},
+                    {"key": "duration2", "value": 15},
+                ],
+            },
+            "终结技",
+        )
+        combo = service._extract_values(
+            {
+                "skillId": "chr_0032_lizhiyan_combo_skill",
+                "blackboard": [
+                    {"key": "duration_will", "value": 6},
+                    {"key": "spell_vul_per_will", "value": 0.000125},
+                    {"key": "max_spell_vul_will", "value": 0.075},
+                    {"key": "poise_laser", "value": 0},
+                ],
+            },
+            "连携技",
+        )
+
+        self.assertEqual(normal, {"普攻倍率": "85%"})
+        self.assertEqual(ultimate["破晦阵伤害倍率"], "144%")
+        self.assertEqual(ultimate["阵法持续时间（秒）"], "15")
+        self.assertEqual(combo["阵诀·意持续时间（秒）"], "6")
+        self.assertEqual(combo["每点意志脆弱效果"], "0.0125%")
+        self.assertEqual(combo["阵诀·意最大脆弱效果"], "7.5%")
+        self.assertEqual(combo["集束打击失衡值"], "--")
+
+    def test_warfarin_arcane_ultimate_merges_wisd_and_will_second_stage_metrics(self):
+        def records(skill_id, values):
+            return {
+                "SkillPatchDataBundle": [
+                    {
+                        "level": level,
+                        "skillId": skill_id,
+                        "blackboard": [
+                            {"key": key, "value": level_values[index]}
+                            for key, level_values in values.items()
+                        ],
+                    }
+                    for index, (level, _) in enumerate(LEVEL_COLUMNS)
+                ]
+            }
+
+        primary_id = "chr_0032_lizhiyan_ultimate_skill"
+        second_id = "chr_0032_lizhiyan_ultimate_skill2"
+        skill_table = {
+            primary_id: records(
+                primary_id,
+                {
+                    "atk_scale": [1.44, 1.54, 1.66, 1.8],
+                    "atk_scale_laser": [0.36, 0.38, 0.41, 0.45],
+                    "atk_scale_laser_will": [0.36, 0.38, 0.41, 0.45],
+                },
+            ),
+            second_id: records(
+                second_id,
+                {
+                    "atk_scale": [11.52, 12.32, 13.28, 14.4],
+                    "atk_scale_will": [2.88, 3.08, 3.32, 3.6],
+                },
+            ),
+        }
+        group_map = {
+            "ultimate": {
+                "skillGroupType": 2,
+                "name": "破晦",
+                "skillIdList": [primary_id, second_id],
+            }
+        }
+
+        skill = service._build_skills(skill_table, group_map)[0]
+        rows = dict(draw.skill_metric_rows(skill))
+
+        self.assertEqual(rows["阵诀·智集束打击倍率"], ["36%", "38%", "41%", "45%"])
+        self.assertEqual(rows["阵诀·意集束打击倍率"], ["36%", "38%", "41%", "45%"])
+        self.assertEqual(rows["阵诀·智诀明伤害倍率"], ["1152%", "1232%", "1328%", "1440%"])
+        self.assertEqual(rows["阵诀·意诀明伤害倍率"], ["288%", "308%", "332%", "360%"])
+
+        common, groups = draw.skill_metric_row_groups(skill)
+        self.assertEqual([group[0] for group in groups], ["阵诀·智", "阵诀·意"])
+        self.assertEqual([row[1] for row in groups[0][2]], ["集束打击倍率", "诀明伤害倍率"])
+        self.assertEqual([row[1] for row in groups[1][2]], ["集束打击倍率", "诀明伤害倍率"])
+        self.assertNotIn("阵诀·智集束打击倍率", [name for name, _ in common])
+
+        html = draw.metric_table(skill)
+        self.assertIn('<span class="metric-group-name">阵诀·智</span>', html)
+        self.assertIn('<span class="metric-group-note">智识值 ≥ 意志值</span>', html)
+        self.assertIn('<span class="metric-group-name">阵诀·意</span>', html)
+        self.assertIn('<div class="metric-name">诀明伤害倍率</div>', html)
+
+    def test_single_form_skill_keeps_flat_metric_table(self):
+        skill = models.SkillView(
+            "single",
+            "单形态技能",
+            category="战技",
+            levels=[
+                models.SkillLevelView("Lv9", 9, {"阵诀·智伤害倍率": "100%", "失衡值": "10"})
+            ],
+        )
+
+        common, groups = draw.skill_metric_row_groups(skill)
+
+        self.assertEqual(common, draw.skill_metric_rows(skill))
+        self.assertEqual(groups, [])
+        self.assertNotIn("metric-group", draw.metric_table(skill))
+
+    def test_warfarin_combo_uses_condition_descriptions_when_group_desc_is_empty(self):
+        skill_id = "chr_0032_lizhiyan_combo_skill"
+        skill_table = {
+            skill_id: {
+                "SkillPatchDataBundle": [
+                    {
+                        "level": 9,
+                        "skillId": skill_id,
+                        "blackboard": [],
+                    }
+                ]
+            }
+        }
+        group_map = {
+            "combo": {
+                "skillGroupType": 3,
+                "name": "应龙四式",
+                "desc": "",
+                "skillIdList": [skill_id],
+                "conditionName1": "阵诀·智",
+                "conditionPostDesc1": "<@ba.key>阵诀·智</>：\n- 命中后返还技力。",
+                "conditionName2": "阵诀·意",
+                "conditionPostDesc2": "<@ba.key>阵诀·意</>：\n- 施放时牵引敌人。",
+            }
+        }
+
+        skill = service._build_skills(skill_table, group_map)[0]
+
+        self.assertEqual(skill.description, "")
+        self.assertEqual(
+            skill.form_descriptions,
+            [("阵诀·智", "命中后返还技力。"), ("阵诀·意", "施放时牵引敌人。")],
+        )
+        html = draw.skill_form_descriptions(skill, {}, {})
+        self.assertIn('<div class="skill-form-name">阵诀·智</div>', html)
+        self.assertIn('<div class="skill-form-text">命中后返还技力。</div>', html)
+        self.assertIn('<div class="skill-form-name">阵诀·意</div>', html)
+        self.assertIn('<div class="skill-form-text">施放时牵引敌人。</div>', html)
+        self.assertNotIn("- ", html)
+
+    def test_warfarin_arcane_effect_placeholders_and_expressions_are_resolved(self):
+        potential = {
+            "desc": "智识和意志+{Will:0}，源石技艺强度+{PhysicalAndSpellInflictionEnhance:0}。",
+            "dataList": [
+                {"attrModifier": {"attrType": 41, "attrValue": 15}},
+                {"attrModifier": {"attrType": 42, "attrValue": 15}},
+                {"attrModifier": {"attrType": 87, "attrValue": 16}},
+            ],
+        }
+        talent = {
+            "desc": "\n- 最大抗性提升至原本的{1+corrupt_rate:0.00}倍。\n- 每点意志施加{spell_vul_rate_per_will:0.00%}脆弱。",
+            "dataList": [
+                {
+                    "attachSkill": {
+                        "blackboard": [
+                            {"key": "corrupt_rate", "value": 0.1},
+                            {"key": "spell_vul_rate_per_will", "value": 0.0002},
+                        ]
+                    }
+                }
+            ],
+        }
+
+        self.assertEqual(service._format_effect_desc(potential), "智识和意志+15，源石技艺强度+16。")
+        rendered = service._format_effect_desc(talent)
+        self.assertEqual(rendered, "最大抗性提升至原本的1.10倍。 每点意志施加0.02%脆弱。")
+        self.assertNotIn("--", rendered)
+        self.assertNotIn("- ", rendered)
+
+    def test_warfarin_skill_template_prefers_nonzero_group_value(self):
+        records = [
+            {"level": 9, "blackboard": [{"key": "poise", "value": 0}]},
+            {"level": 9, "blackboard": [{"key": "poise", "value": 17}]},
+        ]
+
+        rendered = service._format_skill_desc("重击会造成{poise:0}点失衡。", records, "普攻")
+
+        self.assertEqual(rendered, "重击会造成17点失衡。")
 
     def test_render_operator_card_html_contains_fixed_columns_and_values(self):
         view = build_operator_view(_sample_operator())
@@ -751,6 +1296,205 @@ class EndfieldServiceTests(unittest.TestCase):
         self.assertIn(draw.normalize_rich_color("#30d6e0"), html)
         self.assertIn("归穹宇", html)
         self.assertNotIn("S01", html)
+
+    def test_build_fz_equipment_view_extracts_reference_card_fields(self):
+        view = build_fz_equipment_view(_sample_fz_equipment(), _sample_richtext())
+
+        self.assertEqual(view.name, "长息轻护甲")
+        self.assertEqual(view.max_level, 70)
+        self.assertEqual(view.rarity, 5)
+        self.assertEqual(view.slot_type, "护甲")
+        self.assertEqual(view.suit_name, "长息")
+        self.assertEqual(
+            [(stat.label, stat.value) for stat in view.stats],
+            [("防御力", "56"), ("意志", "110"), ("终结技充能效率", "12.3%")],
+        )
+        self.assertEqual(view.stats[1].values, ["110", "121", "132", "143"])
+        self.assertEqual(view.stats[2].values, ["12.3%", "13.6%", "14.8%", "16%"])
+        self.assertIn("+1000", service.clean_text(view.suit_description))
+        self.assertIn("+16%", service.clean_text(view.suit_description))
+        self.assertEqual(view.suit_required_count, 3)
+        self.assertEqual([piece.name for piece in view.suit_pieces], ["长息护手"])
+        self.assertEqual(view.acquisition, "装备制造")
+        self.assertEqual(view.source_version, "2026-07-19")
+
+    def test_render_equipment_card_html_contains_reference_layout(self):
+        view = build_fz_equipment_view(_sample_fz_equipment(), _sample_richtext())
+        with patch.object(draw, "fetch_many", AsyncMock(return_value={})):
+            html = asyncio.run(render_equipment_card_html(view))
+
+        self.assertIn('class="equipment-card"', html)
+        self.assertIn("装备属性", html)
+        self.assertIn("装备套组效果", html)
+        self.assertIn("长息轻护甲", html)
+        self.assertIn("+56", html)
+        self.assertIn("+12.3%", html)
+        self.assertIn("0锻", html)
+        self.assertIn("1锻", html)
+        self.assertIn("2锻", html)
+        self.assertIn("3锻", html)
+        self.assertIn("+143", html)
+        self.assertIn("+16%", html)
+        self.assertIn('class="equipment-stat-value strong">+143</strong>', html)
+        self.assertIn('class="equipment-stat-value strong">+16%</strong>', html)
+        self.assertIn("margin-top:auto", html)
+        self.assertIn("长息护手", html)
+        self.assertIn("font-size:60px", html)
+        self.assertIn("font-size:25px", html)
+        self.assertIn("grid-template-columns:repeat(4,minmax(0,1fr))", html)
+        self.assertEqual(html.count('class="equipment-stat-icon-img"'), 3)
+        self.assertIn("data:image/png;base64,", draw.equipment_stat_icon("Def", "防御力"))
+        self.assertTrue((ROOT / "assets/image/endfield/equipment/icon_attribute_will.png").exists())
+        self.assertNotIn("获取方式", html)
+        self.assertNotIn("终末地百科", html)
+        self.assertNotIn("equipment-id", html)
+        self.assertNotIn('class="rarity-star"', html)
+
+    def test_build_fz_equipment_view_groups_equipment_without_suit_effect(self):
+        raw = _sample_fz_equipment()
+        attrs = raw["revision"]["contentJson"]["content"][0]["attrs"]
+        attrs["suit"]["bonus"]["description"] = ""
+
+        view = build_fz_equipment_view(raw)
+
+        self.assertEqual(view.suit_name, "\u72ec\u7acb\u88c5\u5907")
+        self.assertEqual(view.group_name, "\u72ec\u7acb\u88c5\u5907\u5957\u7ec4")
+        self.assertEqual(view.suit_required_count, 0)
+        self.assertEqual(view.suit_pieces, [])
+
+    def test_build_fz_equipment_catalog_defaults_to_gold_and_filters_groups(self):
+        raw = _sample_fz_equipment_catalog()
+
+        default = build_fz_equipment_catalog_view(raw)
+        self.assertEqual(default.rarity_filter, "gold")
+        self.assertEqual(default.total_count, 2)
+        self.assertEqual([group.name for group in default.groups], ["长息装备组"])
+        self.assertEqual([item.name for item in default.groups[0].items], ["长息轻护甲", "长息护手"])
+
+        all_items = build_fz_equipment_catalog_view(raw, rarity_filter="all")
+        self.assertEqual(all_items.total_count, 4)
+        self.assertEqual(len(all_items.groups), 2)
+
+        purple = build_fz_equipment_catalog_view(raw, "巡行信使装备组", "purple")
+        self.assertEqual(purple.total_count, 1)
+        self.assertEqual(purple.groups[0].items[0].name, "巡行信使护甲")
+
+        blue = build_fz_equipment_catalog_view(raw, "巡行信使装备组", "blue")
+        self.assertEqual(blue.total_count, 1)
+        self.assertEqual(blue.groups[0].items[0].name, "巡行信使护手")
+
+    def test_build_fz_equipment_catalog_merges_independent_groups(self):
+        raw = _sample_fz_equipment_catalog()
+        entries = raw["revision"]["contentJson"]["content"][0]["attrs"]["roster"]["entries"]
+        entries.extend(
+            [
+                {
+                    "name": "\u7ebe\u96be\u91cd\u7532",
+                    "group": "\u7ebe\u96be\u88c5\u5907\u7ec4",
+                    "level": 70,
+                    "title": "\u88c5\u5907/\u7ebe\u96be\u91cd\u7532",
+                    "rarity": 5,
+                    "slotType": "\u62a4\u7532",
+                    "attrList": [],
+                },
+                {
+                    "name": "\u6d89\u6e0a\u91cd\u7532",
+                    "group": "\u6d89\u6e0a\u88c5\u5907\u7ec4",
+                    "level": 70,
+                    "title": "\u88c5\u5907/\u6d89\u6e0a\u91cd\u7532",
+                    "rarity": 5,
+                    "slotType": "\u62a4\u7532",
+                    "attrList": [],
+                },
+            ]
+        )
+
+        view = build_fz_equipment_catalog_view(raw, "\u72ec\u7acb\u88c5\u5907\u5957\u7ec4", "gold")
+
+        self.assertEqual([group.name for group in view.groups], ["\u72ec\u7acb\u88c5\u5907\u5957\u7ec4"])
+        self.assertEqual(view.total_count, 2)
+
+    def test_render_equipment_catalog_card_html_has_groups_and_attribute_icons(self):
+        view = build_fz_equipment_catalog_view(_sample_fz_equipment_catalog())
+        with patch.object(draw, "fetch_many", AsyncMock(return_value={})):
+            html = asyncio.run(render_equipment_catalog_card_html(view))
+
+        self.assertIn('class="equipment-catalog-card"', html)
+        self.assertIn("全部装备套组", html)
+        self.assertIn("金色装备", html)
+        self.assertIn("长息装备组", html)
+        self.assertIn("长息轻护甲", html)
+        self.assertNotIn("巡行信使护甲", html)
+        self.assertIn("catalog-attr-icon", html)
+        self.assertEqual(html.count('class="equipment-catalog-item rarity-5"'), 2)
+        self.assertNotIn('title="\u9632\u5fa1\u529b ', html)
+        self.assertNotIn('<span>\u9632\u5fa1\u529b</span>', html)
+
+    def test_render_specific_equipment_catalog_uses_compact_four_column_layout(self):
+        view = build_fz_equipment_catalog_view(_sample_fz_equipment_catalog())
+        view.title = view.groups[0].name
+        with patch.object(draw, "fetch_many", AsyncMock(return_value={})):
+            html = asyncio.run(render_equipment_catalog_card_html(view))
+
+        self.assertIn("width:1040px", html)
+        self.assertIn("grid-template-columns:repeat(4,minmax(0,1fr))", html)
+
+    def test_build_fz_operator_catalog_groups_by_element_then_profession(self):
+        view = build_fz_operator_catalog_view(_sample_fz_operator_catalog())
+
+        self.assertEqual(view.total_count, 3)
+        self.assertEqual([element.name for element in view.elements], ["物理", "灼热"])
+        self.assertEqual([group.name for group in view.elements[1].professions], ["术师", "先锋"])
+        self.assertEqual(view.elements[1].professions[0].items[0].name, "狼卫")
+
+        filtered = build_fz_operator_catalog_view(_sample_fz_operator_catalog(), "灼热", "先锋")
+        self.assertEqual(filtered.title, "灼热 · 先锋")
+        self.assertEqual(filtered.total_count, 1)
+        self.assertEqual(filtered.elements[0].professions[0].items[0].name, "秋栗")
+
+    def test_render_operator_catalog_card_html_has_reference_gallery_structure(self):
+        view = build_fz_operator_catalog_view(_sample_fz_operator_catalog())
+        view.elements[1].professions[1].items[0].rarity = 6
+        with patch.object(draw, "fetch_many", AsyncMock(return_value={})):
+            html = asyncio.run(render_operator_catalog_card_html(view))
+
+        self.assertIn('class="operator-catalog-card"', html)
+        self.assertIn("默认按元素分类", html)
+        self.assertIn("物理", html)
+        self.assertIn("灼热", html)
+        self.assertIn("术师", html)
+        self.assertIn("object-fit:contain", html)
+        self.assertNotIn(".operator-portrait::after", html)
+        self.assertIn("background:transparent", html)
+        self.assertIn("#f8f9f6", html)
+        self.assertLess(html.index("秋栗"), html.index("狼卫"))
+        self.assertEqual(html.count('class="operator-catalog-item rarity-'), 3)
+
+    def test_build_fz_weapon_catalog_groups_by_weapon_type(self):
+        view = build_fz_weapon_catalog_view(_sample_fz_weapon_catalog())
+
+        self.assertEqual(view.total_count, 2)
+        self.assertEqual([group.name for group in view.groups], ["单手剑", "双手剑"])
+        self.assertEqual(view.groups[0].items[0].terms_skill, ["切骨"])
+
+        filtered = build_fz_weapon_catalog_view(_sample_fz_weapon_catalog(), "双手剑")
+        self.assertEqual(filtered.title, "双手剑武器")
+        self.assertEqual(filtered.total_count, 1)
+        self.assertEqual(filtered.groups[0].items[0].name, "工业零点一")
+
+    def test_render_weapon_catalog_card_html_has_reference_gallery_structure(self):
+        view = build_fz_weapon_catalog_view(_sample_fz_weapon_catalog())
+        with patch.object(draw, "fetch_many", AsyncMock(return_value={})):
+            html = asyncio.run(render_weapon_catalog_card_html(view))
+
+        self.assertIn('class="weapon-catalog-card"', html)
+        self.assertIn("按武器类型分类", html)
+        self.assertIn("ATK 505", html)
+        self.assertIn("切骨", html)
+        self.assertIn("#f8f9f6", html)
+        self.assertNotIn('class="weapon-type-icon"', html)
+        self.assertNotIn("weapon-substrate-icon", html)
+        self.assertEqual(html.count('class="weapon-catalog-item rarity-'), 2)
 
     def test_build_weapon_view_extracts_fz_wiki_weapon_data(self):
         view = build_weapon_view(_sample_weapon(), _sample_richtext())
@@ -938,6 +1682,39 @@ class EndfieldServiceTests(unittest.TestCase):
         self.assertEqual(view.term_styles["ba.vup"].color, "#9eb7ff")
         self.assertEqual(view.term_styles["ba.conduct"].icon_url, "data:image/png;base64,")
 
+    def test_build_fz_operator_view_uses_condition_descriptions_for_multiform_skill(self):
+        raw = _sample_fz_operator()
+        combo = raw["revision"]["contentJson"]["content"][0]["attrs"]["skills"]["skills"][2]
+        combo["desc"] = ""
+        combo["conditions"] = [
+            {
+                "name": "阵诀·智",
+                "postDesc": "<@ba.key>阵诀·智</>：\n- 命中<@ba.key>囹圄</>目标时返还技力。",
+            },
+            {
+                "name": "阵诀·意",
+                "postDesc": "<@ba.key>阵诀·意</>：\n- 施放时牵引敌人。",
+            },
+        ]
+
+        view = service.build_fz_operator_view(raw, _sample_richtext())
+        skill = view.skills[2]
+
+        self.assertEqual(skill.description, "")
+        self.assertEqual(
+            skill.form_descriptions,
+            [
+                ("阵诀·智", "命中<@ba.key>囹圄</>目标时返还技力。"),
+                ("阵诀·意", "施放时牵引敌人。"),
+            ],
+        )
+        html = draw.skill_form_descriptions(skill, draw.merged_term_styles(view), {})
+        self.assertIn('<div class="skill-form-name">阵诀·智</div>', html)
+        self.assertIn("命中", html)
+        self.assertIn("囹圄", html)
+        self.assertIn('<div class="skill-form-name">阵诀·意</div>', html)
+        self.assertNotIn("- ", html)
+
     def test_fz_skill_metric_rows_keep_specific_param_table_rows(self):
         raw = _sample_fz_operator()
         skills = raw["revision"]["contentJson"]["content"][0]["attrs"]["skills"]["skills"]
@@ -1088,12 +1865,13 @@ class EndfieldServiceTests(unittest.TestCase):
         self.assertNotIn("<@ba.vup", html)
         self.assertNotIn("margin-top: auto", html)
         self.assertIn(f"left: {draw.OPERATOR_ACCENT_LEFT}px", html)
-        self.assertIn(f"height: {draw.OPERATOR_RAIL_HEIGHT}px", html)
+        self.assertIn(f"min-height: {draw.OPERATOR_RAIL_HEIGHT}px", html)
+        self.assertIn("height: auto", html)
         self.assertIn("align-content: start", html)
         self.assertNotIn("align-content: space-between", html)
         self.assertNotIn("flex: 1 1 auto", html)
         self.assertIn("align-self: start", html)
-        self.assertIn(str(draw.OPERATOR_RAIL_HEIGHT + 56), html)
+        self.assertIn("Math.ceil(rail.scrollHeight) + 56", html)
         self.assertNotIn("max-height: calc(100% - 56px)", html)
         self.assertNotIn("min-height: 244px", html)
 

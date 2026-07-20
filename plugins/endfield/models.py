@@ -29,6 +29,7 @@ class SkillView:
     icon_id: str = ""
     category: str = "技能"
     description: str = ""
+    form_descriptions: list[tuple[str, str]] = field(default_factory=list)
     levels: list[SkillLevelView] = field(default_factory=list)
     extra_levels: dict[str, list[SkillLevelView]] = field(default_factory=dict)
 
@@ -102,4 +103,152 @@ class WeaponView:
     skills: list[WeaponSkillView] = field(default_factory=list)
     rich_text_styles: dict[str, dict] = field(default_factory=dict)
     rich_text_links: dict[str, dict] = field(default_factory=dict)
+    source_version: str = ""
+
+
+@dataclass(slots=True)
+class OperatorCatalogItemView:
+    name: str
+    title: str
+    operator_id: str = ""
+    english_name: str = ""
+    rarity: int = 0
+    element: str = ""
+    element_color: str = "#888888"
+    profession: str = ""
+    weapon_type: str = ""
+    icon_url: str = ""
+    element_icon_url: str = ""
+    profession_icon_url: str = ""
+    weapon_type_icon_url: str = ""
+
+
+@dataclass(slots=True)
+class OperatorCatalogProfessionView:
+    name: str
+    icon_url: str = ""
+    items: list[OperatorCatalogItemView] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class OperatorCatalogElementView:
+    name: str
+    color: str = "#888888"
+    icon_url: str = ""
+    professions: list[OperatorCatalogProfessionView] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class OperatorCatalogView:
+    title: str
+    elements: list[OperatorCatalogElementView] = field(default_factory=list)
+    total_count: int = 0
+    element_filter: str = ""
+    profession_filter: str = ""
+    source_version: str = ""
+
+
+@dataclass(slots=True)
+class WeaponCatalogItemView:
+    name: str
+    title: str
+    weapon_id: str = ""
+    english_name: str = ""
+    rarity: int = 0
+    weapon_type: str = ""
+    max_level: int = 0
+    max_atk: int | str = "--"
+    icon_url: str = ""
+    weapon_type_icon_url: str = ""
+    substrate_icon_url: str = ""
+    terms_main: list[str] = field(default_factory=list)
+    terms_sub: list[str] = field(default_factory=list)
+    terms_skill: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class WeaponCatalogGroupView:
+    name: str
+    icon_url: str = ""
+    items: list[WeaponCatalogItemView] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class WeaponCatalogView:
+    title: str
+    groups: list[WeaponCatalogGroupView] = field(default_factory=list)
+    total_count: int = 0
+    weapon_type_filter: str = ""
+    source_version: str = ""
+
+
+@dataclass(slots=True)
+class EquipmentStatView:
+    label: str
+    value: str
+    values: list[str] = field(default_factory=list)
+    icon_key: str = ""
+
+
+@dataclass(slots=True)
+class EquipmentPieceView:
+    name: str
+    slot_type: str = "装备"
+    icon_url: str = ""
+
+
+@dataclass(slots=True)
+class EquipmentView:
+    name: str
+    title: str
+    equipment_id: str = ""
+    rarity: int = 0
+    max_level: int = 0
+    part_type: str = ""
+    slot_type: str = "装备"
+    suit_name: str = ""
+    group_name: str = ""
+    description: str = ""
+    flavor: str = ""
+    icon_url: str = ""
+    stats: list[EquipmentStatView] = field(default_factory=list)
+    suit_required_count: int = 0
+    suit_description: str = ""
+    suit_pieces: list[EquipmentPieceView] = field(default_factory=list)
+    acquisition: str = "未知方式"
+    term_styles: dict[str, TermStyleView] = field(default_factory=dict)
+    source_version: str = ""
+
+
+@dataclass(slots=True)
+class EquipmentCatalogAttributeView:
+    label: str
+    value: str = ""
+
+
+@dataclass(slots=True)
+class EquipmentCatalogItemView:
+    name: str
+    title: str
+    group_name: str
+    equipment_id: str = ""
+    level: int = 0
+    rarity: int = 0
+    slot_type: str = "装备"
+    icon_url: str = ""
+    attributes: list[EquipmentCatalogAttributeView] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class EquipmentCatalogGroupView:
+    name: str
+    items: list[EquipmentCatalogItemView] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class EquipmentCatalogView:
+    title: str
+    groups: list[EquipmentCatalogGroupView] = field(default_factory=list)
+    total_count: int = 0
+    rarity_filter: str = "gold"
     source_version: str = ""
