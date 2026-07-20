@@ -781,8 +781,22 @@ async def init_steam_info():
         steam_info_data.save()
 
 
+def _log_init_steam_info_result(task: asyncio.Task):
+    try:
+        task.result()
+    except asyncio.CancelledError:
+        return
+    except Exception:
+        logger.exception("[steamInfo] initial Steam refresh failed")
+
+
+def _start_init_steam_info():
+    task = asyncio.create_task(init_steam_info(), name="steam-info-initial-refresh")
+    task.add_done_callback(_log_init_steam_info_result)
+
+
 if not config.steam_disable_broadcast_on_startup:
-    on_ready(init_steam_info)
+    on_ready(_start_init_steam_info)
 else:
     logger.info("已禁用启动时的 Steam 信息刷新")
 

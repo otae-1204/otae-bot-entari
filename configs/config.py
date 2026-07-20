@@ -65,8 +65,8 @@ SATORI_CLIENTS: List[dict] = _env("SATORI_CLIENTS", [])
 
 # ── 全局代理 ──
 SYSTEM_PROXY: dict = {
-    "http": _env("HTTP_PROXY", "http://127.0.0.1:7890"),
-    "https": _env("HTTPS_PROXY", "https://127.0.0.1:7890"),
+    "http": str(_env("HTTP_PROXY", "") or "").strip() or None,
+    "https": str(_env("HTTPS_PROXY", "") or "").strip() or None,
 }
 
 

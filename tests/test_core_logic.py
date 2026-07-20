@@ -4025,6 +4025,46 @@ remotePort = {{ $v.Second }}
         self.assertTrue(steam.STEAM_OWNED_GAMES_URL.startswith("https://"))
         self.assertTrue(steam.STEAM_PLAYER_ACHIEVEMENTS_URL.startswith("https://"))
 
+    def test_steam_player_summaries_falls_back_to_direct_after_proxy_failure(self):
+        steam = _load_steam_module()
+        calls = []
+
+        class FakeResponse:
+            status = 200
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return None
+
+            async def json(self):
+                return {"response": {"players": [{"steamid": "123"}]}}
+
+        class FakeSession:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return None
+
+            def get(self, url, **kwargs):
+                request_proxy = kwargs.get("proxy")
+                calls.append(request_proxy)
+                if request_proxy:
+                    raise steam.aiohttp.ClientConnectionError("proxy unavailable")
+                return FakeResponse()
+
+        with patch.object(steam.aiohttp, "ClientSession", return_value=FakeSession()):
+            result = asyncio.run(
+                steam.get_steam_users_info(
+                    ["123"], ["first-key", "second-key"], "http://127.0.0.1:7890"
+                )
+            )
+
+        self.assertEqual(result["response"]["players"][0]["steamid"], "123")
+        self.assertEqual(calls, ["http://127.0.0.1:7890", None])
+
     def test_steam_app_list_prefers_official_store_service_with_api_key(self):
         steam = _load_steam_module()
 
@@ -4173,7 +4213,7 @@ remotePort = {{ $v.Second }}
         self.assertEqual(apps, [{"appid": 3527290, "name": "PEAK"}])
         self.assertEqual(fake_session.urls, list(steam.STEAM_STORE_APP_LIST_URLS))
 
-    def test_steam_app_list_uses_proxy_without_direct_retry(self):
+    def test_steam_app_list_falls_back_to_direct_after_proxy_failure(self):
         steam = _load_steam_module()
         calls = []
 
@@ -4221,7 +4261,9 @@ remotePort = {{ $v.Second }}
             calls,
             [
                 (steam.STEAM_STORE_APP_LIST_URLS[0], "http://127.0.0.1:7890"),
+                (steam.STEAM_STORE_APP_LIST_URLS[0], None),
                 (steam.STEAM_STORE_APP_LIST_URLS[1], "http://127.0.0.1:7890"),
+                (steam.STEAM_STORE_APP_LIST_URLS[1], None),
             ],
         )
 

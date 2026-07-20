@@ -78,7 +78,7 @@ BANGUMI_ALIAS_INFOBOX_KEYS = {
 
 
 def _proxy_candidates(proxy: str = None) -> List[Optional[str]]:
-    return [proxy] if proxy else [None]
+    return [proxy, None] if proxy else [None]
 
 
 def _request_proxy_candidates(url: str, proxy: str = None) -> List[Optional[str]]:
@@ -127,8 +127,8 @@ async def get_steam_users_info(
         return {"response": {"players": []}}
 
     url = STEAM_PLAYER_SUMMARIES_URL
-    for api_key in api_keys:
-        for request_proxy in _request_proxy_candidates(url, proxy):
+    for request_proxy in _request_proxy_candidates(url, proxy):
+        for api_key in api_keys:
             try:
                 async with aiohttp.ClientSession(timeout=STEAM_REQUEST_TIMEOUT) as session:
                     async with session.get(
@@ -148,8 +148,12 @@ async def get_steam_users_info(
                                 f"Steam player summaries request failed: "
                                 f"{resp.status}, {response_text}"
                             )
+                            break
             except aiohttp.ClientError as exc:
                 logger.warning(f"Steam player summaries request failed: {exc}")
+                break
+        else:
+            break
 
     logger.error("All Steam API attempts failed to get player summaries.")
     return {"response": {"players": []}}
