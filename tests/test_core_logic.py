@@ -222,6 +222,31 @@ class CoreLogicTests(unittest.TestCase):
         )))
         self.assertIsNone(entari_native.runtime.get_account())
 
+    def test_entari_handler_resolves_injected_async_provider(self):
+        entari_native = _load_module(
+            "entari_native_inject_for_test", "utils/entari_native.py"
+        )
+
+        event = types.SimpleNamespace(guild=types.SimpleNamespace(id="10001"))
+        session = types.SimpleNamespace(event=event)
+        account = types.SimpleNamespace(self_id="20002")
+        calls = []
+
+        async def get_target(event, bot):
+            calls.append((event, bot))
+            return entari_native.SendDest("10001", "10001", True)
+
+        async def handler(target=entari_native.inject(get_target)):
+            return target
+
+        result = asyncio.run(
+            entari_native._call_handler(handler, None, session, account, None)
+        )
+
+        self.assertIsInstance(result, entari_native.SendDest)
+        self.assertEqual(result.parent_id, "10001")
+        self.assertEqual(calls, [(event, account)])
+
     def test_no_direct_adapter_get_name_calls_remain(self):
         offenders = []
         for base in (ROOT / "plugins", ROOT / "utils"):

@@ -44,6 +44,11 @@ class ArgVal:
         return cls
 
 
+@dataclass(frozen=True)
+class _Injected:
+    provider: Callable[..., Any]
+
+
 @dataclass
 class SendDest:
     id: str
@@ -365,7 +370,11 @@ async def _call_handler(func: Callable[..., Any], matcher: Matcher, session: Ses
     sig = inspect.signature(func)
     for name, param in sig.parameters.items():
         anno = param.annotation
-        if name in {"event"}:
+        if isinstance(param.default, _Injected):
+            kwargs[name] = await _call_event_handler(
+                param.default.provider, session, account
+            )
+        elif name in {"event"}:
             kwargs[name] = session.event
         elif name in {"bot", "account"}:
             kwargs[name] = account
@@ -450,7 +459,7 @@ def account_adapter_name(account: Any) -> str:
 
 
 def inject(func: Callable[..., Any]):
-    return func
+    return _Injected(func)
 
 
 def stop_session() -> None:
