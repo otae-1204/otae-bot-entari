@@ -19,6 +19,7 @@ from utils.http_client import clear_http_cache, get_http_cache_stats
 from utils.temp_files import schedule_temp_file_cleanup
 
 from .client import WarfarinAPIError, WarfarinClient
+from .aliases import alias_targets
 from .commands import (
     EndfieldCandidate,
     CANDIDATE_SCORE_THRESHOLD,
@@ -35,6 +36,7 @@ from .commands import (
     parse_command,
     parse_shortcut_command,
     score_candidate,
+    score_entity_candidate,
 )
 from .draw import (
     draw_equipment_card,
@@ -326,7 +328,7 @@ async def _resolve_operator_candidates_fz(query: str) -> list[EndfieldCandidate]
             for profession in element.professions:
                 professions.setdefault(profession.name, profession.name)
                 for item in profession.items:
-                    score = score_candidate(query, item.name, item.english_name, item.title)
+                    score = score_entity_candidate("operator", query, item.name, item.english_name, item.title)
                     if score >= CANDIDATE_SCORE_THRESHOLD:
                         candidates.append(
                             EndfieldCandidate(
@@ -365,7 +367,7 @@ async def _resolve_operator_candidates_fz(query: str) -> list[EndfieldCandidate]
         if not title:
             continue
         name = title.split("/", 1)[-1]
-        score = score_candidate(query, name, title)
+        score = score_entity_candidate("operator", query, name, title)
         if score >= CANDIDATE_SCORE_THRESHOLD:
             candidates.append(
                 EndfieldCandidate(
@@ -389,7 +391,7 @@ async def _resolve_operator_candidates_fz(query: str) -> list[EndfieldCandidate]
             if not title.startswith(title_prefix):
                 continue
             name = title.split("/", 1)[-1]
-            score = score_candidate(query, name, title)
+            score = score_entity_candidate("operator", query, name, title)
             candidates.append(
                 EndfieldCandidate(
                     kind="operator",
@@ -413,7 +415,7 @@ async def _resolve_operator_candidates_warfarin(query: str) -> list[EndfieldCand
         return []
     query = _strip_title_prefix(query, "干员/")
     candidates: list[EndfieldCandidate] = []
-    if _looks_like_operator_slug(query):
+    if _looks_like_operator_slug(query) and not alias_targets("operator", query):
         candidates.append(
             EndfieldCandidate(
                 kind="operator",
@@ -431,7 +433,7 @@ async def _resolve_operator_candidates_warfarin(query: str) -> list[EndfieldCand
             continue
         slug = str(item.get("slug") or "").strip()
         name = str(item.get("name") or slug).strip()
-        score = score_candidate(query, name, slug)
+        score = score_entity_candidate("operator", query, name, slug)
         candidates.append(
             EndfieldCandidate(
                 kind="operator",
@@ -449,7 +451,7 @@ async def _resolve_operator_candidates_warfarin(query: str) -> list[EndfieldCand
         name = str(item.get("name") or slug).strip()
         if not slug or not name:
             continue
-        score = score_candidate(query, name, slug)
+        score = score_entity_candidate("operator", query, name, slug)
         if score >= CANDIDATE_SCORE_THRESHOLD:
             candidates.append(
                 EndfieldCandidate(
@@ -509,7 +511,7 @@ async def _resolve_weapon_candidates_fz(query: str) -> list[EndfieldCandidate]:
                 )
             )
         for item in group.items:
-            score = score_candidate(query, item.name, item.english_name, item.title)
+            score = score_entity_candidate("weapon", query, item.name, item.english_name, item.title)
             if score >= CANDIDATE_SCORE_THRESHOLD:
                 candidates.append(
                     EndfieldCandidate(
@@ -530,7 +532,7 @@ async def _resolve_weapon_candidates_warfarin(query: str) -> list[EndfieldCandid
         return []
     query = _strip_title_prefix(query, "武器/")
     candidates: list[EndfieldCandidate] = []
-    if _looks_like_operator_slug(query):
+    if _looks_like_operator_slug(query) and not alias_targets("weapon", query):
         candidates.append(
             EndfieldCandidate(
                 kind="weapon",
@@ -548,7 +550,7 @@ async def _resolve_weapon_candidates_warfarin(query: str) -> list[EndfieldCandid
             continue
         slug = str(item.get("slug") or "").strip()
         name = str(item.get("name") or slug).strip()
-        score = score_candidate(query, name, slug)
+        score = score_entity_candidate("weapon", query, name, slug)
         candidates.append(
             EndfieldCandidate(
                 kind="weapon",
@@ -566,7 +568,7 @@ async def _resolve_weapon_candidates_warfarin(query: str) -> list[EndfieldCandid
         name = str(item.get("name") or slug).strip()
         if not slug or not name:
             continue
-        score = score_candidate(query, name, slug)
+        score = score_entity_candidate("weapon", query, name, slug)
         if score >= CANDIDATE_SCORE_THRESHOLD:
             candidates.append(
                 EndfieldCandidate(
@@ -631,7 +633,7 @@ async def _resolve_equipment_candidates_fz(
                 )
             )
         for item in group.items:
-            item_score = score_candidate(query, item.name, item.title)
+            item_score = score_entity_candidate("equipment", query, item.name, item.title)
             if item_score < CANDIDATE_SCORE_THRESHOLD:
                 continue
             candidates.append(

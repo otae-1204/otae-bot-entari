@@ -6,6 +6,7 @@ from typing import Iterable, Sequence
 
 from pypinyin import Style, lazy_pinyin
 
+from .aliases import aliases_for
 from .sources import normalize_source, source_labels, source_order
 
 
@@ -149,6 +150,15 @@ def score_candidate(query: str, *values: str) -> int:
                     continue
                 best = max(best, min(_score_normalized_pair(query_key, value_key), 88))
     return best
+
+
+def score_entity_candidate(kind: str, query: str, canonical_name: str, *values: str) -> int:
+    return score_candidate(
+        query,
+        canonical_name,
+        *values,
+        *aliases_for(kind, canonical_name),
+    )
 
 
 def dev_visible_for_user(user_id: str, superusers: Iterable[str]) -> bool:

@@ -46,6 +46,7 @@ draw = _load_endfield_module("draw")
 service = _load_endfield_module("service")
 commands = _load_endfield_module("commands")
 models = sys.modules["endfield_for_test.models"]
+aliases = sys.modules["endfield_for_test.aliases"]
 
 render_operator_card_html = draw.render_operator_card_html
 render_weapon_card_html = draw.render_weapon_card_html
@@ -101,6 +102,27 @@ class EndfieldCommandParserTests(unittest.TestCase):
         self.assertGreater(typo, weak)
         self.assertLess(weak, commands.CLEAR_SCORE)
         self.assertGreaterEqual(commands.score_candidate("赤樱", "赤缨"), commands.CANDIDATE_SCORE_THRESHOLD)
+
+    def test_alias_library_scores_entities_and_preserves_ambiguity(self):
+        self.assertEqual(commands.score_entity_candidate("operator", "lzy", "诀"), 100)
+        self.assertEqual(commands.score_entity_candidate("weapon", "TRASH", "作品：蚀迹"), 100)
+        self.assertEqual(commands.score_entity_candidate("equipment", "拓荒终结技甲", "拓荒护甲"), 100)
+        self.assertEqual(aliases.alias_targets("operator", "管"), ("管理员(男)", "管理员(女)"))
+        self.assertEqual(
+            aliases.alias_targets("equipment", "拓荒战技甲"),
+            ("拓荒护甲·壹型", "拓荒护甲·贰型"),
+        )
+        self.assertEqual(aliases.alias_targets("weapon", "228"), ())
+        self.assertEqual(aliases.aliases_for("weapon", "不存在的武器"), ())
+
+    def test_candidate_resolvers_use_alias_scoring_before_slug_fallback(self):
+        source = (ROOT / "plugins/endfield/__init__.py").read_text(encoding="utf-8")
+
+        self.assertIn('score_entity_candidate("operator", query, item.name', source)
+        self.assertIn('score_entity_candidate("weapon", query, item.name', source)
+        self.assertIn('score_entity_candidate("equipment", query, item.name', source)
+        self.assertIn('_looks_like_operator_slug(query) and not alias_targets("operator", query)', source)
+        self.assertIn('_looks_like_operator_slug(query) and not alias_targets("weapon", query)', source)
 
     def test_default_query_uses_all_scope(self):
         parsed = commands.parse_command("陈千语")

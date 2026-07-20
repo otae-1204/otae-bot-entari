@@ -44,9 +44,10 @@ class EndfieldPerformanceBehaviorTests(unittest.IsolatedAsyncioTestCase):
 
         fake = FakeClient()
         with patch.object(endfield, "client", fake):
-            candidates = await endfield._resolve_operator_candidates_fz("莱万汀")
+            candidates = await endfield._resolve_operator_candidates_fz("lwt")
         self.assertEqual(fake.search_calls, 0)
         self.assertEqual(candidates[0].key, "干员/莱万汀")
+        self.assertEqual(candidates[0].score, 100)
 
     async def test_fz_equipment_candidates_prefer_group_then_exact_item(self):
         catalog = EquipmentCatalogView(
@@ -73,14 +74,17 @@ class EndfieldPerformanceBehaviorTests(unittest.IsolatedAsyncioTestCase):
         ) as loader:
             group_candidates = await endfield._resolve_equipment_candidates_fz("长息")
             item_candidates = await endfield._resolve_equipment_candidates_fz("长息轻护甲")
+            alias_candidates = await endfield._resolve_equipment_candidates_fz("长息充能甲")
 
         loader.assert_awaited()
         selected_group, _ = endfield.choose_candidate(group_candidates)
         selected_item, _ = endfield.choose_candidate(item_candidates)
+        selected_alias, _ = endfield.choose_candidate(alias_candidates)
         self.assertEqual(selected_group.kind, "equipment_catalog")
         self.assertEqual(selected_group.key, "gold::长息装备组")
         self.assertEqual(selected_item.kind, "equipment")
         self.assertEqual(selected_item.key, "装备/长息轻护甲")
+        self.assertEqual(selected_alias.key, "装备/长息轻护甲")
 
     async def test_fz_equipment_catalog_defaults_gold_and_accepts_all_filter(self):
         catalog = EquipmentCatalogView("全部装备套组")
