@@ -1,0 +1,182 @@
+{
+  "pages": [
+    {
+      "id": "main",
+      "file": "main.png",
+      "title": "otaebot 使用说明",
+      "columns": [
+        [
+          {
+            "heading": "Minecraft",
+            "items": [
+              "/help mc  查看服务器管理帮助",
+              "/wiki <内容>  搜索 Minecraft 中文 Wiki",
+              "/mod <mod名>  搜索 Mcmod 模组"
+            ]
+          },
+          {
+            "heading": "Steam",
+            "items": [
+              "/help steam  查看 Steam 功能帮助",
+              "/steaminfo  查询自己的 Steam 信息",
+              "/steamgame <游戏>  查本群玩家游戏时长"
+            ]
+          },
+          {
+            "heading": "终末地",
+            "items": [
+              "/help ef  查看终末地查询帮助",
+              "/ef <关键词>  查询干员、武器或装备",
+              "/ef 干员 | 武器 | 装备  查看分类速查"
+            ]
+          }
+        ],
+        [
+          {
+            "heading": "MCSM",
+            "items": [
+              "/help mcsm  查看面板与实例管理帮助",
+              "/mcsm list  查看实例列表",
+              "/mcsm status <别名>  查看实例状态"
+            ]
+          },
+          {
+            "heading": "BiliBili",
+            "items": [
+              "/help bili  查看 B 站订阅帮助",
+              "/bili list  查看订阅列表",
+              "B站链接  自动生成预览卡片"
+            ]
+          },
+          {
+            "heading": "娱乐与更多",
+            "items": [
+              "@某人 /x  把群友叉出去",
+              "/forkrank  查看被叉排行",
+              "/help list  查看可用帮助主题"
+            ]
+          }
+        ]
+      ]
+    },
+    {
+      "id": "usage",
+      "file": "使用说明.png",
+      "title": "otaebot 使用说明",
+      "columns": [
+        [
+          {
+            "heading": "Minecraft",
+            "items": [
+              "/help mc  查看服务器管理帮助",
+              "/wiki <内容>  搜索 Minecraft 中文 Wiki",
+              "/mod <mod名>  搜索 Mcmod 模组"
+            ]
+          },
+          {
+            "heading": "Steam",
+            "items": [
+              "/help steam  查看 Steam 功能帮助",
+              "/steaminfo  查询自己的 Steam 信息",
+              "/steamgame <游戏>  查本群玩家游戏时长"
+            ]
+          },
+          {
+            "heading": "终末地",
+            "items": [
+              "/help ef  查看终末地查询帮助",
+              "/ef <关键词>  查询干员、武器或装备",
+              "/ef 干员 | 武器 | 装备  查看分类速查"
+            ]
+          }
+        ],
+        [
+          {
+            "heading": "MCSM",
+            "items": [
+              "/help mcsm  查看面板与实例管理帮助",
+              "/mcsm list  查看实例列表",
+              "/mcsm status <别名>  查看实例状态"
+            ]
+          },
+          {
+            "heading": "BiliBili",
+            "items": [
+              "/help bili  查看 B 站订阅帮助",
+              "/bili list  查看订阅列表",
+              "B站链接  自动生成预览卡片"
+            ]
+          },
+          {
+            "heading": "娱乐与更多",
+            "items": [
+              "@某人 /x  把群友叉出去",
+              "/forkrank  查看被叉排行",
+              "/help list  查看可用帮助主题"
+            ]
+          }
+        ]
+      ]
+    },
+    {
+      "id": "endfield",
+      "file": "endfield.png",
+      "title": "终末地功能说明",
+      "columns": [
+        [
+          {
+            "heading": "基础查询",
+            "items": [
+              "/ef <关键词>  自动查询全部类型",
+              "/zmd <关键词>  与 /ef 相同",
+              "/ef 搜索 <关键词>  查看跨类型候选"
+            ]
+          },
+          {
+            "heading": "分类与速查",
+            "items": [
+              "/ef 干员 [名称/元素/职业]",
+              "/ef 武器 [名称/武器类型]",
+              "/ef 装备 [名称/套组名]"
+            ]
+          },
+          {
+            "heading": "快捷指令",
+            "items": [
+              "/efop <名称>  查询干员",
+              "/efwp <名称>  查询武器",
+              "/efeq <名称>  查询装备"
+            ]
+          }
+        ],
+        [
+          {
+            "heading": "数据源",
+            "items": [
+              "/ef <关键词> -s <fz|warfarin>",
+              "/ef 数据源  查看支持情况",
+              "装备数据当前使用 FZ Wiki"
+            ]
+          },
+          {
+            "heading": "装备目录",
+            "items": [
+              "/ef 装备  默认查看全部金装",
+              "/ef 装备 <套组名>  查看指定套组",
+              "--all 或 --rarity <gold|purple|blue|all>"
+            ]
+          },
+          {
+            "heading": "别名匹配",
+            "items": [
+              "支持角色、武器、装备 JSON 别名库",
+              "支持英文名、拼音和常用简称",
+              "重复别名会返回多个候选供选择"
+            ]
+          }
+        ]
+      ],
+      "footnote": "注：<>必填，[]选填；-s 指定数据源"
+    }
+  ]
+}
