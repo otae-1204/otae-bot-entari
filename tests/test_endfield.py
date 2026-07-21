@@ -95,17 +95,17 @@ class EndfieldCommandParserTests(unittest.TestCase):
         self.assertIn("zmd", commands.ROOT_ALIASES)
         self.assertIn("终末地", commands.ROOT_ALIASES)
 
-    def test_parse_loadout_command_without_delimiters_and_in_any_order(self):
+    def test_parse_loadout_command_keeps_operator_first_and_gear_in_any_order(self):
         parsed = commands.parse_command(
-            "配装 脉冲源石配件 词条2锻造2 佩丽卡 超轻域手 脉冲甲 脉冲源石配件 "
+            "配装 佩丽卡 脉冲源石配件 词条2锻造2 超轻域手 脉冲甲 脉冲源石配件 "
             "角色等级80 武器等级70 潜能3"
         )
         self.assertEqual(parsed.action, "loadout")
         self.assertEqual((parsed.char_level, parsed.weapon_level, parsed.potential, parsed.enhance), (80, 70, 3, 3))
         spec, error = commands.parse_loadout_spec(parsed.query, parsed.enhance)
         self.assertEqual(error, "")
-        self.assertEqual([item.name for item in spec.items], ["脉冲源石配件", "佩丽卡", "超轻域手", "脉冲甲", "脉冲源石配件"])
-        self.assertEqual(spec.items[0].forge_levels, ((2, 2),))
+        self.assertEqual([item.name for item in spec.items], ["佩丽卡", "脉冲源石配件", "超轻域手", "脉冲甲", "脉冲源石配件"])
+        self.assertEqual(spec.items[1].forge_levels, ((2, 2),))
         self.assertEqual(spec.items[-1].forge_levels, ())
 
     def test_parse_loadout_rejects_invalid_enhance(self):
@@ -128,11 +128,21 @@ class EndfieldCommandParserTests(unittest.TestCase):
         self.assertGreater(typo, weak)
         self.assertLess(weak, commands.CLEAR_SCORE)
         self.assertGreaterEqual(commands.score_candidate("赤樱", "赤缨"), commands.CANDIDATE_SCORE_THRESHOLD)
+        self.assertLess(
+            commands.score_candidate("塞希", "集成实训护甲"),
+            commands.CANDIDATE_SCORE_THRESHOLD,
+        )
 
     def test_alias_library_scores_entities_and_preserves_ambiguity(self):
         self.assertEqual(commands.score_entity_candidate("operator", "lzy", "诀"), 100)
         self.assertEqual(commands.score_entity_candidate("weapon", "TRASH", "作品：蚀迹"), 100)
         self.assertEqual(commands.score_entity_candidate("equipment", "拓荒终结技甲", "拓荒护甲"), 100)
+        self.assertEqual(commands.score_entity_candidate("operator", "塞希", "赛希"), 100)
+        self.assertEqual(commands.score_entity_candidate("equipment", "纾难甲", "纾难护甲"), 100)
+        self.assertLess(
+            commands.score_entity_candidate("operator", "纾难甲", "赛希"),
+            commands.CANDIDATE_SCORE_THRESHOLD,
+        )
         self.assertEqual(aliases.alias_targets("operator", "管"), ("管理员(男)", "管理员(女)"))
         self.assertEqual(
             aliases.alias_targets("equipment", "拓荒战技甲"),
@@ -149,6 +159,8 @@ class EndfieldCommandParserTests(unittest.TestCase):
         self.assertIn('score_entity_candidate("equipment", query, item.name', source)
         self.assertIn('_looks_like_operator_slug(query) and not alias_targets("operator", query)', source)
         self.assertIn('_looks_like_operator_slug(query) and not alias_targets("weapon", query)', source)
+        self.assertIn('candidate_kind = "operator" if index == 0 else "gear"', source)
+        self.assertIn('allowed_kinds = {"weapon", "equipment"}', source)
 
     def test_default_query_uses_all_scope(self):
         parsed = commands.parse_command("陈千语")

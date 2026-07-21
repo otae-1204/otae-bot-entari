@@ -236,10 +236,12 @@ async def _handle_loadout(matcher, command: ParsedEndfieldCommand) -> None:
             return await matcher.finish(f"配装参数错误：{error or '已取消'}")
 
         resolved: list[tuple[EndfieldCandidate, tuple[tuple[int, int], ...]]] = []
-        for item in spec.items:
-            candidate = await _resolve_loadout_candidate("all", item.name)
+        for index, item in enumerate(spec.items):
+            candidate_kind = "operator" if index == 0 else "gear"
+            candidate = await _resolve_loadout_candidate(candidate_kind, item.name)
             if candidate is None:
-                return await matcher.finish(f"未找到配装内容：{item.name}")
+                label = "干员" if index == 0 else "武器或装备"
+                return await matcher.finish(f"未找到{label}：{item.name}")
             if item.forge_levels and candidate.kind != "equipment":
                 return await matcher.finish(f"只有装备可以设置词条锻造：{item.name}")
             resolved.append((candidate, item.forge_levels))
@@ -286,7 +288,7 @@ async def _handle_loadout(matcher, command: ParsedEndfieldCommand) -> None:
 
 async def _prompt_loadout_spec(default_enhance: int) -> tuple[ParsedLoadoutSpec | None, str]:
     answer = await prompt(
-        "请发送干员、可选武器和装备名称，使用空格分隔，顺序任意。\n"
+        "请先发送干员名称，再填写可选武器和装备名称，使用空格分隔；武器与装备顺序任意。\n"
         "单独调整词条可在装备后追加：词条2锻造2",
         timeout=90,
     )
@@ -302,10 +304,15 @@ async def _prompt_loadout_spec(default_enhance: int) -> tuple[ParsedLoadoutSpec 
 async def _resolve_loadout_candidate(kind: str, query: str) -> EndfieldCandidate | None:
     raw_candidates = (
         await _collect_candidates("all", query, "fz", "all")
-        if kind == "all"
+        if kind in {"all", "gear"}
         else await _resolve_candidates_from_sources(kind, query, "fz", "all")
     )
-    allowed_kinds = {"operator", "weapon", "equipment"} if kind == "all" else {kind}
+    if kind == "all":
+        allowed_kinds = {"operator", "weapon", "equipment"}
+    elif kind == "gear":
+        allowed_kinds = {"weapon", "equipment"}
+    else:
+        allowed_kinds = {kind}
     candidates = [item for item in raw_candidates if item.kind in allowed_kinds and item.source == "fz"]
     selected, ambiguous = choose_candidate(candidates)
     if selected is not None:

@@ -173,11 +173,8 @@ def score_candidate(query: str, *values: str) -> int:
         if not normalized_value:
             continue
         best = max(best, _score_normalized_pair(normalized_query, normalized_value))
-        for query_key in query_keys:
-            for value_key in _search_keys(value):
-                if query_key == normalized_query and value_key == normalized_value:
-                    continue
-                best = max(best, min(_score_normalized_pair(query_key, value_key), 88))
+        for query_key, value_key in zip(query_keys, _search_keys(value)):
+            best = max(best, min(_score_search_key_pair(query_key, value_key), 88))
     return best
 
 
@@ -213,7 +210,7 @@ def format_help() -> str:
             "干员速查：/ef 干员；可按元素或职业筛选，例如 /ef 干员 灼热、/ef 干员 术师。",
             "武器速查：/ef 武器；可按类型筛选，例如 /ef 武器 单手剑。",
             "装备目录：默认仅金色；--all 显示全部，--rarity 可选 gold、purple、blue、all。",
-            "配装无需固定顺序；省略武器时自动使用干员推荐武器。干员/武器默认90级，装备词条默认3锻。",
+            "配装第一个名称固定为干员；之后武器与装备无需固定顺序，省略武器时自动使用推荐武器。干员/武器默认90级，装备词条默认3锻。",
             "单独调整词条：在装备后追加“词条2锻造2”；可重复追加多个词条设置。",
             "快捷：/efop <名称>、/efwp <名称>、/efeq <名称>、/终末地干员 <名称>、/终末地武器 <名称>、/终末地装备 <名称>",
         ]
@@ -439,18 +436,13 @@ def _normalize(text: str) -> str:
     return "".join(char for char in str(text or "").lower() if char.isalnum())
 
 
-def _search_keys(text: str) -> set[str]:
+def _search_keys(text: str) -> tuple[str, str]:
     normalized = _normalize(text)
     if not normalized:
-        return set()
-    keys = {normalized}
+        return "", ""
     full_pinyin = _normalize("".join(lazy_pinyin(str(text or ""), errors="default")))
     initials = _normalize("".join(lazy_pinyin(str(text or ""), style=Style.FIRST_LETTER, errors="default")))
-    if full_pinyin:
-        keys.add(full_pinyin)
-    if initials:
-        keys.add(initials)
-    return keys
+    return full_pinyin, initials
 
 
 def _score_normalized_pair(query: str, value: str) -> int:
@@ -481,3 +473,15 @@ def _score_normalized_pair(query: str, value: str) -> int:
     elif ratio >= 0.66:
         best = max(best, 65)
     return best
+
+
+def _score_search_key_pair(query: str, value: str) -> int:
+    if query.isascii() and value.isascii():
+        shorter_length = min(len(query), len(value))
+        if shorter_length < 2:
+            return 0
+        score = _score_normalized_pair(query, value)
+        if shorter_length < 3 and score in {72, 82}:
+            return 0
+        return score
+    return _score_normalized_pair(query, value)
