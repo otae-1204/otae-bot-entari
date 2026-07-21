@@ -1185,7 +1185,7 @@ def _loadout_effect_target(key: str, clause: str, *, allow_label_fallback: bool)
         for tokens, semantic_target in semantic_targets:
             if any(token in lowered for token in tokens):
                 return semantic_target
-    if "atk" in lowered:
+    if re.fullmatch(r"(?:owner_)?(?:atk|attack)(?:_(?:up|increase|bonus|percent|pct))?", lowered):
         return "AtkPercent"
     if not allow_label_fallback:
         return ""

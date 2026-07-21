@@ -1215,12 +1215,46 @@ class EndfieldServiceTests(unittest.TestCase):
         )
         self.assertEqual(
             service._loadout_effect_target(
+                "atk_scale_touch",
+                "连携技伤害倍率提升至原本的1.3倍",
+                allow_label_fallback=False,
+            ),
+            "",
+        )
+        self.assertEqual(
+            service._loadout_effect_target(
                 "PhysicalAndSpellInflictionEnhance",
                 "智识和意志+15，源石技艺强度+16",
                 allow_label_fallback=False,
             ),
             "PhysicalAndSpellInflictionEnhance",
         )
+
+    def test_loadout_does_not_treat_skill_multiplier_as_attack_percent(self):
+        baseline = build_fz_loadout_view(_sample_loadout_operator(), _sample_loadout_weapon(), [])
+        operator = copy.deepcopy(_sample_loadout_operator())
+        attrs = operator["revision"]["contentJson"]["content"][0]["attrs"]
+        attrs["potentials"] = {
+            "potentials": [
+                {
+                    "name": "观海",
+                    "desc": (
+                        "连携技<@ba.key>应龙四式</>效果加强：\n"
+                        "伤害倍率提升至原本的<@ba.vup>{atk_scale_touch:0.0}</>倍。\n"
+                        "施加的自然脆弱和寒冷脆弱效果额外<@ba.vup>+{rate_pre:0%}</>。"
+                    ),
+                    "values": {"atk_scale_touch": 1.3, "rate_pre": 0.06},
+                }
+            ]
+        }
+
+        view = build_fz_loadout_view(operator, _sample_loadout_weapon(), [])
+
+        baseline_attack = next(row.value for row in baseline.primary_stats if row.key == "Atk")
+        attack = next(row.value for row in view.primary_stats if row.key == "Atk")
+        self.assertEqual(attack, baseline_attack)
+        potential = next(effect for effect in view.effects if effect.source == "干员 · 观海")
+        self.assertFalse(potential.active)
 
     def test_loadout_calculates_conduct_levels_and_forced_conduct_traits(self):
         operator = copy.deepcopy(_sample_loadout_operator())
