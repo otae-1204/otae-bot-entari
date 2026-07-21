@@ -721,6 +721,7 @@ LOADOUT_EFFECT_KEY_TARGETS = {
     "crit_damage": "CriticalDamageIncrease",
     "dmg_up": "AllDamageIncrease",
     "ultimate_gain_up": "UltimateSpGainScalar",
+    "phy_spell_up": "PhysicalAndSpellInflictionEnhance",
     "phy_dmg_up": "PhysicalDamageIncrease",
     "spell_dmg_up": "SpellDamageIncrease",
     "fire_dmg_up": "FireDamageIncrease",

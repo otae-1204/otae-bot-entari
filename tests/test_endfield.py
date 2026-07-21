@@ -1207,6 +1207,12 @@ class EndfieldServiceTests(unittest.TestCase):
         self.assertEqual(view.equipment[0].enhance_levels, (3, 1, 3))
         self.assertEqual({row.key: row.value for row in view.ability_stats}["Str"], "40")
 
+    def test_loadout_maps_originium_arts_strength_separately_from_physical_damage(self):
+        self.assertEqual(
+            service._loadout_effect_target("phy_spell_up", "源石技艺强度 +30", allow_label_fallback=False),
+            "PhysicalAndSpellInflictionEnhance",
+        )
+
     def test_loadout_card_html_shows_static_and_triggered_effects(self):
         view = build_fz_loadout_view(
             _sample_loadout_operator(),
