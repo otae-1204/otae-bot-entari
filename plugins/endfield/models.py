@@ -243,6 +243,9 @@ class EquipmentCatalogItemView:
 class EquipmentCatalogGroupView:
     name: str
     items: list[EquipmentCatalogItemView] = field(default_factory=list)
+    suit_name: str = ""
+    suit_required_count: int = 0
+    suit_effect_description: str = ""
 
 
 @dataclass(slots=True)

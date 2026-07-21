@@ -31,6 +31,7 @@ from utils.temp_files import schedule_temp_file_cleanup
 from .models import (
     EffectView,
     EquipmentCatalogAttributeView,
+    EquipmentCatalogGroupView,
     EquipmentCatalogItemView,
     EquipmentCatalogView,
     EquipmentView,
@@ -1156,6 +1157,10 @@ def _render_equipment_catalog_html(
 .catalog-group-header {{ min-height:36px; display:flex; align-items:center; justify-content:space-between; gap:16px; padding:6px 10px; border-left:8px solid var(--catalog-accent); border-bottom:3px solid #20252a; }}
 .catalog-group-name {{ font-size:21px; font-weight:950; }}
 .catalog-group-meta {{ color:#727b81; font-size:12px; font-weight:850; }}
+.catalog-suit-effect {{ display:grid; grid-template-columns:auto minmax(0,1fr); gap:10px; align-items:start; margin-top:8px; padding:9px 11px; border:1px solid rgba(23,27,31,.17); border-left:6px solid #286cd6; background:#e9edef; }}
+.catalog-suit-badge {{ padding:4px 8px; background:#20252a; color:#fff; font-size:11px; font-weight:950; white-space:nowrap; }}
+.catalog-suit-copy {{ color:#3f4a51; font-size:12px; line-height:1.5; font-weight:800; }}
+.catalog-suit-copy .vup,.catalog-suit-copy .term,.catalog-suit-copy .rich-style,.catalog-suit-copy strong {{ color:#286cd6 !important; font-weight:950; }}
     .catalog-items {{ display:grid; grid-template-columns:repeat({columns},minmax(0,1fr)); gap:7px; margin-top:8px; }}
 .equipment-catalog-item {{ position:relative; min-height:104px; display:grid; grid-template-columns:70px minmax(0,1fr); gap:7px; padding:8px; overflow:visible; border:1px solid rgba(23,27,31,.17); background:#f4f6f5; }}
 .equipment-catalog-item.rarity-5 {{ border-top:4px solid #c88a00; }}
@@ -1194,16 +1199,31 @@ def equipment_catalog_groups(view: EquipmentCatalogView, item_icons: dict[str, s
             slot_counts[item.slot_type] = slot_counts.get(item.slot_type, 0) + 1
         meta = " · ".join(f"{slot}{count}" for slot, count in slot_counts.items())
         items = "".join(equipment_catalog_item(item, item_icons) for item in group.items)
+        suit_effect = equipment_catalog_suit_effect(group)
         groups.append(
             '<section class="equipment-catalog-group">'
             '<div class="catalog-group-header">'
             f'<div class="catalog-group-name">{esc(group.name)}</div>'
             f'<div class="catalog-group-meta">共 {len(group.items)} 件 · {esc(meta)}</div>'
             '</div>'
+            f'{suit_effect}'
             f'<div class="catalog-items">{items}</div>'
             '</section>'
         )
     return "".join(groups)
+
+
+def equipment_catalog_suit_effect(group: EquipmentCatalogGroupView) -> str:
+    if not group.suit_effect_description:
+        return ""
+    required = f"{group.suit_required_count}件套" if group.suit_required_count else "套组效果"
+    description = highlight_terms(group.suit_effect_description, {}, {}).replace("\n", "<br>")
+    return (
+        '<div class="catalog-suit-effect">'
+        f'<span class="catalog-suit-badge">{esc(required)}</span>'
+        f'<div class="catalog-suit-copy">{description}</div>'
+        '</div>'
+    )
 
 
 def equipment_catalog_item(

@@ -265,7 +265,21 @@ class EndfieldService:
         rarity_filter: str = "gold",
     ) -> EquipmentCatalogView:
         raw = await self.client.fz_article_by_title("装备")
-        return build_fz_equipment_catalog_view(raw, group_name, rarity_filter)
+        view = build_fz_equipment_catalog_view(raw, group_name, rarity_filter)
+        representative_titles = [
+            group.items[0].title
+            for group in view.groups
+            if group.items and group.name != "独立装备套组"
+        ]
+        detail_results = await asyncio.gather(
+            *(self.client.fz_article_by_title(title) for title in representative_titles),
+            return_exceptions=True,
+        )
+        _apply_fz_equipment_catalog_suit_effects(
+            view,
+            [result for result in detail_results if isinstance(result, dict)],
+        )
+        return view
 
     async def get_operator_catalog_view(
         self,
@@ -1525,6 +1539,36 @@ def build_fz_equipment_catalog_view(
         rarity_filter=rarity_filter,
         source_version=str(article.get("updatedAt") or "")[:10],
     )
+
+
+def _apply_fz_equipment_catalog_suit_effects(
+    view: EquipmentCatalogView,
+    detail_raws: list[dict[str, Any]],
+) -> None:
+    groups = {group.name: group for group in view.groups}
+    for raw in detail_raws:
+        attrs = _fz_template_attrs(raw)
+        suit = attrs.get("suit") if isinstance(attrs.get("suit"), dict) else {}
+        bonus = suit.get("bonus") if isinstance(suit.get("bonus"), dict) else {}
+        group_name = _normalize_equipment_group_name(_first_text(suit, "groupName"))
+        group = groups.get(group_name)
+        if group is None or not bonus:
+            continue
+        levels = [
+            level
+            for level in _unwrap_fz_list(bonus.get("levels"), "levels", "items", "list")
+            if isinstance(level, dict)
+        ]
+        selected = levels[-1] if levels else {}
+        values = selected.get("values") if isinstance(selected.get("values"), dict) else {}
+        description = _format_fz_template(
+            _first_text(bonus, "description", "desc"),
+            values,
+        )
+        description = re.sub(r"^\s*\d+\s*件套组效果\s*[：:]\s*", "", description)
+        group.suit_name = _first_text(suit, "suitName") or _first_text(bonus, "name")
+        group.suit_required_count = _to_int(_first_value(suit, "equipCnt", "requiredCount"))
+        group.suit_effect_description = description
 
 
 def build_fz_operator_catalog_view(

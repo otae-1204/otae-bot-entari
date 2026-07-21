@@ -1762,6 +1762,28 @@ class EndfieldServiceTests(unittest.TestCase):
         self.assertEqual(blue.total_count, 1)
         self.assertEqual(blue.groups[0].items[0].name, "巡行信使护手")
 
+    def test_equipment_catalog_loads_group_suit_effect_from_representative_item(self):
+        client = types.SimpleNamespace(
+            fz_article_by_title=AsyncMock(
+                side_effect=[_sample_fz_equipment_catalog(), _sample_fz_equipment()]
+            )
+        )
+
+        view = asyncio.run(
+            service.EndfieldService(client).get_equipment_catalog_view("长息装备组", "gold")
+        )
+
+        group = view.groups[0]
+        self.assertEqual(group.suit_name, "长息")
+        self.assertEqual(group.suit_required_count, 3)
+        self.assertIn("生命值<@ba.vup>+1000</>", group.suit_effect_description)
+        self.assertIn("伤害<@ba.vup>+16%</>", group.suit_effect_description)
+        self.assertNotIn("3件套组效果", group.suit_effect_description)
+        self.assertEqual(
+            [call.args[0] for call in client.fz_article_by_title.await_args_list],
+            ["装备", "装备/长息轻护甲"],
+        )
+
     def test_build_fz_equipment_catalog_merges_independent_groups(self):
         raw = _sample_fz_equipment_catalog()
         entries = raw["revision"]["contentJson"]["content"][0]["attrs"]["roster"]["entries"]
@@ -1795,6 +1817,7 @@ class EndfieldServiceTests(unittest.TestCase):
 
     def test_render_equipment_catalog_card_html_has_groups_and_attribute_icons(self):
         view = build_fz_equipment_catalog_view(_sample_fz_equipment_catalog())
+        service._apply_fz_equipment_catalog_suit_effects(view, [_sample_fz_equipment()])
         with patch.object(draw, "fetch_many", AsyncMock(return_value={})):
             html = asyncio.run(render_equipment_catalog_card_html(view))
 
@@ -1806,6 +1829,9 @@ class EndfieldServiceTests(unittest.TestCase):
         self.assertNotIn("巡行信使护甲", html)
         self.assertIn("catalog-attr-icon", html)
         self.assertEqual(html.count('class="equipment-catalog-item rarity-5"'), 2)
+        self.assertIn('class="catalog-suit-effect"', html)
+        self.assertIn("3件套", html)
+        self.assertIn('<span class="vup"><strong>+16%</strong></span>', html)
         self.assertNotIn('title="\u9632\u5fa1\u529b ', html)
         self.assertNotIn('<span>\u9632\u5fa1\u529b</span>', html)
 
