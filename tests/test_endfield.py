@@ -1208,6 +1208,34 @@ class EndfieldServiceTests(unittest.TestCase):
         self.assertEqual(view.equipment[0].enhance_levels, (3, 1, 3))
         self.assertEqual({row.key: row.value for row in view.ability_stats}["Str"], "40")
 
+    def test_loadout_applies_equipment_sub_attribute_base_multiplier(self):
+        equipment = _sample_loadout_equipment("Body")
+        rows = equipment["revision"]["contentJson"]["content"][0]["attrs"]["stats"]["rows"]
+        rows.append(
+            {
+                "label": "副能力",
+                "values": [10, 10, 10, 10],
+                "compositeAttr": "Sub",
+                "modifierType": "BaseAddition",
+            }
+        )
+        rows.append(
+            {
+                "label": "副能力",
+                "values": [0.3, 0.3, 0.3, 0.3],
+                "compositeAttr": "Sub",
+                "modifierType": "BaseMultiplier",
+            }
+        )
+
+        view = build_fz_loadout_view(
+            _sample_loadout_operator(),
+            _sample_loadout_weapon(),
+            [(equipment, 3, ())],
+        )
+
+        self.assertEqual({row.key: row.value for row in view.ability_stats}["Will"], "78")
+
     def test_loadout_maps_originium_arts_strength_separately_from_physical_damage(self):
         self.assertEqual(
             service._loadout_effect_target("phy_spell_up", "源石技艺强度 +30", allow_label_fallback=False),

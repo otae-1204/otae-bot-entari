@@ -794,6 +794,7 @@ def build_fz_loadout_view(
 
     base_stats = _fz_operator_attributes_at_level(operator_attrs.get("attributes"), operator_level)
     additions: dict[str, float] = {}
+    base_multipliers: dict[str, float] = {}
     final_additions: dict[str, float] = {}
     multipliers: dict[str, float] = {}
     effects: list[LoadoutEffectView] = []
@@ -833,6 +834,7 @@ def build_fz_loadout_view(
                     main_attribute,
                     sub_attribute,
                     additions,
+                    base_multipliers,
                     final_additions,
                     multipliers,
                 )
@@ -877,6 +879,8 @@ def build_fz_loadout_view(
     stats = dict(base_stats)
     for key, value in additions.items():
         stats[key] = stats.get(key, 0.0) + value
+    for key, value in base_multipliers.items():
+        stats[key] = stats.get(key, 0.0) * (1 + value)
     operator_attack = base_stats.get("Atk", 0.0)
     weapon_attack = _fz_weapon_attack_at_level(weapon_attrs.get("stats"), weapon_level)
     attack_percent = additions.get("AtkPercent", 0.0)
@@ -1009,6 +1013,7 @@ def _apply_loadout_equipment_row(
     main_attribute: str,
     sub_attribute: str,
     additions: dict[str, float],
+    base_multipliers: dict[str, float],
     final_additions: dict[str, float],
     multipliers: dict[str, float],
 ) -> None:
@@ -1027,6 +1032,8 @@ def _apply_loadout_equipment_row(
     modifier = str(row.get("modifierType") or "BaseAddition")
     if modifier == "BaseFinalAddition":
         final_additions[target] = final_additions.get(target, 0.0) + value
+    elif modifier == "BaseMultiplier":
+        base_multipliers[target] = base_multipliers.get(target, 0.0) + value
     elif modifier == "BaseFinalMultiplier":
         multipliers[target] = multipliers.get(target, 1.0) * value
     elif target == "Atk" and bool(row.get("isPercent")):
