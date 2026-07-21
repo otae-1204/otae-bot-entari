@@ -603,7 +603,7 @@ html,body{{margin:0;width:1500px;background:#d9dde0;color:#171b1f;font-family:"M
 <section class="loadout-section"><h2 class="section-title">装备配置</h2><div class="loadout-items">{equipment_html}</div></section>
 <section class="loadout-section"><h2 class="section-title">进阶面板</h2><div class="advanced-grid">{stat_cards(view.advanced_stats)}</div></section>
 <section class="loadout-section"><h2 class="section-title">最终异常效果</h2><div class="status-summary">源石技艺附带效果增益 <b>+{view.status_effect_bonus * 100:.1f}%</b>　公式 2 × 源石技艺强度 ÷（源石技艺强度 + 300）</div><div class="status-grid">{status_cards()}</div></section>
-<section class="loadout-section"><h2 class="section-title">效果明细</h2><div class="effect-columns"><div><div class="effect-note">已计入面板的常驻效果</div><div class="loadout-effect-list">{effect_cards(active_effects)}</div></div><div><div class="effect-note">条件 / 触发效果</div><div class="loadout-effect-list">{effect_cards(triggered_effects)}</div></div></div></section>
+<section class="loadout-section"><h2 class="section-title">效果明细</h2><div class="effect-columns"><div><div class="effect-note">常驻 / 无触发条件效果</div><div class="loadout-effect-list">{effect_cards(active_effects)}</div></div><div><div class="effect-note">条件 / 触发效果</div><div class="loadout-effect-list">{effect_cards(triggered_effects)}</div></div></div></section>
 <footer class="loadout-note"><strong>计算说明</strong>　攻击力按配装公式计算，能力值使用四维属性整数部分；生命值计入 5 × 力量，敏捷 / 智识 / 意志换算对应派生属性。显示结果按游戏规则向下取整。</footer>
 </main></body></html>'''
 

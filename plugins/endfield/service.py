@@ -737,6 +737,11 @@ LOADOUT_EFFECT_KEY_TARGETS = {
     "critical_damage": "CriticalDamageIncrease",
     "criticaldamageincrease": "CriticalDamageIncrease",
     "crit_damage": "CriticalDamageIncrease",
+    "heal": "HealOutputIncrease",
+    "heal_up": "HealOutputIncrease",
+    "heal_output_up": "HealOutputIncrease",
+    "second_attr_up": "SubPercent",
+    "sub_attr_up": "SubPercent",
     "dmg_up": "AllDamageIncrease",
     "ultimate_gain_up": "UltimateSpGainScalar",
     "phy_spell_up": "PhysicalAndSpellInflictionEnhance",
@@ -800,6 +805,8 @@ def build_fz_loadout_view(
     effects: list[LoadoutEffectView] = []
 
     main_attribute, sub_attribute = _fz_main_sub_attributes(operator_hero)
+    main_key = _loadout_attribute_key(main_attribute)
+    sub_key = _loadout_attribute_key(sub_attribute)
     equipment_views: list[LoadoutEquipmentView] = []
     suits: dict[str, dict[str, Any]] = {}
     suit_counts: dict[str, int] = {}
@@ -876,6 +883,9 @@ def build_fz_loadout_view(
                 effects,
             )
 
+    sub_percent = additions.pop("SubPercent", 0.0)
+    if sub_percent:
+        base_multipliers[sub_key] = base_multipliers.get(sub_key, 0.0) + sub_percent
     stats = dict(base_stats)
     for key, value in additions.items():
         stats[key] = stats.get(key, 0.0) + value
@@ -885,8 +895,6 @@ def build_fz_loadout_view(
     weapon_attack = _fz_weapon_attack_at_level(weapon_attrs.get("stats"), weapon_level)
     attack_percent = additions.get("AtkPercent", 0.0)
     fixed_attack = final_additions.get("Atk", 0.0)
-    main_key = _loadout_attribute_key(main_attribute)
-    sub_key = _loadout_attribute_key(sub_attribute)
     main_value = math.floor(stats.get(main_key, 0.0))
     sub_value = math.floor(stats.get(sub_key, 0.0))
     ability_bonus = main_value * 0.005 + sub_value * 0.002
@@ -1158,9 +1166,9 @@ def _apply_loadout_description(
             if not target:
                 continue
             resolved.append((target, value))
-        active = not triggered and bool(resolved)
+        active = not triggered
         effects.append(LoadoutEffectView(source, rendered, active=active))
-        if not active:
+        if triggered:
             continue
         for target, value in resolved:
             if target == "AllDamageTakenScalar":
@@ -1214,6 +1222,8 @@ def _loadout_effect_target(key: str, clause: str, *, allow_label_fallback: bool)
     label_targets = (
         ("暴击伤害", "CriticalDamageIncrease"),
         ("暴击率", "CriticalRate"),
+        ("治疗效率", "HealOutputIncrease"),
+        ("副能力", "SubPercent"),
         ("终结技充能效率", "UltimateSpGainScalar"),
         ("源石技艺强度", "PhysicalAndSpellInflictionEnhance"),
         ("物理伤害", "PhysicalDamageIncrease"),

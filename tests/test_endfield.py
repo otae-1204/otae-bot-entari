@@ -1248,6 +1248,40 @@ class EndfieldServiceTests(unittest.TestCase):
 
         self.assertEqual({row.key: row.value for row in view.ability_stats}["Will"], "78")
 
+    def test_loadout_applies_unconditional_healing_and_sub_attribute_weapon_effects(self):
+        weapon = _sample_loadout_weapon()
+        skills = weapon["revision"]["contentJson"]["content"][0]["attrs"]["skills"]["skills"]
+        skills.extend(
+            [
+                {
+                    "name": "治疗效率提升",
+                    "description": "治疗效率+{heal:0%}",
+                    "zeroPotentialMaxLevel": 9,
+                    "levels": [{"level": 9, "values": {"heal": 0.3}}],
+                },
+                {
+                    "name": "副能力提升",
+                    "description": "副能力+{second_attr_up:0%}",
+                    "zeroPotentialMaxLevel": 9,
+                    "levels": [{"level": 9, "values": {"second_attr_up": 0.4}}],
+                },
+                {
+                    "name": "未映射常驻说明",
+                    "description": "特殊常驻效果+{unknown}",
+                    "zeroPotentialMaxLevel": 9,
+                    "levels": [{"level": 9, "values": {"unknown": 1}}],
+                },
+            ]
+        )
+
+        view = build_fz_loadout_view(_sample_loadout_operator(), weapon, [])
+
+        abilities = {row.key: row.value for row in view.ability_stats}
+        advanced = {row.key: row.value for row in view.advanced_stats}
+        self.assertEqual(abilities["Will"], "70")
+        self.assertEqual(advanced["HealOutputIncrease"], "30.0%")
+        self.assertTrue(any(effect.active and "特殊常驻效果" in effect.description for effect in view.effects))
+
     def test_loadout_maps_originium_arts_strength_separately_from_physical_damage(self):
         self.assertEqual(
             service._loadout_effect_target("phy_spell_up", "源石技艺强度 +30", allow_label_fallback=False),
@@ -1294,7 +1328,7 @@ class EndfieldServiceTests(unittest.TestCase):
         attack = next(row.value for row in view.primary_stats if row.key == "Atk")
         self.assertEqual(attack, baseline_attack)
         potential = next(effect for effect in view.effects if effect.source == "干员 · 观海")
-        self.assertFalse(potential.active)
+        self.assertTrue(potential.active)
 
     def test_loadout_calculates_conduct_levels_and_forced_conduct_traits(self):
         operator = copy.deepcopy(_sample_loadout_operator())
@@ -1410,7 +1444,7 @@ class EndfieldServiceTests(unittest.TestCase):
         with patch.object(draw, "fetch_many", AsyncMock(return_value={})):
             html = asyncio.run(render_loadout_card_html(view))
         self.assertIn("终末地 · 配装模拟器", html)
-        self.assertIn("已计入面板的常驻效果", html)
+        self.assertIn("常驻 / 无触发条件效果", html)
         self.assertIn("条件 / 触发效果", html)
         self.assertIn("最终异常效果", html)
         self.assertIn("源石技艺附带效果增益", html)
