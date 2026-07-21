@@ -14,6 +14,7 @@ ROOT_ALIASES = ("终末地", "endfield", "ef", "zmd")
 OPERATOR_ALIASES = {"干员", "角色", "operator", "op"}
 WEAPON_ALIASES = {"武器", "weapon", "wp"}
 EQUIPMENT_ALIASES = {"装备", "equipment", "equip", "eq"}
+LOADOUT_ALIASES = {"配装", "配装模拟器", "loadout", "build"}
 SEARCH_ALIASES = {"搜索", "search", "s"}
 HELP_ALIASES = {"帮助", "help", "h", "?"}
 SOURCE_ALIASES = {"数据源", "source", "sources"}
@@ -55,6 +56,10 @@ class ParsedEndfieldCommand:
     rarity: str = ""
     dev_action: str = ""
     args: tuple[str, ...] = ()
+    char_level: int = 90
+    weapon_level: int = 90
+    potential: int = 5
+    enhance: int = 3
     error: str = ""
 
 
@@ -66,6 +71,22 @@ class EndfieldCandidate:
     score: int
     source: str = ""
     reason: str = ""
+
+
+@dataclass(frozen=True)
+class LoadoutSlotSpec:
+    name: str
+    enhance: int = 3
+
+
+@dataclass(frozen=True)
+class ParsedLoadoutSpec:
+    operator: str
+    weapon: str
+    body: LoadoutSlotSpec
+    hand: LoadoutSlotSpec
+    accessory_1: LoadoutSlotSpec
+    accessory_2: LoadoutSlotSpec
 
 
 def parse_command(rest: str) -> ParsedEndfieldCommand:
@@ -90,6 +111,18 @@ def parse_command(rest: str) -> ParsedEndfieldCommand:
     if head in DEV_ALIASES:
         dev_action = parts[1].lower() if len(parts) > 1 else "help"
         return ParsedEndfieldCommand("dev", dev_action=dev_action, args=tuple(parts[2:]))
+    if head in LOADOUT_ALIASES:
+        loadout_parts, levels, option_error = _parse_loadout_options(parts[1:])
+        if option_error:
+            return ParsedEndfieldCommand("invalid", error=option_error)
+        return ParsedEndfieldCommand(
+            "loadout",
+            query=" ".join(loadout_parts).strip(),
+            char_level=levels[0],
+            weapon_level=levels[1],
+            potential=levels[2],
+            enhance=levels[3],
+        )
     if head in SEARCH_ALIASES:
         scope, query_parts = _parse_optional_scope(parts[1:])
         return ParsedEndfieldCommand("search", scope=scope, query=" ".join(query_parts).strip(), source=source, rarity=rarity)
@@ -174,6 +207,8 @@ def format_help() -> str:
             "  /ef 武器 <名称> | /ef wp <名称>",
             "  /ef 装备 <名称> | /ef eq <名称>",
             "  /ef 装备（查看全部套组）| /ef 装备 <套组名>",
+            "  /ef 配装（交互选择干员、武器与四件装备）",
+            "  /ef 配装 干员 | 武器 | 护甲@3 | 护手@3 | 配件1@3 | 配件2@3",
             "  /ef 搜索 <关键词> | /efs <关键词>",
             "  /ef <关键词> --source <fz|warfarin>",
             "  /ef 数据源",
@@ -182,6 +217,7 @@ def format_help() -> str:
             "干员速查：/ef 干员；可按元素或职业筛选，例如 /ef 干员 灼热、/ef 干员 术师。",
             "武器速查：/ef 武器；可按类型筛选，例如 /ef 武器 单手剑。",
             "装备目录：默认仅金色；--all 显示全部，--rarity 可选 gold、purple、blue、all。",
+            "配装参数：--char-level 90、--weapon-level 90、--potential 5、--enhance 3；装备可填“无”。",
             "快捷：/efop <名称>、/efwp <名称>、/efeq <名称>、/终末地干员 <名称>、/终末地武器 <名称>、/终末地装备 <名称>",
         ]
     )
@@ -310,6 +346,81 @@ def _parse_rarity_option(parts: list[str]) -> tuple[list[str], str, str]:
             return remaining, rarity, "只能指定一个装备稀有度"
         rarity = normalized
     return remaining, rarity, ""
+
+
+def parse_loadout_spec(query: str, default_enhance: int = 3) -> tuple[ParsedLoadoutSpec | None, str]:
+    fields = [field.strip() for field in str(query or "").split("|")]
+    if len(fields) != 6:
+        return None, "完整配装需要依次填写干员、武器、护甲、护手和两个配件，并用 | 分隔"
+    if not fields[0] or fields[0] in {"无", "none", "-"}:
+        return None, "干员不能为空"
+    if not fields[1] or fields[1] in {"无", "none", "-"}:
+        return None, "武器不能为空"
+
+    slots: list[LoadoutSlotSpec] = []
+    for field in fields[2:]:
+        slot, error = _parse_loadout_slot(field, default_enhance)
+        if error:
+            return None, error
+        slots.append(slot)
+    return ParsedLoadoutSpec(fields[0], fields[1], *slots), ""
+
+
+def _parse_loadout_slot(value: str, default_enhance: int) -> tuple[LoadoutSlotSpec, str]:
+    value = value.strip()
+    if not value or value.lower() in {"无", "none", "-"}:
+        return LoadoutSlotSpec("", default_enhance), ""
+    name = value
+    enhance = default_enhance
+    if "@" in value:
+        name, raw_enhance = value.rsplit("@", 1)
+        name = name.strip()
+        try:
+            enhance = int(raw_enhance)
+        except ValueError:
+            return LoadoutSlotSpec(name, default_enhance), f"装备强化档位无效：{value}"
+    if not name:
+        return LoadoutSlotSpec("", default_enhance), f"装备名称不能为空：{value}"
+    if not 0 <= enhance <= 3:
+        return LoadoutSlotSpec(name, enhance), f"装备强化档位必须在 0–3：{value}"
+    return LoadoutSlotSpec(name, enhance), ""
+
+
+def _parse_loadout_options(parts: list[str]) -> tuple[list[str], tuple[int, int, int, int], str]:
+    definitions = {
+        "--char-level": (0, 1, 90, "干员等级"),
+        "--weapon-level": (1, 1, 90, "武器等级"),
+        "--potential": (2, 0, 5, "武器潜能"),
+        "--enhance": (3, 0, 3, "装备强化档位"),
+    }
+    values = [90, 90, 5, 3]
+    remaining: list[str] = []
+    index = 0
+    while index < len(parts):
+        part = parts[index]
+        option = part.split("=", 1)[0].lower()
+        definition = definitions.get(option)
+        if definition is None:
+            remaining.append(part)
+            index += 1
+            continue
+        if "=" in part:
+            raw_value = part.split("=", 1)[1]
+            index += 1
+        elif index + 1 < len(parts):
+            raw_value = parts[index + 1]
+            index += 2
+        else:
+            return remaining, tuple(values), f"{part} 后需要数值"
+        target, minimum, maximum, label = definition
+        try:
+            value = int(raw_value)
+        except ValueError:
+            return remaining, tuple(values), f"{label}必须是整数"
+        if not minimum <= value <= maximum:
+            return remaining, tuple(values), f"{label}必须在 {minimum}–{maximum}"
+        values[target] = value
+    return remaining, tuple(values), ""
 
 
 def _split(text: str) -> list[str]:

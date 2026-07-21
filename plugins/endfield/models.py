@@ -252,3 +252,47 @@ class EquipmentCatalogView:
     total_count: int = 0
     rarity_filter: str = "gold"
     source_version: str = ""
+
+
+@dataclass(slots=True)
+class LoadoutPanelStatView:
+    key: str
+    label: str
+    value: str
+    detail: str = ""
+
+
+@dataclass(slots=True)
+class LoadoutEquipmentView:
+    name: str
+    slot_type: str
+    enhance: int
+    icon_url: str = ""
+    suit_name: str = ""
+
+
+@dataclass(slots=True)
+class LoadoutEffectView:
+    source: str
+    description: str
+    active: bool = False
+
+
+@dataclass(slots=True)
+class LoadoutView:
+    operator_name: str
+    weapon_name: str
+    operator_level: int
+    weapon_level: int
+    weapon_potential: int
+    main_attribute: str
+    sub_attribute: str
+    weapon_type: str
+    operator_icon_url: str = ""
+    weapon_icon_url: str = ""
+    equipment: list[LoadoutEquipmentView] = field(default_factory=list)
+    primary_stats: list[LoadoutPanelStatView] = field(default_factory=list)
+    ability_stats: list[LoadoutPanelStatView] = field(default_factory=list)
+    advanced_stats: list[LoadoutPanelStatView] = field(default_factory=list)
+    effects: list[LoadoutEffectView] = field(default_factory=list)
+    source_version: str = ""

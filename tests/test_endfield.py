@@ -54,6 +54,7 @@ render_equipment_card_html = draw.render_equipment_card_html
 render_equipment_catalog_card_html = draw.render_equipment_catalog_card_html
 render_operator_catalog_card_html = draw.render_operator_catalog_card_html
 render_weapon_catalog_card_html = draw.render_weapon_catalog_card_html
+render_loadout_card_html = draw.render_loadout_card_html
 LEVEL_COLUMNS = models.LEVEL_COLUMNS
 build_operator_view = service.build_operator_view
 build_weapon_view = service.build_weapon_view
@@ -61,6 +62,7 @@ build_fz_equipment_view = service.build_fz_equipment_view
 build_fz_equipment_catalog_view = service.build_fz_equipment_catalog_view
 build_fz_operator_catalog_view = service.build_fz_operator_catalog_view
 build_fz_weapon_catalog_view = service.build_fz_weapon_catalog_view
+build_fz_loadout_view = service.build_fz_loadout_view
 clean_text = service.clean_text
 
 
@@ -91,6 +93,26 @@ class EndfieldCommandParserTests(unittest.TestCase):
     def test_root_aliases_include_zmd(self):
         self.assertIn("zmd", commands.ROOT_ALIASES)
         self.assertIn("终末地", commands.ROOT_ALIASES)
+
+    def test_parse_loadout_command_with_levels_and_slots(self):
+        parsed = commands.parse_command(
+            "配装 佩丽卡 | 赤缨 | 长息轻护甲@2 | 长息护手 | 无 | 长息蓄电核@1 "
+            "--char-level 80 --weapon-level=70 --potential 3 --enhance 2"
+        )
+        self.assertEqual(parsed.action, "loadout")
+        self.assertEqual((parsed.char_level, parsed.weapon_level, parsed.potential, parsed.enhance), (80, 70, 3, 2))
+        spec, error = commands.parse_loadout_spec(parsed.query, parsed.enhance)
+        self.assertEqual(error, "")
+        self.assertEqual(spec.operator, "佩丽卡")
+        self.assertEqual(spec.body.enhance, 2)
+        self.assertEqual(spec.hand.enhance, 2)
+        self.assertEqual(spec.accessory_1.name, "")
+        self.assertEqual(spec.accessory_2.enhance, 1)
+
+    def test_parse_loadout_rejects_invalid_enhance(self):
+        spec, error = commands.parse_loadout_spec("佩丽卡 | 赤缨 | 护甲@4 | 无 | 无 | 无")
+        self.assertIsNone(spec)
+        self.assertIn("0–3", error)
 
     def test_score_candidate_handles_typo_and_pinyin(self):
         exact = commands.score_candidate("弭弗", "弭弗")
@@ -924,6 +946,125 @@ def _sample_weapon():
     }
 
 
+def _sample_loadout_operator():
+    rows = []
+    values = {
+        "MaxHp": ("生命值", "1000"),
+        "Atk": ("攻击力", "100"),
+        "Def": ("防御力", "0"),
+        "Str": ("力量", "20"),
+        "Agi": ("敏捷", "30"),
+        "Wisd": ("智识", "40"),
+        "Will": ("意志", "50"),
+        "CriticalRate": ("暴击率", "5%"),
+        "CriticalDamageIncrease": ("暴击伤害", "50%"),
+        "UltimateSpGainScalar": ("终结技充能效率", "100%"),
+    }
+    for key, (label, value) in values.items():
+        rows.append({"key": key, "label": label, "cells": [[value]]})
+    return {
+        "article": {"title": "干员/测试干员", "updatedAt": "2026-07-20T00:00:00.000Z"},
+        "revision": {
+            "contentJson": {
+                "content": [
+                    {
+                        "attrs": {
+                            "hero": {
+                                "name": "测试干员",
+                                "weaponType": "双手剑",
+                                "meta": [{"label": "主 / 副属性", "value": "力量 / 意志"}],
+                            },
+                            "attributes": {"breaks": [{"levels": [90], "breakStage": 4}], "rows": rows},
+                            "talents": {"talents": []},
+                            "potentials": {"potentials": []},
+                        }
+                    }
+                ]
+            }
+        },
+    }
+
+
+def _sample_loadout_weapon():
+    return {
+        "article": {"title": "武器/测试武器", "updatedAt": "2026-07-20T00:00:00.000Z"},
+        "revision": {
+            "contentJson": {
+                "content": [
+                    {
+                        "attrs": {
+                            "hero": {"name": "测试武器", "weaponType": "双手剑", "maxLv": 90},
+                            "stats": {"curve": [{"lv": 90, "atk": 200}]},
+                            "skills": {
+                                "skills": [
+                                    {
+                                        "name": "力量提升",
+                                        "description": "力量+{str}",
+                                        "zeroPotentialMaxLevel": 9,
+                                        "levels": [{"level": 9, "values": {"str": 10}}],
+                                    },
+                                    {
+                                        "name": "攻击提升",
+                                        "description": "攻击力+{atk:0%}",
+                                        "zeroPotentialMaxLevel": 9,
+                                        "levels": [{"level": 9, "values": {"atk": 0.2}}],
+                                    },
+                                    {
+                                        "name": "条件效果",
+                                        "description": "物理伤害+{phy:0%}。攻击命中时，攻击力+{conditional_atk:0%}。",
+                                        "zeroPotentialMaxLevel": 0,
+                                        "levels": [{"level": 5, "values": {"phy": 0.1, "conditional_atk": 0.2}}],
+                                    },
+                                ]
+                            },
+                        }
+                    }
+                ]
+            }
+        },
+    }
+
+
+def _sample_loadout_equipment(part_type="Body"):
+    slot_type = {"Body": "护甲", "Hand": "护手", "EDC": "配件"}[part_type]
+    return {
+        "article": {"title": f"装备/测试{slot_type}", "updatedAt": "2026-07-20T00:00:00.000Z"},
+        "revision": {
+            "contentJson": {
+                "content": [
+                    {
+                        "attrs": {
+                            "hero": {"name": f"测试{slot_type}", "partType": part_type, "slotType": slot_type},
+                            "stats": {
+                                "rows": [
+                                    {
+                                        "label": "防御力",
+                                        "values": [50, 50, 50, 50],
+                                        "attrType": "Def",
+                                        "modifierType": "BaseAddition",
+                                    },
+                                    {
+                                        "label": "力量",
+                                        "values": [0, 10, 20, 30],
+                                        "attrType": "Str",
+                                        "modifierType": "BaseAddition",
+                                    },
+                                    {
+                                        "label": "攻击力",
+                                        "values": [10, 10, 10, 10],
+                                        "attrType": "Atk",
+                                        "modifierType": "BaseFinalAddition",
+                                    },
+                                ]
+                            },
+                        }
+                    }
+                ]
+            }
+        },
+    }
+
+
 def _sample_richtext():
     return {
         "RICH_TEXT_STYLES": {
@@ -1026,6 +1167,47 @@ def _sample_warfarin_weapon():
 
 
 class EndfieldServiceTests(unittest.TestCase):
+    def test_loadout_calculates_attack_and_derived_panel(self):
+        view = build_fz_loadout_view(
+            _sample_loadout_operator(),
+            _sample_loadout_weapon(),
+            [(_sample_loadout_equipment("Body"), 2, "Body")],
+            operator_level=90,
+            weapon_level=90,
+            weapon_potential=5,
+        )
+        primary = {row.key: row.value for row in view.primary_stats}
+        abilities = {row.key: row.value for row in view.ability_stats}
+        advanced = {row.key: row.value for row in view.advanced_stats}
+        self.assertEqual(primary["Atk"], "499")
+        self.assertEqual(primary["MaxHp"], "1250")
+        self.assertEqual(primary["Def"], "50")
+        self.assertEqual(abilities["Str"], "50")
+        self.assertEqual(advanced["PhysicalDamageIncrease"], "10.0%")
+        self.assertTrue(any(effect.active and "物理伤害" in effect.description for effect in view.effects))
+        self.assertTrue(any(not effect.active and "攻击命中时" in effect.description for effect in view.effects))
+
+    def test_loadout_rejects_wrong_equipment_slot(self):
+        with self.assertRaisesRegex(ValueError, "装备槽位不匹配"):
+            build_fz_loadout_view(
+                _sample_loadout_operator(),
+                _sample_loadout_weapon(),
+                [(_sample_loadout_equipment("Body"), 3, "Hand")],
+            )
+
+    def test_loadout_card_html_shows_static_and_triggered_effects(self):
+        view = build_fz_loadout_view(
+            _sample_loadout_operator(),
+            _sample_loadout_weapon(),
+            [(_sample_loadout_equipment("Body"), 2, "Body")],
+        )
+        with patch.object(draw, "fetch_many", AsyncMock(return_value={})):
+            html = asyncio.run(render_loadout_card_html(view))
+        self.assertIn("终末地 · 配装模拟器", html)
+        self.assertIn("已计入面板的常驻效果", html)
+        self.assertIn("条件 / 触发效果", html)
+        self.assertIn("499", html)
+
     def test_clean_text_removes_warfarin_rich_text_tags(self):
         self.assertEqual(clean_text("造成<#ba.damage>物理伤害</>。"), "造成物理伤害。")
 

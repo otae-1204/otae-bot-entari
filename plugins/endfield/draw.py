@@ -35,6 +35,7 @@ from .models import (
     EquipmentCatalogView,
     EquipmentView,
     LEVEL_COLUMNS,
+    LoadoutView,
     OperatorCatalogItemView,
     OperatorCatalogView,
     OperatorView,
@@ -266,6 +267,15 @@ async def draw_weapon_catalog_card(view: WeaponCatalogView) -> bytes:
     )
 
 
+async def draw_loadout_card(view: LoadoutView) -> bytes:
+    return await _draw_gallery_catalog(
+        await prepare_loadout_card_html(view),
+        ".loadout-card",
+        (".loadout-panel", ".loadout-stat", ".loadout-effect", ".loadout-item"),
+        "loadout",
+    )
+
+
 async def _draw_gallery_catalog(
     prepared: PreparedCardHtml,
     selector: str,
@@ -301,6 +311,27 @@ async def _draw_gallery_catalog(
 
 async def render_operator_card_html(view: OperatorView) -> str:
     return (await _prepare_operator_card_html(view, inline=True)).html
+
+
+async def render_loadout_card_html(view: LoadoutView) -> str:
+    return (await _prepare_loadout_card_html(view, inline=True)).html
+
+
+async def prepare_loadout_card_html(view: LoadoutView) -> PreparedCardHtml:
+    return await _prepare_loadout_card_html(view, inline=False)
+
+
+async def _prepare_loadout_card_html(view: LoadoutView, *, inline: bool) -> PreparedCardHtml:
+    equipment_urls = [item.icon_url for item in view.equipment if item.icon_url]
+    assets = await _prepare_assets(
+        [view.operator_icon_url, view.weapon_icon_url, *equipment_urls],
+        inline=inline,
+    )
+    return PreparedCardHtml(
+        _render_loadout_html(view, assets.urls),
+        assets.resources,
+        1500,
+    )
 
 
 async def prepare_operator_card_html(view: OperatorView) -> PreparedCardHtml:
@@ -471,6 +502,64 @@ async def _prepare_weapon_catalog_card_html(
     assets = await _prepare_assets(icon_urls, inline=inline)
     icon_map = {url: assets.urls.get(url, "") for url in icon_urls}
     return PreparedCardHtml(_render_weapon_catalog_html(view, icon_map), assets.resources, 1900)
+
+
+def _render_loadout_html(view: LoadoutView, asset_urls: dict[str, str]) -> str:
+    operator_img = asset_urls.get(view.operator_icon_url, "")
+    weapon_img = asset_urls.get(view.weapon_icon_url, "")
+    equipment_html = "".join(
+        f'''<div class="loadout-item">
+            <div class="loadout-item-icon">{f'<img src="{esc_attr(asset_urls.get(item.icon_url, ""))}" alt="">' if asset_urls.get(item.icon_url, "") else '<span>EQ</span>'}</div>
+            <div><b>{esc(item.name)}</b><small>{esc(item.slot_type)} · 强化 {item.enhance}{f' · {esc(item.suit_name)}' if item.suit_name else ''}</small></div>
+        </div>'''
+        for item in view.equipment
+    ) or '<div class="loadout-empty">未装备护甲、护手或配件</div>'
+
+    def stat_cards(rows, class_name: str = "") -> str:
+        return "".join(
+            f'''<div class="loadout-stat {class_name}"><span>{esc(row.label)}</span><strong>{esc(row.value)}</strong>{f'<small>{esc(row.detail)}</small>' if row.detail else ''}</div>'''
+            for row in rows
+        )
+
+    active_effects = [effect for effect in view.effects if effect.active]
+    triggered_effects = [effect for effect in view.effects if not effect.active]
+
+    def effect_cards(items) -> str:
+        return "".join(
+            f'<div class="loadout-effect"><b>{esc(item.source)}</b><span>{esc(item.description)}</span></div>'
+            for item in items
+        ) or '<div class="loadout-empty">无</div>'
+
+    return f'''<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><style>
+*{{box-sizing:border-box}} body{{margin:0;background:#10151a;color:#ecf2f4;font-family:"Microsoft YaHei","PingFang SC",sans-serif}}
+.loadout-card{{width:1500px;padding:38px;background:radial-gradient(circle at 18% 0,#263b40 0,transparent 36%),linear-gradient(135deg,#11191e,#182229 58%,#10161b);border:1px solid #38515a}}
+.loadout-head{{display:grid;grid-template-columns:1fr auto;gap:24px;align-items:center;border-bottom:2px solid #63d2c6;padding-bottom:24px}}
+.loadout-title{{font-size:44px;font-weight:850;letter-spacing:2px}} .loadout-subtitle{{margin-top:8px;color:#9eb1b8;font-size:20px}}
+.loadout-tags{{display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end}} .loadout-tag{{padding:8px 14px;background:#233238;border:1px solid #49636a;color:#aeece4;font-size:17px}}
+.loadout-identity{{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin:26px 0}}
+.identity-card{{display:grid;grid-template-columns:112px 1fr;gap:18px;align-items:center;padding:18px;background:#1d292f;border-left:5px solid #63d2c6}}
+.identity-icon{{width:112px;height:112px;display:grid;place-items:center;background:#10171b;overflow:hidden}} .identity-icon img{{width:100%;height:100%;object-fit:contain}} .identity-icon span{{font-size:26px;color:#6f858c}}
+.identity-card small,.loadout-item small{{display:block;color:#93a7ae;margin-top:7px;font-size:16px}} .identity-card b{{font-size:28px}}
+.loadout-grid{{display:grid;grid-template-columns:1.08fr .92fr;gap:22px}} .loadout-panel{{background:#172127;border:1px solid #31454d;padding:22px}}
+.loadout-panel h2{{margin:0 0 17px;font-size:24px;color:#bdf7ef}} .loadout-stat-grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}}
+.loadout-stat{{min-height:108px;background:#223038;padding:15px;border-top:3px solid #52747c}} .loadout-stat span{{display:block;color:#a9bcc2;font-size:17px}} .loadout-stat strong{{display:block;margin-top:7px;font-size:34px;color:#fff}}
+.loadout-stat small{{display:block;margin-top:7px;color:#8ea3aa;font-size:13px;line-height:1.4}} .loadout-stat.ability{{min-height:84px}} .loadout-stat.ability strong{{font-size:28px}}
+.ability-grid{{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}} .advanced-grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}}
+.advanced-grid .loadout-stat{{min-height:74px;padding:12px}} .advanced-grid .loadout-stat strong{{font-size:23px}}
+.loadout-items{{display:grid;grid-template-columns:1fr 1fr;gap:11px}} .loadout-item{{display:grid;grid-template-columns:68px 1fr;gap:12px;align-items:center;background:#202d34;padding:10px}}
+.loadout-item-icon{{width:68px;height:68px;display:grid;place-items:center;background:#10171b;color:#688087;overflow:hidden}} .loadout-item-icon img{{width:100%;height:100%;object-fit:contain}} .loadout-item b{{font-size:17px}}
+.loadout-effect-list{{display:grid;gap:10px}} .loadout-effect{{display:grid;grid-template-columns:190px 1fr;gap:14px;padding:12px;background:#202d34;border-left:3px solid #607981;line-height:1.55}}
+.loadout-effect b{{color:#aeece4}} .loadout-effect span{{color:#d4dfe2}} .loadout-empty{{padding:16px;color:#768b92;background:#1d292f}}
+.loadout-note{{margin-top:22px;padding-top:16px;border-top:1px solid #31454d;color:#81979e;font-size:15px;line-height:1.6}}
+</style></head><body><main class="loadout-card">
+<header class="loadout-head"><div><div class="loadout-title">终末地 · 配装模拟器</div><div class="loadout-subtitle">FZ Wiki 数据 · 静态面板估算</div></div><div class="loadout-tags"><span class="loadout-tag">主属性 {esc(view.main_attribute)}</span><span class="loadout-tag">副属性 {esc(view.sub_attribute)}</span><span class="loadout-tag">{esc(view.weapon_type)}</span></div></header>
+<section class="loadout-identity"><div class="identity-card"><div class="identity-icon">{f'<img src="{esc_attr(operator_img)}" alt="">' if operator_img else '<span>OP</span>'}</div><div><small>干员 · Lv.{view.operator_level}</small><b>{esc(view.operator_name)}</b></div></div><div class="identity-card"><div class="identity-icon">{f'<img src="{esc_attr(weapon_img)}" alt="">' if weapon_img else '<span>WP</span>'}</div><div><small>武器 · Lv.{view.weapon_level} · 潜能 {view.weapon_potential}</small><b>{esc(view.weapon_name)}</b></div></div></section>
+<section class="loadout-grid"><div class="loadout-panel"><h2>核心面板</h2><div class="loadout-stat-grid">{stat_cards(view.primary_stats)}</div><h2 style="margin-top:20px">能力值</h2><div class="ability-grid">{stat_cards(view.ability_stats, 'ability')}</div></div><div class="loadout-panel"><h2>已装备</h2><div class="loadout-items">{equipment_html}</div></div></section>
+<section class="loadout-panel" style="margin-top:22px"><h2>进阶面板</h2><div class="advanced-grid">{stat_cards(view.advanced_stats)}</div></section>
+<section class="loadout-grid" style="margin-top:22px"><div class="loadout-panel"><h2>已计入面板的常驻效果</h2><div class="loadout-effect-list">{effect_cards(active_effects)}</div></div><div class="loadout-panel"><h2>条件 / 触发效果（未计入静态面板）</h2><div class="loadout-effect-list">{effect_cards(triggered_effects)}</div></div></section>
+<footer class="loadout-note">攻击力按用户给定公式计算；能力值计算使用四维属性整数部分。生命值额外计入 5 × 力量，敏捷 / 智识 / 意志分别换算物理抗性、法术抗性和受治疗效率。面板显示值按游戏规则向下取整，条件效果单独列出。数据版本：{esc(view.source_version or '--')}</footer>
+</main></body></html>'''
 
 
 def _render_html(

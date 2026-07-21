@@ -14,7 +14,7 @@ from nepattern import AnyString
 
 from configs.config import Config
 from utils.async_cache import AsyncTTLCache, CacheStats
-from utils.entari_native import ArgVal, ChainMsg, event_user_id, make_image, on_alconna
+from utils.entari_native import ArgVal, ChainMsg, event_user_id, make_image, on_alconna, prompt
 from utils.http_client import clear_http_cache, get_http_cache_stats
 from utils.temp_files import schedule_temp_file_cleanup
 
@@ -24,6 +24,7 @@ from .commands import (
     EndfieldCandidate,
     CANDIDATE_SCORE_THRESHOLD,
     ParsedEndfieldCommand,
+    ParsedLoadoutSpec,
     ROOT_ALIASES,
     choose_candidate,
     dev_visible_for_user,
@@ -34,6 +35,7 @@ from .commands import (
     format_source,
     format_unknown,
     parse_command,
+    parse_loadout_spec,
     parse_shortcut_command,
     score_candidate,
     score_entity_candidate,
@@ -41,6 +43,7 @@ from .commands import (
 from .draw import (
     draw_equipment_card,
     draw_equipment_catalog_card,
+    draw_loadout_card,
     draw_operator_card,
     draw_operator_catalog_card,
     draw_weapon_card,
@@ -161,6 +164,8 @@ async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand)
         if not dev_visible_for_user(str(event_user_id(event)), Config.SUPERUSERS):
             return await matcher.finish(format_unknown())
         return await matcher.finish(await _handle_dev_command(command))
+    if command.action == "loadout":
+        return await _handle_loadout(matcher, command)
     if command.action not in {"query", "search"}:
         return await matcher.finish(format_unknown())
     if not command.query:
@@ -219,6 +224,111 @@ async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand)
     except Exception as exc:
         logger.exception(f"[endfield] card failed for {command.scope} {command.query}: {exc}")
         return await matcher.finish("图片生成失败")
+
+
+async def _handle_loadout(matcher, command: ParsedEndfieldCommand) -> None:
+    try:
+        if command.query:
+            spec, error = parse_loadout_spec(command.query, command.enhance)
+        else:
+            spec, error = await _prompt_loadout_spec(command.enhance)
+        if error or spec is None:
+            return await matcher.finish(f"配装参数错误：{error or '已取消'}")
+
+        operator = await _resolve_loadout_candidate("operator", spec.operator)
+        if operator is None:
+            return await matcher.finish(f"未找到干员：{spec.operator}")
+        weapon = await _resolve_loadout_candidate("weapon", spec.weapon)
+        if weapon is None:
+            return await matcher.finish(f"未找到武器：{spec.weapon}")
+
+        equipment_requests = (
+            (spec.body, "Body"),
+            (spec.hand, "Hand"),
+            (spec.accessory_1, "EDC"),
+            (spec.accessory_2, "EDC"),
+        )
+        equipment: list[tuple[str, int, str]] = []
+        for slot, expected_part in equipment_requests:
+            if not slot.name:
+                continue
+            candidate = await _resolve_loadout_candidate("equipment", slot.name)
+            if candidate is None:
+                return await matcher.finish(f"未找到装备：{slot.name}")
+            equipment.append((candidate.key, slot.enhance, expected_part))
+
+        started = perf_counter()
+        view = await service.get_loadout_view(
+            operator.key,
+            weapon.key,
+            equipment,
+            operator_level=command.char_level,
+            weapon_level=command.weapon_level,
+            weapon_potential=command.potential,
+        )
+        data_seconds = perf_counter() - started
+        png = await draw_loadout_card(view)
+        logger.info(
+            f"[endfield] perf action=loadout data={data_seconds:.3f}s "
+            f"draw={perf_counter() - started - data_seconds:.3f}s"
+        )
+        return await _finish_png(matcher, png)
+    except _ExitException:
+        raise
+    except (WarfarinAPIError, ValueError) as exc:
+        logger.warning(f"[endfield] loadout rejected: {exc}")
+        return await matcher.finish(f"配装计算失败：{exc}")
+    except Exception as exc:
+        logger.exception(f"[endfield] loadout failed: {exc}")
+        return await matcher.finish("配装图片生成失败")
+
+
+async def _prompt_loadout_spec(default_enhance: int) -> tuple[ParsedLoadoutSpec | None, str]:
+    prompts = (
+        "请输入干员名称（输入 取消 结束）：",
+        "请输入武器名称：",
+        "请输入护甲名称，可填 无：",
+        "请输入护手名称，可填 无：",
+        "请输入第一个配件名称，可填 无：",
+        "请输入第二个配件名称，可填 无：",
+    )
+    answers: list[str] = []
+    for message in prompts:
+        answer = await prompt(message, timeout=60)
+        if answer is None:
+            return None, "等待输入超时"
+        text = answer.extract_plain_text() if hasattr(answer, "extract_plain_text") else str(answer or "")
+        text = text.strip()
+        if text.lower() in {"取消", "cancel", "q", "quit"}:
+            return None, "已取消"
+        answers.append(text)
+    return parse_loadout_spec(" | ".join(answers), default_enhance)
+
+
+async def _resolve_loadout_candidate(kind: str, query: str) -> EndfieldCandidate | None:
+    candidates = [
+        item
+        for item in await _resolve_candidates_from_sources(kind, query, "fz", "all")
+        if item.kind == kind and item.source == "fz"
+    ]
+    selected, ambiguous = choose_candidate(candidates)
+    if selected is not None:
+        return selected
+    options = ambiguous or sorted(candidates, key=lambda item: item.score, reverse=True)
+    if not options:
+        return None
+    options = options[:8]
+    lines = [f"“{query}”有多个匹配结果，请回复编号："]
+    lines.extend(f"{index}. {item.display_name}" for index, item in enumerate(options, 1))
+    answer = await prompt("\n".join(lines), timeout=60)
+    if answer is None:
+        return None
+    text = answer.extract_plain_text() if hasattr(answer, "extract_plain_text") else str(answer or "")
+    try:
+        index = int(text.strip()) - 1
+    except ValueError:
+        return None
+    return options[index] if 0 <= index < len(options) else None
 
 
 async def _collect_candidates(

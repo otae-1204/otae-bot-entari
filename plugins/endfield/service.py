@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import re
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
@@ -17,6 +18,10 @@ from .models import (
     EquipmentView,
     EffectView,
     LEVEL_COLUMNS,
+    LoadoutEffectView,
+    LoadoutEquipmentView,
+    LoadoutPanelStatView,
+    LoadoutView,
     OperatorCatalogElementView,
     OperatorCatalogItemView,
     OperatorCatalogProfessionView,
@@ -205,6 +210,28 @@ class EndfieldService:
             return None
         raw, richtext = await _fz_article_and_richtext(self.client, title)
         return build_fz_equipment_view(raw, richtext)
+
+    async def get_loadout_view(
+        self,
+        operator_title: str,
+        weapon_title: str,
+        equipment: list[tuple[str, int, str]],
+        *,
+        operator_level: int = 90,
+        weapon_level: int = 90,
+        weapon_potential: int = 5,
+    ) -> LoadoutView:
+        titles = [operator_title, weapon_title, *(title for title, _, _ in equipment)]
+        raws = await asyncio.gather(*(self.client.fz_article_by_title(title) for title in titles))
+        equipment_raws = [(raw, equipment[index][1], equipment[index][2]) for index, raw in enumerate(raws[2:])]
+        return build_fz_loadout_view(
+            raws[0],
+            raws[1],
+            equipment_raws,
+            operator_level=operator_level,
+            weapon_level=weapon_level,
+            weapon_potential=weapon_potential,
+        )
 
     async def get_equipment_catalog_view(
         self,
@@ -603,6 +630,550 @@ def build_fz_equipment_view(raw: dict[str, Any], richtext: dict[str, Any] | None
         term_styles=_build_fz_term_styles(richtext or {}),
         source_version=str(article.get("updatedAt") or "")[:10],
     )
+
+
+LOADOUT_ATTRIBUTE_NAMES = {
+    "Str": "力量",
+    "Agi": "敏捷",
+    "Wisd": "智识",
+    "Will": "意志",
+    "CriticalRate": "暴击率",
+    "CriticalDamageIncrease": "暴击伤害",
+    "PhysicalAndSpellInflictionEnhance": "源石技艺强度",
+    "HealOutputIncrease": "治疗效率加成",
+    "HealTakenIncrease": "受治疗效率加成",
+    "ComboSkillCooldownScalar": "连携技冷却缩减",
+    "UltimateSpGainScalar": "终结技充能效率",
+    "PoiseDamageOutputScalar": "失衡效率加成",
+    "NormalAttackDamageIncrease": "普通攻击伤害加成",
+    "NormalSkillDamageIncrease": "战技伤害加成",
+    "ComboSkillDamageIncrease": "连携技伤害加成",
+    "UltimateSkillDamageIncrease": "终结技伤害加成",
+    "PhysicalDamageIncrease": "物理伤害加成",
+    "SpellDamageIncrease": "法术伤害加成",
+    "FireDamageIncrease": "灼热伤害加成",
+    "PulseDamageIncrease": "电磁伤害加成",
+    "CrystDamageIncrease": "寒冷伤害加成",
+    "NaturalDamageIncrease": "自然伤害加成",
+    "EtherDamageIncrease": "超域伤害加成",
+    "AllDamageIncrease": "所有伤害加成",
+    "AllDamageTakenScalar": "全伤害减免",
+}
+LOADOUT_PERCENT_ATTRIBUTES = frozenset(
+    {
+        "CriticalRate",
+        "CriticalDamageIncrease",
+        "HealOutputIncrease",
+        "HealTakenIncrease",
+        "ComboSkillCooldownScalar",
+        "UltimateSpGainScalar",
+        "PoiseDamageOutputScalar",
+        "NormalAttackDamageIncrease",
+        "NormalSkillDamageIncrease",
+        "ComboSkillDamageIncrease",
+        "UltimateSkillDamageIncrease",
+        "PhysicalDamageIncrease",
+        "SpellDamageIncrease",
+        "FireDamageIncrease",
+        "PulseDamageIncrease",
+        "CrystDamageIncrease",
+        "NaturalDamageIncrease",
+        "EtherDamageIncrease",
+        "AllDamageIncrease",
+    }
+)
+LOADOUT_EFFECT_KEY_TARGETS = {
+    "str": "Str",
+    "agi": "Agi",
+    "wisd": "Wisd",
+    "will": "Will",
+    "atk": "AtkPercent",
+    "atk_up": "AtkPercent",
+    "hp_up": "MaxHpFinal",
+    "max_hp": "MaxHpFinal",
+    "critical_rate": "CriticalRate",
+    "crit_rate": "CriticalRate",
+    "critical_damage": "CriticalDamageIncrease",
+    "crit_damage": "CriticalDamageIncrease",
+    "dmg_up": "AllDamageIncrease",
+    "ultimate_gain_up": "UltimateSpGainScalar",
+    "phy_dmg_up": "PhysicalDamageIncrease",
+    "spell_dmg_up": "SpellDamageIncrease",
+    "fire_dmg_up": "FireDamageIncrease",
+    "pulse_dmg_up": "PulseDamageIncrease",
+    "cryst_dmg_up": "CrystDamageIncrease",
+    "natural_dmg_up": "NaturalDamageIncrease",
+    "ether_dmg_up": "EtherDamageIncrease",
+}
+
+
+def build_fz_loadout_view(
+    operator_raw: dict[str, Any],
+    weapon_raw: dict[str, Any],
+    equipment_raws: list[tuple[dict[str, Any], int, str]],
+    *,
+    operator_level: int = 90,
+    weapon_level: int = 90,
+    weapon_potential: int = 5,
+) -> LoadoutView:
+    operator_attrs = _fz_template_attrs(operator_raw)
+    weapon_attrs = _fz_template_attrs(weapon_raw)
+    operator_hero = operator_attrs.get("hero") if isinstance(operator_attrs.get("hero"), dict) else {}
+    weapon_hero = weapon_attrs.get("hero") if isinstance(weapon_attrs.get("hero"), dict) else {}
+    if not operator_hero or not weapon_hero:
+        raise ValueError("FZ loadout data is missing operator or weapon fields")
+
+    operator_level = max(1, min(90, int(operator_level)))
+    weapon_level = max(1, min(90, int(weapon_level)))
+    weapon_potential = max(0, min(5, int(weapon_potential)))
+    operator_weapon_type = _first_text(operator_hero, "weaponType", "weapon")
+    weapon_type = _first_text(weapon_hero, "weaponType", "weapon")
+    if operator_weapon_type and weapon_type and operator_weapon_type != weapon_type:
+        raise ValueError(f"武器类型不匹配：干员使用{operator_weapon_type}，所选武器为{weapon_type}")
+
+    base_stats = _fz_operator_attributes_at_level(operator_attrs.get("attributes"), operator_level)
+    additions: dict[str, float] = {}
+    final_additions: dict[str, float] = {}
+    multipliers: dict[str, float] = {}
+    effects: list[LoadoutEffectView] = []
+
+    main_attribute, sub_attribute = _fz_main_sub_attributes(operator_hero)
+    equipment_views: list[LoadoutEquipmentView] = []
+    suits: dict[str, dict[str, Any]] = {}
+    suit_counts: dict[str, int] = {}
+    for raw, enhance, expected_part in equipment_raws:
+        attrs = _fz_template_attrs(raw)
+        hero = attrs.get("hero") if isinstance(attrs.get("hero"), dict) else {}
+        if not hero:
+            raise ValueError("FZ equipment article does not match the loadout schema")
+        actual_part = _first_text(hero, "partType")
+        if expected_part and actual_part != expected_part:
+            expected_label = {"Body": "护甲", "Hand": "护手", "EDC": "配件"}.get(expected_part, expected_part)
+            actual_label = _first_text(hero, "slotType", "partType") or "未知槽位"
+            raise ValueError(f"装备槽位不匹配：{_first_text(hero, 'name', 'title')} 是{actual_label}，此处需要{expected_label}")
+        enhance = max(0, min(3, int(enhance)))
+        for row in ((attrs.get("stats") or {}).get("rows") or []):
+            if isinstance(row, dict):
+                _apply_loadout_equipment_row(
+                    row,
+                    enhance,
+                    main_attribute,
+                    sub_attribute,
+                    additions,
+                    final_additions,
+                    multipliers,
+                )
+        suit = attrs.get("suit") if isinstance(attrs.get("suit"), dict) else {}
+        suit_name = _first_text(suit, "suitName", "name") or _first_text(hero, "suitName")
+        required = _to_int(_first_value(suit, "equipCnt", "requiredCount"))
+        if suit_name and required > 0:
+            suit_counts[suit_name] = suit_counts.get(suit_name, 0) + 1
+            suits.setdefault(suit_name, suit)
+        equipment_views.append(
+            LoadoutEquipmentView(
+                name=_first_text(hero, "name", "title") or str((raw.get("article") or {}).get("title") or "").split("/", 1)[-1],
+                slot_type=_first_text(hero, "slotType", "partType") or "装备",
+                enhance=enhance,
+                icon_url=_fz_asset_raw_url(_first_text(hero, "iconUrl", "icon")),
+                suit_name=suit_name,
+            )
+        )
+
+    _apply_loadout_weapon_skills(
+        weapon_attrs.get("skills"),
+        weapon_potential,
+        additions,
+        final_additions,
+        multipliers,
+        effects,
+        source=_first_text(weapon_hero, "name") or "武器",
+    )
+    _apply_loadout_operator_effects(operator_attrs, additions, final_additions, multipliers, effects)
+    for suit_name, suit in suits.items():
+        required = _to_int(_first_value(suit, "equipCnt", "requiredCount"))
+        if suit_counts.get(suit_name, 0) >= required:
+            _apply_loadout_set_effect(
+                suit_name,
+                suit,
+                additions,
+                final_additions,
+                multipliers,
+                effects,
+            )
+
+    stats = dict(base_stats)
+    for key, value in additions.items():
+        stats[key] = stats.get(key, 0.0) + value
+    operator_attack = base_stats.get("Atk", 0.0)
+    weapon_attack = _fz_weapon_attack_at_level(weapon_attrs.get("stats"), weapon_level)
+    attack_percent = additions.get("AtkPercent", 0.0)
+    fixed_attack = final_additions.get("Atk", 0.0)
+    main_key = _loadout_attribute_key(main_attribute)
+    sub_key = _loadout_attribute_key(sub_attribute)
+    main_value = math.floor(stats.get(main_key, 0.0))
+    sub_value = math.floor(stats.get(sub_key, 0.0))
+    ability_bonus = main_value * 0.005 + sub_value * 0.002
+    attack = math.floor(((operator_attack + weapon_attack) * (1 + attack_percent) + fixed_attack) * (1 + ability_bonus))
+    strength = math.floor(stats.get("Str", 0.0))
+    hp = math.floor(
+        base_stats.get("MaxHp", 0.0) * (1 + additions.get("MaxHpPercent", 0.0))
+        + final_additions.get("MaxHp", 0.0)
+        + strength * 5
+    )
+    defense = math.floor(stats.get("Def", 0.0) + final_additions.get("Def", 0.0))
+    physical_resistance = 1 - 1 / (0.001 * math.floor(stats.get("Agi", 0.0)) + 1)
+    spell_resistance = 1 - 1 / (0.001 * math.floor(stats.get("Wisd", 0.0)) + 1)
+    healing_taken = stats.get("HealTakenIncrease", 0.0) + math.floor(stats.get("Will", 0.0)) * 0.001
+
+    primary_stats = [
+        LoadoutPanelStatView("Atk", "攻击力", str(attack), f"{int(operator_attack)} + {int(weapon_attack)}，攻击加成 {_format_loadout_percent(attack_percent)}，能力加成 {_format_loadout_percent(ability_bonus)}"),
+        LoadoutPanelStatView("MaxHp", "生命值", str(hp), f"基础 {int(base_stats.get('MaxHp', 0))}，力量额外 +{strength * 5}"),
+        LoadoutPanelStatView("Def", "防御力", str(defense)),
+    ]
+    ability_stats = [
+        LoadoutPanelStatView(key, LOADOUT_ATTRIBUTE_NAMES[key], str(math.floor(stats.get(key, 0.0))))
+        for key in ("Str", "Agi", "Wisd", "Will")
+    ]
+    advanced_values = dict(stats)
+    advanced_values["PhysicalResistance"] = physical_resistance
+    advanced_values["SpellResistance"] = spell_resistance
+    advanced_values["HealTakenIncrease"] = healing_taken
+    if "AllDamageTakenScalar" in multipliers:
+        advanced_values["AllDamageTakenScalar"] = 1 - multipliers["AllDamageTakenScalar"]
+    advanced_stats = _build_loadout_advanced_stats(advanced_values)
+
+    versions = [
+        str((operator_raw.get("article") or {}).get("updatedAt") or "")[:10],
+        str((weapon_raw.get("article") or {}).get("updatedAt") or "")[:10],
+        *(str((raw.get("article") or {}).get("updatedAt") or "")[:10] for raw, _, _ in equipment_raws),
+    ]
+    return LoadoutView(
+        operator_name=_first_text(operator_hero, "name", "title"),
+        weapon_name=_first_text(weapon_hero, "name", "title"),
+        operator_level=operator_level,
+        weapon_level=weapon_level,
+        weapon_potential=weapon_potential,
+        main_attribute=main_attribute,
+        sub_attribute=sub_attribute,
+        weapon_type=weapon_type,
+        operator_icon_url=_fz_asset_raw_url(_first_text(operator_hero, "iconUrl", "avatarUrl", "icon")),
+        weapon_icon_url=_fz_asset_raw_url(_first_text(weapon_hero, "iconUrl", "icon")),
+        equipment=equipment_views,
+        primary_stats=primary_stats,
+        ability_stats=ability_stats,
+        advanced_stats=advanced_stats,
+        effects=effects,
+        source_version=max((version for version in versions if version), default=""),
+    )
+
+
+def _fz_operator_attributes_at_level(raw: Any, level: int) -> dict[str, float]:
+    if not isinstance(raw, dict):
+        raise ValueError("FZ operator attributes are missing")
+    breaks = raw.get("breaks") or []
+    rows = raw.get("rows") or []
+    selected_group = -1
+    selected_index = -1
+    for group_index, group in enumerate(breaks):
+        levels = group.get("levels") if isinstance(group, dict) else None
+        if isinstance(levels, list) and level in levels:
+            selected_group = group_index
+            selected_index = levels.index(level)
+    if selected_group < 0:
+        raise ValueError(f"FZ operator level not found: {level}")
+    result: dict[str, float] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        cells = row.get("cells") or []
+        if selected_group >= len(cells) or selected_index >= len(cells[selected_group]):
+            continue
+        value = _to_float(cells[selected_group][selected_index])
+        key = str(row.get("key") or row.get("hint") or "")
+        if key and value is not None:
+            result[key] = value
+    return result
+
+
+def _fz_main_sub_attributes(hero: dict[str, Any]) -> tuple[str, str]:
+    value = _fz_hero_meta_value(hero, "主 / 副属性", "主/副属性", "主副属性")
+    parts = [part.strip() for part in re.split(r"[/／]", value) if part.strip()]
+    if len(parts) != 2:
+        raise ValueError("FZ operator data is missing main/sub attributes")
+    return parts[0], parts[1]
+
+
+def _loadout_attribute_key(label: str) -> str:
+    return {"力量": "Str", "敏捷": "Agi", "智识": "Wisd", "意志": "Will"}.get(label, label)
+
+
+def _apply_loadout_equipment_row(
+    row: dict[str, Any],
+    enhance: int,
+    main_attribute: str,
+    sub_attribute: str,
+    additions: dict[str, float],
+    final_additions: dict[str, float],
+    multipliers: dict[str, float],
+) -> None:
+    values = row.get("values") or []
+    raw_value = values[min(enhance, len(values) - 1)] if isinstance(values, list) and values else row.get("value")
+    value = _to_float(raw_value)
+    if value is None:
+        return
+    target = str(row.get("compositeAttr") or row.get("attrType") or "")
+    if target == "Main":
+        target = _loadout_attribute_key(main_attribute)
+    elif target == "Sub":
+        target = _loadout_attribute_key(sub_attribute)
+    if not target or target == "Level":
+        return
+    modifier = str(row.get("modifierType") or "BaseAddition")
+    if modifier == "BaseFinalAddition":
+        final_additions[target] = final_additions.get(target, 0.0) + value
+    elif modifier == "BaseFinalMultiplier":
+        multipliers[target] = multipliers.get(target, 1.0) * value
+    elif target == "Atk" and bool(row.get("isPercent")):
+        additions["AtkPercent"] = additions.get("AtkPercent", 0.0) + value
+    elif target == "MaxHp" and bool(row.get("isPercent")):
+        additions["MaxHpPercent"] = additions.get("MaxHpPercent", 0.0) + value
+    else:
+        additions[target] = additions.get(target, 0.0) + value
+
+
+def _fz_weapon_attack_at_level(raw: Any, level: int) -> float:
+    stats = raw if isinstance(raw, dict) else {}
+    curve = stats.get("curve") or []
+    exact = next((row for row in curve if isinstance(row, dict) and _to_int(row.get("lv")) == level), None)
+    if exact is None:
+        raise ValueError(f"FZ weapon level not found: {level}")
+    return _to_float(exact.get("atk")) or 0.0
+
+
+def _apply_loadout_weapon_skills(
+    raw: Any,
+    potential: int,
+    additions: dict[str, float],
+    final_additions: dict[str, float],
+    multipliers: dict[str, float],
+    effects: list[LoadoutEffectView],
+    *,
+    source: str,
+) -> None:
+    for skill in _unwrap_fz_list(raw, "skills", "items", "list"):
+        if not isinstance(skill, dict):
+            continue
+        maximum = min(9, _to_int(skill.get("zeroPotentialMaxLevel")) + potential)
+        levels = _ordered_fz_levels(_unwrap_fz_list(skill.get("levels"), "levels", "items", "list"))
+        selected = next((item for item in levels if _to_int(item.get("level")) == maximum), levels[-1] if levels else None)
+        if not isinstance(selected, dict):
+            continue
+        values = selected.get("values") if isinstance(selected.get("values"), dict) else {}
+        description = _first_text(skill, "description", "desc")
+        _apply_loadout_description(
+            description,
+            values,
+            additions,
+            final_additions,
+            multipliers,
+            effects,
+            f"{source} · {_first_text(skill, 'name', 'title') or '武器效果'}",
+        )
+
+
+def _apply_loadout_operator_effects(
+    attrs: dict[str, Any],
+    additions: dict[str, float],
+    final_additions: dict[str, float],
+    multipliers: dict[str, float],
+    effects: list[LoadoutEffectView],
+) -> None:
+    for field in ("talents", "potentials"):
+        latest: dict[str, dict[str, Any]] = {}
+        for item in _unwrap_fz_list(attrs.get(field), field, "items", "list"):
+            if isinstance(item, dict):
+                latest[_first_text(item, "name", "title") or str(len(latest))] = item
+        for name, item in latest.items():
+            values = item.get("values") if isinstance(item.get("values"), dict) else {}
+            _apply_loadout_description(
+                _first_text(item, "description", "desc", "effect"),
+                values,
+                additions,
+                final_additions,
+                multipliers,
+                effects,
+                f"干员 · {name}",
+            )
+
+
+def _apply_loadout_set_effect(
+    suit_name: str,
+    suit: dict[str, Any],
+    additions: dict[str, float],
+    final_additions: dict[str, float],
+    multipliers: dict[str, float],
+    effects: list[LoadoutEffectView],
+) -> None:
+    bonus = suit.get("bonus") if isinstance(suit.get("bonus"), dict) else {}
+    levels = _unwrap_fz_list(bonus.get("levels"), "levels", "items", "list")
+    selected = levels[-1] if levels and isinstance(levels[-1], dict) else {}
+    values = selected.get("values") if isinstance(selected.get("values"), dict) else {}
+    _apply_loadout_description(
+        _first_text(bonus, "description", "desc"),
+        values,
+        additions,
+        final_additions,
+        multipliers,
+        effects,
+        f"{suit_name}套装",
+    )
+
+
+def _apply_loadout_description(
+    description: str,
+    values: dict[str, Any],
+    additions: dict[str, float],
+    final_additions: dict[str, float],
+    multipliers: dict[str, float],
+    effects: list[LoadoutEffectView],
+    source: str,
+) -> None:
+    if not description or not values:
+        return
+    for clause in (part.strip() for part in re.split(r"[。；\n]+", description) if part.strip()):
+        keys = [str(key) for key in values if re.search(rf"\b{re.escape(str(key))}\b", clause, flags=re.I)]
+        if not keys:
+            continue
+        triggered = _loadout_clause_is_triggered(clause)
+        rendered = _format_fz_template(clause, values)
+        resolved: list[tuple[str, float]] = []
+        for key in keys:
+            value = _to_float(_case_insensitive_get(values, key))
+            if value is None:
+                continue
+            target = _loadout_effect_target(key, clause, allow_label_fallback=len(keys) == 1)
+            if not target:
+                continue
+            resolved.append((target, value))
+        active = not triggered and bool(resolved)
+        effects.append(LoadoutEffectView(source, rendered, active=active))
+        if not active:
+            continue
+        for target, value in resolved:
+            if target == "AllDamageTakenScalar":
+                multipliers[target] = multipliers.get(target, 1.0) * value
+            elif target == "AtkFinal":
+                final_additions["Atk"] = final_additions.get("Atk", 0.0) + value
+            elif target == "MaxHpFinal":
+                final_additions["MaxHp"] = final_additions.get("MaxHp", 0.0) + value
+            else:
+                additions[target] = additions.get(target, 0.0) + value
+
+
+def _loadout_clause_is_triggered(clause: str) -> bool:
+    plain = _clean_fz_rich_text(clause)
+    return bool(
+        re.search(
+            r"(?:当|每|若|如果|期间|时[，,]|后[，,使]|根据|使(?:其他队友|敌人)|装备者施加|装备者造成|"
+            r"对.+(?:敌人|目标)|(?:连携技|终结技|战技|普通攻击).+的|所需)",
+            plain,
+        )
+    )
+
+
+def _loadout_effect_target(key: str, clause: str, *, allow_label_fallback: bool) -> str:
+    lowered = _alias_key(key).lower()
+    if lowered == "dmg_taken_down":
+        return "AllDamageTakenScalar"
+    target = LOADOUT_EFFECT_KEY_TARGETS.get(lowered)
+    if target:
+        return target
+    if any(token in lowered for token in ("duration", "time", "count", "cost", "stack", "limit", "interval", "cooldown")):
+        return ""
+    semantic_targets = (
+        (("phy", "physical"), "PhysicalDamageIncrease"),
+        (("spell",), "SpellDamageIncrease"),
+        (("fire",), "FireDamageIncrease"),
+        (("pulse",), "PulseDamageIncrease"),
+        (("cryst", "cold"), "CrystDamageIncrease"),
+        (("natural",), "NaturalDamageIncrease"),
+        (("ether",), "EtherDamageIncrease"),
+    )
+    if any(token in lowered for token in ("dmg", "damage", "up")):
+        for tokens, semantic_target in semantic_targets:
+            if any(token in lowered for token in tokens):
+                return semantic_target
+    if "atk" in lowered:
+        return "AtkPercent"
+    if not allow_label_fallback:
+        return ""
+    plain = _clean_fz_rich_text(clause)
+    label_targets = (
+        ("暴击伤害", "CriticalDamageIncrease"),
+        ("暴击率", "CriticalRate"),
+        ("终结技充能效率", "UltimateSpGainScalar"),
+        ("源石技艺强度", "PhysicalAndSpellInflictionEnhance"),
+        ("物理伤害", "PhysicalDamageIncrease"),
+        ("法术伤害", "SpellDamageIncrease"),
+        ("灼热伤害", "FireDamageIncrease"),
+        ("电磁伤害", "PulseDamageIncrease"),
+        ("寒冷伤害", "CrystDamageIncrease"),
+        ("自然伤害", "NaturalDamageIncrease"),
+        ("超域伤害", "EtherDamageIncrease"),
+        ("攻击力", "AtkPercent" if "%" in clause else "AtkFinal"),
+        ("生命值", "MaxHpPercent" if "%" in clause else "MaxHpFinal"),
+        ("力量", "Str"),
+        ("敏捷", "Agi"),
+        ("智识", "Wisd"),
+        ("意志", "Will"),
+    )
+    return next((target for label, target in label_targets if label in plain), "")
+
+
+def _build_loadout_advanced_stats(values: dict[str, float]) -> list[LoadoutPanelStatView]:
+    labels = dict(LOADOUT_ATTRIBUTE_NAMES)
+    labels.update({"PhysicalResistance": "物理抗性", "SpellResistance": "法术抗性"})
+    order = (
+        "CriticalRate",
+        "CriticalDamageIncrease",
+        "PhysicalResistance",
+        "SpellResistance",
+        "PhysicalAndSpellInflictionEnhance",
+        "HealOutputIncrease",
+        "HealTakenIncrease",
+        "UltimateSpGainScalar",
+        "ComboSkillCooldownScalar",
+        "PoiseDamageOutputScalar",
+        "AllDamageIncrease",
+        "AllDamageTakenScalar",
+        "NormalAttackDamageIncrease",
+        "NormalSkillDamageIncrease",
+        "ComboSkillDamageIncrease",
+        "UltimateSkillDamageIncrease",
+        "PhysicalDamageIncrease",
+        "SpellDamageIncrease",
+        "FireDamageIncrease",
+        "PulseDamageIncrease",
+        "CrystDamageIncrease",
+        "NaturalDamageIncrease",
+        "EtherDamageIncrease",
+    )
+    always_show = {"CriticalRate", "CriticalDamageIncrease", "PhysicalResistance", "SpellResistance"}
+    result: list[LoadoutPanelStatView] = []
+    for key in order:
+        value = values.get(key, 0.0)
+        if key not in always_show and abs(value) < 1e-9:
+            continue
+        if key in LOADOUT_PERCENT_ATTRIBUTES or key in {"PhysicalResistance", "SpellResistance", "AllDamageTakenScalar"}:
+            formatted = _format_loadout_percent(value)
+        else:
+            formatted = str(math.floor(value))
+        result.append(LoadoutPanelStatView(key, labels.get(key, key), formatted))
+    return result
+
+
+def _format_loadout_percent(value: float) -> str:
+    return f"{value * 100:.1f}%"
 
 
 def build_fz_equipment_catalog_view(
