@@ -3355,6 +3355,23 @@ remotePort = {{ $v.Second }}
         error.assert_called_once()
         self.assertNotIn(secret_key, str(error.call_args))
 
+    def test_steam_duration_text_uses_readable_chinese(self):
+        import plugins.steamInfo as steam_plugin
+
+        with patch.object(steam_plugin.time, "time", return_value=1540):
+            self.assertEqual(steam_plugin._play_time_text(1000), "9 分钟")
+        with patch.object(steam_plugin.time, "time", return_value=8500):
+            self.assertEqual(steam_plugin._play_time_text(1000), "2 小时 5 分钟")
+
+        self.assertEqual(steam_plugin._format_minutes(125), "2 小时 5 分钟")
+        self.assertEqual(steam_plugin._format_minutes_compact(120), "2小时")
+
+        source = (ROOT / "plugins/steamInfo/__init__.py").read_text(encoding="utf-8")
+        self.assertIn("玩了 {play_time_text}", source)
+        self.assertIn("后不玩了", source)
+        for mojibake in ("灏忔椂", "鍒嗛挓", "鐜╀簡", "鍚庝笉鐜╀簡"):
+            self.assertNotIn(mojibake, source)
+
     def test_steam_compare_detects_start_stop_and_change(self):
         steam_data = _load_steam_data_source()
         with TemporaryDirectory() as tmp:

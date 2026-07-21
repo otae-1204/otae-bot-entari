@@ -320,8 +320,8 @@ def _play_time_text(start_time: Optional[int]) -> Optional[str]:
     hours = seconds // 3600
     minutes = (seconds % 3600) // 60
     if hours > 0:
-        return f"{hours} 灏忔椂 {minutes} 鍒嗛挓"
-    return f"{minutes} 鍒嗛挓"
+        return f"{hours} 小时 {minutes} 分钟"
+    return f"{minutes} 分钟"
 
 
 def _format_minutes(minutes: int) -> str:
@@ -329,10 +329,10 @@ def _format_minutes(minutes: int) -> str:
     hours = minutes // 60
     remain_minutes = minutes % 60
     if hours and remain_minutes:
-        return f"{hours} 灏忔椂 {remain_minutes} 鍒嗛挓"
+        return f"{hours} 小时 {remain_minutes} 分钟"
     if hours:
-        return f"{hours} 灏忔椂"
-    return f"{remain_minutes} 鍒嗛挓"
+        return f"{hours} 小时"
+    return f"{remain_minutes} 分钟"
 
 
 def _format_minutes_compact(minutes: int) -> str:
@@ -342,7 +342,7 @@ def _format_minutes_compact(minutes: int) -> str:
     if hours and remain_minutes:
         return f"{hours}小时{remain_minutes}分"
     if hours:
-        return f"{hours}灏忔椂"
+        return f"{hours}小时"
     return f"{remain_minutes}分"
 
 
@@ -682,7 +682,7 @@ async def broadcast_steam_info(parent_id: str, steam_info: PlayerSummaries):
             play_time_text = _play_time_text(old_player.get("game_start_time"))
             if play_time_text:
                 msg.append(
-                    f"{display_name} 鐜╀簡 {play_time_text} {old_player['gameextrainfo']} 鍚庝笉鐜╀簡"
+                    f"{display_name} 玩了 {play_time_text} {old_player['gameextrainfo']} 后不玩了"
                 )
             else:
                 msg.append(
@@ -1001,7 +1001,7 @@ async def info_handle(
         {
             "game_header": game["game_image"],
             "game_name": game["game_name"],
-            "game_time": f"{game['play_time']} 灏忔椂" if game["play_time"] else "",
+            "game_time": f"{game['play_time']} 小时" if game["play_time"] else "",
             "last_play_time": game["last_played"],
             "achievements": game["achievements"],
             "completed_achievement_number": game.get("completed_achievement_number"),
