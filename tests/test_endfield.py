@@ -1093,6 +1093,13 @@ class EndfieldServiceTests(unittest.TestCase):
         values = [level.values.get("伤害倍率", "--") for level in view.skills[1].levels]
         self.assertEqual(values, ["90%", "100%", "--", "--"])
 
+    def test_fz_skill_levels_use_mastery_labels_for_levels_ten_to_twelve(self):
+        levels = service._build_fz_skill_levels(
+            [{"level": level, "values": {}} for level in (9, 10, 11, 12)]
+        )
+
+        self.assertEqual([level.label for level in levels], ["Lv9", "M1", "M2", "M3"])
+
     def test_warfarin_arcane_blackboard_metrics_are_localized_with_correct_units(self):
         normal = service._extract_values(
             {
@@ -1673,7 +1680,7 @@ class EndfieldServiceTests(unittest.TestCase):
         self.assertEqual(view.portrait_url, "data:image/png;base64,")
         self.assertEqual([skill.category for skill in view.skills], ["普攻", "战技", "连携技", "终结技"])
         self.assertEqual(view.skills[0].icon_id, "data:image/png;base64,")
-        self.assertEqual([level.label for level in view.skills[0].levels], ["Lv7", "Lv8", "Lv9", "Lv10"])
+        self.assertEqual([level.label for level in view.skills[0].levels], ["Lv7", "Lv8", "Lv9", "M1"])
 
         metric_names = set()
         for skill in view.skills:
@@ -1857,7 +1864,7 @@ class EndfieldServiceTests(unittest.TestCase):
             self.assertNotIn("{", effect.description)
             self.assertNotIn("}", effect.description)
 
-    def test_render_fz_operator_card_html_uses_dynamic_level_labels(self):
+    def test_render_fz_operator_card_html_uses_mastery_level_labels(self):
         view = service.build_fz_operator_view(_sample_fz_operator(), _sample_richtext())
         with patch.object(draw, "fetch_many", AsyncMock(return_value={})):
             html = asyncio.run(render_operator_card_html(view))
@@ -1865,8 +1872,8 @@ class EndfieldServiceTests(unittest.TestCase):
         self.assertIn("Lv7", html)
         self.assertIn("Lv8", html)
         self.assertIn("Lv9", html)
-        self.assertIn("Lv10", html)
-        self.assertNotIn("<span>M1</span>", html)
+        self.assertNotIn("Lv10", html)
+        self.assertIn("<span>M1</span>", html)
         self.assertNotIn("<span>M2</span>", html)
         self.assertNotIn("<span>M3</span>", html)
         self.assertIn("攻击倍率", html)

@@ -993,7 +993,7 @@ def _build_fz_skill_levels(raw: Any, param_values: list[dict[str, str]] | None =
             cost = "--"
         levels.append(
             SkillLevelView(
-                label=f"Lv{level}",
+                label=_level_label(level),
                 level=level,
                 values=mapped_values,
                 cooldown=cooldown,
