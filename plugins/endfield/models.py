@@ -272,6 +272,7 @@ class LoadoutEquipmentView:
     enhance_levels: tuple[int, ...] = ()
     icon_url: str = ""
     suit_name: str = ""
+    stats: list[EquipmentStatView] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -303,6 +304,7 @@ class LoadoutView:
     operator_name: str
     weapon_name: str
     operator_level: int
+    operator_potential: int
     weapon_level: int
     weapon_potential: int
     main_attribute: str

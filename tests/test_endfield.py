@@ -99,15 +99,46 @@ class EndfieldCommandParserTests(unittest.TestCase):
     def test_parse_loadout_command_keeps_operator_first_and_gear_in_any_order(self):
         parsed = commands.parse_command(
             "配装 佩丽卡 脉冲源石配件 词条2锻造2 超轻域手 脉冲甲 脉冲源石配件 "
-            "角色等级80 武器等级70 潜能3"
+            "角色等级80 角色潜能2 武器等级70 武器潜能3 武器技能1等级5 武器技能3等级2"
         )
         self.assertEqual(parsed.action, "loadout")
-        self.assertEqual((parsed.char_level, parsed.weapon_level, parsed.potential, parsed.enhance), (80, 70, 3, 3))
+        self.assertEqual(
+            (parsed.char_level, parsed.char_potential, parsed.weapon_level, parsed.weapon_potential, parsed.enhance),
+            (80, 2, 70, 3, 3),
+        )
         spec, error = commands.parse_loadout_spec(parsed.query, parsed.enhance)
         self.assertEqual(error, "")
         self.assertEqual([item.name for item in spec.items], ["佩丽卡", "脉冲源石配件", "超轻域手", "脉冲甲", "脉冲源石配件"])
         self.assertEqual(spec.items[1].forge_levels, ((2, 2),))
         self.assertEqual(spec.items[-1].forge_levels, ())
+        self.assertEqual(parsed.weapon_skill_levels, ((1, 5), (3, 2)))
+
+    def test_parse_loadout_supports_separate_operator_and_weapon_potentials(self):
+        parsed = commands.parse_command(
+            "配装 佩丽卡 --char-potential=1 --weapon-potential 4"
+        )
+
+        self.assertEqual(parsed.action, "loadout")
+        self.assertEqual(parsed.char_potential, 1)
+        self.assertEqual(parsed.weapon_potential, 4)
+
+    def test_parse_loadout_rejects_invalid_operator_potential(self):
+        parsed = commands.parse_command("配装 佩丽卡 角色潜能6")
+
+        self.assertEqual(parsed.action, "invalid")
+        self.assertIn("角色潜能必须在 0–5", parsed.error)
+
+    def test_parse_loadout_rejects_ambiguous_bare_potential(self):
+        parsed = commands.parse_command("配装 佩丽卡 潜能3")
+
+        self.assertEqual(parsed.action, "invalid")
+        self.assertIn("角色潜能N或武器潜能N", parsed.error)
+
+    def test_parse_loadout_rejects_invalid_weapon_skill_level(self):
+        parsed = commands.parse_command("配装 佩丽卡 武器技能1等级10")
+
+        self.assertEqual(parsed.action, "invalid")
+        self.assertIn("武器技能等级必须在 1–9", parsed.error)
 
     def test_parse_loadout_rejects_invalid_enhance(self):
         spec, error = commands.parse_loadout_spec("佩丽卡 脉冲源石配件 词条2锻造4")
@@ -118,6 +149,14 @@ class EndfieldCommandParserTests(unittest.TestCase):
         self.assertEqual(aliases.alias_targets("equipment", "脉冲源石配件"), ("脉冲式校准器",))
         self.assertEqual(aliases.alias_targets("equipment", "脉冲甲"), ("脉冲式干扰服",))
         self.assertEqual(aliases.alias_targets("equipment", "超轻域手"), ("轻超域护手",))
+
+    def test_exact_long_breath_armor_name_beats_variant(self):
+        query = "长息轻护甲"
+        base_score = commands.score_entity_candidate("equipment", query, "长息轻护甲")
+        variant_score = commands.score_entity_candidate("equipment", query, "长息轻护甲·壹型")
+
+        self.assertEqual(base_score, 100)
+        self.assertGreater(base_score, variant_score)
 
     def test_score_candidate_handles_typo_and_pinyin(self):
         exact = commands.score_candidate("弭弗", "弭弗")
@@ -370,6 +409,12 @@ class EndfieldCommandParserTests(unittest.TestCase):
         text = commands.format_help()
         self.assertIn("--source <fz|warfarin>", text)
         self.assertIn("-s/--source", text)
+
+    def test_help_documents_loadout_potential_and_weapon_skill_options(self):
+        text = commands.format_help()
+
+        self.assertIn("角色潜能2 武器潜能3", text)
+        self.assertIn("武器技能1等级5", text)
 
 
 def _sample_operator(levels: tuple[int, ...] = (9, 10, 11, 12)):
@@ -1044,6 +1089,27 @@ def _sample_loadout_operator():
     }
 
 
+def _sample_loadout_operator_growth():
+    nodes = {}
+    for stage, value in ((1, 8), (2, 10), (3, 10), (4, 15)):
+        nodes[f"ability_{stage}"] = {
+            "attributeNodeInfo": {
+                "breakStage": stage,
+                "attributeModifiers": [
+                    {"attrType": 41, "attrValue": value, "modifierType": 5},
+                    {"attrType": 42, "attrValue": value, "modifierType": 5},
+                ],
+            }
+        }
+    nodes["locked"] = {
+        "attributeNodeInfo": {
+            "breakStage": 5,
+            "attributeModifiers": [{"attrType": 42, "attrValue": 999, "modifierType": 5}],
+        }
+    }
+    return {"data": {"charGrowthTable": {"talentNodeMap": nodes}}}
+
+
 def _sample_loadout_weapon():
     return {
         "article": {"title": "武器/测试武器", "updatedAt": "2026-07-20T00:00:00.000Z"},
@@ -1226,6 +1292,33 @@ def _sample_warfarin_weapon():
 
 
 class EndfieldServiceTests(unittest.TestCase):
+    def test_loadout_service_fetches_operator_growth_data(self):
+        client = types.SimpleNamespace(
+            fz_article_by_title=AsyncMock(side_effect=[_sample_loadout_operator(), _sample_loadout_weapon()]),
+            fz_game_richtext=AsyncMock(return_value={}),
+            search=AsyncMock(
+                return_value={
+                    "results": [
+                        {"type": "operators", "slug": "test-operator", "name": "测试干员"}
+                    ]
+                }
+            ),
+            operator_detail=AsyncMock(return_value=_sample_loadout_operator_growth()),
+        )
+
+        view = asyncio.run(
+            service.EndfieldService(client).get_loadout_view(
+                "干员/测试干员",
+                "武器/测试武器",
+                [],
+            )
+        )
+
+        abilities = {row.key: row.value for row in view.ability_stats}
+        self.assertEqual(abilities["Wisd"], "83")
+        self.assertEqual(abilities["Will"], "93")
+        client.operator_detail.assert_awaited_once_with("test-operator")
+
     def test_loadout_calculates_attack_and_derived_panel(self):
         view = build_fz_loadout_view(
             _sample_loadout_operator(),
@@ -1261,6 +1354,11 @@ class EndfieldServiceTests(unittest.TestCase):
             [(_sample_loadout_equipment("Body"), 3, ((2, 1),))],
         )
         self.assertEqual(view.equipment[0].enhance_levels, (3, 1, 3))
+        self.assertEqual(
+            [(row.label, row.value) for row in view.equipment[0].stats],
+            [("力量", "10"), ("攻击力", "10")],
+        )
+        self.assertEqual({row.key: row.value for row in view.primary_stats}["Def"], "50")
         self.assertEqual({row.key: row.value for row in view.ability_stats}["Str"], "40")
 
     def test_loadout_applies_equipment_sub_attribute_base_multiplier(self):
@@ -1290,6 +1388,55 @@ class EndfieldServiceTests(unittest.TestCase):
         )
 
         self.assertEqual({row.key: row.value for row in view.ability_stats}["Will"], "78")
+
+    def test_loadout_applies_operator_growth_nodes_before_ability_multiplier(self):
+        operator = copy.deepcopy(_sample_loadout_operator())
+        attrs = operator["revision"]["contentJson"]["content"][0]["attrs"]
+        attrs["attributes"]["rows"][6]["cells"] = [["121.5"]]
+
+        def will_equipment(part_type, value, multiplier=0.0):
+            equipment = _sample_loadout_equipment(part_type)
+            rows = [
+                {
+                    "label": "意志",
+                    "values": [value, value, value, value],
+                    "attrType": "Will",
+                    "modifierType": "BaseAddition",
+                    "enhances": True,
+                }
+            ]
+            if multiplier:
+                rows.append(
+                    {
+                        "label": "副能力",
+                        "values": [multiplier, multiplier, multiplier, multiplier],
+                        "compositeAttr": "Sub",
+                        "attrType": "Level",
+                        "modifierType": "BaseMultiplier",
+                        "enhances": True,
+                    }
+                )
+            equipment["revision"]["contentJson"]["content"][0]["attrs"]["stats"]["rows"] = rows
+            return equipment
+
+        view = build_fz_loadout_view(
+            operator,
+            _sample_loadout_weapon(),
+            [
+                (will_equipment("EDC", 27), 3, ()),
+                (will_equipment("EDC", 53), 3, ()),
+                (will_equipment("Hand", 55), 3, ()),
+                (will_equipment("Body", 75, 0.269123), 3, ()),
+            ],
+            operator_growth=_sample_loadout_operator_growth(),
+        )
+
+        abilities = {row.key: row.value for row in view.ability_stats}
+        self.assertEqual(abilities["Will"], "475")
+        self.assertEqual(abilities["Wisd"], "83")
+        growth = next(effect for effect in view.effects if effect.source == "干员 · 能力天赋")
+        self.assertTrue(growth.active)
+        self.assertEqual(growth.description, "智识+43，意志+43")
 
     def test_loadout_applies_unconditional_healing_and_sub_attribute_weapon_effects(self):
         weapon = _sample_loadout_weapon()
@@ -1373,6 +1520,87 @@ class EndfieldServiceTests(unittest.TestCase):
         potential = next(effect for effect in view.effects if effect.source == "干员 · 观海")
         self.assertTrue(potential.active)
 
+    def test_loadout_applies_only_unlocked_operator_potentials(self):
+        operator = copy.deepcopy(_sample_loadout_operator())
+        attrs = operator["revision"]["contentJson"]["content"][0]["attrs"]
+        attrs["potentials"] = {
+            "potentials": [
+                {
+                    "name": "潜能一",
+                    "level": 1,
+                    "description": "智识+{Wisd}",
+                    "values": {"Wisd": 10},
+                },
+                {
+                    "name": "潜能二",
+                    "level": 2,
+                    "description": "意志+{Will}",
+                    "values": {"Will": 20},
+                },
+            ]
+        }
+
+        rank_zero = build_fz_loadout_view(
+            operator,
+            _sample_loadout_weapon(),
+            [],
+            operator_potential=0,
+        )
+        rank_one = build_fz_loadout_view(
+            operator,
+            _sample_loadout_weapon(),
+            [],
+            operator_potential=1,
+        )
+
+        rank_zero_abilities = {row.key: row.value for row in rank_zero.ability_stats}
+        rank_one_abilities = {row.key: row.value for row in rank_one.ability_stats}
+        self.assertEqual(rank_zero_abilities["Wisd"], "40")
+        self.assertEqual(rank_zero_abilities["Will"], "50")
+        self.assertEqual(rank_one_abilities["Wisd"], "50")
+        self.assertEqual(rank_one_abilities["Will"], "50")
+        self.assertFalse(any(effect.source == "干员 · 潜能一" for effect in rank_zero.effects))
+        self.assertTrue(any(effect.source == "干员 · 潜能一" for effect in rank_one.effects))
+        self.assertFalse(any(effect.source == "干员 · 潜能二" for effect in rank_one.effects))
+
+    def test_loadout_supports_per_weapon_skill_levels(self):
+        weapon = copy.deepcopy(_sample_loadout_weapon())
+        skills = weapon["revision"]["contentJson"]["content"][0]["attrs"]["skills"]["skills"]
+        skills[0]["levels"] = [
+            {"level": 1, "values": {"str": 1}},
+            {"level": 9, "values": {"str": 10}},
+        ]
+
+        view = build_fz_loadout_view(
+            _sample_loadout_operator(),
+            weapon,
+            [],
+            weapon_skill_levels=((1, 1),),
+        )
+
+        abilities = {row.key: row.value for row in view.ability_stats}
+        self.assertEqual(abilities["Str"], "21")
+        self.assertTrue(any(effect.source.endswith("力量提升 Lv.1") for effect in view.effects))
+
+    def test_loadout_rejects_weapon_skill_level_above_potential_limit(self):
+        with self.assertRaisesRegex(ValueError, "武器技能3在当前潜能下最高为等级1"):
+            build_fz_loadout_view(
+                _sample_loadout_operator(),
+                _sample_loadout_weapon(),
+                [],
+                weapon_potential=1,
+                weapon_skill_levels=((3, 5),),
+            )
+
+    def test_loadout_rejects_weapon_skill_index_out_of_range(self):
+        with self.assertRaisesRegex(ValueError, "武器技能4（该武器共有3个技能）"):
+            build_fz_loadout_view(
+                _sample_loadout_operator(),
+                _sample_loadout_weapon(),
+                [],
+                weapon_skill_levels=((4, 1),),
+            )
+
     def test_loadout_calculates_conduct_levels_and_forced_conduct_traits(self):
         operator = copy.deepcopy(_sample_loadout_operator())
         attrs = operator["revision"]["contentJson"]["content"][0]["attrs"]
@@ -1414,6 +1642,16 @@ class EndfieldServiceTests(unittest.TestCase):
         self.assertEqual(forced.levels[0].duration, "8.75秒")
         arts_row = next(row for row in view.advanced_stats if row.key == "PhysicalAndSpellInflictionEnhance")
         self.assertIn("附带效果 +33.3%", arts_row.detail)
+
+        rank_one = build_fz_loadout_view(
+            operator,
+            _sample_loadout_weapon(),
+            [],
+            operator_potential=1,
+        )
+        rank_one_forced = next(effect for effect in rank_one.status_effects if effect.forced)
+        self.assertEqual(rank_one_forced.levels[0].value, "法术易伤 16%")
+        self.assertEqual(rank_one_forced.levels[0].duration, "8.75秒")
 
     def test_loadout_applies_latest_corrosion_talent_and_potential(self):
         operator = copy.deepcopy(_sample_loadout_operator())
@@ -1487,6 +1725,9 @@ class EndfieldServiceTests(unittest.TestCase):
         with patch.object(draw, "fetch_many", AsyncMock(return_value={})):
             html = asyncio.run(render_loadout_card_html(view))
         self.assertIn("终末地 · 配装模拟器", html)
+        self.assertIn("干员 · LEVEL 90 · 潜能 5", html)
+        self.assertIn('class="loadout-item-stats"', html)
+        self.assertIn("力量", html)
         self.assertIn("常驻 / 无触发条件效果", html)
         self.assertIn("条件 / 触发效果", html)
         self.assertIn("最终异常效果", html)

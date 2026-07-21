@@ -61,8 +61,10 @@ class ParsedEndfieldCommand:
     alias_action: str = ""
     args: tuple[str, ...] = ()
     char_level: int = 90
+    char_potential: int = 5
     weapon_level: int = 90
-    potential: int = 5
+    weapon_potential: int = 5
+    weapon_skill_levels: tuple[tuple[int, int], ...] = ()
     enhance: int = 3
     error: str = ""
 
@@ -116,16 +118,18 @@ def parse_command(rest: str) -> ParsedEndfieldCommand:
             return ParsedEndfieldCommand("alias", alias_action="add", args=tuple(parts[2:]))
         return ParsedEndfieldCommand("alias", alias_action="add", args=tuple(parts[1:]))
     if head in LOADOUT_ALIASES:
-        loadout_parts, levels, option_error = _parse_loadout_options(parts[1:])
+        loadout_parts, levels, weapon_skill_levels, option_error = _parse_loadout_options(parts[1:])
         if option_error:
             return ParsedEndfieldCommand("invalid", error=option_error)
         return ParsedEndfieldCommand(
             "loadout",
             query=" ".join(loadout_parts).strip(),
             char_level=levels[0],
-            weapon_level=levels[1],
-            potential=levels[2],
-            enhance=levels[3],
+            char_potential=levels[1],
+            weapon_level=levels[2],
+            weapon_potential=levels[3],
+            weapon_skill_levels=weapon_skill_levels,
+            enhance=levels[4],
         )
     if head in SEARCH_ALIASES:
         scope, query_parts = _parse_optional_scope(parts[1:])
@@ -220,7 +224,7 @@ def format_help() -> str:
             "  /ef 装备 <名称> | /ef eq <名称>",
             "  /ef 装备（查看全部套组）| /ef 装备 <套组名>",
             "  /ef 配装（交互输入干员、可选武器与装备）",
-            "  /zmd 配装 佩丽卡 脉冲源石配件 脉冲甲 脉冲源石配件 超轻域手",
+            "  /zmd 配装 佩丽卡 脉冲源石配件 脉冲甲 脉冲源石配件 超轻域手 角色潜能2 武器潜能3",
             "  /ef 搜索 <关键词> | /efs <关键词>",
             "  /ef <关键词> --source <fz|warfarin>",
             "  /ef 数据源",
@@ -229,7 +233,9 @@ def format_help() -> str:
             "干员速查：/ef 干员；可按元素或职业筛选，例如 /ef 干员 灼热、/ef 干员 术师。",
             "武器速查：/ef 武器；可按类型筛选，例如 /ef 武器 单手剑。",
             "装备目录：默认仅金色；--all 显示全部，--rarity 可选 gold、purple、blue、all。",
-            "配装第一个名称固定为干员；之后武器与装备无需固定顺序，省略武器时自动使用推荐武器。干员/武器默认90级，装备词条默认3锻。",
+            "配装第一个名称固定为干员；之后武器与装备无需固定顺序，省略武器时自动使用推荐武器。干员/武器默认90级，角色/武器潜能默认5，装备词条默认3锻。",
+            "潜能指定：追加“角色潜能2 武器潜能3”。",
+            "武器技能指定：追加“武器技能1等级5”；可重复指定多个技能。",
             "单独调整词条：在装备后追加“词条2锻造2”；可重复追加多个词条设置。",
             "快捷：/efop <名称>、/efwp <名称>、/efeq <名称>、/终末地干员 <名称>、/终末地武器 <名称>、/终末地装备 <名称>",
         ]
@@ -392,33 +398,52 @@ def _split_inline_forge(token: str) -> tuple[str, tuple[int, int] | None]:
     return match.group(1).strip(), (int(match.group(2)), int(match.group(3)))
 
 
-def _parse_loadout_options(parts: list[str]) -> tuple[list[str], tuple[int, int, int, int], str]:
+def _parse_loadout_options(
+    parts: list[str],
+) -> tuple[list[str], tuple[int, int, int, int, int], tuple[tuple[int, int], ...], str]:
     definitions = {
         "--char-level": (0, 1, 90, "干员等级"),
-        "--weapon-level": (1, 1, 90, "武器等级"),
-        "--potential": (2, 0, 5, "武器潜能"),
-        "--enhance": (3, 0, 3, "装备强化档位"),
+        "--char-potential": (1, 0, 5, "角色潜能"),
+        "--operator-potential": (1, 0, 5, "角色潜能"),
+        "--weapon-level": (2, 1, 90, "武器等级"),
+        "--weapon-potential": (3, 0, 5, "武器潜能"),
+        "--enhance": (4, 0, 3, "装备强化档位"),
     }
-    values = [90, 90, 5, 3]
+    values = [90, 5, 90, 5, 3]
+    weapon_skill_levels: dict[int, int] = {}
     remaining: list[str] = []
     index = 0
     while index < len(parts):
         part = parts[index]
-        compact_match = re.fullmatch(r"(干员等级|角色等级|武器等级|武器潜能|潜能|默认锻造|装备锻造)(\d+)", part)
+        if re.fullmatch(r"潜能\d+", part):
+            return remaining, tuple(values), tuple(sorted(weapon_skill_levels.items())), "潜能类型不明确，请写角色潜能N或武器潜能N"
+        if part.lower() == "--potential" or part.lower().startswith("--potential="):
+            return remaining, tuple(values), tuple(sorted(weapon_skill_levels.items())), "请使用 --weapon-potential 指定武器潜能"
+        skill_match = re.fullmatch(r"武器技能([1-9]\d*)等级([1-9]\d*)", part)
+        if skill_match:
+            skill_index = int(skill_match.group(1))
+            skill_level = int(skill_match.group(2))
+            if skill_level > 9:
+                return remaining, tuple(values), tuple(sorted(weapon_skill_levels.items())), "武器技能等级必须在 1–9"
+            weapon_skill_levels[skill_index] = skill_level
+            index += 1
+            continue
+        compact_match = re.fullmatch(r"(干员等级|角色等级|干员潜能|角色潜能|武器等级|武器潜能|默认锻造|装备锻造)(\d+)", part)
         if compact_match:
             compact_definitions = {
                 "干员等级": (0, 1, 90, "干员等级"),
                 "角色等级": (0, 1, 90, "干员等级"),
-                "武器等级": (1, 1, 90, "武器等级"),
-                "武器潜能": (2, 0, 5, "武器潜能"),
-                "潜能": (2, 0, 5, "武器潜能"),
-                "默认锻造": (3, 0, 3, "装备强化档位"),
-                "装备锻造": (3, 0, 3, "装备强化档位"),
+                "干员潜能": (1, 0, 5, "角色潜能"),
+                "角色潜能": (1, 0, 5, "角色潜能"),
+                "武器等级": (2, 1, 90, "武器等级"),
+                "武器潜能": (3, 0, 5, "武器潜能"),
+                "默认锻造": (4, 0, 3, "装备强化档位"),
+                "装备锻造": (4, 0, 3, "装备强化档位"),
             }
             target, minimum, maximum, label = compact_definitions[compact_match.group(1)]
             value = int(compact_match.group(2))
             if not minimum <= value <= maximum:
-                return remaining, tuple(values), f"{label}必须在 {minimum}–{maximum}"
+                return remaining, tuple(values), tuple(sorted(weapon_skill_levels.items())), f"{label}必须在 {minimum}–{maximum}"
             values[target] = value
             index += 1
             continue
@@ -435,16 +460,16 @@ def _parse_loadout_options(parts: list[str]) -> tuple[list[str], tuple[int, int,
             raw_value = parts[index + 1]
             index += 2
         else:
-            return remaining, tuple(values), f"{part} 后需要数值"
+            return remaining, tuple(values), tuple(sorted(weapon_skill_levels.items())), f"{part} 后需要数值"
         target, minimum, maximum, label = definition
         try:
             value = int(raw_value)
         except ValueError:
-            return remaining, tuple(values), f"{label}必须是整数"
+            return remaining, tuple(values), tuple(sorted(weapon_skill_levels.items())), f"{label}必须是整数"
         if not minimum <= value <= maximum:
-            return remaining, tuple(values), f"{label}必须在 {minimum}–{maximum}"
+            return remaining, tuple(values), tuple(sorted(weapon_skill_levels.items())), f"{label}必须在 {minimum}–{maximum}"
         values[target] = value
-    return remaining, tuple(values), ""
+    return remaining, tuple(values), tuple(sorted(weapon_skill_levels.items())), ""
 
 
 def _split(text: str) -> list[str]:

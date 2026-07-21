@@ -272,8 +272,10 @@ async def _handle_loadout(matcher, command: ParsedEndfieldCommand) -> None:
             weapon_title,
             equipment,
             operator_level=command.char_level,
+            operator_potential=command.char_potential,
             weapon_level=command.weapon_level,
-            weapon_potential=command.potential,
+            weapon_potential=command.weapon_potential,
+            weapon_skill_levels=command.weapon_skill_levels,
         )
         data_seconds = perf_counter() - started
         png = await draw_loadout_card(view)

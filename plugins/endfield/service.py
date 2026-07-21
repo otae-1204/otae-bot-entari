@@ -220,31 +220,49 @@ class EndfieldService:
         equipment: list[tuple[str, int, tuple[tuple[int, int], ...]]],
         *,
         operator_level: int = 90,
+        operator_potential: int = 5,
         weapon_level: int = 90,
         weapon_potential: int = 5,
+        weapon_skill_levels: tuple[tuple[int, int], ...] = (),
     ) -> LoadoutView:
         titles = [operator_title, weapon_title, *(title for title, _, _ in equipment)]
         raw_results = await asyncio.gather(
             *(self.client.fz_article_by_title(title) for title in titles),
             self.client.fz_game_richtext(),
+            self._get_loadout_operator_growth(operator_title),
             return_exceptions=True,
         )
-        raws = raw_results[:-1]
+        raws = raw_results[:-2]
         for raw in raws:
             if isinstance(raw, Exception):
                 raise raw
-        richtext_result = raw_results[-1]
+        richtext_result = raw_results[-2]
         richtext = richtext_result if isinstance(richtext_result, dict) else {}
+        growth_result = raw_results[-1]
+        operator_growth = growth_result if isinstance(growth_result, dict) else {}
         equipment_raws = [(raw, equipment[index][1], equipment[index][2]) for index, raw in enumerate(raws[2:])]
         return build_fz_loadout_view(
             raws[0],
             raws[1],
             equipment_raws,
             operator_level=operator_level,
+            operator_potential=operator_potential,
             weapon_level=weapon_level,
             weapon_potential=weapon_potential,
+            weapon_skill_levels=weapon_skill_levels,
             richtext=richtext,
+            operator_growth=operator_growth,
         )
+
+    async def _get_loadout_operator_growth(self, operator_title: str) -> dict[str, Any]:
+        name = _strip_title_prefix(operator_title, "干员/")
+        try:
+            slug = await self.find_operator_slug(name)
+            if not slug:
+                return {}
+            return await self.client.operator_detail(slug)
+        except (WarfarinAPIError, ValueError, KeyError, TypeError):
+            return {}
 
     async def get_recommended_weapon_title(self, operator_title: str) -> str:
         raw = await self.client.fz_article_by_title(operator_title)
@@ -778,9 +796,12 @@ def build_fz_loadout_view(
     equipment_raws: list[tuple[dict[str, Any], int, tuple[tuple[int, int], ...]]],
     *,
     operator_level: int = 90,
+    operator_potential: int = 5,
     weapon_level: int = 90,
     weapon_potential: int = 5,
+    weapon_skill_levels: tuple[tuple[int, int], ...] = (),
     richtext: dict[str, Any] | None = None,
+    operator_growth: dict[str, Any] | None = None,
 ) -> LoadoutView:
     operator_attrs = _fz_template_attrs(operator_raw)
     weapon_attrs = _fz_template_attrs(weapon_raw)
@@ -790,6 +811,7 @@ def build_fz_loadout_view(
         raise ValueError("FZ loadout data is missing operator or weapon fields")
 
     operator_level = max(1, min(90, int(operator_level)))
+    operator_potential = max(0, min(5, int(operator_potential)))
     weapon_level = max(1, min(90, int(weapon_level)))
     weapon_potential = max(0, min(5, int(weapon_potential)))
     operator_weapon_type = _first_text(operator_hero, "weaponType", "weapon")
@@ -807,6 +829,12 @@ def build_fz_loadout_view(
     main_attribute, sub_attribute = _fz_main_sub_attributes(operator_hero)
     main_key = _loadout_attribute_key(main_attribute)
     sub_key = _loadout_attribute_key(sub_attribute)
+    _apply_loadout_operator_growth(
+        operator_growth,
+        _fz_operator_break_stage_at_level(operator_attrs.get("attributes"), operator_level),
+        additions,
+        effects,
+    )
     equipment_views: list[LoadoutEquipmentView] = []
     suits: dict[str, dict[str, Any]] = {}
     suit_counts: dict[str, int] = {}
@@ -828,6 +856,7 @@ def build_fz_loadout_view(
         stat_rows = (attrs.get("stats") or {}).get("rows") or []
         forge_levels = _loadout_equipment_forge_levels(stat_rows, default_enhance, forge_overrides)
         forge_index = 0
+        equipment_stats: list[EquipmentStatView] = []
         for row in stat_rows:
             if isinstance(row, dict):
                 if bool(row.get("enhances", True)):
@@ -845,6 +874,9 @@ def build_fz_loadout_view(
                     final_additions,
                     multipliers,
                 )
+                stat = _build_loadout_equipment_stat(row, enhance, main_attribute, sub_attribute)
+                if stat is not None:
+                    equipment_stats.append(stat)
         suit = attrs.get("suit") if isinstance(attrs.get("suit"), dict) else {}
         suit_name = _first_text(suit, "suitName", "name") or _first_text(hero, "suitName")
         required = _to_int(_first_value(suit, "equipCnt", "requiredCount"))
@@ -858,19 +890,28 @@ def build_fz_loadout_view(
                 enhance_levels=forge_levels,
                 icon_url=_fz_asset_raw_url(_first_text(hero, "iconUrl", "icon")),
                 suit_name=suit_name,
+                stats=equipment_stats,
             )
         )
 
     _apply_loadout_weapon_skills(
         weapon_attrs.get("skills"),
         weapon_potential,
+        weapon_skill_levels,
         additions,
         final_additions,
         multipliers,
         effects,
         source=_first_text(weapon_hero, "name") or "武器",
     )
-    _apply_loadout_operator_effects(operator_attrs, additions, final_additions, multipliers, effects)
+    _apply_loadout_operator_effects(
+        operator_attrs,
+        operator_potential,
+        additions,
+        final_additions,
+        multipliers,
+        effects,
+    )
     for suit_name, suit in suits.items():
         required = _to_int(_first_value(suit, "equipCnt", "requiredCount"))
         if suit_counts.get(suit_name, 0) >= required:
@@ -932,7 +973,7 @@ def build_fz_loadout_view(
     for row in advanced_stats:
         if row.key == "PhysicalAndSpellInflictionEnhance":
             row.detail = f"导电 / 腐蚀 / 碎甲附带效果 +{status_effect_bonus * 100:.1f}%"
-    status_effects = _build_loadout_status_effects(operator_attrs, arts_strength)
+    status_effects = _build_loadout_status_effects(operator_attrs, operator_potential, arts_strength)
 
     versions = [
         str((operator_raw.get("article") or {}).get("updatedAt") or "")[:10],
@@ -943,6 +984,7 @@ def build_fz_loadout_view(
         operator_name=_first_text(operator_hero, "name", "title"),
         weapon_name=_first_text(weapon_hero, "name", "title"),
         operator_level=operator_level,
+        operator_potential=operator_potential,
         weapon_level=weapon_level,
         weapon_potential=weapon_potential,
         main_attribute=main_attribute,
@@ -988,6 +1030,65 @@ def _fz_operator_attributes_at_level(raw: Any, level: int) -> dict[str, float]:
         if key and value is not None:
             result[key] = value
     return result
+
+
+def _fz_operator_break_stage_at_level(raw: Any, level: int) -> int:
+    if not isinstance(raw, dict):
+        return 0
+    selected_stage = 0
+    for group in raw.get("breaks") or []:
+        if not isinstance(group, dict):
+            continue
+        levels = group.get("levels")
+        if isinstance(levels, list) and level in levels:
+            selected_stage = _to_int(group.get("breakStage"))
+    return selected_stage
+
+
+LOADOUT_GROWTH_ATTRIBUTE_KEYS = {
+    39: "Str",
+    40: "Agi",
+    41: "Wisd",
+    42: "Will",
+}
+
+
+def _apply_loadout_operator_growth(
+    raw: dict[str, Any] | None,
+    break_stage: int,
+    additions: dict[str, float],
+    effects: list[LoadoutEffectView],
+) -> None:
+    data = raw.get("data") if isinstance(raw, dict) and isinstance(raw.get("data"), dict) else raw
+    growth = data.get("charGrowthTable") if isinstance(data, dict) else None
+    if not isinstance(growth, dict):
+        return
+    totals: dict[str, float] = {}
+    for node in (growth.get("talentNodeMap") or {}).values():
+        if not isinstance(node, dict):
+            continue
+        info = node.get("attributeNodeInfo")
+        if not isinstance(info, dict) or _to_int(info.get("breakStage")) > break_stage:
+            continue
+        for modifier in info.get("attributeModifiers") or []:
+            if not isinstance(modifier, dict):
+                continue
+            raw_type = modifier.get("attrType")
+            key = LOADOUT_GROWTH_ATTRIBUTE_KEYS.get(_to_int(raw_type), _loadout_attribute_key(str(raw_type or "")))
+            value = _to_float(modifier.get("attrValue"))
+            if key not in LOADOUT_ATTRIBUTE_NAMES or value is None:
+                continue
+            totals[key] = totals.get(key, 0.0) + value
+    if not totals:
+        return
+    for key, value in totals.items():
+        additions[key] = additions.get(key, 0.0) + value
+    description = "，".join(
+        f"{LOADOUT_ATTRIBUTE_NAMES[key]}+{_format_plain_number(totals[key])}"
+        for key in ("Str", "Agi", "Wisd", "Will")
+        if key in totals
+    )
+    effects.append(LoadoutEffectView("干员 · 能力天赋", description, active=True))
 
 
 def _fz_main_sub_attributes(hero: dict[str, Any]) -> tuple[str, str]:
@@ -1052,6 +1153,33 @@ def _apply_loadout_equipment_row(
         additions[target] = additions.get(target, 0.0) + value
 
 
+def _build_loadout_equipment_stat(
+    row: dict[str, Any],
+    enhance: int,
+    main_attribute: str,
+    sub_attribute: str,
+) -> EquipmentStatView | None:
+    if str(row.get("attrType") or "") == "Def":
+        return None
+    values = row.get("values") or []
+    raw_value = values[min(enhance, len(values) - 1)] if isinstance(values, list) and values else row.get("value")
+    if raw_value in (None, ""):
+        return None
+    label = _first_text(row, "label", "name")
+    composite = str(row.get("compositeAttr") or "")
+    if composite == "Main":
+        label = f"{label or '主能力'}（{main_attribute}）"
+    elif composite == "Sub":
+        label = f"{label or '副能力'}（{sub_attribute}）"
+    if not label:
+        return None
+    return EquipmentStatView(
+        label=label,
+        value=_format_equipment_stat(raw_value, bool(row.get("isPercent"))),
+        icon_key=str(row.get("attrType") or ""),
+    )
+
+
 def _fz_weapon_attack_at_level(raw: Any, level: int) -> float:
     stats = raw if isinstance(raw, dict) else {}
     curve = stats.get("curve") or []
@@ -1064,6 +1192,7 @@ def _fz_weapon_attack_at_level(raw: Any, level: int) -> float:
 def _apply_loadout_weapon_skills(
     raw: Any,
     potential: int,
+    skill_levels: tuple[tuple[int, int], ...],
     additions: dict[str, float],
     final_additions: dict[str, float],
     multipliers: dict[str, float],
@@ -1071,12 +1200,28 @@ def _apply_loadout_weapon_skills(
     *,
     source: str,
 ) -> None:
-    for skill in _unwrap_fz_list(raw, "skills", "items", "list"):
+    overrides = dict(skill_levels)
+    skills = _unwrap_fz_list(raw, "skills", "items", "list")
+    for skill_index, skill in enumerate(skills, 1):
         if not isinstance(skill, dict):
             continue
         maximum = min(9, _to_int(skill.get("zeroPotentialMaxLevel")) + potential)
         levels = _ordered_fz_levels(_unwrap_fz_list(skill.get("levels"), "levels", "items", "list"))
-        selected = next((item for item in levels if _to_int(item.get("level")) == maximum), levels[-1] if levels else None)
+        requested_level = overrides.get(skill_index)
+        if requested_level is not None and requested_level > maximum:
+            raise ValueError(f"武器技能{skill_index}在当前潜能下最高为等级{maximum}")
+        target_level = requested_level if requested_level is not None else maximum
+        selected = next((item for item in levels if _to_int(item.get("level")) == target_level), None)
+        if selected is None and requested_level is not None:
+            available = [
+                _to_int(item.get("level"))
+                for item in levels
+                if 0 < _to_int(item.get("level")) <= maximum
+            ]
+            choices = "、".join(str(level) for level in available) or "无"
+            raise ValueError(f"武器技能{skill_index}不支持等级{requested_level}（可选：{choices}）")
+        if selected is None:
+            selected = levels[-1] if levels else None
         if not isinstance(selected, dict):
             continue
         values = selected.get("values") if isinstance(selected.get("values"), dict) else {}
@@ -1088,20 +1233,28 @@ def _apply_loadout_weapon_skills(
             final_additions,
             multipliers,
             effects,
-            f"{source} · {_first_text(skill, 'name', 'title') or '武器效果'}",
+            f"{source} · {_first_text(skill, 'name', 'title') or '武器效果'} Lv.{_to_int(selected.get('level'))}",
         )
+    unknown_indices = sorted(set(overrides) - set(range(1, len(skills) + 1)))
+    if unknown_indices:
+        raise ValueError(f"武器技能序号超出范围：武器技能{unknown_indices[0]}（该武器共有{len(skills)}个技能）")
 
 
 def _apply_loadout_operator_effects(
     attrs: dict[str, Any],
+    operator_potential: int,
     additions: dict[str, float],
     final_additions: dict[str, float],
     multipliers: dict[str, float],
     effects: list[LoadoutEffectView],
 ) -> None:
-    for field in ("talents", "potentials"):
+    item_groups = (
+        ("talents", _unwrap_fz_list(attrs.get("talents"), "talents", "items", "list")),
+        ("potentials", _loadout_operator_potentials(attrs.get("potentials"), operator_potential)),
+    )
+    for field, items in item_groups:
         latest: dict[str, dict[str, Any]] = {}
-        for item in _unwrap_fz_list(attrs.get(field), field, "items", "list"):
+        for item in items:
             if isinstance(item, dict):
                 latest[_first_text(item, "name", "title") or str(len(latest))] = item
         for name, item in latest.items():
@@ -1250,17 +1403,14 @@ def _loadout_status_effect_bonus(arts_strength: float) -> float:
 
 def _build_loadout_status_effects(
     attrs: dict[str, Any],
+    operator_potential: int,
     arts_strength: float,
 ) -> list[LoadoutStatusEffectView]:
     hero = attrs.get("hero") if isinstance(attrs.get("hero"), dict) else {}
     tags = hero.get("tags") if isinstance(hero.get("tags"), list) else []
     bonus = _loadout_status_effect_bonus(arts_strength)
     latest_talents = _latest_loadout_operator_items(attrs.get("talents"), "talents")
-    potentials = [
-        item
-        for item in _unwrap_fz_list(attrs.get("potentials"), "potentials", "items", "list")
-        if isinstance(item, dict)
-    ]
+    potentials = _loadout_operator_potentials(attrs.get("potentials"), operator_potential)
     duration_additions = {name: 0.0 for name in LOADOUT_STATUS_TAGS}
     maximum_multipliers = {name: 1.0 for name in LOADOUT_STATUS_TAGS}
     for item in (*latest_talents, *potentials):
@@ -1369,6 +1519,17 @@ def _latest_loadout_operator_items(raw: Any, field: str) -> list[dict[str, Any]]
         if isinstance(item, dict):
             latest[_first_text(item, "name", "title") or str(len(latest))] = item
     return list(latest.values())
+
+
+def _loadout_operator_potentials(raw: Any, operator_potential: int) -> list[dict[str, Any]]:
+    selected: list[dict[str, Any]] = []
+    for index, item in enumerate(_unwrap_fz_list(raw, "potentials", "items", "list"), 1):
+        if not isinstance(item, dict):
+            continue
+        unlock_level = _to_int(_first_value(item, "level", "potentialLevel", "rank")) or index
+        if unlock_level <= operator_potential:
+            selected.append(item)
+    return selected
 
 
 def _loadout_status_names(description: str) -> list[str]:

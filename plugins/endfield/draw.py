@@ -508,12 +508,20 @@ async def _prepare_weapon_catalog_card_html(
 def _render_loadout_html(view: LoadoutView, asset_urls: dict[str, str]) -> str:
     operator_img = asset_urls.get(view.operator_icon_url, "")
     weapon_img = asset_urls.get(view.weapon_icon_url, "")
+
+    def equipment_stats(item) -> str:
+        return "".join(
+            f'<div class="loadout-item-stat"><span>{esc(stat.label)}</span><b>{esc(stat.value)}</b></div>'
+            for stat in item.stats
+        )
+
     equipment_html = "".join(
         f'''<article class="loadout-item">
           <div class="loadout-item-top"><span class="loadout-slot">{esc(item.slot_type)}</span><span class="loadout-forge">{esc(_loadout_forge_summary(item.enhance_levels))}</span></div>
           <div class="loadout-item-visual">{f'<img src="{esc_attr(asset_urls.get(item.icon_url, ""))}" alt="">' if asset_urls.get(item.icon_url, "") else '<span>EQ</span>'}</div>
           <div class="loadout-item-name">{esc(item.name)}</div>
           <div class="loadout-item-suit">{esc(item.suit_name or "独立装备")}</div>
+          <div class="loadout-item-stats">{equipment_stats(item)}</div>
         </article>'''
         for item in view.equipment
     ) or '<div class="loadout-empty">未装备护甲、护手或配件</div>'
@@ -582,10 +590,11 @@ html,body{{margin:0;width:1500px;background:#d9dde0;color:#171b1f;font-family:"M
 .loadout-stat strong{{display:block;margin-top:6px;color:#286cd6;font-size:36px;line-height:1;font-weight:950}} .loadout-stat small{{display:block;margin-top:7px;color:#727b81;font-size:12px;line-height:1.32;font-weight:800}}
 .loadout-stat.ability{{min-height:78px;padding:10px}} .loadout-stat.ability strong{{font-size:27px}} .loadout-stat.ability .loadout-stat-icon-img,.loadout-stat.ability .loadout-stat-icon-fallback{{width:24px;height:24px}}
 .loadout-section{{margin-top:18px;padding:18px 20px;border:1px solid rgba(23,27,31,.30);background:rgba(247,248,246,.94)}}
-.loadout-items{{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}} .loadout-item{{position:relative;min-height:290px;padding:10px;background:rgba(255,255,255,.68);border:1px solid rgba(23,27,31,.24)}}
+.loadout-items{{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}} .loadout-item{{position:relative;min-height:365px;padding:10px;background:rgba(255,255,255,.68);border:1px solid rgba(23,27,31,.24)}}
 .loadout-item-top{{display:flex;justify-content:space-between;align-items:center;gap:8px;min-height:29px}} .loadout-slot{{padding:5px 9px;background:#20252a;color:#fff;font-size:13px;font-weight:950}} .loadout-forge{{color:#536068;font-size:12px;font-weight:900;text-align:right}}
 .loadout-item-visual{{height:180px;display:flex;align-items:center;justify-content:center;margin-top:5px;padding:8px;background:radial-gradient(circle,#fff 0,#eceeef 58%,transparent 72%)}} .loadout-item-visual img{{display:block;width:auto;height:auto;max-width:100%;max-height:100%;object-fit:contain;filter:drop-shadow(0 12px 10px rgba(23,27,31,.20))}} .loadout-item-visual span{{color:#92999e;font-size:22px;font-weight:950}}
 .loadout-item-name{{margin-top:7px;font-size:20px;line-height:1.1;font-weight:950}} .loadout-item-suit{{margin-top:5px;color:#727b81;font-size:13px;font-weight:850}}
+.loadout-item-stats{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;margin-top:9px}} .loadout-item-stat{{display:flex;align-items:center;justify-content:space-between;gap:6px;min-height:29px;padding:5px 7px;background:#e4e8ea;border-left:4px solid #20252a;color:#59646b;font-size:11px;font-weight:850}} .loadout-item-stat span{{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}} .loadout-item-stat b{{flex:none;color:#286cd6;font-size:13px;font-weight:950}}
 .advanced-grid{{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}} .advanced-grid .loadout-stat{{min-height:75px;padding:9px 10px;border-left-width:5px}} .advanced-grid .loadout-stat strong{{font-size:24px}} .advanced-grid .loadout-stat-icon-img,.advanced-grid .loadout-stat-icon-fallback{{width:23px;height:23px}}
 .status-summary{{margin:-3px 0 12px;color:#58636a;font-size:13px;font-weight:850}} .status-summary b{{color:#286cd6;font-size:17px}}
 .status-grid{{display:grid;gap:10px}} .status-card{{padding:12px;background:rgba(255,255,255,.72);border:1px solid rgba(23,27,31,.22);border-left:7px solid #20252a}} .status-card.forced{{border-left-color:#286cd6}}
@@ -598,7 +607,7 @@ html,body{{margin:0;width:1500px;background:#d9dde0;color:#171b1f;font-family:"M
 .loadout-note{{margin-top:18px;padding:13px 16px;background:#20252a;color:#cbd1d4;font-size:13px;line-height:1.55;font-weight:800}} .loadout-note strong{{color:#fff}}
 </style></head><body><main class="loadout-card">
 <header class="loadout-head"><div><div class="loadout-kicker">终末地 · 配装模拟器</div><div class="loadout-title">配装面板</div></div><div class="loadout-subtitle">ARKNIGHTS: ENDFIELD<br>数据来源 api.fz.wiki · 更新 {esc(view.source_version or '--')}</div></header>
-<section class="loadout-overview"><aside class="loadout-identity"><div class="operator-block"><div class="operator-visual">{f'<img src="{esc_attr(operator_img)}" alt="">' if operator_img else '<span>OP</span>'}</div><div><div class="operator-level">干员 · LEVEL {view.operator_level}</div><div class="operator-name">{esc(view.operator_name)}</div><div class="operator-tags"><span class="operator-tag">主 · {esc(view.main_attribute)}</span><span class="operator-tag">副 · {esc(view.sub_attribute)}</span><span class="operator-tag">{esc(view.weapon_type)}</span></div></div></div><div class="weapon-block"><div class="weapon-visual">{f'<img src="{esc_attr(weapon_img)}" alt="">' if weapon_img else '<span>WP</span>'}</div><div><div class="weapon-label">武器 · LEVEL {view.weapon_level}</div><div class="weapon-name">{esc(view.weapon_name)}</div><div class="weapon-meta">潜能 {view.weapon_potential} · {esc(view.weapon_type)}</div></div></div></aside>
+<section class="loadout-overview"><aside class="loadout-identity"><div class="operator-block"><div class="operator-visual">{f'<img src="{esc_attr(operator_img)}" alt="">' if operator_img else '<span>OP</span>'}</div><div><div class="operator-level">干员 · LEVEL {view.operator_level} · 潜能 {view.operator_potential}</div><div class="operator-name">{esc(view.operator_name)}</div><div class="operator-tags"><span class="operator-tag">主 · {esc(view.main_attribute)}</span><span class="operator-tag">副 · {esc(view.sub_attribute)}</span><span class="operator-tag">{esc(view.weapon_type)}</span></div></div></div><div class="weapon-block"><div class="weapon-visual">{f'<img src="{esc_attr(weapon_img)}" alt="">' if weapon_img else '<span>WP</span>'}</div><div><div class="weapon-label">武器 · LEVEL {view.weapon_level}</div><div class="weapon-name">{esc(view.weapon_name)}</div><div class="weapon-meta">潜能 {view.weapon_potential} · {esc(view.weapon_type)}</div></div></div></aside>
 <div class="loadout-panel"><h2 class="section-title">核心面板</h2><div class="core-grid">{stat_cards(view.primary_stats)}</div><div class="ability-grid">{stat_cards(view.ability_stats, 'ability')}</div></div></section>
 <section class="loadout-section"><h2 class="section-title">装备配置</h2><div class="loadout-items">{equipment_html}</div></section>
 <section class="loadout-section"><h2 class="section-title">进阶面板</h2><div class="advanced-grid">{stat_cards(view.advanced_stats)}</div></section>
