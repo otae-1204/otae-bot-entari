@@ -1389,6 +1389,55 @@ class EndfieldServiceTests(unittest.TestCase):
 
         self.assertEqual({row.key: row.value for row in view.ability_stats}["Will"], "78")
 
+    def test_equipment_composite_fixed_values_ignore_incorrect_percent_flag(self):
+        equipment = _sample_loadout_equipment("Hand")
+        rows = [
+            {
+                "label": "副能力",
+                "values": [55, 60, 66, 71],
+                "attrType": "Level",
+                "compositeAttr": "Sub",
+                "modifierType": "BaseAddition",
+                "isPercent": True,
+                "valueFormat": "{value:0}",
+            },
+            {
+                "label": "主能力",
+                "values": [37, 40, 44, 48],
+                "attrType": "Level",
+                "compositeAttr": "Main",
+                "modifierType": "BaseAddition",
+                "isPercent": True,
+                "valueFormat": "{value:0}",
+            },
+            {
+                "label": "副能力",
+                "values": [0.1475, 0.1623, 0.1770, 0.1918],
+                "attrType": "Level",
+                "compositeAttr": "Sub",
+                "modifierType": "BaseMultiplier",
+                "isPercent": True,
+                "valueFormat": "{value:0.0%}",
+            },
+        ]
+        equipment["revision"]["contentJson"]["content"][0]["attrs"]["stats"]["rows"] = rows
+
+        equipment_view = build_fz_equipment_view(equipment)
+        self.assertEqual([row.value for row in equipment_view.stats], ["55", "37", "14.8%"])
+
+        loadout = build_fz_loadout_view(
+            _sample_loadout_operator(),
+            _sample_loadout_weapon(),
+            [(equipment, 3, ())],
+        )
+        self.assertEqual(
+            [(row.label, row.value) for row in loadout.equipment[0].stats],
+            [("副能力（意志）", "71"), ("主能力（力量）", "48"), ("副能力（意志）", "19.2%")],
+        )
+        abilities = {row.key: row.value for row in loadout.ability_stats}
+        self.assertEqual(abilities["Str"], "78")
+        self.assertEqual(abilities["Will"], "144")
+
     def test_loadout_applies_operator_growth_nodes_before_ability_multiplier(self):
         operator = copy.deepcopy(_sample_loadout_operator())
         attrs = operator["revision"]["contentJson"]["content"][0]["attrs"]

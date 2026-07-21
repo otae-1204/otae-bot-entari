@@ -615,7 +615,7 @@ def build_fz_equipment_view(raw: dict[str, Any], richtext: dict[str, Any] | None
         if not label or value in (None, ""):
             continue
         formatted_values = [
-            _format_equipment_stat(item, bool(row.get("isPercent")))
+            _format_equipment_stat(item, _equipment_stat_is_percent(row))
             for item in (raw_values[:4] if isinstance(raw_values, list) else [value])
         ]
         while len(formatted_values) < 4:
@@ -1145,9 +1145,9 @@ def _apply_loadout_equipment_row(
         base_multipliers[target] = base_multipliers.get(target, 0.0) + value
     elif modifier == "BaseFinalMultiplier":
         multipliers[target] = multipliers.get(target, 1.0) * value
-    elif target == "Atk" and bool(row.get("isPercent")):
+    elif target == "Atk" and _equipment_stat_is_percent(row):
         additions["AtkPercent"] = additions.get("AtkPercent", 0.0) + value
-    elif target == "MaxHp" and bool(row.get("isPercent")):
+    elif target == "MaxHp" and _equipment_stat_is_percent(row):
         additions["MaxHpPercent"] = additions.get("MaxHpPercent", 0.0) + value
     else:
         additions[target] = additions.get(target, 0.0) + value
@@ -1175,9 +1175,18 @@ def _build_loadout_equipment_stat(
         return None
     return EquipmentStatView(
         label=label,
-        value=_format_equipment_stat(raw_value, bool(row.get("isPercent"))),
+        value=_format_equipment_stat(raw_value, _equipment_stat_is_percent(row)),
         icon_key=str(row.get("attrType") or ""),
     )
+
+
+def _equipment_stat_is_percent(row: dict[str, Any]) -> bool:
+    value_format = str(row.get("valueFormat") or "")
+    if value_format:
+        return "%" in value_format
+    if str(row.get("modifierType") or "") == "BaseMultiplier":
+        return True
+    return bool(row.get("isPercent"))
 
 
 def _fz_weapon_attack_at_level(raw: Any, level: int) -> float:
