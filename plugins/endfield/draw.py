@@ -510,7 +510,7 @@ def _render_loadout_html(view: LoadoutView, asset_urls: dict[str, str]) -> str:
     equipment_html = "".join(
         f'''<div class="loadout-item">
             <div class="loadout-item-icon">{f'<img src="{esc_attr(asset_urls.get(item.icon_url, ""))}" alt="">' if asset_urls.get(item.icon_url, "") else '<span>EQ</span>'}</div>
-            <div><b>{esc(item.name)}</b><small>{esc(item.slot_type)} · 强化 {item.enhance}{f' · {esc(item.suit_name)}' if item.suit_name else ''}</small></div>
+            <div><b>{esc(item.name)}</b><small>{esc(item.slot_type)} · {esc(_loadout_forge_summary(item.enhance_levels))}{f' · {esc(item.suit_name)}' if item.suit_name else ''}</small></div>
         </div>'''
         for item in view.equipment
     ) or '<div class="loadout-empty">未装备护甲、护手或配件</div>'
@@ -560,6 +560,14 @@ def _render_loadout_html(view: LoadoutView, asset_urls: dict[str, str]) -> str:
 <section class="loadout-grid" style="margin-top:22px"><div class="loadout-panel"><h2>已计入面板的常驻效果</h2><div class="loadout-effect-list">{effect_cards(active_effects)}</div></div><div class="loadout-panel"><h2>条件 / 触发效果（未计入静态面板）</h2><div class="loadout-effect-list">{effect_cards(triggered_effects)}</div></div></section>
 <footer class="loadout-note">攻击力按用户给定公式计算；能力值计算使用四维属性整数部分。生命值额外计入 5 × 力量，敏捷 / 智识 / 意志分别换算物理抗性、法术抗性和受治疗效率。面板显示值按游戏规则向下取整，条件效果单独列出。数据版本：{esc(view.source_version or '--')}</footer>
 </main></body></html>'''
+
+
+def _loadout_forge_summary(levels: tuple[int, ...]) -> str:
+    if not levels:
+        return "无可锻造词条"
+    if len(set(levels)) == 1:
+        return f"全部 {levels[0]} 锻"
+    return " / ".join(f"词条{index} {level}锻" for index, level in enumerate(levels, 1))
 
 
 def _render_html(

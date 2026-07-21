@@ -215,7 +215,7 @@ class EndfieldService:
         self,
         operator_title: str,
         weapon_title: str,
-        equipment: list[tuple[str, int, str]],
+        equipment: list[tuple[str, int, tuple[tuple[int, int], ...]]],
         *,
         operator_level: int = 90,
         weapon_level: int = 90,
@@ -232,6 +232,19 @@ class EndfieldService:
             weapon_level=weapon_level,
             weapon_potential=weapon_potential,
         )
+
+    async def get_recommended_weapon_title(self, operator_title: str) -> str:
+        raw = await self.client.fz_article_by_title(operator_title)
+        attrs = _fz_template_attrs(raw)
+        weapons = attrs.get("weapons") if isinstance(attrs.get("weapons"), dict) else {}
+        for group_name in ("group1", "group2"):
+            for item in weapons.get(group_name) or []:
+                if not isinstance(item, dict):
+                    continue
+                name = _first_text(item, "name", "title")
+                if name:
+                    return name if name.startswith("武器/") else f"武器/{name}"
+        raise ValueError("FZ 干员数据没有推荐武器")
 
     async def get_equipment_catalog_view(
         self,
@@ -710,7 +723,7 @@ LOADOUT_EFFECT_KEY_TARGETS = {
 def build_fz_loadout_view(
     operator_raw: dict[str, Any],
     weapon_raw: dict[str, Any],
-    equipment_raws: list[tuple[dict[str, Any], int, str]],
+    equipment_raws: list[tuple[dict[str, Any], int, tuple[tuple[int, int], ...]]],
     *,
     operator_level: int = 90,
     weapon_level: int = 90,
@@ -741,19 +754,31 @@ def build_fz_loadout_view(
     equipment_views: list[LoadoutEquipmentView] = []
     suits: dict[str, dict[str, Any]] = {}
     suit_counts: dict[str, int] = {}
-    for raw, enhance, expected_part in equipment_raws:
+    part_counts: dict[str, int] = {}
+    for raw, default_enhance, forge_overrides in equipment_raws:
         attrs = _fz_template_attrs(raw)
         hero = attrs.get("hero") if isinstance(attrs.get("hero"), dict) else {}
         if not hero:
             raise ValueError("FZ equipment article does not match the loadout schema")
         actual_part = _first_text(hero, "partType")
-        if expected_part and actual_part != expected_part:
-            expected_label = {"Body": "护甲", "Hand": "护手", "EDC": "配件"}.get(expected_part, expected_part)
-            actual_label = _first_text(hero, "slotType", "partType") or "未知槽位"
-            raise ValueError(f"装备槽位不匹配：{_first_text(hero, 'name', 'title')} 是{actual_label}，此处需要{expected_label}")
-        enhance = max(0, min(3, int(enhance)))
-        for row in ((attrs.get("stats") or {}).get("rows") or []):
+        if actual_part not in {"Body", "Hand", "EDC"}:
+            raise ValueError(f"无法识别装备槽位：{_first_text(hero, 'name', 'title')}")
+        part_counts[actual_part] = part_counts.get(actual_part, 0) + 1
+        maximum = 2 if actual_part == "EDC" else 1
+        if part_counts[actual_part] > maximum:
+            label = {"Body": "护甲", "Hand": "护手", "EDC": "配件"}[actual_part]
+            raise ValueError(f"{label}数量超过槽位上限")
+        default_enhance = max(0, min(3, int(default_enhance)))
+        stat_rows = (attrs.get("stats") or {}).get("rows") or []
+        forge_levels = _loadout_equipment_forge_levels(stat_rows, default_enhance, forge_overrides)
+        forge_index = 0
+        for row in stat_rows:
             if isinstance(row, dict):
+                if bool(row.get("enhances", True)):
+                    enhance = forge_levels[forge_index]
+                    forge_index += 1
+                else:
+                    enhance = default_enhance
                 _apply_loadout_equipment_row(
                     row,
                     enhance,
@@ -773,7 +798,7 @@ def build_fz_loadout_view(
             LoadoutEquipmentView(
                 name=_first_text(hero, "name", "title") or str((raw.get("article") or {}).get("title") or "").split("/", 1)[-1],
                 slot_type=_first_text(hero, "slotType", "partType") or "装备",
-                enhance=enhance,
+                enhance_levels=forge_levels,
                 icon_url=_fz_asset_raw_url(_first_text(hero, "iconUrl", "icon")),
                 suit_name=suit_name,
             )
@@ -905,6 +930,19 @@ def _fz_main_sub_attributes(hero: dict[str, Any]) -> tuple[str, str]:
 
 def _loadout_attribute_key(label: str) -> str:
     return {"力量": "Str", "敏捷": "Agi", "智识": "Wisd", "意志": "Will"}.get(label, label)
+
+
+def _loadout_equipment_forge_levels(
+    rows: list[Any],
+    default_enhance: int,
+    overrides: tuple[tuple[int, int], ...],
+) -> tuple[int, ...]:
+    forgeable_count = sum(isinstance(row, dict) and bool(row.get("enhances", True)) for row in rows)
+    override_map = dict(overrides)
+    invalid = [index for index, level in override_map.items() if index < 1 or index > forgeable_count or not 0 <= level <= 3]
+    if invalid:
+        raise ValueError(f"词条编号超出范围：词条{invalid[0]}（该装备共有{forgeable_count}条可锻造词条）")
+    return tuple(override_map.get(index, default_enhance) for index in range(1, forgeable_count + 1))
 
 
 def _apply_loadout_equipment_row(

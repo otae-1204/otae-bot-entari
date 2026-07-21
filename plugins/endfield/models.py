@@ -266,7 +266,7 @@ class LoadoutPanelStatView:
 class LoadoutEquipmentView:
     name: str
     slot_type: str
-    enhance: int
+    enhance_levels: tuple[int, ...] = ()
     icon_url: str = ""
     suit_name: str = ""
 

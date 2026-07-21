@@ -94,25 +94,28 @@ class EndfieldCommandParserTests(unittest.TestCase):
         self.assertIn("zmd", commands.ROOT_ALIASES)
         self.assertIn("终末地", commands.ROOT_ALIASES)
 
-    def test_parse_loadout_command_with_levels_and_slots(self):
+    def test_parse_loadout_command_without_delimiters_and_in_any_order(self):
         parsed = commands.parse_command(
-            "配装 佩丽卡 | 赤缨 | 长息轻护甲@2 | 长息护手 | 无 | 长息蓄电核@1 "
-            "--char-level 80 --weapon-level=70 --potential 3 --enhance 2"
+            "配装 脉冲源石配件 词条2锻造2 佩丽卡 超轻域手 脉冲甲 脉冲源石配件 "
+            "角色等级80 武器等级70 潜能3"
         )
         self.assertEqual(parsed.action, "loadout")
-        self.assertEqual((parsed.char_level, parsed.weapon_level, parsed.potential, parsed.enhance), (80, 70, 3, 2))
+        self.assertEqual((parsed.char_level, parsed.weapon_level, parsed.potential, parsed.enhance), (80, 70, 3, 3))
         spec, error = commands.parse_loadout_spec(parsed.query, parsed.enhance)
         self.assertEqual(error, "")
-        self.assertEqual(spec.operator, "佩丽卡")
-        self.assertEqual(spec.body.enhance, 2)
-        self.assertEqual(spec.hand.enhance, 2)
-        self.assertEqual(spec.accessory_1.name, "")
-        self.assertEqual(spec.accessory_2.enhance, 1)
+        self.assertEqual([item.name for item in spec.items], ["脉冲源石配件", "佩丽卡", "超轻域手", "脉冲甲", "脉冲源石配件"])
+        self.assertEqual(spec.items[0].forge_levels, ((2, 2),))
+        self.assertEqual(spec.items[-1].forge_levels, ())
 
     def test_parse_loadout_rejects_invalid_enhance(self):
-        spec, error = commands.parse_loadout_spec("佩丽卡 | 赤缨 | 护甲@4 | 无 | 无 | 无")
+        spec, error = commands.parse_loadout_spec("佩丽卡 脉冲源石配件 词条2锻造4")
         self.assertIsNone(spec)
         self.assertIn("0–3", error)
+
+    def test_loadout_aliases_include_mobile_short_names(self):
+        self.assertEqual(aliases.alias_targets("equipment", "脉冲源石配件"), ("脉冲式校准器",))
+        self.assertEqual(aliases.alias_targets("equipment", "脉冲甲"), ("脉冲式干扰服",))
+        self.assertEqual(aliases.alias_targets("equipment", "超轻域手"), ("轻超域护手",))
 
     def test_score_candidate_handles_typo_and_pinyin(self):
         exact = commands.score_candidate("弭弗", "弭弗")
@@ -1171,7 +1174,7 @@ class EndfieldServiceTests(unittest.TestCase):
         view = build_fz_loadout_view(
             _sample_loadout_operator(),
             _sample_loadout_weapon(),
-            [(_sample_loadout_equipment("Body"), 2, "Body")],
+            [(_sample_loadout_equipment("Body"), 2, ())],
             operator_level=90,
             weapon_level=90,
             weapon_potential=5,
@@ -1187,19 +1190,28 @@ class EndfieldServiceTests(unittest.TestCase):
         self.assertTrue(any(effect.active and "物理伤害" in effect.description for effect in view.effects))
         self.assertTrue(any(not effect.active and "攻击命中时" in effect.description for effect in view.effects))
 
-    def test_loadout_rejects_wrong_equipment_slot(self):
-        with self.assertRaisesRegex(ValueError, "装备槽位不匹配"):
+    def test_loadout_rejects_too_many_body_items(self):
+        with self.assertRaisesRegex(ValueError, "护甲数量超过槽位上限"):
             build_fz_loadout_view(
                 _sample_loadout_operator(),
                 _sample_loadout_weapon(),
-                [(_sample_loadout_equipment("Body"), 3, "Hand")],
+                [(_sample_loadout_equipment("Body"), 3, ()), (_sample_loadout_equipment("Body"), 3, ())],
             )
+
+    def test_loadout_supports_per_affix_forge_levels(self):
+        view = build_fz_loadout_view(
+            _sample_loadout_operator(),
+            _sample_loadout_weapon(),
+            [(_sample_loadout_equipment("Body"), 3, ((2, 1),))],
+        )
+        self.assertEqual(view.equipment[0].enhance_levels, (3, 1, 3))
+        self.assertEqual({row.key: row.value for row in view.ability_stats}["Str"], "40")
 
     def test_loadout_card_html_shows_static_and_triggered_effects(self):
         view = build_fz_loadout_view(
             _sample_loadout_operator(),
             _sample_loadout_weapon(),
-            [(_sample_loadout_equipment("Body"), 2, "Body")],
+            [(_sample_loadout_equipment("Body"), 2, ())],
         )
         with patch.object(draw, "fetch_many", AsyncMock(return_value={})):
             html = asyncio.run(render_loadout_card_html(view))

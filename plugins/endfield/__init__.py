@@ -235,32 +235,33 @@ async def _handle_loadout(matcher, command: ParsedEndfieldCommand) -> None:
         if error or spec is None:
             return await matcher.finish(f"配装参数错误：{error or '已取消'}")
 
-        operator = await _resolve_loadout_candidate("operator", spec.operator)
-        if operator is None:
-            return await matcher.finish(f"未找到干员：{spec.operator}")
-        weapon = await _resolve_loadout_candidate("weapon", spec.weapon)
-        if weapon is None:
-            return await matcher.finish(f"未找到武器：{spec.weapon}")
-
-        equipment_requests = (
-            (spec.body, "Body"),
-            (spec.hand, "Hand"),
-            (spec.accessory_1, "EDC"),
-            (spec.accessory_2, "EDC"),
-        )
-        equipment: list[tuple[str, int, str]] = []
-        for slot, expected_part in equipment_requests:
-            if not slot.name:
-                continue
-            candidate = await _resolve_loadout_candidate("equipment", slot.name)
+        resolved: list[tuple[EndfieldCandidate, tuple[tuple[int, int], ...]]] = []
+        for item in spec.items:
+            candidate = await _resolve_loadout_candidate("all", item.name)
             if candidate is None:
-                return await matcher.finish(f"未找到装备：{slot.name}")
-            equipment.append((candidate.key, slot.enhance, expected_part))
+                return await matcher.finish(f"未找到配装内容：{item.name}")
+            if item.forge_levels and candidate.kind != "equipment":
+                return await matcher.finish(f"只有装备可以设置词条锻造：{item.name}")
+            resolved.append((candidate, item.forge_levels))
+
+        operators = [item for item, _ in resolved if item.kind == "operator"]
+        weapons = [item for item, _ in resolved if item.kind == "weapon"]
+        if len(operators) != 1:
+            return await matcher.finish("配装命令需要且只能包含一个干员")
+        if len(weapons) > 1:
+            return await matcher.finish("配装命令最多包含一把武器")
+        operator = operators[0]
+        weapon_title = weapons[0].key if weapons else await service.get_recommended_weapon_title(operator.key)
+        equipment = [
+            (candidate.key, command.enhance, forge_levels)
+            for candidate, forge_levels in resolved
+            if candidate.kind == "equipment"
+        ]
 
         started = perf_counter()
         view = await service.get_loadout_view(
             operator.key,
-            weapon.key,
+            weapon_title,
             equipment,
             operator_level=command.char_level,
             weapon_level=command.weapon_level,
@@ -284,33 +285,28 @@ async def _handle_loadout(matcher, command: ParsedEndfieldCommand) -> None:
 
 
 async def _prompt_loadout_spec(default_enhance: int) -> tuple[ParsedLoadoutSpec | None, str]:
-    prompts = (
-        "请输入干员名称（输入 取消 结束）：",
-        "请输入武器名称：",
-        "请输入护甲名称，可填 无：",
-        "请输入护手名称，可填 无：",
-        "请输入第一个配件名称，可填 无：",
-        "请输入第二个配件名称，可填 无：",
+    answer = await prompt(
+        "请发送干员、可选武器和装备名称，使用空格分隔，顺序任意。\n"
+        "单独调整词条可在装备后追加：词条2锻造2",
+        timeout=90,
     )
-    answers: list[str] = []
-    for message in prompts:
-        answer = await prompt(message, timeout=60)
-        if answer is None:
-            return None, "等待输入超时"
-        text = answer.extract_plain_text() if hasattr(answer, "extract_plain_text") else str(answer or "")
-        text = text.strip()
-        if text.lower() in {"取消", "cancel", "q", "quit"}:
-            return None, "已取消"
-        answers.append(text)
-    return parse_loadout_spec(" | ".join(answers), default_enhance)
+    if answer is None:
+        return None, "等待输入超时"
+    text = answer.extract_plain_text() if hasattr(answer, "extract_plain_text") else str(answer or "")
+    text = text.strip()
+    if text.lower() in {"取消", "cancel", "q", "quit"}:
+        return None, "已取消"
+    return parse_loadout_spec(text, default_enhance)
 
 
 async def _resolve_loadout_candidate(kind: str, query: str) -> EndfieldCandidate | None:
-    candidates = [
-        item
-        for item in await _resolve_candidates_from_sources(kind, query, "fz", "all")
-        if item.kind == kind and item.source == "fz"
-    ]
+    raw_candidates = (
+        await _collect_candidates("all", query, "fz", "all")
+        if kind == "all"
+        else await _resolve_candidates_from_sources(kind, query, "fz", "all")
+    )
+    allowed_kinds = {"operator", "weapon", "equipment"} if kind == "all" else {kind}
+    candidates = [item for item in raw_candidates if item.kind in allowed_kinds and item.source == "fz"]
     selected, ambiguous = choose_candidate(candidates)
     if selected is not None:
         return selected

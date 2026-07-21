@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from difflib import SequenceMatcher
+import re
 from typing import Iterable, Sequence
 
 from pypinyin import Style, lazy_pinyin
@@ -76,17 +77,12 @@ class EndfieldCandidate:
 @dataclass(frozen=True)
 class LoadoutSlotSpec:
     name: str
-    enhance: int = 3
+    forge_levels: tuple[tuple[int, int], ...] = ()
 
 
 @dataclass(frozen=True)
 class ParsedLoadoutSpec:
-    operator: str
-    weapon: str
-    body: LoadoutSlotSpec
-    hand: LoadoutSlotSpec
-    accessory_1: LoadoutSlotSpec
-    accessory_2: LoadoutSlotSpec
+    items: tuple[LoadoutSlotSpec, ...]
 
 
 def parse_command(rest: str) -> ParsedEndfieldCommand:
@@ -207,8 +203,8 @@ def format_help() -> str:
             "  /ef 武器 <名称> | /ef wp <名称>",
             "  /ef 装备 <名称> | /ef eq <名称>",
             "  /ef 装备（查看全部套组）| /ef 装备 <套组名>",
-            "  /ef 配装（交互选择干员、武器与四件装备）",
-            "  /ef 配装 干员 | 武器 | 护甲@3 | 护手@3 | 配件1@3 | 配件2@3",
+            "  /ef 配装（交互输入干员、可选武器与装备）",
+            "  /zmd 配装 佩丽卡 脉冲源石配件 脉冲甲 脉冲源石配件 超轻域手",
             "  /ef 搜索 <关键词> | /efs <关键词>",
             "  /ef <关键词> --source <fz|warfarin>",
             "  /ef 数据源",
@@ -217,7 +213,8 @@ def format_help() -> str:
             "干员速查：/ef 干员；可按元素或职业筛选，例如 /ef 干员 灼热、/ef 干员 术师。",
             "武器速查：/ef 武器；可按类型筛选，例如 /ef 武器 单手剑。",
             "装备目录：默认仅金色；--all 显示全部，--rarity 可选 gold、purple、blue、all。",
-            "配装参数：--char-level 90、--weapon-level 90、--potential 5、--enhance 3；装备可填“无”。",
+            "配装无需固定顺序；省略武器时自动使用干员推荐武器。干员/武器默认90级，装备词条默认3锻。",
+            "单独调整词条：在装备后追加“词条2锻造2”；可重复追加多个词条设置。",
             "快捷：/efop <名称>、/efwp <名称>、/efeq <名称>、/终末地干员 <名称>、/终末地武器 <名称>、/终末地装备 <名称>",
         ]
     )
@@ -349,41 +346,34 @@ def _parse_rarity_option(parts: list[str]) -> tuple[list[str], str, str]:
 
 
 def parse_loadout_spec(query: str, default_enhance: int = 3) -> tuple[ParsedLoadoutSpec | None, str]:
-    fields = [field.strip() for field in str(query or "").split("|")]
-    if len(fields) != 6:
-        return None, "完整配装需要依次填写干员、武器、护甲、护手和两个配件，并用 | 分隔"
-    if not fields[0] or fields[0] in {"无", "none", "-"}:
-        return None, "干员不能为空"
-    if not fields[1] or fields[1] in {"无", "none", "-"}:
-        return None, "武器不能为空"
+    del default_enhance
+    items: list[LoadoutSlotSpec] = []
+    for raw_token in _split(query):
+        if raw_token.lower() in {"无", "none", "-"}:
+            continue
+        forge_syntax = re.fullmatch(r"(.*?)(?:词条)?([1-9]\d*)锻造(\d+)", raw_token)
+        if forge_syntax and not 0 <= int(forge_syntax.group(3)) <= 3:
+            return None, f"词条锻造等级必须在 0–3：{raw_token}"
+        token, inline_forge = _split_inline_forge(raw_token)
+        if token:
+            items.append(LoadoutSlotSpec(token))
+        if inline_forge is not None:
+            if not items:
+                return None, "词条锻造设置前需要先写装备名称"
+            item = items[-1]
+            forge_levels = dict(item.forge_levels)
+            forge_levels[inline_forge[0]] = inline_forge[1]
+            items[-1] = LoadoutSlotSpec(item.name, tuple(sorted(forge_levels.items())))
+    if not items:
+        return None, "请至少填写一个干员"
+    return ParsedLoadoutSpec(tuple(items)), ""
 
-    slots: list[LoadoutSlotSpec] = []
-    for field in fields[2:]:
-        slot, error = _parse_loadout_slot(field, default_enhance)
-        if error:
-            return None, error
-        slots.append(slot)
-    return ParsedLoadoutSpec(fields[0], fields[1], *slots), ""
 
-
-def _parse_loadout_slot(value: str, default_enhance: int) -> tuple[LoadoutSlotSpec, str]:
-    value = value.strip()
-    if not value or value.lower() in {"无", "none", "-"}:
-        return LoadoutSlotSpec("", default_enhance), ""
-    name = value
-    enhance = default_enhance
-    if "@" in value:
-        name, raw_enhance = value.rsplit("@", 1)
-        name = name.strip()
-        try:
-            enhance = int(raw_enhance)
-        except ValueError:
-            return LoadoutSlotSpec(name, default_enhance), f"装备强化档位无效：{value}"
-    if not name:
-        return LoadoutSlotSpec("", default_enhance), f"装备名称不能为空：{value}"
-    if not 0 <= enhance <= 3:
-        return LoadoutSlotSpec(name, enhance), f"装备强化档位必须在 0–3：{value}"
-    return LoadoutSlotSpec(name, enhance), ""
+def _split_inline_forge(token: str) -> tuple[str, tuple[int, int] | None]:
+    match = re.fullmatch(r"(.*?)(?:词条)?([1-9]\d*)锻造([0-3])", token)
+    if not match:
+        return token, None
+    return match.group(1).strip(), (int(match.group(2)), int(match.group(3)))
 
 
 def _parse_loadout_options(parts: list[str]) -> tuple[list[str], tuple[int, int, int, int], str]:
@@ -398,6 +388,24 @@ def _parse_loadout_options(parts: list[str]) -> tuple[list[str], tuple[int, int,
     index = 0
     while index < len(parts):
         part = parts[index]
+        compact_match = re.fullmatch(r"(干员等级|角色等级|武器等级|武器潜能|潜能|默认锻造|装备锻造)(\d+)", part)
+        if compact_match:
+            compact_definitions = {
+                "干员等级": (0, 1, 90, "干员等级"),
+                "角色等级": (0, 1, 90, "干员等级"),
+                "武器等级": (1, 1, 90, "武器等级"),
+                "武器潜能": (2, 0, 5, "武器潜能"),
+                "潜能": (2, 0, 5, "武器潜能"),
+                "默认锻造": (3, 0, 3, "装备强化档位"),
+                "装备锻造": (3, 0, 3, "装备强化档位"),
+            }
+            target, minimum, maximum, label = compact_definitions[compact_match.group(1)]
+            value = int(compact_match.group(2))
+            if not minimum <= value <= maximum:
+                return remaining, tuple(values), f"{label}必须在 {minimum}–{maximum}"
+            values[target] = value
+            index += 1
+            continue
         option = part.split("=", 1)[0].lower()
         definition = definitions.get(option)
         if definition is None:
