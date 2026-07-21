@@ -279,6 +279,23 @@ class LoadoutEffectView:
 
 
 @dataclass(slots=True)
+class LoadoutStatusLevelView:
+    level: int
+    value: str
+    detail: str
+    duration: str
+
+
+@dataclass(slots=True)
+class LoadoutStatusEffectView:
+    name: str
+    source: str
+    forced: bool = False
+    levels: list[LoadoutStatusLevelView] = field(default_factory=list)
+    note: str = ""
+
+
+@dataclass(slots=True)
 class LoadoutView:
     operator_name: str
     weapon_name: str
@@ -294,6 +311,8 @@ class LoadoutView:
     primary_stats: list[LoadoutPanelStatView] = field(default_factory=list)
     ability_stats: list[LoadoutPanelStatView] = field(default_factory=list)
     advanced_stats: list[LoadoutPanelStatView] = field(default_factory=list)
+    status_effect_bonus: float = 0.0
+    status_effects: list[LoadoutStatusEffectView] = field(default_factory=list)
     effects: list[LoadoutEffectView] = field(default_factory=list)
     source_version: str = ""
     term_styles: dict[str, TermStyleView] = field(default_factory=dict)

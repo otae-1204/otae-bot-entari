@@ -535,6 +535,26 @@ def _render_loadout_html(view: LoadoutView, asset_urls: dict[str, str]) -> str:
             for item in items
         ) or '<div class="loadout-empty">无</div>'
 
+    def status_cards() -> str:
+        if not view.status_effects:
+            return '<div class="loadout-empty">该干员没有导电、腐蚀或碎甲附带效果</div>'
+        cards = []
+        for effect in view.status_effects:
+            levels = "".join(
+                f'''<div class="status-level">
+                  <b>LV {level.level}</b><strong>{esc(level.value)}</strong><span>{esc(level.detail)}</span><small>{esc(level.duration)}</small>
+                </div>'''
+                for level in effect.levels
+            )
+            cards.append(
+                f'''<article class="status-card{' forced' if effect.forced else ''}">
+                  <div class="status-card-head"><div><b>{esc(effect.name)}</b><span>{esc(effect.source)}</span></div><em>{'强制' if effect.forced else '常规'}</em></div>
+                  <div class="status-levels{' single' if len(effect.levels) == 1 else ''}">{levels}</div>
+                  <div class="status-note">{esc(effect.note)}</div>
+                </article>'''
+            )
+        return "".join(cards)
+
     return f'''<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><style>
 *{{box-sizing:border-box}}
@@ -566,6 +586,11 @@ html,body{{margin:0;width:1500px;background:#d9dde0;color:#171b1f;font-family:"M
 .loadout-item-visual{{height:180px;display:flex;align-items:center;justify-content:center;margin-top:5px;padding:8px;background:radial-gradient(circle,#fff 0,#eceeef 58%,transparent 72%)}} .loadout-item-visual img{{display:block;width:auto;height:auto;max-width:100%;max-height:100%;object-fit:contain;filter:drop-shadow(0 12px 10px rgba(23,27,31,.20))}} .loadout-item-visual span{{color:#92999e;font-size:22px;font-weight:950}}
 .loadout-item-name{{margin-top:7px;font-size:20px;line-height:1.1;font-weight:950}} .loadout-item-suit{{margin-top:5px;color:#727b81;font-size:13px;font-weight:850}}
 .advanced-grid{{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}} .advanced-grid .loadout-stat{{min-height:75px;padding:9px 10px;border-left-width:5px}} .advanced-grid .loadout-stat strong{{font-size:24px}} .advanced-grid .loadout-stat-icon-img,.advanced-grid .loadout-stat-icon-fallback{{width:23px;height:23px}}
+.status-summary{{margin:-3px 0 12px;color:#58636a;font-size:13px;font-weight:850}} .status-summary b{{color:#286cd6;font-size:17px}}
+.status-grid{{display:grid;gap:10px}} .status-card{{padding:12px;background:rgba(255,255,255,.72);border:1px solid rgba(23,27,31,.22);border-left:7px solid #20252a}} .status-card.forced{{border-left-color:#286cd6}}
+.status-card-head{{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:9px}} .status-card-head>div{{display:flex;align-items:baseline;gap:10px}} .status-card-head b{{font-size:23px;font-weight:950}} .status-card-head span{{color:#667078;font-size:13px;font-weight:850}} .status-card-head em{{padding:4px 9px;background:#20252a;color:#fff;font-size:11px;font-style:normal;font-weight:950;letter-spacing:.08em}} .status-card.forced .status-card-head em{{background:#286cd6}}
+.status-levels{{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}} .status-levels.single{{grid-template-columns:minmax(260px,1fr)}} .status-level{{min-height:92px;padding:9px 10px;background:linear-gradient(180deg,#eef1f2,#e0e4e6);border:1px solid rgba(23,27,31,.16)}} .status-level b{{display:block;color:#657078;font-size:11px;font-weight:950}} .status-level strong{{display:block;margin-top:4px;color:#286cd6;font-size:19px;line-height:1.1;font-weight:950}} .status-level span{{display:block;margin-top:5px;color:#4a555c;font-size:12px;font-weight:850}} .status-level small{{display:block;margin-top:4px;color:#747e85;font-size:11px;font-weight:850}}
+.status-note{{margin-top:8px;color:#667078;font-size:12px;line-height:1.4;font-weight:850}}
 .effect-columns{{display:grid;grid-template-columns:1fr 1fr;gap:12px}} .loadout-effect-list{{display:grid;gap:7px;align-content:start}} .loadout-effect{{display:grid;grid-template-columns:170px 1fr;gap:12px;padding:10px 11px;background:rgba(255,255,255,.70);border:1px solid rgba(23,27,31,.18);border-left:6px solid #20252a;line-height:1.42}}
 .loadout-effect b{{font-size:13px;font-weight:950}} .loadout-effect span{{color:#3e484f;font-size:13px;font-weight:750}} .loadout-effect .term,.loadout-effect .vup,.loadout-effect .rich-style{{color:#286cd6 !important;font-weight:950}} .loadout-effect .info-note{{color:#5d6870 !important;font-weight:850}} .effect-note{{margin:-4px 0 9px;color:#747d83;font-size:12px;font-weight:850}}
 .loadout-empty{{padding:14px;color:#7a8389;background:rgba(23,27,31,.055);font-weight:850}}
@@ -576,6 +601,7 @@ html,body{{margin:0;width:1500px;background:#d9dde0;color:#171b1f;font-family:"M
 <div class="loadout-panel"><h2 class="section-title">核心面板</h2><div class="core-grid">{stat_cards(view.primary_stats)}</div><div class="ability-grid">{stat_cards(view.ability_stats, 'ability')}</div></div></section>
 <section class="loadout-section"><h2 class="section-title">装备配置</h2><div class="loadout-items">{equipment_html}</div></section>
 <section class="loadout-section"><h2 class="section-title">进阶面板</h2><div class="advanced-grid">{stat_cards(view.advanced_stats)}</div></section>
+<section class="loadout-section"><h2 class="section-title">最终异常效果</h2><div class="status-summary">源石技艺附带效果增益 <b>+{view.status_effect_bonus * 100:.1f}%</b>　公式 2 × 源石技艺强度 ÷（源石技艺强度 + 300）</div><div class="status-grid">{status_cards()}</div></section>
 <section class="loadout-section"><h2 class="section-title">效果明细</h2><div class="effect-columns"><div><div class="effect-note">已计入面板的常驻效果</div><div class="loadout-effect-list">{effect_cards(active_effects)}</div></div><div><div class="effect-note">条件 / 触发效果</div><div class="loadout-effect-list">{effect_cards(triggered_effects)}</div></div></div></section>
 <footer class="loadout-note"><strong>计算说明</strong>　攻击力按配装公式计算，能力值使用四维属性整数部分；生命值计入 5 × 力量，敏捷 / 智识 / 意志换算对应派生属性。显示结果按游戏规则向下取整。</footer>
 </main></body></html>'''
@@ -1475,11 +1501,26 @@ def _equipment_attribute_icon_filename(label: str) -> str:
         "连携技伤害加成": "icon_combo_skill_efficiency.png",
         "所有技能伤害加成": "icon_normal_skill_efficiency.png",
         "寒冷和电磁伤害加成": "icon_cryst_damage_increase.png",
+        "寒冷伤害加成": "icon_cryst_damage_increase.png",
         "暴击率": "icon_attribute_criticalRate.png",
+        "暴击伤害": "icon_attribute_criticalDamageIncrease.png",
         "灼热和自然伤害加成": "icon_fire_damage_increase.png",
+        "灼热伤害加成": "icon_fire_damage_increase.png",
         "对失衡目标伤害加成": "icon_attr_damage_to_broken_unit_increase.png",
         "全伤害减免": "icon_attribute_def.png",
         "法术伤害加成": "icon_originium_arts.png",
+        "物理抗性": "icon_attribute_physicalDamageTakenScalar.png",
+        "灼热抗性": "icon_attribute_fireDamageTakenScalar.png",
+        "电磁抗性": "icon_attribute_pulseDamageTakenScalar.png",
+        "寒冷抗性": "icon_attribute_crystDamageTakenScalar.png",
+        "自然抗性": "icon_attribute_natural_damage_taken_scalar.png",
+        "超域抗性": "icon_ether_damage_taken_scalar.png",
+        "受治疗效率加成": "icon_heal_taken_increase.png",
+        "连携技冷却缩减": "icon_comboskill_cooldown_scalar.png",
+        "失衡效率加成": "icon_poise_efficiency.png",
+        "电磁伤害加成": "icon_pulse_damage_increase.png",
+        "自然伤害加成": "icon_natural_damage_increase.png",
+        "超域伤害加成": "icon_ether_damage_taken_scalar.png",
     }
     return exact.get(label, "")
 

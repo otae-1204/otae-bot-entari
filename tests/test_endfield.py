@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import asyncio
+import copy
 import io
 import struct
 import sys
@@ -1212,6 +1213,119 @@ class EndfieldServiceTests(unittest.TestCase):
             service._loadout_effect_target("phy_spell_up", "源石技艺强度 +30", allow_label_fallback=False),
             "PhysicalAndSpellInflictionEnhance",
         )
+        self.assertEqual(
+            service._loadout_effect_target(
+                "PhysicalAndSpellInflictionEnhance",
+                "智识和意志+15，源石技艺强度+16",
+                allow_label_fallback=False,
+            ),
+            "PhysicalAndSpellInflictionEnhance",
+        )
+
+    def test_loadout_calculates_conduct_levels_and_forced_conduct_traits(self):
+        operator = copy.deepcopy(_sample_loadout_operator())
+        attrs = operator["revision"]["contentJson"]["content"][0]["attrs"]
+        attrs["hero"].update({"name": "佩丽卡", "tags": ["电磁附着", "导电"]})
+        attrs["attributes"]["rows"].append(
+            {"key": "PhysicalAndSpellInflictionEnhance", "label": "源石技艺强度", "cells": [["60"]]}
+        )
+        attrs["skills"] = {
+            "skills": [
+                {
+                    "name": "即时协议·闪链",
+                    "description": "造成电磁伤害并强制施加短暂的<#ba.conduct>导电</>。",
+                    "levels": [{"level": 12, "values": {"duration": 5}}],
+                }
+            ]
+        }
+        attrs["potentials"] = {
+            "potentials": [
+                {
+                    "name": "危机处理",
+                    "description": "连携技<@ba.key>即时协议·闪链</>施加的<#ba.conduct>导电</>持续时间<@ba.vup>+{duration-1:0%}</>。",
+                    "values": {"duration": 1.75},
+                },
+                {
+                    "name": "长效导流",
+                    "description": "连携技<@ba.key>即时协议·闪链</>施加的<#ba.conduct>导电</>使敌人受到法术伤害提高的效果提升至原本的<@ba.vup>{extra_scaling}</>倍。",
+                    "values": {"extra_scaling": 1.33},
+                },
+            ]
+        }
+
+        view = build_fz_loadout_view(operator, _sample_loadout_weapon(), [])
+
+        self.assertAlmostEqual(view.status_effect_bonus, 1 / 3)
+        normal = next(effect for effect in view.status_effects if not effect.forced)
+        forced = next(effect for effect in view.status_effects if effect.forced)
+        self.assertEqual([level.value for level in normal.levels], ["法术易伤 16%", "法术易伤 21.33%", "法术易伤 26.67%", "法术易伤 32%"])
+        self.assertEqual(forced.levels[0].value, "法术易伤 21.28%")
+        self.assertEqual(forced.levels[0].duration, "8.75秒")
+        arts_row = next(row for row in view.advanced_stats if row.key == "PhysicalAndSpellInflictionEnhance")
+        self.assertIn("附带效果 +33.3%", arts_row.detail)
+
+    def test_loadout_applies_latest_corrosion_talent_and_potential(self):
+        operator = copy.deepcopy(_sample_loadout_operator())
+        attrs = operator["revision"]["contentJson"]["content"][0]["attrs"]
+        attrs["hero"].update({"name": "诀", "tags": ["自然附着", "腐蚀"]})
+        attrs["talents"] = {
+            "talents": [
+                {
+                    "name": "厉兵",
+                    "level": 1,
+                    "desc": "自身施加的<#ba.corrupt>腐蚀</>效果持续时间+{duration_add}秒，且降低的最大抗性提升至原本的{1+corrupt_rate}倍。",
+                    "values": {"duration_add": 5, "corrupt_rate": 0.05},
+                },
+                {
+                    "name": "厉兵",
+                    "level": 2,
+                    "desc": "自身施加的<#ba.corrupt>腐蚀</>效果持续时间+{duration_add}秒，且降低的最大抗性提升至原本的{1+corrupt_rate}倍。",
+                    "values": {"duration_add": 10, "corrupt_rate": 0.1},
+                },
+            ]
+        }
+        attrs["potentials"] = {
+            "potentials": [
+                {
+                    "name": "心如寒铁",
+                    "desc": "智识和意志+{Will}，源石技艺强度+{PhysicalAndSpellInflictionEnhance}。",
+                    "values": {"Will": 15, "Wisd": 15, "PhysicalAndSpellInflictionEnhance": 16},
+                },
+                {
+                    "name": "衔石",
+                    "desc": "自身施加的<#ba.corrupt>腐蚀</>效果持续时间额外+{duration_add}秒，且降低的最大抗性额外提升原本的{corrupt_rate}。",
+                    "values": {"duration_add": 5, "corrupt_rate": 0.2},
+                }
+            ]
+        }
+
+        view = build_fz_loadout_view(operator, _sample_loadout_weapon(), [])
+        corrosion = view.status_effects[0]
+
+        self.assertEqual(corrosion.name, "腐蚀")
+        self.assertAlmostEqual(view.status_effect_bonus, 32 / 316)
+        self.assertEqual(corrosion.levels[0].value, "最大降抗 17.18")
+        self.assertEqual(corrosion.levels[0].detail, "初始 3.96 · 每秒 0.93")
+        self.assertEqual(corrosion.levels[0].duration, "30秒")
+        self.assertIn("最大降抗 ×1.30", corrosion.note)
+
+    def test_loadout_uses_native_icons_for_game_panel_attributes(self):
+        expected = {
+            "暴击伤害": "icon_attribute_criticalDamageIncrease.png",
+            "物理抗性": "icon_attribute_physicalDamageTakenScalar.png",
+            "灼热抗性": "icon_attribute_fireDamageTakenScalar.png",
+            "电磁抗性": "icon_attribute_pulseDamageTakenScalar.png",
+            "寒冷抗性": "icon_attribute_crystDamageTakenScalar.png",
+            "自然抗性": "icon_attribute_natural_damage_taken_scalar.png",
+            "超域抗性": "icon_ether_damage_taken_scalar.png",
+            "受治疗效率加成": "icon_heal_taken_increase.png",
+            "连携技冷却缩减": "icon_comboskill_cooldown_scalar.png",
+            "失衡效率加成": "icon_poise_efficiency.png",
+            "电磁伤害加成": "icon_pulse_damage_increase.png",
+        }
+        for label, filename in expected.items():
+            self.assertEqual(draw._equipment_attribute_icon_filename(label), filename)
+            self.assertTrue((ROOT / "assets/image/endfield/equipment" / filename).is_file())
 
     def test_loadout_card_html_shows_static_and_triggered_effects(self):
         view = build_fz_loadout_view(
@@ -1224,6 +1338,8 @@ class EndfieldServiceTests(unittest.TestCase):
         self.assertIn("终末地 · 配装模拟器", html)
         self.assertIn("已计入面板的常驻效果", html)
         self.assertIn("条件 / 触发效果", html)
+        self.assertIn("最终异常效果", html)
+        self.assertIn("源石技艺附带效果增益", html)
         self.assertIn("499", html)
 
     def test_clean_text_removes_warfarin_rich_text_tags(self):

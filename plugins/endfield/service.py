@@ -21,6 +21,8 @@ from .models import (
     LoadoutEffectView,
     LoadoutEquipmentView,
     LoadoutPanelStatView,
+    LoadoutStatusEffectView,
+    LoadoutStatusLevelView,
     LoadoutView,
     OperatorCatalogElementView,
     OperatorCatalogItemView,
@@ -716,12 +718,15 @@ LOADOUT_EFFECT_KEY_TARGETS = {
     "hp_up": "MaxHpFinal",
     "max_hp": "MaxHpFinal",
     "critical_rate": "CriticalRate",
+    "criticalrate": "CriticalRate",
     "crit_rate": "CriticalRate",
     "critical_damage": "CriticalDamageIncrease",
+    "criticaldamageincrease": "CriticalDamageIncrease",
     "crit_damage": "CriticalDamageIncrease",
     "dmg_up": "AllDamageIncrease",
     "ultimate_gain_up": "UltimateSpGainScalar",
     "phy_spell_up": "PhysicalAndSpellInflictionEnhance",
+    "physicalandspellinflictionenhance": "PhysicalAndSpellInflictionEnhance",
     "phy_dmg_up": "PhysicalDamageIncrease",
     "spell_dmg_up": "SpellDamageIncrease",
     "fire_dmg_up": "FireDamageIncrease",
@@ -729,6 +734,22 @@ LOADOUT_EFFECT_KEY_TARGETS = {
     "cryst_dmg_up": "CrystDamageIncrease",
     "natural_dmg_up": "NaturalDamageIncrease",
     "ether_dmg_up": "EtherDamageIncrease",
+}
+
+LOADOUT_STATUS_TAGS = {
+    "导电": "ba.conduct",
+    "腐蚀": "ba.corrupt",
+    "碎甲": "ba.fracture",
+}
+LOADOUT_STATUS_DURATION_KEYS = {
+    "导电": "duration_conduct",
+    "腐蚀": "duration_corrupt",
+    "碎甲": "duration_fracture",
+}
+LOADOUT_STATUS_LEVELS = {
+    "导电": tuple((value, duration) for value, duration in zip((0.12, 0.16, 0.20, 0.24), (12, 18, 24, 30))),
+    "腐蚀": tuple(zip((3.6, 4.8, 6.0, 7.2), (0.84, 1.12, 1.4, 1.68), (12.0, 16.0, 20.0, 24.0))),
+    "碎甲": tuple((value, duration) for value, duration in zip((0.12, 0.16, 0.20, 0.24), (12, 18, 24, 30))),
 }
 
 
@@ -862,6 +883,8 @@ def build_fz_loadout_view(
     physical_resistance = 1 - 1 / (0.001 * math.floor(stats.get("Agi", 0.0)) + 1)
     spell_resistance = 1 - 1 / (0.001 * math.floor(stats.get("Wisd", 0.0)) + 1)
     healing_taken = stats.get("HealTakenIncrease", 0.0) + math.floor(stats.get("Will", 0.0)) * 0.001
+    arts_strength = stats.get("PhysicalAndSpellInflictionEnhance", 0.0)
+    status_effect_bonus = _loadout_status_effect_bonus(arts_strength)
 
     primary_stats = [
         LoadoutPanelStatView("Atk", "攻击力", str(attack), f"{int(operator_attack)} + {int(weapon_attack)}，攻击加成 {_format_loadout_percent(attack_percent)}，能力加成 {_format_loadout_percent(ability_bonus)}"),
@@ -874,11 +897,16 @@ def build_fz_loadout_view(
     ]
     advanced_values = dict(stats)
     advanced_values["PhysicalResistance"] = physical_resistance
-    advanced_values["SpellResistance"] = spell_resistance
+    for key in ("FireResistance", "PulseResistance", "CrystResistance", "NaturalResistance", "EtherResistance"):
+        advanced_values[key] = spell_resistance
     advanced_values["HealTakenIncrease"] = healing_taken
     if "AllDamageTakenScalar" in multipliers:
         advanced_values["AllDamageTakenScalar"] = 1 - multipliers["AllDamageTakenScalar"]
     advanced_stats = _build_loadout_advanced_stats(advanced_values)
+    for row in advanced_stats:
+        if row.key == "PhysicalAndSpellInflictionEnhance":
+            row.detail = f"导电 / 腐蚀 / 碎甲附带效果 +{status_effect_bonus * 100:.1f}%"
+    status_effects = _build_loadout_status_effects(operator_attrs, arts_strength)
 
     versions = [
         str((operator_raw.get("article") or {}).get("updatedAt") or "")[:10],
@@ -900,6 +928,8 @@ def build_fz_loadout_view(
         primary_stats=primary_stats,
         ability_stats=ability_stats,
         advanced_stats=advanced_stats,
+        status_effect_bonus=status_effect_bonus,
+        status_effects=status_effects,
         effects=effects,
         source_version=max((version for version in versions if version), default=""),
         term_styles=_build_fz_term_styles(richtext or {}),
@@ -1182,15 +1212,211 @@ def _loadout_effect_target(key: str, clause: str, *, allow_label_fallback: bool)
     return next((target for label, target in label_targets if label in plain), "")
 
 
+def _loadout_status_effect_bonus(arts_strength: float) -> float:
+    strength = max(0.0, float(arts_strength))
+    return 2 * strength / (strength + 300) if strength else 0.0
+
+
+def _build_loadout_status_effects(
+    attrs: dict[str, Any],
+    arts_strength: float,
+) -> list[LoadoutStatusEffectView]:
+    hero = attrs.get("hero") if isinstance(attrs.get("hero"), dict) else {}
+    tags = hero.get("tags") if isinstance(hero.get("tags"), list) else []
+    bonus = _loadout_status_effect_bonus(arts_strength)
+    latest_talents = _latest_loadout_operator_items(attrs.get("talents"), "talents")
+    potentials = [
+        item
+        for item in _unwrap_fz_list(attrs.get("potentials"), "potentials", "items", "list")
+        if isinstance(item, dict)
+    ]
+    duration_additions = {name: 0.0 for name in LOADOUT_STATUS_TAGS}
+    maximum_multipliers = {name: 1.0 for name in LOADOUT_STATUS_TAGS}
+    for item in (*latest_talents, *potentials):
+        description = _first_text(item, "description", "desc", "effect")
+        plain = _clean_fz_rich_text(description)
+        values = item.get("values") if isinstance(item.get("values"), dict) else {}
+        for status_name in _loadout_status_names(description):
+            if "自身施加" in plain and "效果持续时间" in plain:
+                duration_additions[status_name] += sum(
+                    _to_float(value) or 0.0
+                    for key, value in values.items()
+                    if "duration_add" in str(key).lower()
+                )
+            if status_name == "腐蚀" and "降低的最大抗性" in plain:
+                maximum_multipliers[status_name] += sum(
+                    _to_float(value) or 0.0
+                    for key, value in values.items()
+                    if "corrupt_rate" in str(key).lower()
+                )
+
+    result: list[LoadoutStatusEffectView] = []
+    for status_name in LOADOUT_STATUS_TAGS:
+        if status_name not in tags:
+            continue
+        notes = [f"源石技艺增益 +{bonus * 100:.1f}%"]
+        if duration_additions[status_name]:
+            notes.append(f"特性持续 +{_format_status_number(duration_additions[status_name])}秒")
+        if maximum_multipliers[status_name] != 1:
+            notes.append(f"最大降抗 ×{maximum_multipliers[status_name]:.2f}")
+        result.append(
+            LoadoutStatusEffectView(
+                name=status_name,
+                source="普通附带效果",
+                levels=_make_loadout_status_levels(
+                    status_name,
+                    bonus,
+                    duration_add=duration_additions[status_name],
+                    maximum_multiplier=maximum_multipliers[status_name],
+                ),
+                note=" · ".join(notes),
+            )
+        )
+
+    for skill in _unwrap_fz_list(attrs.get("skills"), "skills", "items", "list"):
+        if not isinstance(skill, dict):
+            continue
+        description = _first_text(skill, "description", "desc", "effect")
+        plain = _clean_fz_rich_text(description)
+        if "强制施加" not in plain:
+            continue
+        skill_name = _first_text(skill, "name", "title") or "强制异常技能"
+        levels = [item for item in skill.get("levels") or [] if isinstance(item, dict)]
+        selected = levels[-1] if levels else {}
+        values = selected.get("values") if isinstance(selected.get("values"), dict) else {}
+        for status_name in _loadout_status_names(description):
+            duration_key = LOADOUT_STATUS_DURATION_KEYS[status_name]
+            duration = _to_float(_case_insensitive_get(values, duration_key))
+            if duration is None:
+                duration = _to_float(_case_insensitive_get(values, "duration"))
+            duration = duration or 0.0
+            characteristic_multiplier = 1.0
+            characteristic_notes: list[str] = []
+            for potential in potentials:
+                potential_description = _first_text(potential, "description", "desc", "effect")
+                potential_plain = _clean_fz_rich_text(potential_description)
+                if skill_name not in potential_plain or status_name not in _loadout_status_names(potential_description):
+                    continue
+                potential_values = potential.get("values") if isinstance(potential.get("values"), dict) else {}
+                for key, raw_value in potential_values.items():
+                    value = _to_float(raw_value)
+                    if value is None:
+                        continue
+                    lowered = str(key).lower()
+                    if "duration" in lowered and "持续时间" in potential_plain:
+                        if re.search(rf"\{{\s*{re.escape(str(key))}\s*-\s*1\s*:", potential_description, flags=re.I):
+                            duration *= value
+                            characteristic_notes.append(f"持续 ×{_format_status_number(value)}")
+                        else:
+                            duration += value
+                            characteristic_notes.append(f"持续 +{_format_status_number(value)}秒")
+                    if lowered in {"extra_scaling", "effect_scaling"} and "提升至原本" in potential_plain:
+                        characteristic_multiplier *= value
+                        characteristic_notes.append(f"效果 ×{_format_status_number(value)}")
+            note_parts = ["强制异常按 Lv1 基础值", f"源石技艺增益 +{bonus * 100:.1f}%", *characteristic_notes]
+            result.append(
+                LoadoutStatusEffectView(
+                    name=status_name,
+                    source=skill_name,
+                    forced=True,
+                    levels=_make_loadout_status_levels(
+                        status_name,
+                        bonus,
+                        characteristic_multiplier=characteristic_multiplier,
+                        forced_duration=duration,
+                        level_count=1,
+                    ),
+                    note=" · ".join(note_parts),
+                )
+            )
+    return result
+
+
+def _latest_loadout_operator_items(raw: Any, field: str) -> list[dict[str, Any]]:
+    latest: dict[str, dict[str, Any]] = {}
+    for item in _unwrap_fz_list(raw, field, "items", "list"):
+        if isinstance(item, dict):
+            latest[_first_text(item, "name", "title") or str(len(latest))] = item
+    return list(latest.values())
+
+
+def _loadout_status_names(description: str) -> list[str]:
+    plain = _clean_fz_rich_text(description)
+    return [
+        name
+        for name, richtext_id in LOADOUT_STATUS_TAGS.items()
+        if name in plain or richtext_id in description
+    ]
+
+
+def _make_loadout_status_levels(
+    status_name: str,
+    bonus: float,
+    *,
+    duration_add: float = 0.0,
+    maximum_multiplier: float = 1.0,
+    characteristic_multiplier: float = 1.0,
+    forced_duration: float = 0.0,
+    level_count: int = 4,
+) -> list[LoadoutStatusLevelView]:
+    effect_multiplier = (1 + bonus) * characteristic_multiplier
+    result: list[LoadoutStatusLevelView] = []
+    for index, base in enumerate(LOADOUT_STATUS_LEVELS[status_name][:level_count], 1):
+        if status_name == "腐蚀":
+            initial, per_second, maximum = base
+            value = f"最大降抗 {_format_status_number(maximum * effect_multiplier * maximum_multiplier)}"
+            detail = (
+                f"初始 {_format_status_number(initial * effect_multiplier)}"
+                f" · 每秒 {_format_status_number(per_second * effect_multiplier)}"
+            )
+            duration = forced_duration or (15 + duration_add)
+        else:
+            base_value, base_duration = base
+            label = "法术易伤" if status_name == "导电" else "物理易伤"
+            value = f"{label} {_format_status_percent(base_value * effect_multiplier)}"
+            detail = f"基础 {_format_status_percent(base_value)}"
+            duration = forced_duration or (base_duration + duration_add)
+        result.append(
+            LoadoutStatusLevelView(
+                level=index,
+                value=value,
+                detail=detail,
+                duration=f"{_format_status_number(duration)}秒",
+            )
+        )
+    return result
+
+
+def _format_status_number(value: float) -> str:
+    return f"{value:.2f}".rstrip("0").rstrip(".")
+
+
+def _format_status_percent(value: float) -> str:
+    return f"{value * 100:.2f}".rstrip("0").rstrip(".") + "%"
+
+
 def _build_loadout_advanced_stats(values: dict[str, float]) -> list[LoadoutPanelStatView]:
     labels = dict(LOADOUT_ATTRIBUTE_NAMES)
-    labels.update({"PhysicalResistance": "物理抗性", "SpellResistance": "法术抗性"})
+    labels.update(
+        {
+            "PhysicalResistance": "物理抗性",
+            "FireResistance": "灼热抗性",
+            "PulseResistance": "电磁抗性",
+            "CrystResistance": "寒冷抗性",
+            "NaturalResistance": "自然抗性",
+            "EtherResistance": "超域抗性",
+        }
+    )
     order = (
         "CriticalRate",
         "CriticalDamageIncrease",
-        "PhysicalResistance",
-        "SpellResistance",
         "PhysicalAndSpellInflictionEnhance",
+        "PhysicalResistance",
+        "FireResistance",
+        "PulseResistance",
+        "CrystResistance",
+        "NaturalResistance",
+        "EtherResistance",
         "HealOutputIncrease",
         "HealTakenIncrease",
         "UltimateSpGainScalar",
@@ -1210,13 +1436,21 @@ def _build_loadout_advanced_stats(values: dict[str, float]) -> list[LoadoutPanel
         "NaturalDamageIncrease",
         "EtherDamageIncrease",
     )
-    always_show = {"CriticalRate", "CriticalDamageIncrease", "PhysicalResistance", "SpellResistance"}
+    resistance_keys = {
+        "PhysicalResistance",
+        "FireResistance",
+        "PulseResistance",
+        "CrystResistance",
+        "NaturalResistance",
+        "EtherResistance",
+    }
+    always_show = {"CriticalRate", "CriticalDamageIncrease", "PhysicalAndSpellInflictionEnhance", *resistance_keys}
     result: list[LoadoutPanelStatView] = []
     for key in order:
         value = values.get(key, 0.0)
         if key not in always_show and abs(value) < 1e-9:
             continue
-        if key in LOADOUT_PERCENT_ATTRIBUTES or key in {"PhysicalResistance", "SpellResistance", "AllDamageTakenScalar"}:
+        if key in LOADOUT_PERCENT_ATTRIBUTES or key in resistance_keys | {"AllDamageTakenScalar"}:
             formatted = _format_loadout_percent(value)
         else:
             formatted = str(math.floor(value))
