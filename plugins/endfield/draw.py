@@ -508,16 +508,21 @@ def _render_loadout_html(view: LoadoutView, asset_urls: dict[str, str]) -> str:
     operator_img = asset_urls.get(view.operator_icon_url, "")
     weapon_img = asset_urls.get(view.weapon_icon_url, "")
     equipment_html = "".join(
-        f'''<div class="loadout-item">
-            <div class="loadout-item-icon">{f'<img src="{esc_attr(asset_urls.get(item.icon_url, ""))}" alt="">' if asset_urls.get(item.icon_url, "") else '<span>EQ</span>'}</div>
-            <div><b>{esc(item.name)}</b><small>{esc(item.slot_type)} · {esc(_loadout_forge_summary(item.enhance_levels))}{f' · {esc(item.suit_name)}' if item.suit_name else ''}</small></div>
-        </div>'''
+        f'''<article class="loadout-item">
+          <div class="loadout-item-top"><span class="loadout-slot">{esc(item.slot_type)}</span><span class="loadout-forge">{esc(_loadout_forge_summary(item.enhance_levels))}</span></div>
+          <div class="loadout-item-visual">{f'<img src="{esc_attr(asset_urls.get(item.icon_url, ""))}" alt="">' if asset_urls.get(item.icon_url, "") else '<span>EQ</span>'}</div>
+          <div class="loadout-item-name">{esc(item.name)}</div>
+          <div class="loadout-item-suit">{esc(item.suit_name or "独立装备")}</div>
+        </article>'''
         for item in view.equipment
     ) or '<div class="loadout-empty">未装备护甲、护手或配件</div>'
 
     def stat_cards(rows, class_name: str = "") -> str:
         return "".join(
-            f'''<div class="loadout-stat {class_name}"><span>{esc(row.label)}</span><strong>{esc(row.value)}</strong>{f'<small>{esc(row.detail)}</small>' if row.detail else ''}</div>'''
+            f'''<div class="loadout-stat {class_name}">
+              <div class="loadout-stat-head">{equipment_attribute_icon(row.label, "loadout-stat-icon-img", "loadout-stat-icon-fallback")}<span>{esc(row.label)}</span></div>
+              <strong>{esc(row.value)}</strong>{f'<small>{esc(row.detail)}</small>' if row.detail else ''}
+            </div>'''
             for row in rows
         )
 
@@ -532,33 +537,47 @@ def _render_loadout_html(view: LoadoutView, asset_urls: dict[str, str]) -> str:
 
     return f'''<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><style>
-*{{box-sizing:border-box}} body{{margin:0;background:#10151a;color:#ecf2f4;font-family:"Microsoft YaHei","PingFang SC",sans-serif}}
-.loadout-card{{width:1500px;padding:38px;background:radial-gradient(circle at 18% 0,#263b40 0,transparent 36%),linear-gradient(135deg,#11191e,#182229 58%,#10161b);border:1px solid #38515a}}
-.loadout-head{{display:grid;grid-template-columns:1fr auto;gap:24px;align-items:center;border-bottom:2px solid #63d2c6;padding-bottom:24px}}
-.loadout-title{{font-size:44px;font-weight:850;letter-spacing:2px}} .loadout-subtitle{{margin-top:8px;color:#9eb1b8;font-size:20px}}
-.loadout-tags{{display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end}} .loadout-tag{{padding:8px 14px;background:#233238;border:1px solid #49636a;color:#aeece4;font-size:17px}}
-.loadout-identity{{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin:26px 0}}
-.identity-card{{display:grid;grid-template-columns:112px 1fr;gap:18px;align-items:center;padding:18px;background:#1d292f;border-left:5px solid #63d2c6}}
-.identity-icon{{width:112px;height:112px;display:grid;place-items:center;background:#10171b;overflow:hidden}} .identity-icon img{{width:100%;height:100%;object-fit:contain}} .identity-icon span{{font-size:26px;color:#6f858c}}
-.identity-card small,.loadout-item small{{display:block;color:#93a7ae;margin-top:7px;font-size:16px}} .identity-card b{{font-size:28px}}
-.loadout-grid{{display:grid;grid-template-columns:1.08fr .92fr;gap:22px}} .loadout-panel{{background:#172127;border:1px solid #31454d;padding:22px}}
-.loadout-panel h2{{margin:0 0 17px;font-size:24px;color:#bdf7ef}} .loadout-stat-grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}}
-.loadout-stat{{min-height:108px;background:#223038;padding:15px;border-top:3px solid #52747c}} .loadout-stat span{{display:block;color:#a9bcc2;font-size:17px}} .loadout-stat strong{{display:block;margin-top:7px;font-size:34px;color:#fff}}
-.loadout-stat small{{display:block;margin-top:7px;color:#8ea3aa;font-size:13px;line-height:1.4}} .loadout-stat.ability{{min-height:84px}} .loadout-stat.ability strong{{font-size:28px}}
-.ability-grid{{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}} .advanced-grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}}
-.advanced-grid .loadout-stat{{min-height:74px;padding:12px}} .advanced-grid .loadout-stat strong{{font-size:23px}}
-.loadout-items{{display:grid;grid-template-columns:1fr 1fr;gap:11px}} .loadout-item{{display:grid;grid-template-columns:68px 1fr;gap:12px;align-items:center;background:#202d34;padding:10px}}
-.loadout-item-icon{{width:68px;height:68px;display:grid;place-items:center;background:#10171b;color:#688087;overflow:hidden}} .loadout-item-icon img{{width:100%;height:100%;object-fit:contain}} .loadout-item b{{font-size:17px}}
-.loadout-effect-list{{display:grid;gap:10px}} .loadout-effect{{display:grid;grid-template-columns:190px 1fr;gap:14px;padding:12px;background:#202d34;border-left:3px solid #607981;line-height:1.55}}
-.loadout-effect b{{color:#aeece4}} .loadout-effect span{{color:#d4dfe2}} .loadout-empty{{padding:16px;color:#768b92;background:#1d292f}}
-.loadout-note{{margin-top:22px;padding-top:16px;border-top:1px solid #31454d;color:#81979e;font-size:15px;line-height:1.6}}
+*{{box-sizing:border-box}}
+html,body{{margin:0;width:1500px;background:#d9dde0;color:#171b1f;font-family:"Microsoft YaHei","PingFang SC","Noto Sans SC",Arial,sans-serif}}
+.loadout-card{{width:1500px;padding:28px;background:linear-gradient(90deg,rgba(29,34,39,.075) 1px,transparent 1px) 0 0/40px 40px,linear-gradient(0deg,rgba(29,34,39,.075) 1px,transparent 1px) 0 0/40px 40px,linear-gradient(135deg,#f7f8f4 0%,#e7eaeb 62%,#cfd5d9 100%)}}
+.loadout-head{{min-height:92px;display:grid;grid-template-columns:1fr auto;align-items:end;gap:24px;padding:18px 22px 16px;background:#171b1f;color:#fff;border-bottom:7px solid #6f7880}}
+.loadout-kicker{{color:#9ca5ab;font-size:15px;font-weight:900;letter-spacing:.12em}} .loadout-title{{margin-top:6px;font-size:42px;line-height:1;font-weight:950}}
+.loadout-subtitle{{margin-bottom:4px;color:#c8ced2;font-size:16px;font-weight:800;text-align:right}}
+.loadout-overview{{display:grid;grid-template-columns:420px 1fr;gap:18px;margin-top:18px}}
+.loadout-identity,.loadout-panel{{border:1px solid rgba(23,27,31,.30);background:rgba(247,248,246,.94);box-shadow:-10px 16px 38px rgba(23,27,31,.10)}}
+.loadout-identity{{padding:20px}}
+.operator-block{{display:grid;grid-template-columns:145px 1fr;gap:17px;align-items:center;padding-bottom:16px;border-bottom:5px solid #171b1f}}
+.operator-visual{{width:145px;height:145px;display:grid;place-items:center;overflow:hidden;background:radial-gradient(circle,#fff 0,#e7eaeb 62%,#cdd2d5 100%);border:1px solid rgba(23,27,31,.22)}} .operator-visual img{{width:100%;height:100%;object-fit:contain}} .operator-visual span{{color:#899197;font-size:28px;font-weight:950}}
+.operator-level{{color:#687177;font-size:14px;font-weight:900}} .operator-name{{margin-top:4px;font-size:43px;line-height:.98;font-weight:950;overflow-wrap:anywhere}}
+.operator-tags{{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}} .operator-tag{{padding:5px 9px;background:#e1e4e5;border-left:5px solid #20252a;font-size:13px;font-weight:900}}
+.weapon-block{{display:grid;grid-template-columns:105px 1fr;gap:14px;align-items:center;margin-top:15px;padding:12px;background:#e5e8e9;border:1px solid rgba(23,27,31,.20)}}
+.weapon-visual{{width:105px;height:82px;display:grid;place-items:center;background:rgba(255,255,255,.62)}} .weapon-visual img{{width:100%;height:100%;object-fit:contain}} .weapon-visual span{{color:#899197;font-weight:950}}
+.weapon-label{{color:#697279;font-size:12px;font-weight:900}} .weapon-name{{margin-top:3px;font-size:25px;line-height:1.05;font-weight:950}} .weapon-meta{{margin-top:5px;color:#4c565d;font-size:13px;font-weight:850}}
+.loadout-panel{{padding:18px 20px}}
+.section-title{{display:flex;align-items:center;gap:10px;margin:0 0 12px;padding-bottom:9px;border-bottom:4px solid #20252a;font-size:25px;line-height:1;font-weight:950}} .section-title::before{{content:"";width:9px;height:27px;background:#286cd6}}
+.core-grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}} .ability-grid{{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:8px}}
+.loadout-stat{{min-height:108px;padding:12px 13px;background:linear-gradient(180deg,rgba(255,255,255,.80),rgba(232,235,236,.88));border:1px solid rgba(23,27,31,.22);border-left:7px solid #20252a}}
+.loadout-stat-head{{display:flex;align-items:center;gap:8px;color:#4a555c;font-size:15px;font-weight:900}} .loadout-stat-icon-img{{width:29px;height:29px;object-fit:contain;filter:brightness(0) saturate(100%);opacity:.56}} .loadout-stat-icon-fallback{{width:29px;height:29px;display:grid;place-items:center;background:#d5dadd;color:#59646b;font-size:11px;font-weight:950}}
+.loadout-stat strong{{display:block;margin-top:6px;color:#286cd6;font-size:36px;line-height:1;font-weight:950}} .loadout-stat small{{display:block;margin-top:7px;color:#727b81;font-size:12px;line-height:1.32;font-weight:800}}
+.loadout-stat.ability{{min-height:78px;padding:10px}} .loadout-stat.ability strong{{font-size:27px}} .loadout-stat.ability .loadout-stat-icon-img,.loadout-stat.ability .loadout-stat-icon-fallback{{width:24px;height:24px}}
+.loadout-section{{margin-top:18px;padding:18px 20px;border:1px solid rgba(23,27,31,.30);background:rgba(247,248,246,.94)}}
+.loadout-items{{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}} .loadout-item{{position:relative;min-height:230px;padding:10px;background:rgba(255,255,255,.68);border:1px solid rgba(23,27,31,.24)}}
+.loadout-item-top{{display:flex;justify-content:space-between;align-items:center;gap:8px;min-height:29px}} .loadout-slot{{padding:5px 9px;background:#20252a;color:#fff;font-size:13px;font-weight:950}} .loadout-forge{{color:#536068;font-size:12px;font-weight:900;text-align:right}}
+.loadout-item-visual{{height:125px;display:grid;place-items:center;margin-top:5px;background:radial-gradient(circle,#fff 0,#eceeef 58%,transparent 72%);overflow:hidden}} .loadout-item-visual img{{width:100%;height:100%;object-fit:contain;filter:drop-shadow(0 12px 10px rgba(23,27,31,.20))}} .loadout-item-visual span{{color:#92999e;font-size:22px;font-weight:950}}
+.loadout-item-name{{margin-top:7px;font-size:20px;line-height:1.1;font-weight:950}} .loadout-item-suit{{margin-top:5px;color:#727b81;font-size:13px;font-weight:850}}
+.advanced-grid{{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}} .advanced-grid .loadout-stat{{min-height:75px;padding:9px 10px;border-left-width:5px}} .advanced-grid .loadout-stat strong{{font-size:24px}} .advanced-grid .loadout-stat-icon-img,.advanced-grid .loadout-stat-icon-fallback{{width:23px;height:23px}}
+.effect-columns{{display:grid;grid-template-columns:1fr 1fr;gap:12px}} .loadout-effect-list{{display:grid;gap:7px;align-content:start}} .loadout-effect{{display:grid;grid-template-columns:170px 1fr;gap:12px;padding:10px 11px;background:rgba(255,255,255,.70);border:1px solid rgba(23,27,31,.18);border-left:6px solid #20252a;line-height:1.42}}
+.loadout-effect b{{font-size:13px;font-weight:950}} .loadout-effect span{{color:#3e484f;font-size:13px;font-weight:750}} .effect-note{{margin:-4px 0 9px;color:#747d83;font-size:12px;font-weight:850}}
+.loadout-empty{{padding:14px;color:#7a8389;background:rgba(23,27,31,.055);font-weight:850}}
+.loadout-note{{margin-top:18px;padding:13px 16px;background:#20252a;color:#cbd1d4;font-size:13px;line-height:1.55;font-weight:800}} .loadout-note strong{{color:#fff}}
 </style></head><body><main class="loadout-card">
-<header class="loadout-head"><div><div class="loadout-title">终末地 · 配装模拟器</div><div class="loadout-subtitle">FZ Wiki 数据 · 静态面板估算</div></div><div class="loadout-tags"><span class="loadout-tag">主属性 {esc(view.main_attribute)}</span><span class="loadout-tag">副属性 {esc(view.sub_attribute)}</span><span class="loadout-tag">{esc(view.weapon_type)}</span></div></header>
-<section class="loadout-identity"><div class="identity-card"><div class="identity-icon">{f'<img src="{esc_attr(operator_img)}" alt="">' if operator_img else '<span>OP</span>'}</div><div><small>干员 · Lv.{view.operator_level}</small><b>{esc(view.operator_name)}</b></div></div><div class="identity-card"><div class="identity-icon">{f'<img src="{esc_attr(weapon_img)}" alt="">' if weapon_img else '<span>WP</span>'}</div><div><small>武器 · Lv.{view.weapon_level} · 潜能 {view.weapon_potential}</small><b>{esc(view.weapon_name)}</b></div></div></section>
-<section class="loadout-grid"><div class="loadout-panel"><h2>核心面板</h2><div class="loadout-stat-grid">{stat_cards(view.primary_stats)}</div><h2 style="margin-top:20px">能力值</h2><div class="ability-grid">{stat_cards(view.ability_stats, 'ability')}</div></div><div class="loadout-panel"><h2>已装备</h2><div class="loadout-items">{equipment_html}</div></div></section>
-<section class="loadout-panel" style="margin-top:22px"><h2>进阶面板</h2><div class="advanced-grid">{stat_cards(view.advanced_stats)}</div></section>
-<section class="loadout-grid" style="margin-top:22px"><div class="loadout-panel"><h2>已计入面板的常驻效果</h2><div class="loadout-effect-list">{effect_cards(active_effects)}</div></div><div class="loadout-panel"><h2>条件 / 触发效果（未计入静态面板）</h2><div class="loadout-effect-list">{effect_cards(triggered_effects)}</div></div></section>
-<footer class="loadout-note">攻击力按用户给定公式计算；能力值计算使用四维属性整数部分。生命值额外计入 5 × 力量，敏捷 / 智识 / 意志分别换算物理抗性、法术抗性和受治疗效率。面板显示值按游戏规则向下取整，条件效果单独列出。数据版本：{esc(view.source_version or '--')}</footer>
+<header class="loadout-head"><div><div class="loadout-kicker">终末地 · 配装模拟器</div><div class="loadout-title">配装面板</div></div><div class="loadout-subtitle">ARKNIGHTS: ENDFIELD<br>数据来源 api.fz.wiki · 更新 {esc(view.source_version or '--')}</div></header>
+<section class="loadout-overview"><aside class="loadout-identity"><div class="operator-block"><div class="operator-visual">{f'<img src="{esc_attr(operator_img)}" alt="">' if operator_img else '<span>OP</span>'}</div><div><div class="operator-level">干员 · LEVEL {view.operator_level}</div><div class="operator-name">{esc(view.operator_name)}</div><div class="operator-tags"><span class="operator-tag">主 · {esc(view.main_attribute)}</span><span class="operator-tag">副 · {esc(view.sub_attribute)}</span><span class="operator-tag">{esc(view.weapon_type)}</span></div></div></div><div class="weapon-block"><div class="weapon-visual">{f'<img src="{esc_attr(weapon_img)}" alt="">' if weapon_img else '<span>WP</span>'}</div><div><div class="weapon-label">武器 · LEVEL {view.weapon_level}</div><div class="weapon-name">{esc(view.weapon_name)}</div><div class="weapon-meta">潜能 {view.weapon_potential} · {esc(view.weapon_type)}</div></div></div></aside>
+<div class="loadout-panel"><h2 class="section-title">核心面板</h2><div class="core-grid">{stat_cards(view.primary_stats)}</div><div class="ability-grid">{stat_cards(view.ability_stats, 'ability')}</div></div></section>
+<section class="loadout-section"><h2 class="section-title">装备配置</h2><div class="loadout-items">{equipment_html}</div></section>
+<section class="loadout-section"><h2 class="section-title">进阶面板</h2><div class="advanced-grid">{stat_cards(view.advanced_stats)}</div></section>
+<section class="loadout-section"><h2 class="section-title">效果明细</h2><div class="effect-columns"><div><div class="effect-note">已计入面板的常驻效果</div><div class="loadout-effect-list">{effect_cards(active_effects)}</div></div><div><div class="effect-note">条件 / 触发效果</div><div class="loadout-effect-list">{effect_cards(triggered_effects)}</div></div></div></section>
+<footer class="loadout-note"><strong>计算说明</strong>　攻击力按配装公式计算，能力值使用四维属性整数部分；生命值计入 5 × 力量，敏捷 / 智识 / 意志换算对应派生属性。显示结果按游戏规则向下取整。</footer>
 </main></body></html>'''
 
 
