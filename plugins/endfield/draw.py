@@ -531,7 +531,7 @@ def _render_loadout_html(view: LoadoutView, asset_urls: dict[str, str]) -> str:
 
     def effect_cards(items) -> str:
         return "".join(
-            f'<div class="loadout-effect"><b>{esc(item.source)}</b><span>{esc(item.description)}</span></div>'
+            f'<div class="loadout-effect"><b>{esc(item.source)}</b><span>{highlight_terms(item.description, view.term_styles, {})}</span></div>'
             for item in items
         ) or '<div class="loadout-empty">无</div>'
 
@@ -561,13 +561,13 @@ html,body{{margin:0;width:1500px;background:#d9dde0;color:#171b1f;font-family:"M
 .loadout-stat strong{{display:block;margin-top:6px;color:#286cd6;font-size:36px;line-height:1;font-weight:950}} .loadout-stat small{{display:block;margin-top:7px;color:#727b81;font-size:12px;line-height:1.32;font-weight:800}}
 .loadout-stat.ability{{min-height:78px;padding:10px}} .loadout-stat.ability strong{{font-size:27px}} .loadout-stat.ability .loadout-stat-icon-img,.loadout-stat.ability .loadout-stat-icon-fallback{{width:24px;height:24px}}
 .loadout-section{{margin-top:18px;padding:18px 20px;border:1px solid rgba(23,27,31,.30);background:rgba(247,248,246,.94)}}
-.loadout-items{{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}} .loadout-item{{position:relative;min-height:230px;padding:10px;background:rgba(255,255,255,.68);border:1px solid rgba(23,27,31,.24)}}
+.loadout-items{{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}} .loadout-item{{position:relative;min-height:290px;padding:10px;background:rgba(255,255,255,.68);border:1px solid rgba(23,27,31,.24)}}
 .loadout-item-top{{display:flex;justify-content:space-between;align-items:center;gap:8px;min-height:29px}} .loadout-slot{{padding:5px 9px;background:#20252a;color:#fff;font-size:13px;font-weight:950}} .loadout-forge{{color:#536068;font-size:12px;font-weight:900;text-align:right}}
-.loadout-item-visual{{height:125px;display:grid;place-items:center;margin-top:5px;background:radial-gradient(circle,#fff 0,#eceeef 58%,transparent 72%);overflow:hidden}} .loadout-item-visual img{{width:100%;height:100%;object-fit:contain;filter:drop-shadow(0 12px 10px rgba(23,27,31,.20))}} .loadout-item-visual span{{color:#92999e;font-size:22px;font-weight:950}}
+.loadout-item-visual{{height:180px;display:flex;align-items:center;justify-content:center;margin-top:5px;padding:8px;background:radial-gradient(circle,#fff 0,#eceeef 58%,transparent 72%)}} .loadout-item-visual img{{display:block;width:auto;height:auto;max-width:100%;max-height:100%;object-fit:contain;filter:drop-shadow(0 12px 10px rgba(23,27,31,.20))}} .loadout-item-visual span{{color:#92999e;font-size:22px;font-weight:950}}
 .loadout-item-name{{margin-top:7px;font-size:20px;line-height:1.1;font-weight:950}} .loadout-item-suit{{margin-top:5px;color:#727b81;font-size:13px;font-weight:850}}
 .advanced-grid{{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}} .advanced-grid .loadout-stat{{min-height:75px;padding:9px 10px;border-left-width:5px}} .advanced-grid .loadout-stat strong{{font-size:24px}} .advanced-grid .loadout-stat-icon-img,.advanced-grid .loadout-stat-icon-fallback{{width:23px;height:23px}}
 .effect-columns{{display:grid;grid-template-columns:1fr 1fr;gap:12px}} .loadout-effect-list{{display:grid;gap:7px;align-content:start}} .loadout-effect{{display:grid;grid-template-columns:170px 1fr;gap:12px;padding:10px 11px;background:rgba(255,255,255,.70);border:1px solid rgba(23,27,31,.18);border-left:6px solid #20252a;line-height:1.42}}
-.loadout-effect b{{font-size:13px;font-weight:950}} .loadout-effect span{{color:#3e484f;font-size:13px;font-weight:750}} .effect-note{{margin:-4px 0 9px;color:#747d83;font-size:12px;font-weight:850}}
+.loadout-effect b{{font-size:13px;font-weight:950}} .loadout-effect span{{color:#3e484f;font-size:13px;font-weight:750}} .loadout-effect .term,.loadout-effect .vup,.loadout-effect .rich-style{{color:#286cd6 !important;font-weight:950}} .loadout-effect .info-note{{color:#5d6870 !important;font-weight:850}} .effect-note{{margin:-4px 0 9px;color:#747d83;font-size:12px;font-weight:850}}
 .loadout-empty{{padding:14px;color:#7a8389;background:rgba(23,27,31,.055);font-weight:850}}
 .loadout-note{{margin-top:18px;padding:13px 16px;background:#20252a;color:#cbd1d4;font-size:13px;line-height:1.55;font-weight:800}} .loadout-note strong{{color:#fff}}
 </style></head><body><main class="loadout-card">

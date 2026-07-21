@@ -296,3 +296,4 @@ class LoadoutView:
     advanced_stats: list[LoadoutPanelStatView] = field(default_factory=list)
     effects: list[LoadoutEffectView] = field(default_factory=list)
     source_version: str = ""
+    term_styles: dict[str, TermStyleView] = field(default_factory=dict)

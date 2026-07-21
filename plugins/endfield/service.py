@@ -222,7 +222,17 @@ class EndfieldService:
         weapon_potential: int = 5,
     ) -> LoadoutView:
         titles = [operator_title, weapon_title, *(title for title, _, _ in equipment)]
-        raws = await asyncio.gather(*(self.client.fz_article_by_title(title) for title in titles))
+        raw_results = await asyncio.gather(
+            *(self.client.fz_article_by_title(title) for title in titles),
+            self.client.fz_game_richtext(),
+            return_exceptions=True,
+        )
+        raws = raw_results[:-1]
+        for raw in raws:
+            if isinstance(raw, Exception):
+                raise raw
+        richtext_result = raw_results[-1]
+        richtext = richtext_result if isinstance(richtext_result, dict) else {}
         equipment_raws = [(raw, equipment[index][1], equipment[index][2]) for index, raw in enumerate(raws[2:])]
         return build_fz_loadout_view(
             raws[0],
@@ -231,6 +241,7 @@ class EndfieldService:
             operator_level=operator_level,
             weapon_level=weapon_level,
             weapon_potential=weapon_potential,
+            richtext=richtext,
         )
 
     async def get_recommended_weapon_title(self, operator_title: str) -> str:
@@ -728,6 +739,7 @@ def build_fz_loadout_view(
     operator_level: int = 90,
     weapon_level: int = 90,
     weapon_potential: int = 5,
+    richtext: dict[str, Any] | None = None,
 ) -> LoadoutView:
     operator_attrs = _fz_template_attrs(operator_raw)
     weapon_attrs = _fz_template_attrs(weapon_raw)
@@ -889,6 +901,7 @@ def build_fz_loadout_view(
         advanced_stats=advanced_stats,
         effects=effects,
         source_version=max((version for version in versions if version), default=""),
+        term_styles=_build_fz_term_styles(richtext or {}),
     )
 
 
