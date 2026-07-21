@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import tempfile
 from collections.abc import Awaitable, Callable
@@ -19,7 +20,7 @@ from utils.http_client import clear_http_cache, get_http_cache_stats
 from utils.temp_files import schedule_temp_file_cleanup
 
 from .client import WarfarinAPIError, WarfarinClient
-from .aliases import alias_targets
+from .aliases import add_alias, alias_targets
 from .commands import (
     EndfieldCandidate,
     CANDIDATE_SCORE_THRESHOLD,
@@ -34,6 +35,7 @@ from .commands import (
     format_not_found,
     format_source,
     format_unknown,
+    normalize_alias_kind,
     parse_command,
     parse_loadout_spec,
     parse_shortcut_command,
@@ -164,6 +166,10 @@ async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand)
         if not dev_visible_for_user(str(event_user_id(event)), Config.SUPERUSERS):
             return await matcher.finish(format_unknown())
         return await matcher.finish(await _handle_dev_command(command))
+    if command.action == "alias":
+        if not dev_visible_for_user(str(event_user_id(event)), Config.SUPERUSERS):
+            return await matcher.finish(format_unknown())
+        return await matcher.finish(_handle_alias_command(command))
     if command.action == "loadout":
         return await _handle_loadout(matcher, command)
     if command.action not in {"query", "search"}:
@@ -936,6 +942,28 @@ async def _handle_dev_command(command: ParsedEndfieldCommand) -> str:
             return f"已清理 {scope} 缓存，共 {removed} 项。"
         return "\n".join(await _cache_status_lines())
     return "dev 命令：status | resolve | refresh | cache"
+
+
+def _handle_alias_command(command: ParsedEndfieldCommand) -> str:
+    usage = "用法：/zmd 别名 添加 <干员|武器|装备> <正式名称> <新别名>"
+    if command.alias_action != "add" or len(command.args) < 3:
+        return usage
+    kind = normalize_alias_kind(command.args[0])
+    if not kind:
+        return usage
+    canonical_name = command.args[1]
+    alias = " ".join(command.args[2:]).strip()
+    try:
+        canonical, added = add_alias(kind, canonical_name, alias)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        logger.warning(f"[endfield] alias update rejected: {exc}")
+        return f"添加别名失败：{exc}"
+    label = {"operator": "干员", "weapon": "武器", "equipment": "装备"}[kind]
+    if not added:
+        return f"{label}别名已存在：{alias} → {canonical}"
+    targets = alias_targets(kind, alias)
+    collision = f"\n该别名同时匹配：{'、'.join(targets)}" if len(targets) > 1 else ""
+    return f"已添加{label}别名：{alias} → {canonical}{collision}"
 
 
 class _CardNotFound(Exception):

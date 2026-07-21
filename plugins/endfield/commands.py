@@ -20,6 +20,8 @@ SEARCH_ALIASES = {"搜索", "search", "s"}
 HELP_ALIASES = {"帮助", "help", "h", "?"}
 SOURCE_ALIASES = {"数据源", "source", "sources"}
 DEV_ALIASES = {"dev"}
+ALIAS_COMMAND_ALIASES = {"别名", "alias"}
+ALIAS_ADD_ALIASES = {"添加", "新增", "add"}
 
 SCOPE_LABELS = {
     "operator": "干员",
@@ -56,6 +58,7 @@ class ParsedEndfieldCommand:
     source: str = ""
     rarity: str = ""
     dev_action: str = ""
+    alias_action: str = ""
     args: tuple[str, ...] = ()
     char_level: int = 90
     weapon_level: int = 90
@@ -107,6 +110,11 @@ def parse_command(rest: str) -> ParsedEndfieldCommand:
     if head in DEV_ALIASES:
         dev_action = parts[1].lower() if len(parts) > 1 else "help"
         return ParsedEndfieldCommand("dev", dev_action=dev_action, args=tuple(parts[2:]))
+    if head in ALIAS_COMMAND_ALIASES:
+        action = parts[1].lower() if len(parts) > 1 else "help"
+        if action in ALIAS_ADD_ALIASES:
+            return ParsedEndfieldCommand("alias", alias_action="add", args=tuple(parts[2:]))
+        return ParsedEndfieldCommand("alias", alias_action="add", args=tuple(parts[1:]))
     if head in LOADOUT_ALIASES:
         loadout_parts, levels, option_error = _parse_loadout_options(parts[1:])
         if option_error:
@@ -189,6 +197,17 @@ def score_entity_candidate(kind: str, query: str, canonical_name: str, *values: 
 
 def dev_visible_for_user(user_id: str, superusers: Iterable[str]) -> bool:
     return str(user_id) in {str(item) for item in superusers}
+
+
+def normalize_alias_kind(value: str) -> str:
+    lowered = str(value or "").strip().lower()
+    if lowered in OPERATOR_ALIASES:
+        return "operator"
+    if lowered in WEAPON_ALIASES:
+        return "weapon"
+    if lowered in EQUIPMENT_ALIASES:
+        return "equipment"
+    return ""
 
 
 def format_help() -> str:

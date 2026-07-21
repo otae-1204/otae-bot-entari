@@ -6,6 +6,7 @@ import copy
 import io
 import struct
 import sys
+import tempfile
 import types
 import unittest
 from pathlib import Path
@@ -317,6 +318,48 @@ class EndfieldCommandParserTests(unittest.TestCase):
         self.assertEqual(parsed.action, "dev")
         self.assertEqual(parsed.dev_action, "resolve")
         self.assertEqual(parsed.args, ("陈千语",))
+
+    def test_alias_add_command_parses_full_and_short_forms(self):
+        full = commands.parse_command("别名 添加 装备 纾难护甲 散件智识甲")
+        self.assertEqual(full.action, "alias")
+        self.assertEqual(full.alias_action, "add")
+        self.assertEqual(full.args, ("装备", "纾难护甲", "散件智识甲"))
+
+        short = commands.parse_command("alias weapon 四二式·肃阵 Arcane weapon")
+        self.assertEqual(short.action, "alias")
+        self.assertEqual(short.alias_action, "add")
+        self.assertEqual(short.args, ("weapon", "四二式·肃阵", "Arcane", "weapon"))
+
+    def test_alias_add_persists_atomically_and_refreshes_cache(self):
+        content = """{
+  \"version\": 1,
+  \"source\": \"test\",
+  \"operator\": {
+    \"赛希\": [\"赛\"]
+  },
+  \"weapon\": {},
+  \"equipment\": {}
+}
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "alias_data.json"
+            path.write_text(content, encoding="utf-8")
+            with patch.object(aliases, "ALIAS_DATA_PATH", path):
+                aliases.clear_alias_caches()
+                canonical, added = aliases.add_alias("operator", "赛希", "塞希")
+                self.assertEqual((canonical, added), ("赛希", True))
+                self.assertEqual(aliases.alias_targets("operator", "塞希"), ("赛希",))
+                canonical, added = aliases.add_alias("operator", "赛希", "塞希")
+                self.assertEqual((canonical, added), ("赛希", False))
+            aliases.clear_alias_caches()
+
+        self.assertFalse(path.with_name(f".{path.name}.tmp").exists())
+
+    def test_alias_command_is_superuser_gated(self):
+        source = (ROOT / "plugins/endfield/__init__.py").read_text(encoding="utf-8")
+        self.assertIn('if command.action == "alias":', source)
+        self.assertIn('dev_visible_for_user(str(event_user_id(event)), Config.SUPERUSERS)', source)
+        self.assertIn("_handle_alias_command(command)", source)
 
     def test_source_help_lists_warfarin_weapon_fallback(self):
         text = commands.format_source()
