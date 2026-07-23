@@ -2527,6 +2527,45 @@ class EndfieldServiceTests(unittest.TestCase):
         self.assertIn('<div class="skill-form-name">阵诀·意</div>', html)
         self.assertNotIn("- ", html)
 
+    def test_fz_multiform_skill_metrics_are_kept_by_condition(self):
+        raw = _sample_fz_operator()
+        skill = raw["revision"]["contentJson"]["content"][0]["attrs"]["skills"]["skills"][1]
+        skill["conditions"] = [
+            {"id": "wisd", "name": "阵诀·智"},
+            {"id": "will", "name": "阵诀·意"},
+        ]
+        skill["paramTable"] = {
+            "rows": [
+                {"label": "技力消耗", "values": ["100"] * 10},
+                {
+                    "label": "伤害倍率",
+                    "values": [f"{value}%" for value in range(100, 110)],
+                    "conditionId": "wisd",
+                },
+                {
+                    "label": "伤害倍率",
+                    "values": [f"{value}%" for value in range(200, 210)],
+                    "conditionId": "will",
+                },
+                {"label": "失衡值", "values": ["10"] * 10},
+            ]
+        }
+
+        view = service.build_fz_operator_view(raw, _sample_richtext())
+        parsed = view.skills[1]
+        rows = dict(draw.skill_metric_rows(parsed))
+
+        self.assertEqual(rows["阵诀·智攻击倍率"], ["106%", "107%", "108%", "109%"])
+        self.assertEqual(rows["阵诀·意攻击倍率"], ["206%", "207%", "208%", "209%"])
+        self.assertEqual(rows["失衡值"], ["10", "10", "10", "10"])
+        common, groups = draw.skill_metric_row_groups(parsed)
+        common_rows = dict(common)
+        self.assertEqual(common_rows["技力消耗"], ["100"] * 4)
+        self.assertEqual(common_rows["失衡值"], ["10"] * 4)
+        self.assertEqual([group[0] for group in groups], ["阵诀·智", "阵诀·意"])
+        self.assertEqual([row[1] for row in groups[0][2]], ["攻击倍率"])
+        self.assertEqual([row[1] for row in groups[1][2]], ["攻击倍率"])
+
     def test_fz_skill_metric_rows_keep_specific_param_table_rows(self):
         raw = _sample_fz_operator()
         skills = raw["revision"]["contentJson"]["content"][0]["attrs"]["skills"]["skills"]

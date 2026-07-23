@@ -2014,7 +2014,11 @@ def _build_fz_operator_skills(raw: Any) -> list[SkillView]:
         all_levels = _ordered_fz_levels(_unwrap_fz_list(_first_value(item, "levels", "levelData", "records"), "levels", "items", "records"))
         raw_levels = all_levels[-4:]
         selected_positions = [position for position, level in enumerate(all_levels) if any(level is selected for selected in raw_levels)]
-        param_values = _fz_param_table_values(item.get("paramTable"), selected_positions)
+        param_values = _fz_param_table_values(
+            item.get("paramTable"),
+            selected_positions,
+            _fz_skill_condition_names(item),
+        )
         levels = _build_fz_skill_levels(raw_levels, param_values)
         best_level = raw_levels[-1] if raw_levels else {}
         result.append(
@@ -2167,7 +2171,23 @@ def _ordered_fz_levels(levels: list[Any]) -> list[dict[str, Any]]:
     return records
 
 
-def _fz_param_table_values(raw: Any, selected_positions: list[int]) -> list[dict[str, str]]:
+def _fz_skill_condition_names(item: dict[str, Any]) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for condition in _unwrap_fz_list(item.get("conditions"), "conditions", "items", "list"):
+        if not isinstance(condition, dict):
+            continue
+        condition_id = _first_text(condition, "id", "conditionId", "key")
+        name = _first_text(condition, "name", "title", "label")
+        if condition_id and name:
+            result[condition_id] = name
+    return result
+
+
+def _fz_param_table_values(
+    raw: Any,
+    selected_positions: list[int],
+    condition_names: dict[str, str] | None = None,
+) -> list[dict[str, str]]:
     result: list[dict[str, str]] = [{} for _ in selected_positions]
     if not isinstance(raw, dict) or not selected_positions:
         return result
@@ -2178,6 +2198,10 @@ def _fz_param_table_values(raw: Any, selected_positions: list[int]) -> list[dict
         label = _map_fz_param_label(_first_text(row, "label", "name", "title", "key"))
         if not label:
             continue
+        condition_id = _first_text(row, "conditionId", "condition", "formId")
+        condition_name = (condition_names or {}).get(condition_id, "")
+        if condition_name:
+            label = f"{condition_name}{label}"
         raw_values = _first_value(row, "values", "valueList", "data", "columns")
         for out_index, source_index in enumerate(selected_positions):
             value = _fz_param_value_at(raw_values, source_index)
