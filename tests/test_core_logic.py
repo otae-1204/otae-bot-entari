@@ -257,6 +257,73 @@ class CoreLogicTests(unittest.TestCase):
         self.assertEqual(result.parent_id, "10001")
         self.assertEqual(calls, [(event, account)])
 
+    def test_entari_concurrent_private_prompt_keeps_original_session(self):
+        entari_native = _load_module(
+            "entari_native_session_context_for_test", "utils/entari_native.py"
+        )
+        captured = []
+
+        def fake_on(_alconna):
+            def decorator(func):
+                captured.append(func)
+                return func
+
+            return decorator
+
+        class FakeSession:
+            def __init__(self, kind):
+                self.event = types.SimpleNamespace(kind=kind)
+                self.sent = []
+                self.prompts = []
+                self.stopped = False
+
+            async def send(self, message):
+                self.sent.append(str(message))
+
+            async def prompt(self, message, timeout):
+                self.prompts.append((message, timeout))
+                return "private answer"
+
+            def stop(self):
+                self.stopped = True
+
+        async def exercise():
+            matcher = entari_native.Matcher(object())
+            private_ready = asyncio.Event()
+            group_active = asyncio.Event()
+            private_done = asyncio.Event()
+
+            with patch.object(entari_native.command, "on", side_effect=fake_on):
+                @matcher.handle()
+                async def handler(event):
+                    if event.kind == "private":
+                        private_ready.set()
+                        await group_active.wait()
+                        answer = await entari_native.prompt("private prompt", timeout=90)
+                        await matcher.send(f"reply:{answer}")
+                        private_done.set()
+                        return
+                    await private_ready.wait()
+                    group_active.set()
+                    await private_done.wait()
+                    await matcher.send("group reply")
+
+            private_session = FakeSession("private")
+            group_session = FakeSession("group")
+            account = types.SimpleNamespace(self_id="bot")
+            await asyncio.gather(
+                captured[0](private_session, account, None),
+                captured[0](group_session, account, None),
+            )
+            return private_session, group_session
+
+        private_session, group_session = asyncio.run(exercise())
+
+        self.assertEqual(private_session.prompts, [("private prompt", 90)])
+        self.assertEqual(private_session.sent, ["reply:private answer"])
+        self.assertEqual(group_session.prompts, [])
+        self.assertEqual(group_session.sent, ["group reply"])
+
     def test_no_direct_adapter_get_name_calls_remain(self):
         offenders = []
         for base in (ROOT / "plugins", ROOT / "utils"):

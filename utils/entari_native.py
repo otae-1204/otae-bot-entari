@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import inspect
 from dataclasses import dataclass
 from datetime import timedelta
@@ -121,7 +122,7 @@ class Matcher:
             self._handlers.append(func)
 
             async def _wrapper(session: Session, account: Account, alc_result: Any):
-                _SESSION_STACK.append(session)
+                session_token = _CURRENT_SESSION.set(session)
                 try:
                     for handler in self._handlers:
                         result = await _call_handler(handler, self, session, account, alc_result)
@@ -130,7 +131,7 @@ class Matcher:
                     if self.block:
                         session.stop()
                 finally:
-                    _SESSION_STACK.pop()
+                    _CURRENT_SESSION.reset(session_token)
 
             _wrapper.__module__ = func.__module__
             command.on(self.alconna)(_wrapper)
@@ -180,7 +181,7 @@ class _EventHook:
                     predicate = self.rule if isinstance(self.rule, Pred) else Pred(self.rule)
                     if not await predicate(account, event):
                         return
-                _SESSION_STACK.append(session)
+                session_token = _CURRENT_SESSION.set(session)
                 try:
                     result = await _call_event_handler(func, session, account)
                     if result is not None:
@@ -188,7 +189,7 @@ class _EventHook:
                     if self.block:
                         session.stop()
                 finally:
-                    _SESSION_STACK.pop()
+                    _CURRENT_SESSION.reset(session_token)
 
             _wrapper.__module__ = func.__module__
             listen(self.event_type)(_wrapper)
@@ -318,14 +319,18 @@ class _Scheduler:
             await asyncio.gather(*tasks, return_exceptions=True)
 
 
-_SESSION_STACK: list[Session] = []
+_CURRENT_SESSION: contextvars.ContextVar[Session | None] = contextvars.ContextVar(
+    "entari_current_session",
+    default=None,
+)
 timer = _Scheduler()
 
 
 def _current_session() -> Session:
-    if not _SESSION_STACK:
+    session = _CURRENT_SESSION.get()
+    if session is None:
         raise RuntimeError("No active Entari session")
-    return _SESSION_STACK[-1]
+    return session
 
 
 def _takes_two_args(func: Callable[..., Any]) -> bool:
