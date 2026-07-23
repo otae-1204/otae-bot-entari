@@ -12,6 +12,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any, Callable
 
+import aiohttp
 from arclet.alconna import Alconna, Arparma, Args, Empty, MultiVar
 from arclet.entari import (
     Account,
@@ -488,7 +489,16 @@ def stop_session() -> None:
 
 
 async def prompt(message: str, timeout: int = 60):
-    return await _current_session().prompt(message, timeout=timeout)
+    session = _current_session()
+    started = perf_counter()
+    try:
+        return await session.prompt(message, timeout=timeout)
+    except aiohttp.ClientConnectionError:
+        if perf_counter() - started >= 5:
+            raise
+        logger.warning("[entari] prompt message connection interrupted; retrying once")
+        await asyncio.sleep(0.25)
+        return await session.prompt(message, timeout=timeout)
 
 
 def _takes_one_arg(func: Callable[..., Any]) -> bool:

@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from time import perf_counter
 
+import aiohttp
 from arclet.alconna import Alconna, Args, MultiVar
 from arclet.entari import Event
 from arclet.letoderea.exceptions import _ExitException
@@ -313,10 +314,16 @@ async def _handle_personal_command(matcher, event: Event, command: ParsedEndfiel
         return await matcher.finish(str(exc))
     except XhhAPIError as exc:
         return await matcher.finish(str(exc))
+    except aiohttp.ClientConnectionError:
+        logger.warning(f"[endfield-account] message connection interrupted: action={command.action}")
+        return await matcher.finish("QQ 消息连接中断，请重新执行当前命令。")
     except _ExitException:
         raise
     except Exception as exc:
-        logger.error(f"[endfield-account] action failed: action={command.action} error_type={type(exc).__name__}")
+        logger.error(
+            f"[endfield-account] action failed: action={command.action} "
+            f"error_type={type(exc).__module__}.{type(exc).__name__}"
+        )
         return await matcher.finish("终末地账号功能暂时不可用，请稍后重试。")
 
 

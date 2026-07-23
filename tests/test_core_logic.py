@@ -324,6 +324,37 @@ class CoreLogicTests(unittest.TestCase):
         self.assertEqual(group_session.prompts, [])
         self.assertEqual(group_session.sent, ["group reply"])
 
+    def test_entari_prompt_retries_early_connection_disconnect_once(self):
+        entari_native = _load_module(
+            "entari_native_prompt_retry_for_test", "utils/entari_native.py"
+        )
+
+        class FakeSession:
+            def __init__(self):
+                self.calls = 0
+
+            async def prompt(self, message, timeout):
+                self.calls += 1
+                if self.calls == 1:
+                    raise entari_native.aiohttp.ServerDisconnectedError()
+                return f"{message}:{timeout}"
+
+        async def exercise():
+            session = FakeSession()
+            token = entari_native._CURRENT_SESSION.set(session)
+            try:
+                with patch.object(entari_native.asyncio, "sleep", return_value=None) as sleep:
+                    result = await entari_native.prompt("验证码已发送", timeout=120)
+            finally:
+                entari_native._CURRENT_SESSION.reset(token)
+            return session, sleep, result
+
+        session, sleep, result = asyncio.run(exercise())
+
+        self.assertEqual(result, "验证码已发送:120")
+        self.assertEqual(session.calls, 2)
+        sleep.assert_awaited_once_with(0.25)
+
     def test_no_direct_adapter_get_name_calls_remain(self):
         offenders = []
         for base in (ROOT / "plugins", ROOT / "utils"):
