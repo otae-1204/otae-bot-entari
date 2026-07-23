@@ -169,6 +169,16 @@ def _image_file_path(segment) -> Path:
 
 
 class CoreLogicTests(unittest.TestCase):
+    def test_entari_notice_hook_listens_to_notice_events(self):
+        entari_native = _load_module("entari_native_notice_for_test", "utils/entari_native.py")
+
+        message_hook = entari_native.listen_message()
+        notice_hook = entari_native.listen_notice()
+
+        self.assertIs(message_hook.event_type, entari_native.MessageCreatedEvent)
+        self.assertIs(notice_hook.event_type, entari_native.NoticeEvent)
+        self.assertTrue(callable(notice_hook.finish))
+
     def test_entari_account_adapter_name_handles_object_string_and_missing(self):
         entari_native = _load_module("entari_native_adapter_for_test", "utils/entari_native.py")
 

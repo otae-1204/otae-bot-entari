@@ -258,7 +258,7 @@ async def handle_friend_request(event: Event, bot: Bot):
     try:
         msg_id = event.message.id if event.message else str(event.sn)
         await bot.friend_approve(request_id=msg_id, approve=True, comment="")
-        name = event.user.name if event.user else msg_id
+        name = (event.user.name if event.user else None) or msg_id
         logger.info(f"已自动通过好友申请: {name}")
     except Exception as e:
         logger.error(f"好友申请处理失败: {e}")

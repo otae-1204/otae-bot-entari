@@ -28,6 +28,7 @@ from arclet.entari import (
     scheduler as entari_scheduler,
 )
 from arclet.entari.command import Match as CommandMatch
+from arclet.entari.event.base import NoticeEvent
 from loguru import logger
 from nepattern import AnyString
 from satori import ChannelType
@@ -161,7 +162,13 @@ class Pred:
 
 
 class _EventHook:
-    def __init__(self, rule: Pred | Callable[..., Any] | None = None, block: bool = True):
+    def __init__(
+        self,
+        event_type: type = MessageCreatedEvent,
+        rule: Pred | Callable[..., Any] | None = None,
+        block: bool = True,
+    ):
+        self.event_type = event_type
         self.rule = rule
         self.block = block
 
@@ -184,10 +191,19 @@ class _EventHook:
                     _SESSION_STACK.pop()
 
             _wrapper.__module__ = func.__module__
-            listen(MessageCreatedEvent)(_wrapper)
+            listen(self.event_type)(_wrapper)
             return func
 
         return decorator
+
+    async def send(self, message: Any = None, *_, **__):
+        if message is not None:
+            await send(_current_session(), message)
+
+    async def finish(self, message: Any = None, *_, **__):
+        if message is not None:
+            await send(_current_session(), message)
+        _current_session().stop()
 
 
 @dataclass
@@ -412,11 +428,11 @@ def on_alconna(alconna: Alconna, **kwargs) -> Matcher:
 
 
 def listen_message(*_, rule=None, block=True, **__) -> _EventHook:
-    return _EventHook(rule=rule, block=block)
+    return _EventHook(MessageCreatedEvent, rule=rule, block=block)
 
 
 def listen_notice(*_, rule=None, block=True, **__) -> _EventHook:
-    return _EventHook(rule=rule, block=block)
+    return _EventHook(NoticeEvent, rule=rule, block=block)
 
 
 def on_ready(func: Callable[..., Any]):
