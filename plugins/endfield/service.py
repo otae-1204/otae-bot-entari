@@ -788,6 +788,10 @@ LOADOUT_STATUS_LEVELS = {
     "腐蚀": tuple(zip((3.6, 4.8, 6.0, 7.2), (0.84, 1.12, 1.4, 1.68), (12.0, 16.0, 20.0, 24.0))),
     "碎甲": tuple((value, duration) for value, duration in zip((0.12, 0.16, 0.20, 0.24), (12, 18, 24, 30))),
 }
+LOADOUT_STATUS_REACTIONS = {
+    "自然附着": "腐蚀",
+    "电磁附着": "导电",
+}
 
 
 def build_fz_loadout_view(
@@ -1410,6 +1414,27 @@ def _loadout_status_effect_bonus(arts_strength: float) -> float:
     return 2 * strength / (strength + 300) if strength else 0.0
 
 
+def format_status_quick_calc(status_name: str, level: int, arts_strength: int) -> str:
+    if status_name not in LOADOUT_STATUS_LEVELS:
+        raise ValueError("仅支持腐蚀、导电或碎甲")
+    if level not in range(1, 5):
+        raise ValueError("异常效果等级必须在 1–4 之间")
+    if arts_strength < 0:
+        raise ValueError("源石技艺强度不能小于 0")
+
+    bonus = _loadout_status_effect_bonus(arts_strength)
+    effect = _make_loadout_status_levels(status_name, bonus)[level - 1]
+    return "\n".join(
+        [
+            f"Lv{level} {status_name}速算",
+            f"源石技艺强度：{arts_strength}（附带效果 +{bonus * 100:.1f}%）",
+            f"效果：{effect.value}",
+            f"构成：{effect.detail}",
+            f"持续：{effect.duration}",
+        ]
+    )
+
+
 def _build_loadout_status_effects(
     attrs: dict[str, Any],
     operator_potential: int,
@@ -1440,9 +1465,19 @@ def _build_loadout_status_effects(
                     if "corrupt_rate" in str(key).lower()
                 )
 
+    status_sources = {
+        status_name: "普通附带效果"
+        for status_name in LOADOUT_STATUS_TAGS
+        if status_name in tags
+    }
+    for attachment_name, status_name in LOADOUT_STATUS_REACTIONS.items():
+        if attachment_name in tags and status_name not in status_sources:
+            status_sources[status_name] = f"法术反应 · {attachment_name}"
+
     result: list[LoadoutStatusEffectView] = []
     for status_name in LOADOUT_STATUS_TAGS:
-        if status_name not in tags:
+        source = status_sources.get(status_name)
+        if not source:
             continue
         notes = [f"源石技艺增益 +{bonus * 100:.1f}%"]
         if duration_additions[status_name]:
@@ -1452,7 +1487,7 @@ def _build_loadout_status_effects(
         result.append(
             LoadoutStatusEffectView(
                 name=status_name,
-                source="普通附带效果",
+                source=source,
                 levels=_make_loadout_status_levels(
                     status_name,
                     bonus,

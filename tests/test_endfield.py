@@ -65,6 +65,7 @@ build_fz_equipment_catalog_view = service.build_fz_equipment_catalog_view
 build_fz_operator_catalog_view = service.build_fz_operator_catalog_view
 build_fz_weapon_catalog_view = service.build_fz_weapon_catalog_view
 build_fz_loadout_view = service.build_fz_loadout_view
+format_status_quick_calc = service.format_status_quick_calc
 clean_text = service.clean_text
 
 
@@ -121,6 +122,23 @@ class EndfieldCommandParserTests(unittest.TestCase):
         self.assertEqual(parsed.action, "loadout")
         self.assertEqual(parsed.char_potential, 1)
         self.assertEqual(parsed.weapon_potential, 4)
+
+    def test_parse_quick_calc_command(self):
+        parsed = commands.parse_command("速算 2腐蚀 200")
+
+        self.assertEqual(parsed.action, "quick_calc")
+        self.assertEqual((parsed.status_name, parsed.status_level, parsed.arts_strength), ("腐蚀", 2, 200))
+
+        reversed_order = commands.parse_command("速算 导电Lv3 160")
+        self.assertEqual(
+            (reversed_order.status_name, reversed_order.status_level, reversed_order.arts_strength),
+            ("导电", 3, 160),
+        )
+
+    def test_parse_quick_calc_rejects_invalid_inputs(self):
+        self.assertIn("1–4", commands.parse_command("速算 5腐蚀 200").error)
+        self.assertIn("整数", commands.parse_command("速算 2导电 abc").error)
+        self.assertIn("用法", commands.parse_command("速算 2灼热 200").error)
 
     def test_parse_loadout_rejects_invalid_operator_potential(self):
         parsed = commands.parse_command("配装 佩丽卡 角色潜能6")
@@ -415,6 +433,39 @@ class EndfieldCommandParserTests(unittest.TestCase):
 
         self.assertIn("角色潜能2 武器潜能3", text)
         self.assertIn("武器技能1等级5", text)
+
+    def test_plugin_help_uses_endfield_help_image_with_text_fallback(self):
+        source = (ROOT / "plugins/endfield/__init__.py").read_text(encoding="utf-8")
+
+        self.assertIn('if command.action == "help":', source)
+        self.assertIn("return await _finish_endfield_help(matcher)", source)
+        self.assertIn('"assets" / "image" / "help" / "endfield.png"', source)
+        self.assertIn("return await matcher.finish(format_help())", source)
+
+    def test_endfield_help_image_and_spec_cover_account_features(self):
+        image_path = ROOT / "assets/image/help/endfield.png"
+        spec = (ROOT / "scripts/help_pages.json").read_text(encoding="utf-8")
+
+        with Image.open(image_path) as image:
+            self.assertEqual((image.size, image.mode), ((1075, 761), "RGBA"))
+        self.assertIn("/zmd 抽卡同步 [账号] [--full]", spec)
+        self.assertIn("/zmd 抽卡记录 [账号] [页码] [--池 名称]", spec)
+        self.assertIn("/zmd 抽卡导入 [账号]（仅私聊）", spec)
+        self.assertIn("/zmd 速算 2腐蚀 200", spec)
+        self.assertIn("/zmd 速算 <等级><效果> <技艺强度>", spec)
+        self.assertIn("等级 1–4；支持腐蚀 / 导电 / 碎甲", spec)
+        self.assertIn("返回最终数值、效果构成和持续时间", spec)
+        self.assertIn("超限自动分页", spec)
+
+    def test_gacha_import_is_private_only_before_phone_prompt(self):
+        source = (ROOT / "plugins/endfield/__init__.py").read_text(encoding="utf-8")
+
+        self.assertIn('private_only = {"bind", "accounts", "primary", "unbind", "gacha_import"}', source)
+        self.assertIn("该命令涉及账号凭据或手机号，仅支持私聊使用。", source)
+        self.assertLess(
+            source.index("if command.action in private_only and is_group(event):"),
+            source.index('if command.action == "gacha_import":'),
+        )
 
 
 def _sample_operator(levels: tuple[int, ...] = (9, 10, 11, 12)):
@@ -1746,6 +1797,31 @@ class EndfieldServiceTests(unittest.TestCase):
         self.assertEqual(corrosion.levels[0].detail, "初始 3.96 · 每秒 0.93")
         self.assertEqual(corrosion.levels[0].duration, "30秒")
         self.assertIn("最大降抗 ×1.30", corrosion.note)
+
+    def test_loadout_derives_reaction_statuses_from_spell_attachments_only(self):
+        operator = copy.deepcopy(_sample_loadout_operator())
+        attrs = operator["revision"]["contentJson"]["content"][0]["attrs"]
+        attrs["hero"].update({"name": "洁尔佩塔", "tags": ["自然附着", "电磁附着"]})
+
+        view = build_fz_loadout_view(operator, _sample_loadout_weapon(), [])
+
+        effects = {effect.name: effect for effect in view.status_effects}
+        self.assertEqual(set(effects), {"腐蚀", "导电"})
+        self.assertEqual(effects["腐蚀"].source, "法术反应 · 自然附着")
+        self.assertEqual(effects["导电"].source, "法术反应 · 电磁附着")
+        self.assertNotIn("碎甲", effects)
+
+    def test_quick_calc_reuses_loadout_status_formulas(self):
+        self.assertEqual(
+            format_status_quick_calc("腐蚀", 2, 200),
+            "Lv2 腐蚀速算\n"
+            "源石技艺强度：200（附带效果 +80.0%）\n"
+            "效果：最大降抗 28.8\n"
+            "构成：初始 8.64 · 每秒 2.02\n"
+            "持续：15秒",
+        )
+        self.assertIn("效果：法术易伤 28.8%", format_status_quick_calc("导电", 2, 200))
+        self.assertIn("效果：物理易伤 28.8%", format_status_quick_calc("碎甲", 2, 200))
 
     def test_loadout_uses_native_icons_for_game_panel_attributes(self):
         expected = {

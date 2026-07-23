@@ -321,3 +321,48 @@ class LoadoutView:
     effects: list[LoadoutEffectView] = field(default_factory=list)
     source_version: str = ""
     term_styles: dict[str, TermStyleView] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class AttendanceRewardView:
+    name: str
+    count: int = 1
+
+
+@dataclass(slots=True)
+class AttendanceRoleView:
+    nickname: str
+    uid: str
+    server_name: str
+    status: str
+    message: str
+    rewards: list[AttendanceRewardView] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class AttendanceCardView:
+    roles: list[AttendanceRoleView] = field(default_factory=list)
+    generated_at: str = ""
+
+
+@dataclass(slots=True)
+class GachaHistoryItemView:
+    time: str
+    pool_name: str
+    item_name: str
+    rarity: int
+    item_type: str
+    detail: str = ""
+    icon_path: str = ""
+
+
+@dataclass(slots=True)
+class GachaHistoryView:
+    nickname: str
+    uid: str
+    server_name: str
+    page: int
+    total_pages: int
+    total: int
+    pool_filter: str = ""
+    items: list[GachaHistoryItemView] = field(default_factory=list)

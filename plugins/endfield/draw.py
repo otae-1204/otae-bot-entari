@@ -11,7 +11,7 @@ import tempfile
 import unicodedata
 import zlib
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
@@ -35,6 +35,8 @@ from .models import (
     EquipmentCatalogItemView,
     EquipmentCatalogView,
     EquipmentView,
+    AttendanceCardView,
+    GachaHistoryView,
     LEVEL_COLUMNS,
     LoadoutView,
     OperatorCatalogItemView,
@@ -47,12 +49,22 @@ from .models import (
     WeaponCatalogView,
     WeaponView,
 )
+from .gacha import (
+    FreePullBatch,
+    GachaAnalysis,
+    PoolAnalysis,
+    SixStarEvent,
+    SixStarExpectation,
+    calculate_six_star_expectation,
+    format_timestamp,
+)
 
 
 OPERATOR_CARD_WIDTH = 1600
 CARD_WIDTH = OPERATOR_CARD_WIDTH
 CARD_MIN_HEIGHT = 780
 CARD_MAX_HEIGHT = 6144
+GACHA_PAGE_ROW_BUDGETS = (55, 45, 35)
 OPERATOR_RAIL_HEIGHT = 880
 OPERATOR_ACCENT_LEFT = 440
 ASSET_DIR = Path(__file__).resolve().parents[2] / "assets" / "image" / "endfield"
@@ -210,6 +222,526 @@ async def draw_equipment_card(view: EquipmentView) -> bytes:
             f"bytes={len(output)}->{len(optimized)}"
         )
         return optimized
+    finally:
+        schedule_temp_file_cleanup(html_path, delay_seconds=30)
+
+
+async def draw_attendance_card(view: AttendanceCardView) -> bytes:
+    rows = []
+    for role in view.roles:
+        rewards = "、".join(f"{esc(item.name)} × {item.count}" for item in role.rewards) or "无奖励明细"
+        rows.append(
+            f"""
+            <section class="attendance-row status-{esc(role.status)}">
+              <div class="role-main"><strong>{esc(role.nickname)}</strong><span>{esc(role.server_name or '默认服务器')} · {esc(role.uid)}</span></div>
+              <div class="status"><b>{esc(role.message)}</b><span>{rewards}</span></div>
+            </section>
+            """
+        )
+    return await _draw_neutral_card(
+        "attendance-card",
+        f"""
+        <header><div><small>ENDFIELD / SKLAND</small><h1>签到结果</h1></div><time>{esc(view.generated_at)}</time></header>
+        <main class="attendance-list">{''.join(rows) or '<div class="empty">没有可签到的角色</div>'}</main>
+        """,
+        extra_css="""
+        .attendance-list{display:grid;gap:12px}
+        .attendance-row{display:grid;grid-template-columns:minmax(260px,.8fr) minmax(420px,1.2fr);min-height:102px;border:1px solid #8d8d8d;border-left:8px solid #222;background:#fff}
+        .attendance-row.status-failed{border-left-width:3px;background:#ededed}
+        .role-main,.status{display:flex;flex-direction:column;justify-content:center;padding:18px 22px}
+        .role-main{border-right:1px solid #b8b8b8}.role-main strong{font-size:28px}.role-main span,.status span{margin-top:7px;color:#666;font-size:16px}
+        .status b{font-size:22px}.status span{line-height:1.45}
+        """,
+    )
+
+
+async def draw_gacha_analysis_cards(view: GachaAnalysis, *, uid: str) -> tuple[bytes, ...]:
+    try:
+        return (await draw_gacha_analysis_card(view, uid=uid),)
+    except RuntimeError as exc:
+        if not _is_gacha_height_limit_error(exc):
+            raise
+
+    character_pools = _recent_gacha_pools(view, "角色")
+    weapon_pools = _recent_gacha_pools(view, "武器")
+    last_error: RuntimeError | None = None
+    for row_budget in GACHA_PAGE_ROW_BUDGETS:
+        character_pages = _paginate_gacha_pools(character_pools, row_budget)
+        weapon_pages = _paginate_gacha_pools(weapon_pools, row_budget)
+        page_count = max(len(character_pages), len(weapon_pages))
+        pages: list[bytes] = []
+        try:
+            for page_index in range(page_count):
+                pages.append(await draw_gacha_analysis_card(
+                    view,
+                    uid=uid,
+                    character_pools=(
+                        character_pages[page_index] if page_index < len(character_pages) else []
+                    ),
+                    weapon_pools=(
+                        weapon_pages[page_index] if page_index < len(weapon_pages) else []
+                    ),
+                    page_number=page_index + 1,
+                    page_count=page_count,
+                    show_summary=page_index == 0,
+                ))
+        except RuntimeError as exc:
+            if not _is_gacha_height_limit_error(exc):
+                raise
+            last_error = exc
+            continue
+        logger.info(
+            f"[endfield] gacha analysis paginated pages={page_count} row_budget={row_budget}"
+        )
+        return tuple(pages)
+    raise last_error or RuntimeError("抽卡分析分页失败")
+
+
+async def draw_gacha_analysis_card(
+    view: GachaAnalysis,
+    *,
+    uid: str,
+    character_pools: list[PoolAnalysis] | None = None,
+    weapon_pools: list[PoolAnalysis] | None = None,
+    page_number: int = 1,
+    page_count: int = 1,
+    show_summary: bool = True,
+) -> bytes:
+    character_pools = (
+        _recent_gacha_pools(view, "角色") if character_pools is None else character_pools
+    )
+    weapon_pools = _recent_gacha_pools(view, "武器") if weapon_pools is None else weapon_pools
+    compact_layout = max(
+        _gacha_column_render_rows(character_pools),
+        _gacha_column_render_rows(weapon_pools),
+    ) > 80
+    character_total = sum(item.total for item in view.pools if item.item_type == "角色")
+    weapon_total = sum(item.total for item in view.pools if item.item_type == "武器")
+    character_paid = sum(_pool_paid_total(item) for item in view.pools if item.item_type == "角色")
+    weapon_paid = sum(_pool_paid_total(item) for item in view.pools if item.item_type == "武器")
+    character_free = sum(item.free_pull_count for item in view.pools if item.item_type == "角色")
+    weapon_free = sum(item.free_pull_count for item in view.pools if item.item_type == "武器")
+    free_pull_count = getattr(view, "free_pull_count", 0)
+    paid_total = getattr(view, "paid_total", 0) or max(0, view.total - free_pull_count)
+    xhh_imported_at = getattr(view, "xhh_imported_at", 0)
+    recorded_total = getattr(view, "recorded_total", 0)
+    if not xhh_imported_at and not recorded_total:
+        recorded_total = view.total
+    history_missing_count = getattr(view, "history_missing_count", 0)
+    six_star_total = sum(count for rarity, count in view.rarity_counts.items() if rarity >= 6)
+    total_detail = f"逐抽明细 {recorded_total}"
+    if history_missing_count:
+        total_detail += f" · 统计补齐 {history_missing_count}"
+    else:
+        total_detail = f"计保底 {paid_total} · 免费 {free_pull_count}"
+    total_detail += f" · 六星记录 {six_star_total}"
+    character_expectation = calculate_six_star_expectation(view.pools, "角色")
+    weapon_expectation = calculate_six_star_expectation(view.pools, "武器")
+    character_expectation_html = _draw_gacha_expectation_summary(character_expectation, "角色")
+    weapon_expectation_html = _draw_gacha_expectation_summary(weapon_expectation, "武器")
+    character_column = _draw_gacha_pool_column(
+        character_pools, "角色池", character_paid,
+        free_total=character_free, paginated=page_count > 1,
+    )
+    weapon_column = _draw_gacha_pool_column(
+        weapon_pools, "武器池", weapon_paid,
+        free_total=weapon_free, paginated=page_count > 1,
+    )
+    completeness = "统计已补齐" if xhh_imported_at and view.complete else ("同步正常" if view.complete else "部分数据")
+    page_state = f"{completeness} · {page_number}/{page_count}" if page_count > 1 else completeness
+    source_text = (
+        f"小黑盒历史统计已补齐 · 导入 {format_timestamp(xhh_imported_at)} · 官方逐抽明细单独保留"
+        if xhh_imported_at else "官方接口仅提供近 90 天记录 · 本地同步会持续累积保留"
+    )
+    compact_css = """
+        .pool-stack{gap:7px;padding:7px}.column-head{padding:11px 14px}.pool-head{padding:8px 10px}
+        .pity-item{padding:6px 8px}.pull-bars{gap:4px;padding:6px 8px 8px}
+        .pull-row{grid-template-columns:38px 136px minmax(0,1fr);gap:6px}
+        .gacha-thumb,.current-marker{width:36px;height:36px}.bar-track{height:32px}
+        .bar-value{padding:0 8px}.bar-value b{font-size:14px}.pity-hit{padding:2px 5px;font-size:10px}.pity-hit-guarantee{padding:2px 5px;font-size:10px}.pity-hit-miss{padding:2px 7px;font-size:11px}
+        .free-row{grid-template-columns:82px minmax(0,1fr) auto;min-height:40px;padding:3px 5px}
+        .free-icons{min-height:36px}.free-marker{width:76px;height:32px}
+    """ if compact_layout else ""
+    summary_html = (
+        f'<section class="summary"><div class="total"><span>卡池总数</span><strong>{view.total}</strong><small>{esc(total_detail)}</small></div><div class="metric"><div class="metric-head"><span>角色寻访</span><strong>{character_total}</strong></div><small>计保底 {character_paid}</small>{character_expectation_html}</div><div class="metric"><div class="metric-head"><span>武器申领</span><strong>{weapon_total}</strong></div><small>计保底 {weapon_paid}</small>{weapon_expectation_html}</div></section>'
+        if show_summary else ""
+    )
+    return await _draw_neutral_card(
+        "gacha-analysis-card",
+        f"""
+        <header><div><small>ENDFIELD / GACHA ARCHIVE</small><h1>{esc(view.role.nickname)} · 抽卡分析</h1><p>{esc(view.role.server_name or '默认服务器')} · {esc(uid)}</p></div><div class="sync-state"><b>{esc(page_state)}</b><span>同步 {esc(format_timestamp(view.last_sync_at))}</span></div></header>
+        <main>
+          {summary_html}
+          <section class="two-column">{character_column}{weapon_column}</section>
+          {f'<div class="warning">有 {len(view.errors)} 个卡池同步失败，其他成功数据已保留。</div>' if view.errors and show_summary else ''}
+          <footer class="gacha-source"><span>{esc(source_text)}</span><span>免费十连单列展示，不计入任何保底{f' · 第 {page_number}/{page_count} 页' if page_count > 1 else ''}</span></footer>
+        </main>
+        """,
+        extra_css=f"""
+        header p{{margin:8px 0 0;color:#d0d0d0;font-size:16px}}.sync-state{{text-align:right}}.sync-state b{{display:block;font-size:22px}}.sync-state span{{display:block;margin-top:8px;color:#ccc}}
+        .summary{{display:grid;grid-template-columns:.85fr 1.575fr 1.575fr;gap:10px;margin-bottom:16px}}.total,.metric{{min-height:172px;padding:15px 17px;border:1px solid #999;background:#fff}}.total{{display:flex;flex-direction:column;justify-content:center;border:3px solid #222}}.total span,.metric-head span{{color:#666;font-size:15px}}.total strong{{font-size:48px;line-height:1}}.metric-head{{display:flex;align-items:flex-end;justify-content:space-between;gap:12px}}.metric-head strong{{font-size:31px;line-height:1}}.total small,.metric>small{{display:block;margin-top:8px;color:#777;font-size:11px;font-weight:800}}.expectation-summary{{display:grid;gap:5px;margin-top:10px}}.expectation-row{{padding:7px 8px;border-left:4px solid #333;background:#ededed;color:#444;font-size:10px;font-weight:850;line-height:1.35}}.expectation-row b{{color:#111;font-size:12px;white-space:nowrap}}
+        .two-column{{display:grid;grid-template-columns:1fr 1fr;align-items:start;gap:16px}}.pool-column{{min-width:0;border:1px solid #777;background:#e4e4e4}}.column-head{{display:flex;justify-content:space-between;align-items:flex-end;padding:15px 17px;border-bottom:4px solid #222;background:#fff}}.column-head h2{{margin:0;font-size:25px}}.column-head p{{margin:0;color:#666;font-size:13px}}.pool-stack{{display:grid;gap:10px;padding:10px}}.pool-card{{min-width:0;border:1px solid #888;background:#fff}}.pool-head{{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;padding:11px 13px;border-bottom:1px solid #aaa}}.pool-title{{min-width:0}}.pool-title strong{{display:block;font-size:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}.pool-title span{{display:block;margin-top:3px;color:#777;font-size:11px}}.pool-total{{text-align:right}}.pool-total b{{display:block;font-size:22px}}.pool-total span{{display:block;color:#777;font-size:10px;white-space:nowrap}}.pool-total .pool-history{{margin-top:2px;color:#999;font-size:9px}}
+        .current-tag{{display:inline-block;margin-right:6px;padding:2px 5px;border:1px solid #222;background:#222;color:#fff;font-size:9px;letter-spacing:.1em;vertical-align:2px}}.pity-grid{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-bottom:1px solid #aaa;background:#ececec}}.pity-grid.pity-two{{grid-template-columns:repeat(2,minmax(0,1fr))}}.pity-item{{min-width:0;padding:8px 10px;border-right:1px solid #bbb}}.pity-item:last-child{{border-right:0}}.pity-item span{{display:block;color:#666;font-size:9px;font-weight:900}}.pity-item b{{display:block;margin-top:2px;font-size:15px;white-space:nowrap}}.pity-item small{{display:block;margin-top:2px;color:#777;font-size:9px}}
+        .pull-bars{{display:grid;gap:7px;padding:9px 11px 11px}}.pull-row{{display:grid;grid-template-columns:46px 144px minmax(0,1fr);align-items:center;gap:8px;min-width:0}}.gacha-thumb,.current-marker{{width:44px;height:44px;display:grid;place-items:center;overflow:hidden;border:1px solid #777;background:#eee}}.gacha-thumb{{border:2px solid #222}}.gacha-thumb img{{width:100%;height:100%;object-fit:contain}}.gacha-thumb span{{font-size:11px;font-weight:950}}.current-marker{{color:#555;font-size:11px;font-weight:900}}.pull-copy{{min-width:0}}.pull-copy strong{{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:14px}}.pull-copy time{{display:block;margin-top:3px;color:#777;font-size:9px}}.bar-track{{position:relative;height:36px;border:1px solid #999;background:#ededed}}.bar-fill{{height:100%;min-width:46px;background:#333}}.bar-fill.current{{background:#777}}.bar-value{{position:absolute;inset:0;display:flex;align-items:center;gap:7px;padding:0 10px;overflow:hidden}}.bar-value b{{flex:0 0 auto;color:#fff;white-space:nowrap;font-size:16px}}.pity-hits{{display:flex;align-items:center;gap:5px;min-width:0}}.pity-hit{{padding:3px 7px;border:2px solid #111;background:#fff;color:#111;font-size:11px;font-weight:950;line-height:1;white-space:nowrap;box-shadow:0 0 0 1px #fff}}.pity-hit-guarantee{{padding:3px 7px;font-size:11px;font-weight:950}}.pity-hit-small{{border-color:#3f6078;background:#e5eef4;color:#29485d;box-shadow:0 0 0 1px #f7fbfd}}.pity-hit-large{{border-color:#7a5c2e;background:#f4ead7;color:#5d421d;box-shadow:0 0 0 1px #fffaf0}}.pity-hit-miss{{padding:3px 8px;border:2px solid #f8e9e9;background:#8a3f46;color:#fff;font-size:12px;font-weight:950;letter-spacing:.12em;box-shadow:0 0 0 1px #5a2328}}.pool-empty{{padding:4px 0;color:#777;font-size:11px}}.free-row{{display:grid;grid-template-columns:96px minmax(0,1fr) auto;align-items:center;gap:8px;min-height:48px;padding:5px 7px;border:1px dashed #777;background:#f0f0f0}}.free-icons{{display:flex;align-items:center;min-height:44px}}.free-icons .gacha-thumb{{margin-right:-8px;background:#fff}}.free-marker{{width:88px;height:38px;display:grid;place-items:center;border:2px solid #555;color:#444;font-size:11px;font-weight:950;letter-spacing:.08em}}.free-count{{padding:4px 7px;border:1px solid #777;background:#fff;font-size:11px;font-weight:900;white-space:nowrap}}
+        .warning{{margin-top:12px;padding:12px 16px;border:2px dashed #555;background:#f2f2f2}}.gacha-source{{display:flex;justify-content:space-between;gap:20px;margin-top:12px;padding-top:10px;border-top:2px solid #222;color:#777;font-size:12px;font-weight:800}}
+        {compact_css}
+        """,
+    )
+
+
+def _recent_gacha_pools(view: GachaAnalysis, item_type: str) -> list[PoolAnalysis]:
+    pools = [item for item in view.pools if item.item_type == item_type]
+    return sorted(
+        pools,
+        key=lambda item: (
+            0 if item.sort_order >= 0 else 1,
+            item.sort_order if item.sort_order >= 0 else 0,
+            -item.latest_ts,
+            item.name,
+        ),
+    )
+
+
+def _gacha_column_render_rows(pools: list[PoolAnalysis]) -> int:
+    return sum(
+        (1 if pool.is_current else 0)
+        + len(pool.six_stars)
+        + len(pool.keepsake_gifts)
+        + len(pool.free_batches)
+        for pool in pools
+    )
+
+
+def _is_gacha_height_limit_error(exc: RuntimeError) -> bool:
+    message = str(exc)
+    return "Screenshot element height" in message and "exceeds limit" in message
+
+
+def _gacha_pool_page_weight(pool: PoolAnalysis) -> int:
+    return 2 + (3 if pool.is_current else 0) + _gacha_column_render_rows([pool])
+
+
+def _paginate_gacha_pools(
+    pools: list[PoolAnalysis],
+    row_budget: int,
+) -> list[list[PoolAnalysis]]:
+    pieces = [
+        piece
+        for pool in pools
+        for piece in _split_gacha_pool(pool, row_budget)
+    ]
+    if not pieces:
+        return [[]]
+    pages: list[list[PoolAnalysis]] = []
+    current: list[PoolAnalysis] = []
+    current_weight = 0
+    for piece in pieces:
+        weight = _gacha_pool_page_weight(piece)
+        if current and current_weight + weight > row_budget:
+            pages.append(current)
+            current = []
+            current_weight = 0
+        current.append(piece)
+        current_weight += weight
+    if current:
+        pages.append(current)
+    return pages
+
+
+def _split_gacha_pool(pool: PoolAnalysis, row_budget: int) -> list[PoolAnalysis]:
+    if _gacha_pool_page_weight(pool) <= row_budget:
+        return [pool]
+    timeline = [
+        (item.pool_position, item.gacha_ts, 0, "six", item)
+        for item in pool.six_stars
+    ]
+    timeline.extend(
+        (item.pool_position, item.gacha_ts, 1, "gift", item)
+        for item in pool.keepsake_gifts
+    )
+    timeline.sort(key=lambda item: item[:3], reverse=True)
+    content = [(kind, item) for *_sort, kind, item in timeline]
+    content.extend(("free", item) for item in pool.free_batches)
+    if not content:
+        return [pool]
+    first_capacity = max(1, row_budget - 6 if pool.is_current else row_budget - 2)
+    continuation_capacity = max(1, row_budget - 2)
+    chunks: list[list[tuple[str, object]]] = []
+    cursor = 0
+    capacity = first_capacity
+    while cursor < len(content):
+        chunks.append(content[cursor:cursor + capacity])
+        cursor += capacity
+        capacity = continuation_capacity
+    result: list[PoolAnalysis] = []
+    for index, chunk in enumerate(chunks):
+        result.append(replace(
+            pool,
+            name=pool.name if index == 0 else f"{pool.name}（续 {index + 1}）",
+            six_stars=tuple(item for kind, item in chunk if kind == "six"),
+            keepsake_gifts=tuple(item for kind, item in chunk if kind == "gift"),
+            free_batches=tuple(item for kind, item in chunk if kind == "free"),
+            is_current=pool.is_current and index == 0,
+        ))
+    return result
+
+
+def _draw_gacha_pool_column(
+    pools: list[PoolAnalysis],
+    title: str,
+    paid_total: int,
+    *,
+    free_total: int | None = None,
+    paginated: bool = False,
+) -> str:
+    if not pools:
+        content = '<div class="empty">暂无此类卡池记录</div>'
+    else:
+        content = "".join(_draw_gacha_pool(item) for item in pools)
+    six_star_total = sum(
+        len(item.six_stars) + sum(len(batch.six_stars) for batch in item.free_batches)
+        for item in pools
+    )
+    if free_total is None:
+        free_total = sum(item.free_pull_count for item in pools)
+    six_star_label = f"本页 {six_star_total} 个六星" if paginated else f"{six_star_total} 个六星"
+    return f"""
+    <div class="pool-column">
+      <div class="column-head"><h2>{esc(title)}</h2><p>计保底 {paid_total} 抽 · 免费 {free_total} 抽 · {six_star_label}</p></div>
+      <div class="pool-stack">{content}</div>
+    </div>
+    """
+
+
+def _draw_gacha_expectation_summary(expectation: SixStarExpectation, item_type: str) -> str:
+    return (
+        '<div class="expectation-summary">'
+        + _draw_gacha_expectation_row(
+            "up", item_type, expectation.up_before, expectation.up_after,
+            expectation.actual_up,
+        )
+        + _draw_gacha_expectation_row(
+            "6星", item_type, expectation.before_up, expectation.after_up,
+            expectation.actual,
+        )
+        + "</div>"
+    )
+
+
+def _draw_gacha_expectation_row(
+    rarity_label: str,
+    item_type: str,
+    before: float,
+    after: float | None,
+    actual: float | None,
+) -> str:
+    theory = f"{before:.1f}" if after is None else f"{before:.1f} → {after:.1f}"
+    actual_text = f"{actual:.1f}" if actual is not None else "暂无"
+    return (
+        '<div class="expectation-row">'
+        f'获取{esc(rarity_label)}{esc(item_type)}的期望抽数为：<b>{esc(theory)}</b>，'
+        f'该账号实际抽数为：<b>{esc(actual_text)}</b>'
+        '</div>'
+    )
+
+
+def _draw_gacha_pool(pool: PoolAnalysis) -> str:
+    scale = 40 if pool.item_type == "武器" else 80
+    rows = [_draw_gacha_pull_row(None, pool.since_six_star, scale)] if pool.is_current else []
+    timeline = [
+        (item.pool_position, item.gacha_ts, 0, _draw_gacha_pull_row(item, item.interval, scale))
+        for item in pool.six_stars
+    ]
+    timeline.extend(
+        (item.pool_position, item.gacha_ts, 1, _draw_keepsake_gift_row(item))
+        for item in pool.keepsake_gifts
+    )
+    timeline.sort(key=lambda item: item[:3], reverse=True)
+    rows.extend(item[3] for item in timeline)
+    rows.extend(_draw_free_pull_row(batch) for batch in pool.free_batches)
+    empty = '<div class="pool-empty">本池记录中尚无六星</div>' if not pool.six_stars and not pool.free_batches and not pool.keepsake_gifts else ""
+    latest = format_timestamp(pool.latest_ts).split(" ", 1)[0]
+    current_tag = '<span class="current-tag">CURRENT</span>' if pool.is_current else ""
+    paid_total = _pool_paid_total(pool)
+    total_caption = f"计保底 {paid_total} · 垫抽 {pool.since_six_star} · 免费 {pool.free_pull_count}"
+    history_caption = (
+        f'<span class="pool-history">逐抽 {pool.recorded_total} · 统计补齐 {pool.history_missing_count}</span>'
+        if pool.history_missing_count else ""
+    )
+    pity = _draw_pity_grid(pool) if pool.is_current else ""
+    return f"""
+    <section class="pool-card">
+      <div class="pool-head"><div class="pool-title"><strong>{current_tag}{esc(pool.name)}</strong><span>{esc(latest)} · {len(pool.six_stars)} 个计保底六星</span></div><div class="pool-total"><b>{pool.total}</b><span>{esc(total_caption)}</span>{history_caption}</div></div>
+      {pity}
+      <div class="pull-bars">{''.join(rows)}{empty}</div>
+    </section>
+    """
+
+
+def _draw_gacha_pull_row(item: SixStarEvent | None, pulls: int, scale: int) -> str:
+    width = max(8.0, min(100.0, pulls / scale * 100 if scale else 0))
+    if item is None:
+        marker = '<div class="current-marker">至今</div>'
+        copy = '<div class="pull-copy"><strong>当前累计</strong><time>距最近六星</time></div>'
+        current_class = " current"
+    else:
+        icon_url = _local_image_data_url(Path(item.icon_path)) if item.icon_path else ""
+        icon = f'<img src="{esc_attr(icon_url)}" alt="{esc_attr(item.name)}">' if icon_url else '<span>6★</span>'
+        marker = f'<div class="gacha-thumb">{icon}</div>'
+        position = f"第{item.pool_position}抽 · " if item.pool_position else ""
+        pity_hits = "".join(_draw_pity_hit(label) for label in item.pity_labels)
+        pity_html = f'<div class="pity-hits">{pity_hits}</div>' if pity_hits else ""
+        copy = f'<div class="pull-copy"><strong>{esc(item.name)}</strong><time>{esc(position + format_timestamp(item.gacha_ts).split(" ", 1)[0])}</time></div>'
+        current_class = ""
+    if item is None:
+        pity_html = ""
+    return f'<div class="pull-row">{marker}{copy}<div class="bar-track"><div class="bar-fill{current_class}" style="width:{width:.1f}%"></div><div class="bar-value"><b>{pulls} 抽</b>{pity_html}</div></div></div>'
+
+
+def _draw_pity_hit(label: str) -> str:
+    kinds = {
+        "小保底": " pity-hit-guarantee pity-hit-small",
+        "大保底": " pity-hit-guarantee pity-hit-large",
+        "歪": " pity-hit-miss",
+    }
+    kind = kinds.get(label, "")
+    return f'<span class="pity-hit{kind}">{esc(label)}</span>'
+
+
+def _pool_paid_total(pool: PoolAnalysis) -> int:
+    if pool.paid_total or pool.free_pull_count:
+        return pool.paid_total
+    return pool.total
+
+
+def _draw_keepsake_gift_row(item) -> str:
+    icon_url = _local_image_data_url(Path(item.icon_path)) if item.icon_path else ""
+    icon = f'<img src="{esc_attr(icon_url)}" alt="{esc_attr(item.name)}">' if icon_url else '<span>信物</span>'
+    return (
+        f'<div class="pull-row"><div class="gacha-thumb">{icon}</div>'
+        f'<div class="pull-copy"><strong>{esc(item.name)}</strong><time>第{item.pool_position}抽赠送信物</time></div>'
+        f'<div class="bar-track"><div class="bar-fill" style="width:100.0%"></div>'
+        f'<div class="bar-value"><b>第{item.pool_position}抽</b>'
+        f'<div class="pity-hits"><span class="pity-hit">赠送</span></div></div></div></div>'
+    )
+
+
+def _draw_pity_grid(pool: PoolAnalysis) -> str:
+    if pool.item_type == "角色":
+        small_remaining = max(0, pool.small_pity_limit - pool.small_pity_progress)
+        keepsake_remaining = 240 - pool.keepsake_progress if pool.keepsake_progress else 240
+        keepsake_note = f"进度 {pool.keepsake_progress}/240"
+        if pool.keepsake_claims:
+            keepsake_note += f" · 已赠 {pool.keepsake_claims} 次"
+        if not pool.large_pity_limit:
+            large_pity = ("大保底", "无", "本池无120抽UP保底")
+        elif pool.large_pity_consumed:
+            up_name = f" {pool.large_pity_up_name}" if pool.large_pity_up_name else ""
+            large_pity = (
+                "距大保底", "已消耗", f"第{pool.large_pity_consumed_at}抽获得{up_name} · 本期无下次",
+            )
+        elif pool.large_pity_known:
+            large_remaining = max(0, pool.large_pity_limit - pool.large_pity_progress)
+            large_pity = (
+                "距大保底", f"{large_remaining} 抽", f"进度 {pool.large_pity_progress}/{pool.large_pity_limit} · 本池首次当期UP",
+            )
+        else:
+            large_pity = ("距大保底", "待识别", "未取得当期UP配置")
+        items = (
+            ("距小保底", f"{small_remaining} 抽", f"进度 {pool.small_pity_progress}/{pool.small_pity_limit} · 跨角色池继承"),
+            large_pity,
+            ("距下次信物", f"{keepsake_remaining} 抽", keepsake_note),
+        )
+    else:
+        small_remaining = max(0, pool.small_pity_limit - pool.small_pity_progress)
+        large_remaining = max(0, pool.large_pity_limit - pool.large_pity_progress)
+        large_value = "已触发" if pool.large_pity_limit and not large_remaining else f"{large_remaining} 抽"
+        items = (
+            ("距小保底", f"{small_remaining} 次十连", f"进度 {pool.small_pity_progress}/{pool.small_pity_limit} · 第4次十连必出六星"),
+            ("距大保底", large_value, f"进度 {pool.large_pity_progress}/{pool.large_pity_limit} · 本池当期UP"),
+        )
+    class_name = "pity-grid" if pool.item_type == "角色" else "pity-grid pity-two"
+    return f'<div class="{class_name}">' + "".join(
+        f'<div class="pity-item"><span>{esc(label)}</span><b>{esc(value)}</b><small>{esc(note)}</small></div>'
+        for label, value, note in items
+    ) + '</div>'
+
+
+def _draw_free_pull_row(batch: FreePullBatch) -> str:
+    if batch.six_stars:
+        icons = "".join(_draw_gacha_icon(item) for item in batch.six_stars)
+        names = "、".join(item.name for item in batch.six_stars)
+        marker = f'<div class="free-icons">{icons}</div>'
+        title = f"免费十连 · {names}"
+        detail = f"出了 {len(batch.six_stars)} 个六星 · 不计保底"
+    else:
+        marker = '<div class="free-marker">FREE ×10</div>'
+        title = "免费十连 · 未出六星"
+        detail = "不受且不影响任何保底"
+    label = "免费十连" if batch.pull_count == 10 else f"免费 {batch.pull_count} 抽"
+    return (
+        f'<div class="free-row">{marker}<div class="pull-copy"><strong>{esc(title)}</strong>'
+        f'<time>{esc(format_timestamp(batch.gacha_ts).split(" ", 1)[0])} · {esc(detail)}</time>'
+        f'</div><span class="free-count">{esc(label)}</span></div>'
+    )
+
+
+def _draw_gacha_icon(item: SixStarEvent) -> str:
+    icon_url = _local_image_data_url(Path(item.icon_path)) if item.icon_path else ""
+    icon = f'<img src="{esc_attr(icon_url)}" alt="{esc_attr(item.name)}">' if icon_url else '<span>6★</span>'
+    return f'<div class="gacha-thumb">{icon}</div>'
+
+
+async def draw_gacha_history_card(view: GachaHistoryView) -> bytes:
+    rows = []
+    for item in view.items:
+        icon_url = _local_image_data_url(Path(item.icon_path)) if item.icon_path else ""
+        icon = (
+            f'<img src="{esc_attr(icon_url)}" alt="{esc_attr(item.item_name)}">'
+            if icon_url
+            else f'<span>{esc(item.rarity)}★</span>'
+        )
+        rows.append(
+            f"""
+            <div class="history-row rarity-{item.rarity}">
+              <div class="history-icon">{icon}</div><time>{esc(item.time)}</time><div class="pool">{esc(item.pool_name)}</div><div class="item"><strong>{esc(item.item_name)}</strong><span>{esc(item.detail or item.item_type)}</span></div><b>{item.rarity}★</b><em>{esc(item.item_type)}</em>
+            </div>
+            """
+        )
+    rows_html = "".join(rows) or '<div class="empty">这一页没有抽卡记录</div>'
+    filter_text = f" · 池：{esc(view.pool_filter)}" if view.pool_filter else ""
+    return await _draw_neutral_card(
+        "gacha-history-card",
+        f"""
+        <header><div><small>ENDFIELD / GACHA LOG</small><h1>{esc(view.nickname)} · 抽卡记录</h1><p>{esc(view.server_name or '默认服务器')} · {esc(view.uid)}{filter_text}</p></div><div class="page"><b>{view.page} / {view.total_pages}</b><span>共 {view.total} 条</span></div></header>
+        <main><div class="history-head"><span>图</span><span>时间</span><span>卡池</span><span>名称</span><span>星级</span><span>类型</span></div><div class="history-list">{rows_html}</div><footer class="gacha-source"><span>星级与图片来源 FZ Wiki</span><span>图片已存入本地缓存</span></footer></main>
+        """,
+        extra_css="""
+        header p{margin:8px 0 0;color:#d0d0d0}.page{text-align:right}.page b{display:block;font-size:24px}.page span{display:block;margin-top:6px;color:#ccc}
+        .history-head,.history-row{display:grid;grid-template-columns:68px 160px 205px minmax(280px,1fr) 70px 80px;align-items:center}.history-head{padding:10px 15px;background:#d2d2d2;border:1px solid #999;font-size:13px;font-weight:900}.history-row{min-height:72px;padding:6px 15px;border:1px solid #b8b8b8;border-top:0;background:#fff}.history-row.rarity-6{border-left:8px solid #111;font-weight:900}.history-row.rarity-5{border-left:5px solid #666}.history-icon{width:56px;height:56px;display:grid;place-items:center;overflow:hidden;border:1px solid #888;background:#eee}.history-icon img{width:100%;height:100%;object-fit:contain}.history-icon span{font-size:12px;font-weight:950}.history-row time{color:#666;font-size:13px}.history-row .pool{padding-right:15px}.history-row .item{display:flex;flex-direction:column}.history-row .item span{margin-top:3px;color:#777;font-size:12px}.history-row b{font-size:19px}.history-row em{font-style:normal;color:#555}.gacha-source{display:flex;justify-content:space-between;margin-top:12px;padding-top:10px;border-top:2px solid #222;color:#777;font-size:12px;font-weight:800}
+        """,
+    )
+
+
+async def _draw_neutral_card(selector: str, body: str, *, extra_css: str = "") -> bytes:
+    width = 1280
+    css = f"""
+    *{{box-sizing:border-box}}html,body{{margin:0;width:{width}px;background:#d8d8d8;color:#181818;font-family:'Microsoft YaHei','PingFang SC','Noto Sans SC',Arial,sans-serif}}
+    .{selector}{{width:{width}px;min-height:420px;padding:28px;background:linear-gradient(90deg,rgba(0,0,0,.055) 1px,transparent 1px) 0 0/32px 32px,linear-gradient(0deg,rgba(0,0,0,.055) 1px,transparent 1px) 0 0/32px 32px,#ededed}}
+    header{{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;padding:22px 25px;background:#292929;color:#fff;border-bottom:5px solid #000}}
+    header small{{font-size:13px;letter-spacing:.2em;color:#c7c7c7}}header h1{{margin:5px 0 0;font-size:36px;line-height:1.1}}header time{{color:#d0d0d0}}
+    main{{padding:18px;border:1px solid #777;background:#f8f8f8}}.empty{{padding:28px;text-align:center;color:#777;background:#eee;border:1px dashed #888}}
+    {extra_css}
+    """
+    document = f"<!doctype html><html><head><meta charset='utf-8'><style>{css}</style></head><body><div class='{selector}'>{body}</div></body></html>"
+    html_path = _write_temp_html(document)
+    try:
+        output = await screenshot_web_element(
+            html_path.resolve().as_uri(), f".{selector}", viewport=(width, 1), timeout_ms=15000,
+            max_height=CARD_MAX_HEIGHT, device_scale_factor=2.0, settle_ms=30,
+            wait_for_images=True, strict_max_height=True,
+        )
+        return await run_image_render(optimize_png_container, output)
     finally:
         schedule_temp_file_cleanup(html_path, delay_seconds=30)
 

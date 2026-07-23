@@ -5,6 +5,7 @@ import json
 import re
 import tempfile
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from time import perf_counter
 
 from arclet.alconna import Alconna, Args, MultiVar
@@ -15,11 +16,14 @@ from nepattern import AnyString
 
 from configs.config import Config
 from utils.async_cache import AsyncTTLCache, CacheStats
-from utils.entari_native import ArgVal, ChainMsg, event_user_id, make_image, on_alconna, prompt
+from utils.entari_native import ArgVal, ChainMsg, event_user_id, is_group, make_image, on_alconna, prompt
 from utils.http_client import clear_http_cache, get_http_cache_stats
 from utils.temp_files import schedule_temp_file_cleanup
 
 from .client import WarfarinAPIError, WarfarinClient
+from .account_client import AttendanceResult, EndfieldAPIError, EndfieldOfficialClient
+from .account_crypto import CredentialCipher, CredentialKeyError
+from .account_store import EndfieldRole, EndfieldStore, RoleCandidate
 from .aliases import add_alias, alias_targets
 from .commands import (
     EndfieldCandidate,
@@ -50,13 +54,43 @@ from .draw import (
     draw_operator_catalog_card,
     draw_weapon_card,
     draw_weapon_catalog_card,
+    draw_attendance_card,
+    draw_gacha_analysis_cards,
+    draw_gacha_history_card,
 )
-from .service import EndfieldService, build_fz_operator_catalog_view, build_fz_weapon_catalog_view
+from .gacha import (
+    EndfieldGachaService,
+    ROLE_TASKS,
+    TaskAlreadyRunning,
+    filter_xhh_import_six_stars,
+    format_timestamp,
+)
+from .gacha_assets import EndfieldGachaAssetCache, apply_gacha_metadata
+from .xhh_client import XhhAPIError, XhhLoginSession
+from .models import (
+    AttendanceCardView,
+    AttendanceRewardView,
+    AttendanceRoleView,
+    GachaHistoryItemView,
+    GachaHistoryView,
+)
+from .service import (
+    EndfieldService,
+    build_fz_operator_catalog_view,
+    build_fz_weapon_catalog_view,
+    format_status_quick_calc,
+)
 from .sources import source_label, source_order
 
 
 client = WarfarinClient()
 service = EndfieldService(client)
+gacha_asset_cache = EndfieldGachaAssetCache(service)
+account_store = EndfieldStore()
+official_client = EndfieldOfficialClient()
+ENDFIELD_HELP_IMAGE_PATH = (
+    Path(__file__).resolve().parents[2] / "assets" / "image" / "help" / "endfield.png"
+)
 CARD_CACHE_TTL_SECONDS = 600.0
 CARD_CACHE_MAX_BYTES = 48 * 1024 * 1024
 CARD_RENDER_VERSION = "endfield-card-v26"
@@ -159,7 +193,7 @@ async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand)
     if command.error:
         return await matcher.finish(format_error(command.error))
     if command.action == "help":
-        return await matcher.finish(format_help())
+        return await _finish_endfield_help(matcher)
     if command.action == "source":
         return await matcher.finish(format_source())
     if command.action == "dev":
@@ -170,6 +204,12 @@ async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand)
         if not dev_visible_for_user(str(event_user_id(event)), Config.SUPERUSERS):
             return await matcher.finish(format_unknown())
         return await matcher.finish(_handle_alias_command(command))
+    if command.action == "quick_calc":
+        return await matcher.finish(
+            format_status_quick_calc(command.status_name, command.status_level, command.arts_strength)
+        )
+    if command.action in {"bind", "accounts", "primary", "unbind", "attendance", "gacha", "gacha_history", "gacha_sync", "gacha_import"}:
+        return await _handle_personal_command(matcher, event, command)
     if command.action == "loadout":
         return await _handle_loadout(matcher, command)
     if command.action not in {"query", "search"}:
@@ -184,7 +224,7 @@ async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand)
                 rarity=command.rarity,
             )
         else:
-            return await matcher.finish(format_help())
+            return await _finish_endfield_help(matcher)
 
     started = perf_counter()
     try:
@@ -230,6 +270,301 @@ async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand)
     except Exception as exc:
         logger.exception(f"[endfield] card failed for {command.scope} {command.query}: {exc}")
         return await matcher.finish("图片生成失败")
+
+
+async def _handle_personal_command(matcher, event: Event, command: ParsedEndfieldCommand) -> None:
+    private_only = {"bind", "accounts", "primary", "unbind", "gacha_import"}
+    if command.action in private_only and is_group(event):
+        return await matcher.finish("该命令涉及账号凭据或手机号，仅支持私聊使用。")
+    qq_user_id = str(event_user_id(event))
+
+    try:
+        if command.action == "bind":
+            cipher = CredentialCipher.from_env()
+            return await _handle_binding(matcher, qq_user_id, cipher)
+        if command.action == "accounts":
+            return await matcher.finish(_format_accounts(account_store.list_roles(qq_user_id), reveal_uid=True))
+        if command.action == "primary":
+            role = account_store.set_primary(qq_user_id, command.account_selector)
+            return await matcher.finish(
+                f"已将 {role.nickname}（{role.role_id}）设为主账号。" if role else "未找到对应账号，请使用 /zmd 账号 查看编号。"
+            )
+        if command.action == "unbind":
+            role = account_store.unbind(qq_user_id, command.account_selector)
+            return await matcher.finish(
+                f"已解绑 {role.nickname}（{role.role_id}）。" if role else "未找到对应账号，请使用 /zmd 账号 查看编号。"
+            )
+        if command.action == "attendance":
+            cipher = CredentialCipher.from_env()
+            return await _handle_attendance(matcher, qq_user_id, command, cipher, group=is_group(event))
+        if command.action in {"gacha", "gacha_sync"}:
+            cipher = CredentialCipher.from_env()
+            return await _handle_gacha(matcher, qq_user_id, command, cipher, group=is_group(event))
+        if command.action == "gacha_import":
+            return await _handle_xhh_import(matcher, qq_user_id, command)
+        if command.action == "gacha_history":
+            return await _handle_gacha_history(matcher, qq_user_id, command, group=is_group(event))
+    except TaskAlreadyRunning:
+        return await matcher.finish("任务正在进行")
+    except CredentialKeyError as exc:
+        return await matcher.finish(str(exc))
+    except EndfieldAPIError as exc:
+        logger.warning(f"[endfield-account] official API request failed: operation={exc.operation} code={exc.code}")
+        return await matcher.finish(str(exc))
+    except XhhAPIError as exc:
+        return await matcher.finish(str(exc))
+    except _ExitException:
+        raise
+    except Exception as exc:
+        logger.error(f"[endfield-account] action failed: action={command.action} error_type={type(exc).__name__}")
+        return await matcher.finish("终末地账号功能暂时不可用，请稍后重试。")
+
+
+async def _handle_binding(matcher, qq_user_id: str, cipher: CredentialCipher) -> None:
+    method = await _prompt_text(
+        "请选择绑定方式：\n1. Token 绑定\n2. 手机号验证码绑定\n回复 1 或 2；回复“取消”退出。",
+        timeout=90,
+    )
+    if method is None:
+        return await matcher.finish("绑定已取消或等待超时。")
+    normalized = method.casefold()
+    if normalized in {"1", "token", "t"}:
+        await matcher.send(
+            "请在浏览器登录森空岛后打开：\nhttps://web-api.skland.com/account/info/hg\n"
+            "复制响应中 data.content 的完整内容并发送。不要在群聊或其他平台公开该内容。"
+        )
+        account_token = await _prompt_text("请发送 data.content；回复“取消”退出。", timeout=150)
+        if account_token is None:
+            return await matcher.finish("绑定已取消或等待超时。")
+    elif normalized in {"2", "短信", "手机", "sms"}:
+        phone = await _prompt_text("请输入用于鹰角账号登录的手机号；回复“取消”退出。", timeout=90)
+        if phone is None:
+            return await matcher.finish("绑定已取消或等待超时。")
+        if not re.fullmatch(r"1\d{10}", phone):
+            return await matcher.finish("手机号格式不正确，绑定已取消。")
+        await official_client.send_phone_code(phone)
+        code = await _prompt_text("验证码已发送，请输入短信验证码；回复“取消”退出。", timeout=120)
+        if code is None:
+            return await matcher.finish("绑定已取消或等待超时。")
+        if not re.fullmatch(r"\d{4,8}", code):
+            return await matcher.finish("验证码格式不正确，绑定已取消。")
+        account_token = await official_client.token_by_phone_code(phone, code)
+    else:
+        return await matcher.finish("未识别绑定方式，绑定已取消。")
+
+    roles = await official_client.discover_roles(account_token)
+    if not roles:
+        return await matcher.finish("该鹰角账号下未找到终末地角色。")
+    selected = await _select_binding_roles(roles)
+    if selected is None:
+        return await matcher.finish("绑定已取消或等待超时。")
+    account_store.bind_roles(qq_user_id, account_token, selected, cipher)
+    return await matcher.finish(
+        "绑定完成。\n" + "\n".join(
+            f"- {role.nickname} · {role.server_name or role.server_id} · UID {role.role_id}" for role in selected
+        )
+    )
+
+
+async def _select_binding_roles(roles: list[RoleCandidate]) -> list[RoleCandidate] | None:
+    if len(roles) == 1:
+        return roles
+    lines = ["检测到多个终末地角色，请回复编号、逗号分隔的多个编号，或“全部”："]
+    lines.extend(
+        f"{index}. {role.nickname} · {role.server_name or role.server_id} · UID {role.role_id}"
+        for index, role in enumerate(roles, 1)
+    )
+    answer = await _prompt_text("\n".join(lines), timeout=120)
+    if answer is None:
+        return None
+    if answer.casefold() in {"全部", "all"}:
+        return roles
+    try:
+        indexes = {int(item.strip()) - 1 for item in re.split(r"[,，\s]+", answer) if item.strip()}
+    except ValueError:
+        return None
+    if not indexes or any(index < 0 or index >= len(roles) for index in indexes):
+        return None
+    return [role for index, role in enumerate(roles) if index in indexes]
+
+
+async def _handle_attendance(
+    matcher, qq_user_id: str, command: ParsedEndfieldCommand, cipher: CredentialCipher, *, group: bool
+) -> None:
+    roles = account_store.resolve_roles(qq_user_id, command.account_selector)
+    if not roles:
+        return await matcher.finish("未找到对应账号，请先私聊使用 /zmd 绑定。")
+    views: list[AttendanceRoleView] = []
+    for role in roles:
+        try:
+            async with ROLE_TASKS.claim(role):
+                token = account_store.decrypt_token(role, cipher)
+                result = await official_client.attendance(token, role)
+            views.append(_attendance_view(role, result))
+        except TaskAlreadyRunning:
+            views.append(AttendanceRoleView(role.nickname, role.masked_uid, role.server_name, "failed", "任务正在进行"))
+        except EndfieldAPIError as exc:
+            views.append(AttendanceRoleView(role.nickname, role.masked_uid, role.server_name, "failed", str(exc)))
+        except CredentialKeyError as exc:
+            views.append(AttendanceRoleView(role.nickname, role.masked_uid, role.server_name, "failed", str(exc)))
+        except Exception as exc:
+            logger.error(
+                f"[endfield-account] attendance failed: stored_role={role.id} error_type={type(exc).__name__}"
+            )
+            views.append(AttendanceRoleView(role.nickname, role.masked_uid, role.server_name, "failed", "签到失败，请稍后重试"))
+    png = await draw_attendance_card(
+        AttendanceCardView(views, format_timestamp(int(__import__("time").time())))
+    )
+    return await _finish_png(matcher, png)
+
+
+async def _handle_gacha(
+    matcher, qq_user_id: str, command: ParsedEndfieldCommand, cipher: CredentialCipher, *, group: bool
+) -> None:
+    role = account_store.resolve_role(qq_user_id, command.account_selector)
+    if role is None:
+        return await matcher.finish("未找到对应账号，请先私聊使用 /zmd 绑定。")
+    gacha_service = EndfieldGachaService(account_store, official_client, cipher)
+    states = account_store.list_sync_states(role)
+    effective_full = command.full or not states
+    existing_records = account_store.list_gacha_records(role, limit=100000)
+    existing_pool_rules = await gacha_asset_cache.prepare_pool_rules(existing_records)
+    result = await gacha_service.sync(
+        role, full=effective_full, pool_rules=existing_pool_rules,
+    )
+    if command.action == "gacha_sync":
+        failed = f"，{len(result.failed)} 个卡池失败" if result.failed else ""
+        mode = "官方近 90 天窗口全量" if effective_full else "增量"
+        suffix = "；本地会持续保留已同步记录" if effective_full else ""
+        return await matcher.finish(f"{role.nickname} {mode}同步完成：新增 {result.inserted} 条{failed}{suffix}。")
+    records = account_store.list_gacha_records(role, limit=100000)
+    xhh_import = account_store.get_xhh_gacha_import(role)
+    xhh_names = [item.item_name for item in xhh_import.six_stars] if xhh_import else []
+    metadata, pool_rules, xhh_metadata = await asyncio.gather(
+        gacha_asset_cache.prepare(records),
+        gacha_asset_cache.prepare_pool_rules(records),
+        gacha_asset_cache.prepare_names(xhh_names),
+    )
+    keepsake_metadata = await gacha_asset_cache.prepare_keepsakes(pool_rules)
+    analysis = gacha_service.analysis(
+        role, metadata, pool_rules, xhh_metadata, keepsake_metadata,
+    )
+    pngs = await draw_gacha_analysis_cards(analysis, uid=role.masked_uid)
+    return await _finish_pngs(matcher, pngs)
+
+
+async def _handle_gacha_history(matcher, qq_user_id: str, command: ParsedEndfieldCommand, *, group: bool) -> None:
+    role = account_store.resolve_role(qq_user_id, command.account_selector)
+    if role is None:
+        return await matcher.finish("未找到对应账号，请先私聊使用 /zmd 绑定。")
+    total = account_store.count_gacha_records(role, command.pool_filter)
+    total_pages = max(1, (total + 19) // 20)
+    if command.page > total_pages and total:
+        return await matcher.finish(f"页码超出范围，当前共 {total_pages} 页。")
+    records = account_store.list_gacha_records(
+        role, page=command.page, page_size=20, pool_filter=command.pool_filter
+    )
+    metadata = await gacha_asset_cache.prepare(records, download_all=True)
+    records = apply_gacha_metadata(records, metadata)
+    view = GachaHistoryView(
+        nickname=role.nickname, uid=role.masked_uid,
+        server_name=role.server_name, page=command.page, total_pages=total_pages, total=total,
+        pool_filter=command.pool_filter,
+        items=[
+            GachaHistoryItemView(
+                time=format_timestamp(item.gacha_ts), pool_name=item.pool_name,
+                item_name=item.item_name, rarity=item.rarity, item_type=item.item_type,
+                detail=item.weapon_type,
+                icon_path=metadata.get(item.item_id).icon_path if item.item_id in metadata else "",
+            )
+            for item in records
+        ],
+    )
+    return await _finish_png(matcher, await draw_gacha_history_card(view))
+
+
+async def _handle_xhh_import(matcher, qq_user_id: str, command: ParsedEndfieldCommand) -> None:
+    role = account_store.resolve_role(qq_user_id, command.account_selector)
+    if role is None:
+        return await matcher.finish("未找到对应账号，请先私聊使用 /zmd 绑定。")
+    phone = await _prompt_text("请输入小黑盒账号绑定的手机号；回复“取消”退出。", timeout=90)
+    if phone is None:
+        return await matcher.finish("导入已取消或等待超时。")
+    if not re.fullmatch(r"1\d{10}", phone):
+        return await matcher.finish("手机号格式不正确，导入已取消。")
+
+    session: XhhLoginSession | None = None
+    try:
+        async with ROLE_TASKS.claim(role):
+            session = await XhhLoginSession.start(phone)
+            code = await _prompt_text(
+                "小黑盒验证码已发送，请输入短信验证码；回复“取消”退出。", timeout=120
+            )
+            if code is None:
+                return await matcher.finish("导入已取消或等待超时。")
+            if not re.fullmatch(r"\d{4,8}", code):
+                return await matcher.finish("验证码格式不正确，导入已取消。")
+            imported = await session.login_and_fetch(code)
+            if imported.source_uid != role.role_id:
+                return await matcher.finish(
+                    f"小黑盒终末地 UID 与所选账号不一致，请切换账号后重试。所选账号 UID {role.masked_uid}。"
+                )
+            candidate_names = [item.item_name for item in imported.six_stars]
+            xhh_metadata = await gacha_asset_cache.prepare_names(candidate_names)
+            unresolved_names = {
+                item.item_name
+                for item in imported.six_stars
+                if "".join(item.item_name.split()).casefold() not in xhh_metadata
+            }
+            if unresolved_names:
+                return await matcher.finish(
+                    "FZ Wiki 星级目录暂未覆盖本次小黑盒记录，已取消导入以避免误判星级，请稍后重试。"
+                )
+            imported = filter_xhh_import_six_stars(imported, xhh_metadata)
+            account_store.replace_xhh_gacha_import(role, imported)
+    finally:
+        if session is not None:
+            await session.close()
+
+    return await matcher.finish(
+        f"{role.nickname} 的小黑盒历史统计导入完成：{len(imported.pools)} 个卡池，"
+        f"{imported.total_count} 抽，{len(imported.six_stars)} 条六星记录。\n"
+        "发送 /zmd 抽卡 查看补齐后的分析卡；逐抽历史页仍只展示官方明细。"
+    )
+
+
+def _attendance_view(role: EndfieldRole, result: AttendanceResult) -> AttendanceRoleView:
+    return AttendanceRoleView(
+        nickname=role.nickname,
+        uid=role.masked_uid,
+        server_name=role.server_name,
+        status=result.status,
+        message=result.message,
+        rewards=[AttendanceRewardView(item.name, item.count) for item in result.rewards],
+    )
+
+
+def _format_accounts(roles: list[EndfieldRole], *, reveal_uid: bool) -> str:
+    if not roles:
+        return "尚未绑定终末地账号。使用 /zmd 绑定 开始绑定。"
+    lines = ["已绑定的终末地账号："]
+    for index, role in enumerate(roles, 1):
+        marker = " [主账号]" if role.is_primary else ""
+        uid = role.role_id if reveal_uid else role.masked_uid
+        lines.append(f"{index}. {role.nickname}{marker} · {role.server_name or role.server_id} · UID {uid}")
+    lines.append("可使用 /zmd 主账号 <编号> 或 /zmd 解绑 <编号> 管理。")
+    return "\n".join(lines)
+
+
+async def _prompt_text(message: str, *, timeout: int) -> str | None:
+    answer = await prompt(message, timeout=timeout)
+    if answer is None:
+        return None
+    text = answer.extract_plain_text() if hasattr(answer, "extract_plain_text") else str(answer or "")
+    text = text.strip()
+    if not text or text.casefold() in {"取消", "cancel", "q", "quit"}:
+        return None
+    return text
 
 
 async def _handle_loadout(matcher, command: ParsedEndfieldCommand) -> None:
@@ -886,11 +1221,24 @@ async def _render_equipment_catalog(key: str, source: str = "") -> bytes | None:
 
 
 async def _finish_png(matcher, png: bytes) -> None:
-    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as file:
-        file.write(png)
-        file.flush()
-        schedule_temp_file_cleanup(file.name)
-        await matcher.finish(ChainMsg([make_image(path=file.name)]))
+    return await _finish_pngs(matcher, (png,))
+
+
+async def _finish_endfield_help(matcher) -> None:
+    if ENDFIELD_HELP_IMAGE_PATH.exists():
+        return await matcher.finish(ChainMsg([make_image(path=ENDFIELD_HELP_IMAGE_PATH)]))
+    return await matcher.finish(format_help())
+
+
+async def _finish_pngs(matcher, pngs: tuple[bytes, ...]) -> None:
+    images = []
+    for png in pngs:
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as file:
+            file.write(png)
+            file.flush()
+            schedule_temp_file_cleanup(file.name)
+            images.append(make_image(path=file.name))
+    await matcher.finish(ChainMsg(images))
 
 
 async def _handle_dev_command(command: ParsedEndfieldCommand) -> str:

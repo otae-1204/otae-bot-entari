@@ -16,12 +16,22 @@ OPERATOR_ALIASES = {"干员", "角色", "operator", "op"}
 WEAPON_ALIASES = {"武器", "weapon", "wp"}
 EQUIPMENT_ALIASES = {"装备", "equipment", "equip", "eq"}
 LOADOUT_ALIASES = {"配装", "配装模拟器", "loadout", "build"}
+QUICK_CALC_ALIASES = {"速算", "quickcalc", "calc"}
 SEARCH_ALIASES = {"搜索", "search", "s"}
 HELP_ALIASES = {"帮助", "help", "h", "?"}
 SOURCE_ALIASES = {"数据源", "source", "sources"}
 DEV_ALIASES = {"dev"}
 ALIAS_COMMAND_ALIASES = {"别名", "alias"}
 ALIAS_ADD_ALIASES = {"添加", "新增", "add"}
+BIND_ALIASES = {"绑定", "bind"}
+ACCOUNT_ALIASES = {"账号", "账户", "account", "accounts"}
+PRIMARY_ALIASES = {"主账号", "主账户", "primary"}
+UNBIND_ALIASES = {"解绑", "unbind"}
+ATTENDANCE_ALIASES = {"签到", "checkin", "attendance"}
+GACHA_ALIASES = {"抽卡", "gacha"}
+GACHA_HISTORY_ALIASES = {"抽卡记录", "历史抽卡", "gacha-history", "history"}
+GACHA_SYNC_ALIASES = {"抽卡同步", "同步抽卡", "gacha-sync", "sync"}
+GACHA_IMPORT_ALIASES = {"抽卡导入", "小黑盒导入", "xhh-import", "gacha-import", "import"}
 
 SCOPE_LABELS = {
     "operator": "干员",
@@ -66,6 +76,13 @@ class ParsedEndfieldCommand:
     weapon_potential: int = 5
     weapon_skill_levels: tuple[tuple[int, int], ...] = ()
     enhance: int = 3
+    account_selector: str = ""
+    page: int = 1
+    pool_filter: str = ""
+    full: bool = False
+    status_name: str = ""
+    status_level: int = 0
+    arts_strength: int = 0
     error: str = ""
 
 
@@ -94,6 +111,10 @@ def parse_command(rest: str) -> ParsedEndfieldCommand:
     parts = _split(rest)
     if not parts:
         return ParsedEndfieldCommand("help")
+
+    personal = _parse_personal_command(parts)
+    if personal is not None:
+        return personal
 
     parts, source, error = _parse_source_option(parts)
     if error:
@@ -131,6 +152,8 @@ def parse_command(rest: str) -> ParsedEndfieldCommand:
             weapon_skill_levels=weapon_skill_levels,
             enhance=levels[4],
         )
+    if head in QUICK_CALC_ALIASES:
+        return _parse_quick_calc_command(parts[1:])
     if head in SEARCH_ALIASES:
         scope, query_parts = _parse_optional_scope(parts[1:])
         return ParsedEndfieldCommand("search", scope=scope, query=" ".join(query_parts).strip(), source=source, rarity=rarity)
@@ -148,6 +171,116 @@ def parse_command(rest: str) -> ParsedEndfieldCommand:
         )
 
     return ParsedEndfieldCommand("query", scope="all", query=" ".join(parts).strip(), source=source, rarity=rarity)
+
+
+def _parse_quick_calc_command(parts: list[str]) -> ParsedEndfieldCommand:
+    usage = "用法：/zmd 速算 2腐蚀 200（效果可选腐蚀、导电、碎甲，等级为 1–4）"
+    if len(parts) != 2:
+        return ParsedEndfieldCommand("quick_calc", error=usage)
+
+    effect_text = parts[0].strip()
+    match = re.fullmatch(r"(?:lv\s*)?(\d+)\s*(腐蚀|导电|碎甲)", effect_text, flags=re.I)
+    if match:
+        level_text, status_name = match.groups()
+    else:
+        match = re.fullmatch(r"(腐蚀|导电|碎甲)\s*(?:lv\s*)?(\d+)", effect_text, flags=re.I)
+        if not match:
+            return ParsedEndfieldCommand("quick_calc", error=usage)
+        status_name, level_text = match.groups()
+
+    level = int(level_text)
+    if level not in range(1, 5):
+        return ParsedEndfieldCommand("quick_calc", error="异常效果等级必须在 1–4 之间")
+    if not re.fullmatch(r"\d+", parts[1].strip()):
+        return ParsedEndfieldCommand("quick_calc", error="源石技艺强度必须是大于或等于 0 的整数")
+
+    return ParsedEndfieldCommand(
+        "quick_calc",
+        status_name=status_name,
+        status_level=level,
+        arts_strength=int(parts[1]),
+    )
+
+
+def _parse_personal_command(parts: list[str]) -> ParsedEndfieldCommand | None:
+    head = parts[0].lower()
+    if head in BIND_ALIASES:
+        return ParsedEndfieldCommand("bind")
+    if head in ACCOUNT_ALIASES:
+        return ParsedEndfieldCommand("accounts")
+    if head in PRIMARY_ALIASES:
+        selector = " ".join(parts[1:]).strip()
+        return ParsedEndfieldCommand("primary", account_selector=selector, error="请指定账号编号" if not selector else "")
+    if head in UNBIND_ALIASES:
+        selector = " ".join(parts[1:]).strip()
+        return ParsedEndfieldCommand("unbind", account_selector=selector, error="请指定账号编号" if not selector else "")
+    if head in ATTENDANCE_ALIASES:
+        return ParsedEndfieldCommand("attendance", account_selector=" ".join(parts[1:]).strip() or "全部")
+    if head in GACHA_SYNC_ALIASES:
+        remaining, full, error = _parse_full_option(parts[1:])
+        return ParsedEndfieldCommand(
+            "gacha_sync", account_selector=" ".join(remaining).strip(), full=full, error=error
+        )
+    if head in GACHA_IMPORT_ALIASES:
+        return ParsedEndfieldCommand("gacha_import", account_selector=" ".join(parts[1:]).strip())
+    if head in GACHA_HISTORY_ALIASES:
+        remaining, pool_filter, error = _parse_pool_option(parts[1:])
+        if error:
+            return ParsedEndfieldCommand("gacha_history", error=error)
+        page = 1
+        if len(remaining) >= 2 and remaining[-1].isdigit():
+            page = int(remaining.pop())
+            if page < 1:
+                return ParsedEndfieldCommand("gacha_history", error="页码必须大于 0")
+        return ParsedEndfieldCommand(
+            "gacha_history",
+            account_selector=" ".join(remaining).strip(),
+            page=page,
+            pool_filter=pool_filter,
+        )
+    if head in GACHA_ALIASES:
+        return ParsedEndfieldCommand("gacha", account_selector=" ".join(parts[1:]).strip())
+    return None
+
+
+def _parse_pool_option(parts: list[str]) -> tuple[list[str], str, str]:
+    remaining: list[str] = []
+    pool_filter = ""
+    index = 0
+    while index < len(parts):
+        part = parts[index]
+        lowered = part.lower()
+        if lowered in {"--池", "--pool"}:
+            if index + 1 >= len(parts):
+                return remaining, pool_filter, f"{part} 后需要卡池名称"
+            value = parts[index + 1].strip()
+            index += 2
+        elif lowered.startswith("--池=") or lowered.startswith("--pool="):
+            value = part.split("=", 1)[1].strip()
+            index += 1
+        else:
+            remaining.append(part)
+            index += 1
+            continue
+        if not value:
+            return remaining, pool_filter, "卡池名称不能为空"
+        if pool_filter and pool_filter != value:
+            return remaining, pool_filter, "只能指定一个卡池筛选"
+        pool_filter = value
+    return remaining, pool_filter, ""
+
+
+def _parse_full_option(parts: list[str]) -> tuple[list[str], bool, str]:
+    remaining: list[str] = []
+    full = False
+    for part in parts:
+        if part.lower() == "--full":
+            if full:
+                return remaining, full, "--full 只能指定一次"
+            full = True
+        else:
+            remaining.append(part)
+    return remaining, full, ""
 
 
 def parse_shortcut_command(command_name: str, rest: str) -> ParsedEndfieldCommand:
@@ -218,6 +351,14 @@ def format_help() -> str:
     return "\n".join(
         [
             "终末地查询用法：",
+            "  /zmd 绑定（仅私聊，支持 Token 或短信验证码）",
+            "  /zmd 账号 | /zmd 主账号 <编号> | /zmd 解绑 <编号>（仅私聊）",
+            "  /zmd 签到 [全部|编号|昵称|UID后四位]",
+            "  /zmd 抽卡 [账号] | /zmd 抽卡同步 [账号] [--full]",
+            "  /zmd 抽卡导入 [账号]（仅私聊，手机号验证码导入小黑盒历史统计）",
+            "  /zmd 抽卡记录 [账号] [页码] [--池 <名称>]",
+            "  /zmd 速算 2腐蚀 200（效果可替换为导电或碎甲）",
+            "",
             "  /ef <关键词> 或 /zmd <关键词>",
             "  /ef 干员 <名称> | /ef op <名称>",
             "  /ef 武器 <名称> | /ef wp <名称>",

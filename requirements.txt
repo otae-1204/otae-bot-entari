@@ -14,3 +14,4 @@ pytz
 pypinyin
 apscheduler>=3.10.0
 PyYAML>=6.0
+pycryptodome>=3.20.0
