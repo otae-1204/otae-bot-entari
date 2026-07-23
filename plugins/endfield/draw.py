@@ -380,7 +380,7 @@ async def draw_gacha_analysis_card(
         extra_css=f"""
         header p{{margin:8px 0 0;color:#d0d0d0;font-size:16px}}.sync-state{{text-align:right}}.sync-state b{{display:block;font-size:22px}}.sync-state span{{display:block;margin-top:8px;color:#ccc}}
         .summary{{display:grid;grid-template-columns:.85fr 1.575fr 1.575fr;gap:10px;margin-bottom:16px}}.total,.metric{{min-height:172px;padding:15px 17px;border:1px solid #999;background:#fff}}.total{{display:flex;flex-direction:column;justify-content:center;border:3px solid #222}}.total span,.metric-head span{{color:#666;font-size:15px}}.total strong{{font-size:48px;line-height:1}}.metric-head{{display:flex;align-items:flex-end;justify-content:space-between;gap:12px}}.metric-head strong{{font-size:31px;line-height:1}}.total small,.metric>small{{display:block;margin-top:8px;color:#777;font-size:11px;font-weight:800}}.expectation-summary{{display:grid;gap:5px;margin-top:10px}}.expectation-row{{padding:7px 8px;border-left:4px solid #333;background:#ededed;color:#444;font-size:10px;font-weight:850;line-height:1.35}}.expectation-row b{{color:#111;font-size:12px;white-space:nowrap}}
-        .two-column{{display:grid;grid-template-columns:1fr 1fr;align-items:start;gap:16px}}.pool-column{{min-width:0;border:1px solid #777;background:#e4e4e4}}.column-head{{display:flex;justify-content:space-between;align-items:flex-end;padding:15px 17px;border-bottom:4px solid #222;background:#fff}}.column-head h2{{margin:0;font-size:25px}}.column-head p{{margin:0;color:#666;font-size:13px}}.pool-stack{{display:grid;gap:10px;padding:10px}}.pool-card{{min-width:0;border:1px solid #888;background:#fff}}.pool-head{{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;padding:11px 13px;border-bottom:1px solid #aaa}}.pool-title{{min-width:0}}.pool-title strong{{display:block;font-size:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}.pool-title span{{display:block;margin-top:3px;color:#777;font-size:11px}}.pool-total{{text-align:right}}.pool-total b{{display:block;font-size:22px}}.pool-total span{{display:block;color:#777;font-size:10px;white-space:nowrap}}.pool-total .pool-history{{margin-top:2px;color:#999;font-size:9px}}
+        .two-column{{display:grid;grid-template-columns:1fr 1fr;align-items:start;gap:16px}}.pool-column{{min-width:0;border:1px solid #777;background:#e4e4e4}}.column-head{{display:flex;justify-content:space-between;align-items:flex-end;padding:15px 17px;border-bottom:4px solid #222;background:#fff}}.column-head h2{{margin:0;font-size:25px}}.column-head p{{margin:0;color:#666;font-size:13px}}.pool-stack{{display:grid;gap:10px;padding:10px}}.pool-card{{min-width:0;border:1px solid #888;background:#fff}}.pool-head{{position:relative;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;overflow:hidden;padding:11px 13px;border-bottom:1px solid #aaa}}.pool-head.has-banner{{min-height:92px}}.pool-head.character-banner-head{{padding-left:118px}}.pool-head.weapon-banner-head{{padding-left:102px}}.pool-head>.pool-title,.pool-head>.pool-total{{position:relative;z-index:2}}.pool-title{{min-width:0}}.pool-title strong{{display:block;font-size:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}.pool-title span{{display:block;margin-top:3px;color:#777;font-size:11px}}.pool-total{{text-align:right}}.pool-total b{{display:block;font-size:22px}}.pool-total span{{display:block;color:#777;font-size:10px;white-space:nowrap}}.pool-total .pool-history{{margin-top:2px;color:#999;font-size:9px}}.pool-banner{{position:absolute;z-index:0;inset:0 21% 0 32%;display:flex;justify-content:center;align-items:center;overflow:hidden;pointer-events:none}}.pool-banner::after{{content:"";position:absolute;z-index:2;inset:-1px;background:linear-gradient(90deg,#fff 0%,rgba(255,255,255,.36) 18%,rgba(255,255,255,.08) 52%,rgba(255,255,255,.88) 100%)}}.pool-banner.character-pool-banner{{inset:0 auto 0 0;width:124px;justify-content:flex-start}}.pool-banner.character-pool-banner::after,.pool-banner.weapon-pool-banner::after{{background:linear-gradient(90deg,rgba(255,255,255,.04) 0%,rgba(255,255,255,.10) 58%,#fff 100%)}}.pool-banner.weapon-pool-banner{{inset:0 auto 0 0;width:108px;justify-content:center}}.pool-banner img{{position:relative;z-index:1;filter:saturate(.96) contrast(1.08)}}.pool-banner img.character-banner{{width:124px;height:112px;object-fit:cover;object-position:center 42%;-webkit-mask-image:radial-gradient(ellipse 82% 78% at center,#000 42%,rgba(0,0,0,.82) 64%,transparent 100%);mask-image:radial-gradient(ellipse 82% 78% at center,#000 42%,rgba(0,0,0,.82) 64%,transparent 100%)}}.pool-banner.multi-banner img.character-banner{{width:84px;height:108px;margin-left:-42px}}.pool-banner img:first-child{{margin-left:0}}.pool-banner.weapon-pool-banner img.weapon-banner{{width:92px;height:84px;margin:0;object-fit:contain;transform:translateX(-12px);-webkit-mask-image:radial-gradient(ellipse 86% 82% at center,#000 58%,rgba(0,0,0,.82) 72%,transparent 100%);mask-image:radial-gradient(ellipse 86% 82% at center,#000 58%,rgba(0,0,0,.82) 72%,transparent 100%)}}
         .current-tag{{display:inline-block;margin-right:6px;padding:2px 5px;border:1px solid #222;background:#222;color:#fff;font-size:9px;letter-spacing:.1em;vertical-align:2px}}.pity-grid{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-bottom:1px solid #aaa;background:#ececec}}.pity-grid.pity-two{{grid-template-columns:repeat(2,minmax(0,1fr))}}.pity-item{{min-width:0;padding:8px 10px;border-right:1px solid #bbb}}.pity-item:last-child{{border-right:0}}.pity-item span{{display:block;color:#666;font-size:9px;font-weight:900}}.pity-item b{{display:block;margin-top:2px;font-size:15px;white-space:nowrap}}.pity-item small{{display:block;margin-top:2px;color:#777;font-size:9px}}
         .pull-bars{{display:grid;gap:7px;padding:9px 11px 11px}}.pull-row{{display:grid;grid-template-columns:46px 144px minmax(0,1fr);align-items:center;gap:8px;min-width:0}}.gacha-thumb,.current-marker{{width:44px;height:44px;display:grid;place-items:center;overflow:hidden;border:1px solid #777;background:#eee}}.gacha-thumb{{border:2px solid #222}}.gacha-thumb img{{width:100%;height:100%;object-fit:contain}}.gacha-thumb span{{font-size:11px;font-weight:950}}.current-marker{{color:#555;font-size:11px;font-weight:900}}.pull-copy{{min-width:0}}.pull-copy strong{{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:14px}}.pull-copy time{{display:block;margin-top:3px;color:#777;font-size:9px}}.bar-track{{position:relative;height:36px;border:1px solid #999;background:#ededed}}.bar-fill{{height:100%;min-width:46px;background:#333}}.bar-fill.current{{background:#777}}.bar-value{{position:absolute;inset:0;display:flex;align-items:center;gap:7px;padding:0 10px;overflow:hidden}}.bar-value b{{flex:0 0 auto;color:#fff;white-space:nowrap;font-size:16px}}.pity-hits{{display:flex;align-items:center;gap:5px;min-width:0}}.pity-hit{{padding:3px 7px;border:2px solid #111;background:#fff;color:#111;font-size:11px;font-weight:950;line-height:1;white-space:nowrap;box-shadow:0 0 0 1px #fff}}.pity-hit-guarantee{{padding:3px 7px;font-size:11px;font-weight:950}}.pity-hit-small{{border-color:#3f6078;background:#e5eef4;color:#29485d;box-shadow:0 0 0 1px #f7fbfd}}.pity-hit-large{{border-color:#7a5c2e;background:#f4ead7;color:#5d421d;box-shadow:0 0 0 1px #fffaf0}}.pity-hit-miss{{padding:3px 8px;border:2px solid #f8e9e9;background:#8a3f46;color:#fff;font-size:12px;font-weight:950;letter-spacing:.12em;box-shadow:0 0 0 1px #5a2328}}.pool-empty{{padding:4px 0;color:#777;font-size:11px}}.free-row{{display:grid;grid-template-columns:96px minmax(0,1fr) auto;align-items:center;gap:8px;min-height:48px;padding:5px 7px;border:1px dashed #777;background:#f0f0f0}}.free-icons{{display:flex;align-items:center;min-height:44px}}.free-icons .gacha-thumb{{margin-right:-8px;background:#fff}}.free-marker{{width:88px;height:38px;display:grid;place-items:center;border:2px solid #555;color:#444;font-size:11px;font-weight:950;letter-spacing:.08em}}.free-count{{padding:4px 7px;border:1px solid #777;background:#fff;font-size:11px;font-weight:900;white-space:nowrap}}
         .warning{{margin-top:12px;padding:12px 16px;border:2px dashed #555;background:#f2f2f2}}.gacha-source{{display:flex;justify-content:space-between;gap:20px;margin-top:12px;padding-top:10px;border-top:2px solid #222;color:#777;font-size:12px;font-weight:800}}
@@ -390,7 +390,10 @@ async def draw_gacha_analysis_card(
 
 
 def _recent_gacha_pools(view: GachaAnalysis, item_type: str) -> list[PoolAnalysis]:
-    pools = [item for item in view.pools if item.item_type == item_type]
+    pools = [
+        item for item in view.pools
+        if item.item_type == item_type and not _is_hidden_analysis_pool(item)
+    ]
     return sorted(
         pools,
         key=lambda item: (
@@ -400,6 +403,11 @@ def _recent_gacha_pools(view: GachaAnalysis, item_type: str) -> list[PoolAnalysi
             item.name,
         ),
     )
+
+
+def _is_hidden_analysis_pool(pool: PoolAnalysis) -> bool:
+    identity = f"{pool.pool_id} {pool.name}".casefold()
+    return any(marker in identity for marker in ("standard", "基础寻访", "常驻池"))
 
 
 def _gacha_column_render_rows(pools: list[PoolAnalysis]) -> int:
@@ -561,7 +569,17 @@ def _draw_gacha_pool(pool: PoolAnalysis) -> str:
     rows.extend(_draw_free_pull_row(batch) for batch in pool.free_batches)
     empty = '<div class="pool-empty">本池记录中尚无六星</div>' if not pool.six_stars and not pool.free_batches and not pool.keepsake_gifts else ""
     latest = format_timestamp(pool.latest_ts).split(" ", 1)[0]
-    current_tag = '<span class="current-tag">CURRENT</span>' if pool.is_current else ""
+    current_tag = (
+        '<span class="current-tag">CURRENT</span>'
+        if pool.is_current and pool.item_type != "武器" else ""
+    )
+    banner_items = tuple(item for item in pool.banners if item.image_path)[:2]
+    banner_art = _draw_gacha_pool_banner(banner_items)
+    banner_class = " has-banner" if banner_art else ""
+    if banner_art and any(item.item_type == "角色" for item in banner_items):
+        banner_class += " character-banner-head"
+    elif banner_art:
+        banner_class += " weapon-banner-head"
     paid_total = _pool_paid_total(pool)
     total_caption = f"计保底 {paid_total} · 垫抽 {pool.since_six_star} · 免费 {pool.free_pull_count}"
     history_caption = (
@@ -571,11 +589,30 @@ def _draw_gacha_pool(pool: PoolAnalysis) -> str:
     pity = _draw_pity_grid(pool) if pool.is_current else ""
     return f"""
     <section class="pool-card">
-      <div class="pool-head"><div class="pool-title"><strong>{current_tag}{esc(pool.name)}</strong><span>{esc(latest)} · {len(pool.six_stars)} 个计保底六星</span></div><div class="pool-total"><b>{pool.total}</b><span>{esc(total_caption)}</span>{history_caption}</div></div>
+      <div class="pool-head{banner_class}">{banner_art}<div class="pool-title"><strong>{current_tag}{esc(pool.name)}</strong><span>{esc(latest)} · {len(pool.six_stars)} 个计保底六星</span></div><div class="pool-total"><b>{pool.total}</b><span>{esc(total_caption)}</span>{history_caption}</div></div>
       {pity}
       <div class="pull-bars">{''.join(rows)}{empty}</div>
     </section>
     """
+
+
+def _draw_gacha_pool_banner(items) -> str:
+    images = []
+    for item in items:
+        image_url = _local_image_data_url(Path(item.image_path))
+        if not image_url:
+            continue
+        kind = "weapon-banner" if item.item_type == "武器" else "character-banner"
+        images.append(
+            f'<img class="{kind}" src="{esc_attr(image_url)}" alt="{esc_attr(item.name)}">'
+        )
+    multi_class = " multi-banner" if len(images) > 1 else ""
+    character_pool = images and any(item.item_type == "角色" for item in items)
+    pool_class = " character-pool-banner" if character_pool else " weapon-pool-banner"
+    return (
+        f'<div class="pool-banner{multi_class}{pool_class}">{"".join(images)}</div>'
+        if images else ""
+    )
 
 
 def _draw_gacha_pull_row(item: SixStarEvent | None, pulls: int, scale: int) -> str:

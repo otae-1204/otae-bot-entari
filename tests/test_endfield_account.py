@@ -328,6 +328,30 @@ class XiaoheiheClientTests(unittest.TestCase):
         self.assertEqual(len(imported.six_stars), 1)
         self.assertTrue(imported.six_stars[0].is_free)
 
+    def test_explicit_six_star_history_ignores_unrelated_nested_items(self):
+        imported = xhh_module.parse_xhh_overview(
+            {
+                "status": "ok",
+                "result": {
+                    "is_bind": True,
+                    "user_info": {"uid": "10001234"},
+                    "gacha_record": [
+                        {
+                            "pool_id": "weapon", "pool_name": "武器池", "total_count": 40,
+                            "six_star_record": [
+                                {"name": "实际产出", "date": "2026-02-01", "diff": 20}
+                            ],
+                            "up_items": [
+                                {"name": "卡池展示武器", "rarity": 6, "date": "2026-02-01"}
+                            ],
+                        }
+                    ],
+                },
+            }
+        )
+
+        self.assertEqual([item.item_name for item in imported.six_stars], ["实际产出"])
+
     def test_rejects_unbound_or_uidless_overview(self):
         with self.assertRaisesRegex(xhh_module.XhhAPIError, "未绑定"):
             xhh_module.parse_xhh_overview({"status": "ok", "result": {"is_bind": False}})
@@ -554,6 +578,65 @@ class EndfieldGachaAssetCacheTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["42式"].icon_path, "C:/cache/42.png")
         cache_images.assert_awaited_once()
+
+    async def test_prepare_pool_banners_uses_warfarin_portrait_and_fz_weapon_icon(self):
+        operator = gacha_assets_module.GachaItemMetadata(
+            "chr_up", "UP干员", 6, "角色", icon_url="https://assets.fz.wiki/operator.png",
+        )
+        weapon = gacha_assets_module.GachaItemMetadata(
+            "wpn_up", "UP武器", 6, "武器", icon_url="https://assets.fz.wiki/weapon.png",
+        )
+        rules = {
+            "character-pool": gacha_assets_module.GachaPoolRule(
+                "character-pool", (operator.item_id,), 120,
+            ),
+            "weapon-pool": gacha_assets_module.GachaPoolRule(
+                "weapon-pool", (weapon.item_id,), 80,
+            ),
+        }
+        cache = gacha_assets_module.EndfieldGachaAssetCache(types.SimpleNamespace())
+        with (
+            mock.patch.object(
+                cache, "_load_catalog",
+                mock.AsyncMock(return_value={operator.item_id: operator, weapon.item_id: weapon}),
+            ),
+            mock.patch.object(
+                cache, "_cache_images",
+                mock.AsyncMock(return_value={
+                    "banner_chr_up": "C:/cache/banner_chr_up.webp",
+                    "wpn_up": "C:/cache/wpn_up.png",
+                }),
+            ) as cache_images,
+            mock.patch.object(
+                cache, "_crop_character_banner",
+                return_value="C:/cache/banner_bust_chr_up.webp",
+            ) as crop_character_banner,
+        ):
+            result = await cache.prepare_pool_banners(rules)
+
+        requested = {item.item_id: item.icon_url for item in cache_images.await_args.args[0]}
+        self.assertEqual(
+            requested["banner_chr_up"],
+            "https://static.warfarin.wiki/v4/characterportrait/chr_up.webp",
+        )
+        self.assertEqual(requested["wpn_up"], weapon.icon_url)
+        self.assertEqual(result["character-pool"][0].name, "UP干员")
+        self.assertEqual(result["character-pool"][0].image_path, "C:/cache/banner_bust_chr_up.webp")
+        crop_character_banner.assert_called_once_with("chr_up", "C:/cache/banner_chr_up.webp")
+
+    def test_character_banner_crop_keeps_centered_upper_body_region(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = gacha_assets_module.EndfieldGachaAssetCache(
+                types.SimpleNamespace(), cache_dir=directory,
+            )
+            source = Path(directory) / "source.png"
+            Image.new("RGBA", (1000, 1000), (120, 80, 40, 255)).save(source)
+
+            result = Path(cache._crop_character_banner("chr_up", str(source)))
+
+            with Image.open(result) as cropped:
+                self.assertEqual(cropped.size, (500, 338))
+            self.assertEqual(result.name, "banner_bust_v1_chr_up.webp")
 
     async def test_prepare_keepsakes_uses_fz_item_name_icon_and_cache(self):
         operator = gacha_assets_module.GachaItemMetadata(
@@ -938,6 +1021,10 @@ class EndfieldGachaServiceTests(unittest.IsolatedAsyncioTestCase):
             "joint", "辉光庆典", "角色", 100, 0, paid_total=100,
             six_stars=(gacha_module.SixStarEvent("庆典", "辉光庆典", "角色", 3),),
         )
+        standard = gacha_module.PoolAnalysis(
+            "standard", "基础寻访", "角色", 200, 0, paid_total=200,
+            six_stars=(gacha_module.SixStarEvent("常驻六星", "基础寻访", "角色", 3),),
+        )
         weapon = gacha_module.PoolAnalysis(
             "weapon", "武器池", "武器", 80, 0, paid_total=80,
             six_stars=tuple(
@@ -951,7 +1038,7 @@ class EndfieldGachaServiceTests(unittest.IsolatedAsyncioTestCase):
         )
 
         role_value = gacha_module.calculate_six_star_expectation(
-            (character, joint, weapon), "角色",
+            (character, joint, standard, weapon), "角色",
         )
         weapon_value = gacha_module.calculate_six_star_expectation(
             (character, joint, weapon), "武器",
@@ -972,7 +1059,7 @@ class EndfieldGachaServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertAlmostEqual(weapon_value.up_after, 53.5389, places=4)
         self.assertEqual((weapon_value.actual_up, weapon_value.up_outcomes), (40, 2))
 
-    def test_analysis_hides_standard_and_excludes_free_ten_from_character_pity(self):
+    def test_analysis_hides_standard_from_card_but_keeps_it_in_totals(self):
         records = [
             store_module.GachaRecord("role", "server", "standard", "基础寻访", "E_CharacterGachaPoolType_Standard", "s1", 1, "s", "基础角色", 6, "角色"),
             store_module.GachaRecord("role", "server", "old", "旧限定", "special", "o1", 10, "o1", "旧六星", 6, "角色"),
@@ -1001,8 +1088,12 @@ class EndfieldGachaServiceTests(unittest.IsolatedAsyncioTestCase):
         result = gacha_module.build_gacha_analysis(self.role, records, [], pool_rules=rules)
         pools = {item.pool_id: item for item in result.pools}
 
-        self.assertNotIn("standard", pools)
-        self.assertEqual((result.total, result.paid_total, result.free_pull_count, result.free_ten_count), (16, 6, 10, 1))
+        self.assertIn("standard", pools)
+        self.assertNotIn(
+            "standard",
+            {item.pool_id for item in draw_module._recent_gacha_pools(result, "角色")},
+        )
+        self.assertEqual((result.total, result.paid_total, result.free_pull_count, result.free_ten_count), (17, 7, 10, 1))
         self.assertFalse(pools["old"].is_current)
         self.assertTrue(pools["current"].is_current)
         self.assertEqual(pools["current"].small_pity_progress, 5)
@@ -1262,7 +1353,11 @@ class EndfieldGachaServiceTests(unittest.IsolatedAsyncioTestCase):
             xhh_metadata={"42式": item},
         )
 
-        self.assertEqual([pool.pool_id for pool in result.pools], ["spring"])
+        self.assertEqual([pool.pool_id for pool in result.pools], ["spring", "standard"])
+        self.assertEqual(
+            [pool.pool_id for pool in draw_module._recent_gacha_pools(result, "角色")],
+            ["spring"],
+        )
         pool = result.pools[0]
         self.assertEqual((pool.total, pool.paid_total, pool.free_pull_count), (130, 120, 10))
         self.assertEqual((pool.since_six_star, pool.small_pity_progress), (20, 20))
@@ -1271,7 +1366,7 @@ class EndfieldGachaServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(pool.six_stars[0].pity_labels, ("小保底",))
         self.assertTrue(pool.large_pity_consumed)
         self.assertEqual(pool.large_pity_consumed_at, 80)
-        self.assertEqual((result.total, result.recorded_total, result.history_missing_count), (130, 0, 130))
+        self.assertEqual((result.total, result.recorded_total, result.history_missing_count), (160, 0, 160))
         self.assertTrue(result.complete)
         self.assertEqual(result.xhh_imported_at, 456)
 
@@ -1295,6 +1390,43 @@ class EndfieldGachaServiceTests(unittest.IsolatedAsyncioTestCase):
             [item.pool_id for item in draw_module._recent_gacha_pools(result, "角色")],
             ["new", "middle", "old"],
         )
+
+    def test_analysis_orders_mixed_sources_by_time_and_recomputes_current_pool(self):
+        records = [
+            store_module.GachaRecord(
+                "role", "server", "official-new", "新官方池", "special", "1",
+                300, "item", "结果", 4, "角色",
+            ),
+            store_module.GachaRecord(
+                "role", "server", "official-middle", "中间官方池", "special", "2",
+                200, "item", "结果", 4, "角色",
+            ),
+        ]
+        imported = store_module.XhhGachaImport(
+            source_uid="role", nickname="甲", total_count=2, imported_at=456,
+            pools=(
+                store_module.XhhGachaPool(
+                    "xhh-new", "旧小黑盒池", "special", "角色", 1,
+                    latest_ts=100, is_current=True, sort_order=0,
+                ),
+                store_module.XhhGachaPool(
+                    "xhh-old", "更旧小黑盒池", "special", "角色", 1,
+                    latest_ts=50, sort_order=1,
+                ),
+            ),
+            six_stars=(),
+        )
+
+        result = gacha_module.build_gacha_analysis(
+            self.role, records, [], xhh_import=imported,
+        )
+        pools = draw_module._recent_gacha_pools(result, "角色")
+
+        self.assertEqual(
+            [item.pool_id for item in pools],
+            ["official-new", "official-middle", "xhh-new", "xhh-old"],
+        )
+        self.assertEqual([item.pool_id for item in pools if item.is_current], ["official-new"])
 
     def test_xhh_character_intervals_inherit_pity_across_special_pools(self):
         pools = (
@@ -1624,6 +1756,40 @@ class EndfieldGachaServiceTests(unittest.IsolatedAsyncioTestCase):
 
 
 class EndfieldNeutralCardTests(unittest.IsolatedAsyncioTestCase):
+    def test_gacha_pool_header_renders_left_character_banner_without_label(self):
+        pool = gacha_module.PoolAnalysis(
+            "special", "限定池", "角色", 10, 0,
+            banners=(gacha_assets_module.GachaPoolBanner(
+                "chr_up", "UP干员", "角色", "C:/cache/up.webp",
+            ),),
+        )
+
+        with mock.patch.object(draw_module, "_local_image_data_url", return_value="data:image/webp;base64,AAA"):
+            body = draw_module._draw_gacha_pool(pool)
+
+        self.assertIn('class="pool-head has-banner character-banner-head"', body)
+        self.assertIn('class="pool-banner character-pool-banner"', body)
+        self.assertIn('class="character-banner"', body)
+        self.assertNotIn("UP ·", body)
+        self.assertNotIn('class="pool-up-name"', body)
+        self.assertIn("data:image/webp;base64,AAA", body)
+
+    def test_gacha_pool_header_renders_left_weapon_banner(self):
+        pool = gacha_module.PoolAnalysis(
+            "weapon", "武器池", "武器", 20, 0,
+            banners=(gacha_assets_module.GachaPoolBanner(
+                "wpn_up", "UP武器", "武器", "C:/cache/up.png",
+            ),),
+        )
+
+        with mock.patch.object(draw_module, "_local_image_data_url", return_value="data:image/png;base64,AAA"):
+            body = draw_module._draw_gacha_pool(pool)
+
+        self.assertIn('class="pool-head has-banner weapon-banner-head"', body)
+        self.assertIn('class="pool-banner weapon-pool-banner"', body)
+        self.assertIn('class="weapon-banner"', body)
+        self.assertNotIn('class="pool-up-name"', body)
+
     def test_gacha_summary_splits_up_and_six_star_expectations(self):
         character = gacha_module.PoolAnalysis(
             "special", "限定池", "角色", 100, 0, paid_total=100,
@@ -1848,6 +2014,7 @@ class EndfieldNeutralCardTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn('style="width:50.0%"', draw_module._draw_gacha_pool(character))
         weapon_html = draw_module._draw_gacha_pool(weapon)
+        self.assertNotIn("CURRENT", weapon_html)
         self.assertIn('style="width:100.0%"', weapon_html)
         self.assertIn("第80抽", weapon_html)
         self.assertIn("小保底", weapon_html)

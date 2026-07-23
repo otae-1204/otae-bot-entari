@@ -278,9 +278,8 @@ def parse_xhh_overview(payload: object) -> XhhGachaImport:
             "six_records", "star6_list", "six_detail_list", "six_star_detail",
             "six_star_info", "six_star_data", "star6_record", "history",
         )
-        discovered_six = _discover_six_star_records(raw_pool)
-        if discovered_six:
-            raw_six = discovered_six
+        if raw_six is None:
+            raw_six = _discover_six_star_records(raw_pool)
         parsed_six = _parse_six_stars(pool_id, pool_name, item_type, raw_six, total_count, current_count)
         latest_ts = max(
             _parse_timestamp(_first(raw_pool, "latest_time", "update_time", "last_time", "end_time")),
@@ -373,6 +372,15 @@ def _discover_six_star_records(raw_pool: dict[str, Any]) -> list[dict[str, Any]]
     for path, item in _walk_dicts_with_path(raw_pool):
         if item is raw_pool:
             continue
+        path_identity = " ".join(path).casefold()
+        if not any(
+            marker in path_identity
+            for marker in (
+                "six", "star6", "6star", "free_ten", "free", "gift", "gratis",
+                "六星", "免费", "赠送",
+            )
+        ):
+            continue
         if not _first(item, "name", "item_name", "char_name", "weapon_name"):
             continue
         rarity = _first_int(item, "rarity", "star", "star_level", "rank")
@@ -380,7 +388,6 @@ def _discover_six_star_records(raw_pool: dict[str, Any]) -> list[dict[str, Any]]
             continue
         if rarity >= 6 or any(key in item for key in signal_keys):
             copied = dict(item)
-            path_identity = " ".join(path).casefold()
             if any(marker in path_identity for marker in ("free", "gift", "gratis", "免费", "赠送")):
                 copied["__xhh_is_free"] = True
             result.append(copied)

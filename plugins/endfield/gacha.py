@@ -12,7 +12,7 @@ from typing import Awaitable, Callable
 from .account_client import CHARACTER_POOL_TYPES, EndfieldAPIError, EndfieldOfficialClient
 from .account_crypto import CredentialCipher
 from .account_store import EndfieldRole, EndfieldStore, GachaRecord, XhhGachaImport, XhhGachaPool, XhhSixStar
-from .gacha_assets import GachaItemMetadata, GachaPoolRule, apply_gacha_metadata
+from .gacha_assets import GachaItemMetadata, GachaPoolBanner, GachaPoolRule, apply_gacha_metadata
 
 
 POOL_TYPE_LABELS = {
@@ -112,6 +112,7 @@ class PoolAnalysis:
     keepsake_gifts: tuple[KeepsakeGift, ...] = ()
     sort_order: int = -1
     up_item_ids: tuple[str, ...] = ()
+    banners: tuple[GachaPoolBanner, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -275,6 +276,7 @@ class EndfieldGachaService:
         pool_rules: dict[str, GachaPoolRule] | None = None,
         xhh_metadata: dict[str, GachaItemMetadata] | None = None,
         keepsake_metadata: dict[str, GachaItemMetadata] | None = None,
+        pool_banners: dict[str, tuple[GachaPoolBanner, ...]] | None = None,
     ) -> GachaAnalysis:
         records = self.store.list_gacha_records(role, limit=100000)
         states = self.store.list_sync_states(role)
@@ -284,6 +286,7 @@ class EndfieldGachaService:
             role, records, states, metadata, pool_rules, pool_totals,
             xhh_import=xhh_import, xhh_metadata=xhh_metadata,
             keepsake_metadata=keepsake_metadata,
+            pool_banners=pool_banners,
         )
 
 
@@ -298,19 +301,17 @@ def build_gacha_analysis(
     xhh_import: XhhGachaImport | None = None,
     xhh_metadata: dict[str, GachaItemMetadata] | None = None,
     keepsake_metadata: dict[str, GachaItemMetadata] | None = None,
+    pool_banners: dict[str, tuple[GachaPoolBanner, ...]] | None = None,
 ) -> GachaAnalysis:
     metadata = metadata or {}
     pool_rules = pool_rules or {}
     pool_total_overrides = pool_total_overrides or {}
     xhh_metadata = xhh_metadata or {}
     keepsake_metadata = keepsake_metadata or {}
+    pool_banners = pool_banners or {}
     if xhh_import is not None:
         xhh_import = filter_xhh_import_six_stars(xhh_import, xhh_metadata)
-    records = [
-        item
-        for item in apply_gacha_metadata(records, metadata)
-        if not _is_hidden_standard_pool(item)
-    ]
+    records = list(apply_gacha_metadata(records, metadata))
     rarity_counts = dict(sorted(Counter(item.rarity for item in records).items(), reverse=True))
     grouped: dict[tuple[str, str], list[GachaRecord]] = defaultdict(list)
     for record in records:
@@ -464,11 +465,13 @@ def build_gacha_analysis(
                 history_missing_count=total - recorded_total,
                 keepsake_gifts=tuple(reversed(keepsake_gifts)),
                 up_item_ids=pool_rule.up_item_ids if pool_rule else (),
+                banners=pool_banners.get(pool_id, ()),
             )
         )
     if xhh_import is not None:
         pools = _merge_xhh_pools(
-            pools, xhh_import, metadata, xhh_metadata, pool_rules, keepsake_metadata
+            pools, xhh_import, metadata, xhh_metadata, pool_rules, keepsake_metadata,
+            pool_banners,
         )
     pools.sort(key=_pool_analysis_sort_key)
     if xhh_import is not None:
@@ -518,19 +521,17 @@ def _merge_xhh_pools(
     xhh_metadata: dict[str, GachaItemMetadata],
     pool_rules: dict[str, GachaPoolRule],
     keepsake_metadata: dict[str, GachaItemMetadata],
+    pool_banners: dict[str, tuple[GachaPoolBanner, ...]],
 ) -> list[PoolAnalysis]:
-    visible_snapshots = [item for item in imported.pools if not _is_hidden_xhh_pool(item)]
+    snapshots = list(imported.pools)
     character_intervals, character_progress = _xhh_character_pity_state(imported)
-    current_types = {item.item_type for item in visible_snapshots if item.is_current}
-    result = [
-        replace(item, is_current=False) if item.item_type in current_types else item
-        for item in pools
-    ]
+    result = list(pools)
+    xhh_sort_timestamps = _xhh_pool_sort_timestamps(snapshots)
     six_by_pool: dict[str, list[XhhSixStar]] = defaultdict(list)
     for item in imported.six_stars:
         six_by_pool[item.pool_id].append(item)
 
-    for snapshot in visible_snapshots:
+    for snapshot in snapshots:
         existing_index = next(
             (
                 index for index, pool in enumerate(result)
@@ -662,12 +663,15 @@ def _merge_xhh_pools(
             up_item_ids=(
                 rule.up_item_ids if rule else (existing.up_item_ids if existing else ())
             ),
+            banners=pool_banners.get(
+                snapshot.pool_id, existing.banners if existing else (),
+            ),
         )
         if existing_index is None:
             result.append(merged)
         else:
             result[existing_index] = merged
-    return result
+    return _reorder_merged_pools(result, xhh_sort_timestamps)
 
 
 def _xhh_character_pity_state(
@@ -1095,12 +1099,80 @@ def _pool_analysis_sort_key(pool: PoolAnalysis) -> tuple[int, int, int, str]:
     return (1, 0, -pool.latest_ts, pool.name)
 
 
-def _is_hidden_xhh_pool(pool: XhhGachaPool) -> bool:
-    return (
-        pool.pool_id.casefold() == "standard"
-        or "standard" in pool.pool_type.casefold()
-        or pool.pool_name.strip() == "基础寻访"
-    )
+def _xhh_pool_sort_timestamps(
+    pools: list[XhhGachaPool],
+) -> dict[tuple[str, str], int]:
+    result: dict[tuple[str, str], int] = {}
+    grouped: dict[str, list[XhhGachaPool]] = defaultdict(list)
+    for pool in pools:
+        grouped[pool.item_type].append(pool)
+    for item_type, items in grouped.items():
+        ordered = sorted(
+            items,
+            key=lambda item: (
+                item.sort_order if item.sort_order >= 0 else 1_000_000,
+                -item.latest_ts,
+                item.pool_name,
+            ),
+        )
+        for index, pool in enumerate(ordered):
+            timestamp = pool.latest_ts
+            if not timestamp:
+                previous = next(
+                    (
+                        (previous_index, ordered[previous_index].latest_ts)
+                        for previous_index in range(index - 1, -1, -1)
+                        if ordered[previous_index].latest_ts
+                    ),
+                    None,
+                )
+                following = next(
+                    (
+                        (following_index, ordered[following_index].latest_ts)
+                        for following_index in range(index + 1, len(ordered))
+                        if ordered[following_index].latest_ts
+                    ),
+                    None,
+                )
+                if previous and following and previous[1] > following[1]:
+                    span = following[0] - previous[0]
+                    timestamp = previous[1] - (
+                        (previous[1] - following[1]) * (index - previous[0]) // span
+                    )
+                elif previous:
+                    timestamp = max(1, previous[1] - (index - previous[0]) * 86_400)
+                elif following:
+                    timestamp = following[1] + (following[0] - index) * 86_400
+                else:
+                    timestamp = len(ordered) - index
+            result[(pool.pool_id, item_type)] = timestamp
+    return result
+
+
+def _reorder_merged_pools(
+    pools: list[PoolAnalysis],
+    xhh_sort_timestamps: dict[tuple[str, str], int],
+) -> list[PoolAnalysis]:
+    result = list(pools)
+    for item_type in {pool.item_type for pool in result}:
+        indexes = [index for index, pool in enumerate(result) if pool.item_type == item_type]
+        indexes.sort(
+            key=lambda index: (
+                -max(
+                    result[index].latest_ts,
+                    xhh_sort_timestamps.get((result[index].pool_id, item_type), 0),
+                ),
+                result[index].name,
+                result[index].pool_id,
+            )
+        )
+        for sort_order, index in enumerate(indexes):
+            result[index] = replace(
+                result[index],
+                sort_order=sort_order,
+                is_current=sort_order == 0,
+            )
+    return result
 
 
 def _is_xhh_special_character_pool(pool: XhhGachaPool) -> bool:
@@ -1112,12 +1184,6 @@ def _is_xhh_special_character_pool(pool: XhhGachaPool) -> bool:
     )
 
 
-def _is_hidden_standard_pool(record: GachaRecord) -> bool:
-    return (
-        record.pool_id.casefold() == "standard"
-        or "standard" in record.pool_type.casefold()
-        or record.pool_name.strip() == "基础寻访"
-    )
 
 
 def _is_joint_character_pool(record: GachaRecord) -> bool:

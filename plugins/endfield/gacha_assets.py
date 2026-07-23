@@ -23,6 +23,7 @@ CATALOG_TTL_SECONDS = 24 * 60 * 60
 IMAGE_NAMESPACE = "endfield-gacha-images"
 POOL_ARTICLE_PREFIX = "卡池/"
 KEEPSAKE_ARTICLE_PREFIX = "物品/干员信物/"
+WARFARIN_STATIC_BASE = "https://static.warfarin.wiki/v4"
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +44,14 @@ class GachaPoolRule:
     hard_guarantee: int = 0
     pool_name: str = ""
     pool_kind: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class GachaPoolBanner:
+    item_id: str
+    name: str
+    item_type: str
+    image_path: str = ""
 
 
 class EndfieldGachaAssetCache:
@@ -148,6 +157,56 @@ class EndfieldGachaAssetCache:
             )
             if item.icon_path else item
             for operator_id, item in prepared.items()
+        }
+
+    async def prepare_pool_banners(
+        self,
+        pool_rules: dict[str, GachaPoolRule],
+    ) -> dict[str, tuple[GachaPoolBanner, ...]]:
+        catalog = await self._load_catalog()
+        requested_ids = tuple(dict.fromkeys(
+            item_id
+            for rule in pool_rules.values()
+            for item_id in rule.up_item_ids
+            if item_id in catalog
+        ))
+        cache_items: list[GachaItemMetadata] = []
+        cache_ids: dict[str, str] = {}
+        for item_id in requested_ids:
+            item = catalog[item_id]
+            if item.item_type == "角色":
+                cache_id = f"banner_{item_id}"
+                cache_items.append(replace(
+                    item,
+                    item_id=cache_id,
+                    icon_url=f"{WARFARIN_STATIC_BASE}/characterportrait/{item_id}.webp",
+                ))
+            else:
+                cache_id = item_id
+                cache_items.append(item)
+            cache_ids[item_id] = cache_id
+        cached_paths = await self._cache_images([
+            item for item in cache_items if item.icon_url
+        ])
+        banners_by_item: dict[str, GachaPoolBanner] = {}
+        for item_id in requested_ids:
+            item = catalog[item_id]
+            image_path = cached_paths.get(cache_ids[item_id], self._existing_icon_path(item_id))
+            if item.item_type == "角色" and image_path:
+                image_path = self._crop_character_banner(item_id, image_path)
+            banners_by_item[item_id] = GachaPoolBanner(
+                item_id,
+                item.name,
+                item.item_type,
+                image_path,
+            )
+        return {
+            pool_id: tuple(
+                banners_by_item[item_id]
+                for item_id in rule.up_item_ids
+                if item_id in banners_by_item
+            )
+            for pool_id, rule in pool_rules.items()
         }
 
     async def prepare_pool_rules(self, records: Iterable[GachaRecord]) -> dict[str, GachaPoolRule]:
@@ -329,6 +388,27 @@ class EndfieldGachaAssetCache:
             target.parent.mkdir(parents=True, exist_ok=True)
             temporary = target.with_suffix(".png.tmp")
             normalized.save(temporary, format="PNG", optimize=True)
+            temporary.replace(target)
+            return str(target.resolve())
+        except (OSError, ValueError):
+            return str(source.resolve()) if source.is_file() else source_path
+
+    def _crop_character_banner(self, item_id: str, source_path: str) -> str:
+        source = Path(source_path)
+        target = self.cache_dir / f"banner_bust_v1_{_safe_item_id(item_id)}.webp"
+        try:
+            if target.is_file() and target.stat().st_size > 0:
+                return str(target.resolve())
+            with Image.open(source) as opened:
+                image = opened.convert("RGBA")
+            crop_width = max(1, round(image.width * 0.50))
+            crop_height = max(1, round(crop_width / 1.48))
+            left = max(0, (image.width - crop_width) // 2)
+            top = max(0, min(image.height - crop_height, round(image.height * 0.19)))
+            cropped = image.crop((left, top, left + crop_width, top + crop_height))
+            target.parent.mkdir(parents=True, exist_ok=True)
+            temporary = target.with_suffix(".webp.tmp")
+            cropped.save(temporary, format="WEBP", quality=90, method=6)
             temporary.replace(target)
             return str(target.resolve())
         except (OSError, ValueError):

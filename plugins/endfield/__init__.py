@@ -445,9 +445,12 @@ async def _handle_gacha(
         gacha_asset_cache.prepare_pool_rules(records),
         gacha_asset_cache.prepare_names(xhh_names),
     )
-    keepsake_metadata = await gacha_asset_cache.prepare_keepsakes(pool_rules)
+    keepsake_metadata, pool_banners = await asyncio.gather(
+        gacha_asset_cache.prepare_keepsakes(pool_rules),
+        gacha_asset_cache.prepare_pool_banners(pool_rules),
+    )
     analysis = gacha_service.analysis(
-        role, metadata, pool_rules, xhh_metadata, keepsake_metadata,
+        role, metadata, pool_rules, xhh_metadata, keepsake_metadata, pool_banners,
     )
     pngs = await draw_gacha_analysis_cards(analysis, uid=role.masked_uid)
     return await _finish_pngs(matcher, pngs)
