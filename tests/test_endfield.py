@@ -366,6 +366,25 @@ class EndfieldCommandParserTests(unittest.TestCase):
         self.assertIsNone(selected)
         self.assertEqual(len(ambiguous), 1)
 
+    def test_candidate_selection_uses_display_order_and_validates_number(self):
+        candidates = [
+            commands.EndfieldCandidate("equipment", "third", "第三项", 70),
+            commands.EndfieldCandidate("operator", "first", "第一项", 95),
+            commands.EndfieldCandidate("weapon", "second", "第二项", 80),
+        ]
+
+        options = commands.candidate_options(candidates)
+        message = commands.format_candidates(options, interactive=True)
+
+        self.assertEqual([item.key for item in options], ["first", "second", "third"])
+        self.assertIn("1. [干员] 第一项 (first)", message)
+        self.assertIn("2. [武器] 第二项 (second)", message)
+        self.assertIn("可引用本消息并回复 1-3 查询对应内容，也可不回复并忽略本消息", message)
+        self.assertEqual(commands.parse_candidate_selection(" 2 ", len(options)), 1)
+        self.assertIsNone(commands.parse_candidate_selection("0", len(options)))
+        self.assertIsNone(commands.parse_candidate_selection("4", len(options)))
+        self.assertIsNone(commands.parse_candidate_selection("第二个", len(options)))
+
     def test_dev_visibility_uses_superusers(self):
         self.assertTrue(commands.dev_visible_for_user("246", ["100", "246"]))
         self.assertFalse(commands.dev_visible_for_user("135", ["100", "246"]))

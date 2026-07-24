@@ -31,6 +31,7 @@ from arclet.entari import (
 )
 from arclet.entari.command import Match as CommandMatch
 from arclet.entari.event.base import NoticeEvent
+from arclet.letoderea import defer, step_out
 from loguru import logger
 from nepattern import AnyString
 from satori import ChannelType
@@ -499,6 +500,31 @@ async def prompt(message: str, timeout: int = 60):
         logger.warning("[entari] prompt message connection interrupted; retrying once")
         await asyncio.sleep(0.25)
         return await session.prompt(message, timeout=timeout)
+
+
+async def prompt_silently(message: str, timeout: int = 60):
+    session = _current_session()
+    sent_messages = await session.send(message)
+    message_ids = {
+        str(item.id)
+        for item in sent_messages or ()
+        if getattr(item, "id", None) is not None
+    }
+
+    async def waiter(content: MessageChain, candidate_session: Session):
+        quote_id = str(getattr(getattr(candidate_session.event, "quote", None), "id", "") or "")
+        if not quote_id or quote_id not in message_ids:
+            return None
+        if session.event.user and session.event.user.id == candidate_session.event.user.id:
+            if candidate_session.event.channel.type == ChannelType.DIRECT:
+                return content
+            if session.event.channel and candidate_session.event.channel.id == session.event.channel.id:
+                return content
+
+    waiter.__annotations__ = {"content": MessageChain, "candidate_session": Session}
+    step = step_out(MessageCreatedEvent, waiter, block=False, priority=15)
+    defer(step.dispose)
+    return await step.wait(timeout=timeout)
 
 
 def _takes_one_arg(func: Callable[..., Any]) -> bool:

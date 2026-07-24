@@ -355,6 +355,82 @@ class CoreLogicTests(unittest.TestCase):
         self.assertEqual(session.calls, 2)
         sleep.assert_awaited_once_with(0.25)
 
+    def test_entari_silent_prompt_does_not_send_timeout_message(self):
+        entari_native = _load_module(
+            "entari_native_silent_prompt_for_test", "utils/entari_native.py"
+        )
+
+        class FakeSession:
+            def __init__(self):
+                self.event = types.SimpleNamespace(
+                    user=types.SimpleNamespace(id="user"),
+                    channel=types.SimpleNamespace(id="private", type=entari_native.ChannelType.DIRECT),
+                )
+                self.sent = []
+
+            async def send(self, message):
+                self.sent.append(message)
+                return [types.SimpleNamespace(id="candidate-message")]
+
+        class FakeStep:
+            def __init__(self, handler, block):
+                self.handler = handler
+                self.block = block
+                self.disposed = False
+
+            async def wait(self, timeout):
+                self.timeout = timeout
+                content = entari_native.MessageChain("2")
+                non_reply = types.SimpleNamespace(event=types.SimpleNamespace(
+                    user=types.SimpleNamespace(id="user"),
+                    channel=types.SimpleNamespace(id="private", type=entari_native.ChannelType.DIRECT),
+                    quote=None,
+                ))
+                wrong_reply = types.SimpleNamespace(event=types.SimpleNamespace(
+                    user=types.SimpleNamespace(id="user"),
+                    channel=types.SimpleNamespace(id="private", type=entari_native.ChannelType.DIRECT),
+                    quote=entari_native.Quote("other-message"),
+                ))
+                correct_reply = types.SimpleNamespace(event=types.SimpleNamespace(
+                    user=types.SimpleNamespace(id="user"),
+                    channel=types.SimpleNamespace(id="private", type=entari_native.ChannelType.DIRECT),
+                    quote=entari_native.Quote("candidate-message"),
+                ))
+                self.non_reply_result = await self.handler(content, non_reply)
+                self.wrong_reply_result = await self.handler(content, wrong_reply)
+                return await self.handler(content, correct_reply)
+
+            def dispose(self):
+                self.disposed = True
+
+        async def exercise():
+            session = FakeSession()
+            captured = {}
+
+            def fake_step_out(_event_type, handler, *, block, priority):
+                captured["priority"] = priority
+                captured["step"] = FakeStep(handler, block)
+                return captured["step"]
+
+            token = entari_native._CURRENT_SESSION.set(session)
+            try:
+                with patch.object(entari_native, "step_out", side_effect=fake_step_out), patch.object(
+                    entari_native, "defer", side_effect=lambda callback: callback
+                ):
+                    result = await entari_native.prompt_silently("候选列表", timeout=60)
+            finally:
+                entari_native._CURRENT_SESSION.reset(token)
+            return session, captured["step"], result
+
+        session, step, result = asyncio.run(exercise())
+
+        self.assertEqual(str(result), "2")
+        self.assertEqual(session.sent, ["候选列表"])
+        self.assertEqual(step.timeout, 60)
+        self.assertFalse(step.block)
+        self.assertIsNone(step.non_reply_result)
+        self.assertIsNone(step.wrong_reply_result)
+
     def test_no_direct_adapter_get_name_calls_remain(self):
         offenders = []
         for base in (ROOT / "plugins", ROOT / "utils"):

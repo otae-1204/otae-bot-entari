@@ -408,15 +408,36 @@ def format_not_found(scope: str, query: str) -> str:
     return f"未找到{label}：{query}\n可以尝试 /ef 搜索 {query}"
 
 
-def format_candidates(candidates: Sequence[EndfieldCandidate], *, title: str = "找到多个可能结果") -> str:
+def candidate_options(candidates: Sequence[EndfieldCandidate], *, limit: int = 8) -> list[EndfieldCandidate]:
+    return sorted(candidates, key=lambda candidate: candidate.score, reverse=True)[:limit]
+
+
+def parse_candidate_selection(value: str, option_count: int) -> int | None:
+    text = str(value or "").strip()
+    if not text.isdecimal():
+        return None
+    index = int(text) - 1
+    return index if 0 <= index < option_count else None
+
+
+def format_candidates(
+    candidates: Sequence[EndfieldCandidate],
+    *,
+    title: str = "找到多个可能结果",
+    interactive: bool = False,
+) -> str:
     if not candidates:
         return "未找到相关结果。"
+    options = candidate_options(candidates)
     lines = [f"{title}："]
-    for index, item in enumerate(sorted(candidates, key=lambda candidate: candidate.score, reverse=True)[:8], 1):
+    for index, item in enumerate(options, 1):
         label = SCOPE_LABELS.get(item.kind, item.kind)
         suffix = f" ({item.key})" if item.key and item.key != item.display_name else ""
         lines.append(f"{index}. [{label}] {item.display_name}{suffix}")
-    lines.append("请使用 /ef 干员 <名称>、/ef 武器 <名称> 或 /ef 装备 <名称> 精确查询。")
+    if interactive:
+        lines.append(f"可引用本消息并回复 1-{len(options)} 查询对应内容，也可不回复并忽略本消息。")
+    else:
+        lines.append("请使用 /ef 干员 <名称>、/ef 武器 <名称> 或 /ef 装备 <名称> 精确查询。")
     return "\n".join(lines)
 
 

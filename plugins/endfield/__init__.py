@@ -17,7 +17,7 @@ from nepattern import AnyString
 
 from configs.config import Config
 from utils.async_cache import AsyncTTLCache, CacheStats
-from utils.entari_native import ArgVal, ChainMsg, event_user_id, is_group, make_image, on_alconna, prompt
+from utils.entari_native import ArgVal, ChainMsg, event_user_id, is_group, make_image, on_alconna, prompt, prompt_silently
 from utils.http_client import clear_http_cache, get_http_cache_stats
 from utils.temp_files import schedule_temp_file_cleanup
 
@@ -33,6 +33,7 @@ from .commands import (
     ParsedLoadoutSpec,
     ROOT_ALIASES,
     choose_candidate,
+    candidate_options,
     dev_visible_for_user,
     format_candidates,
     format_error,
@@ -42,6 +43,7 @@ from .commands import (
     format_unknown,
     normalize_alias_kind,
     parse_command,
+    parse_candidate_selection,
     parse_loadout_spec,
     parse_shortcut_command,
     score_candidate,
@@ -242,7 +244,18 @@ async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand)
 
         selected, ambiguous = choose_candidate(candidates)
         if ambiguous:
-            return await matcher.finish(format_candidates(ambiguous))
+            options = candidate_options(ambiguous)
+            answer = await prompt_silently(format_candidates(options, interactive=True), timeout=60)
+            if answer is None:
+                return await matcher.finish()
+            text = answer.extract_plain_text() if hasattr(answer, "extract_plain_text") else str(answer or "")
+            text = text.strip()
+            if text.casefold() in {"取消", "cancel", "q", "quit"}:
+                return await matcher.finish("已取消候选查询。")
+            selection = parse_candidate_selection(text, len(options))
+            if selection is None:
+                return await matcher.finish(f"编号无效，请输入 1-{len(options)}。")
+            selected = options[selection]
         if selected is None:
             return await matcher.finish(format_not_found(command.scope, command.query))
 
