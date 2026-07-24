@@ -318,8 +318,12 @@ def score_candidate(query: str, *values: str) -> int:
         if not normalized_value:
             continue
         best = max(best, _score_normalized_pair(normalized_query, normalized_value))
-        for query_key, value_key in zip(query_keys, _search_keys(value)):
-            best = max(best, min(_score_search_key_pair(query_key, value_key), 88))
+        value_keys = _search_keys(value)
+        pinyin_score = _score_search_key_pair(query_keys[0], value_keys[0])
+        if normalized_query.isascii() or pinyin_score >= 82:
+            best = max(best, min(pinyin_score, 88))
+        if normalized_query.isascii() and query_keys[1] == value_keys[1] and len(query_keys[1]) >= 2:
+            best = max(best, 88)
     return best
 
 
@@ -408,8 +412,37 @@ def format_not_found(scope: str, query: str) -> str:
     return f"未找到{label}：{query}\n可以尝试 /ef 搜索 {query}"
 
 
-def candidate_options(candidates: Sequence[EndfieldCandidate], *, limit: int = 8) -> list[EndfieldCandidate]:
-    return sorted(candidates, key=lambda candidate: candidate.score, reverse=True)[:limit]
+def candidate_options(
+    candidates: Sequence[EndfieldCandidate],
+    *,
+    query: str = "",
+    limit: int = 8,
+) -> list[EndfieldCandidate]:
+    ordered = sorted(candidates, key=lambda candidate: candidate.score, reverse=True)
+    normalized_query = _normalize(query)
+    if normalized_query:
+        literal_matches = [
+            candidate
+            for candidate in ordered
+            if any(
+                normalized_query in _normalize(value)
+                for value in (candidate.display_name, candidate.key)
+            )
+        ]
+        if literal_matches:
+            ordered = literal_matches
+        else:
+            accurate_matches = [
+                candidate
+                for candidate in ordered
+                if score_entity_candidate(
+                    candidate.kind,
+                    query,
+                    candidate.display_name,
+                ) >= CANDIDATE_SCORE_THRESHOLD
+            ]
+            ordered = accurate_matches
+    return ordered[:limit]
 
 
 def parse_candidate_selection(value: str, option_count: int) -> int | None:
@@ -667,7 +700,8 @@ def _score_normalized_pair(query: str, value: str) -> int:
     if len(query) == len(value) and len(query) <= 4:
         diff_count = sum(left != right for left, right in zip(query, value))
         if diff_count == 1:
-            best = max(best, 78 if len(query) <= 2 else 82)
+            if len(query) >= 3:
+                best = max(best, 82)
         elif diff_count == 2 and len(query) >= 3:
             best = max(best, 66)
 

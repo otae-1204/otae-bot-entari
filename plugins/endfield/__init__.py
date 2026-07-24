@@ -244,7 +244,9 @@ async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand)
 
         selected, ambiguous = choose_candidate(candidates)
         if ambiguous:
-            options = candidate_options(ambiguous)
+            options = candidate_options(ambiguous, query=command.query)
+            if not options:
+                return await matcher.finish(format_not_found(command.scope, command.query))
             answer = await prompt_silently(format_candidates(options, interactive=True), timeout=60)
             if answer is None:
                 return await matcher.finish()

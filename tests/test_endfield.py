@@ -190,6 +190,34 @@ class EndfieldCommandParserTests(unittest.TestCase):
             commands.score_candidate("塞希", "集成实训护甲"),
             commands.CANDIDATE_SCORE_THRESHOLD,
         )
+        self.assertGreaterEqual(
+            commands.score_candidate("供养栓", "拓荒供氧栓"),
+            commands.CANDIDATE_SCORE_THRESHOLD,
+        )
+        self.assertLess(
+            commands.score_candidate("供养栓", "轻超域护手", "轻域手"),
+            commands.CANDIDATE_SCORE_THRESHOLD,
+        )
+        self.assertLess(
+            commands.score_entity_candidate("operator", "萝莉", "莱万汀"),
+            commands.CANDIDATE_SCORE_THRESHOLD,
+        )
+        self.assertGreaterEqual(
+            commands.score_entity_candidate("operator", "ll", "莱万汀"),
+            commands.CANDIDATE_SCORE_THRESHOLD,
+        )
+        self.assertLess(
+            commands.score_entity_candidate("operator", "栓子", "陈千语"),
+            commands.CANDIDATE_SCORE_THRESHOLD,
+        )
+        self.assertLess(
+            commands.score_entity_candidate("operator", "栓子", "安塔尔"),
+            commands.CANDIDATE_SCORE_THRESHOLD,
+        )
+        self.assertLess(
+            commands.score_entity_candidate("weapon", "栓子", "楔子"),
+            commands.CANDIDATE_SCORE_THRESHOLD,
+        )
 
     def test_alias_library_scores_entities_and_preserves_ambiguity(self):
         self.assertEqual(commands.score_entity_candidate("operator", "lzy", "诀"), 100)
@@ -384,6 +412,53 @@ class EndfieldCommandParserTests(unittest.TestCase):
         self.assertIsNone(commands.parse_candidate_selection("0", len(options)))
         self.assertIsNone(commands.parse_candidate_selection("4", len(options)))
         self.assertIsNone(commands.parse_candidate_selection("第二个", len(options)))
+
+    def test_candidate_options_prioritize_literal_query_matches(self):
+        candidates = [
+            commands.EndfieldCandidate("operator", "干员/赛希", "赛希", 88),
+            commands.EndfieldCandidate("operator", "干员/诀", "诀", 82),
+            commands.EndfieldCandidate("equipment", "装备/拓荒供氧栓", "拓荒供氧栓", 82),
+            commands.EndfieldCandidate("equipment", "装备/拓荒增量供氧栓", "拓荒增量供氧栓", 82),
+            commands.EndfieldCandidate("equipment", "装备/拓荒增量供氧栓·壹型", "拓荒增量供氧栓·壹型", 82),
+            commands.EndfieldCandidate("equipment", "装备/悬河供氧栓", "悬河供氧栓", 82),
+            commands.EndfieldCandidate("equipment", "装备/轻超域护手", "轻超域护手", 82),
+            commands.EndfieldCandidate("operator", "干员/萤石", "萤石", 72),
+        ]
+
+        options = commands.candidate_options(candidates, query="供氧栓")
+
+        self.assertEqual(
+            [item.display_name for item in options],
+            ["拓荒供氧栓", "拓荒增量供氧栓", "拓荒增量供氧栓·壹型", "悬河供氧栓"],
+        )
+
+    def test_candidate_options_filter_low_accuracy_pinyin_matches(self):
+        candidates = [
+            commands.EndfieldCandidate("operator", "干员/赛希", "赛希", 88),
+            commands.EndfieldCandidate("operator", "干员/诀", "诀", 82),
+            commands.EndfieldCandidate("equipment", "装备/拓荒供氧栓", "拓荒供氧栓", 82),
+            commands.EndfieldCandidate("equipment", "装备/拓荒增量供氧栓", "拓荒增量供氧栓", 82),
+            commands.EndfieldCandidate("equipment", "装备/拓荒增量供氧栓·壹型", "拓荒增量供氧栓·壹型", 82),
+            commands.EndfieldCandidate("equipment", "装备/悬河供氧栓", "悬河供氧栓", 82),
+            commands.EndfieldCandidate("equipment", "装备/轻超域护手", "轻超域护手", 82),
+            commands.EndfieldCandidate("operator", "干员/萤石", "萤石", 72),
+        ]
+
+        options = commands.candidate_options(candidates, query="供养栓")
+
+        self.assertEqual(
+            [item.display_name for item in options],
+            ["拓荒供氧栓", "拓荒增量供氧栓", "拓荒增量供氧栓·壹型", "悬河供氧栓"],
+        )
+
+    def test_candidate_options_drop_unrelated_two_character_typo_matches(self):
+        candidates = [
+            commands.EndfieldCandidate("operator", "干员/陈千语", "陈千语", 78),
+            commands.EndfieldCandidate("operator", "干员/安塔尔", "安塔尔", 78),
+            commands.EndfieldCandidate("weapon", "武器/楔子", "楔子", 78),
+        ]
+
+        self.assertEqual(commands.candidate_options(candidates, query="栓子"), [])
 
     def test_dev_visibility_uses_superusers(self):
         self.assertTrue(commands.dev_visible_for_user("246", ["100", "246"]))
