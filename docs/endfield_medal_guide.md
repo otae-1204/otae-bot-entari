@@ -49,7 +49,7 @@ F1/F2 详情每条显示 **描述**（黑）+ **获取条件**（浅色），分
 ### 4.2 图标档位规则
 - 图标 URL：`{AKEDATA_ICON_BASE}/{achvId}_lv{NN}.png`（每档一张；单档章只有 `_lv01`）。
 - 未获得 → 显示 **init 档**（`_lv{initLevel}`）；未升满左卡 → **当前档**（`_lv{real_level}`），右卡 → **下一档**（`_lv{real_level+1}`）；F1 新增列表 → max 档。
-- 等级横条的档位徽记用三档六边形 PNG（`assets/image/endfield/medal_grade_{1,2,3}.png`），缺图降级到 FZ 剪影 + CSS mask 改色。可用 `scripts/_process_medal_icon.py` 从源图重生。
+- 统计区档位徽记用三档 PNG（`assets/image/endfield/medal_{gold,silver,iron}.png`，3=金 / 2=银 / 1=铁），缺图降级到 FZ 剪影 + CSS mask 改色（`medal_grade.png`）。
 
 ### 4.3 描述 ≠ 条件（两个不同字段）
 | 卡片显示 | AKEData 字段 | 渲染样式 |

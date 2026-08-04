@@ -847,7 +847,7 @@ MEDAL_CARD_CSS = """
 .medal-stats .tile.primary{border:3px solid #222}
 .medal-stats .lv-tile{flex:1;display:flex;align-items:center;justify-content:center;gap:10px;padding:8px;border:1px solid #999;background:#fff}
 .medal-stats .lv-tile strong{margin:0;font-size:26px;line-height:1;font-weight:900;color:#222}
-.medal-stats .lv-tile .grade-icon{width:40px;height:40px;object-fit:contain}
+.medal-stats .lv-tile .grade-icon{width:52px;height:60px;object-fit:contain;flex-shrink:0}
 .medal-section{margin-top:6px}.medal-section h2{margin:0 0 10px;font-size:22px}
 .medal-list{display:grid;gap:8px}.medal-list--double{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
 .medal-item{display:grid;grid-template-columns:80px minmax(0,1fr);gap:12px;align-items:center;padding:8px 10px;border:1px solid #888;background:#fff}
@@ -1024,24 +1024,28 @@ async def draw_medal_missing_card(view: MedalMissingView) -> tuple[bytes, ...]:
     return (await _draw_neutral_card("medal-missing-card", body, extra_css=extra),)
 
 
-# 等级档位徽记：优先用三档六边形 PNG（assets/image/endfield/medal_grade_{1,2,3}.png，
-# 由 scripts/_process_medal_icon.py 从参考图/deco_medal_rare.webp 生成，对齐游戏「光荣之路」
-# 档位图标）；缺图时降级到 FZ 剪影 + CSS mask 改色（assets/image/endfield/medal_grade.png）。
+# 等级档位徽记：优先用三档 PNG（assets/image/endfield/medal_{gold,silver,iron}.png，
+# 1=铁/灰、2=银、3=金）；缺图时降级到 FZ 剪影 + CSS mask 改色（assets/image/endfield/medal_grade.png）。
 _MEDAL_GRADE_ICON_PATH = Path("assets/image/endfield/medal_grade.png")
 _MEDAL_GRADE_MASK_URL: str | None = None  # 懒加载（_local_image_data_url 定义在本文件后段）
-_MEDAL_GRADE_COLORS: dict[int, str] = {
+_MEDAL_GRADE_COLORS: dict[int, str] = {  # mask 降级配色
     1: "#6a6a6a",
     2: "#aab0b8",
     3: "#e3c14a",
 }
+_MEDAL_GRADE_FILES: dict[int, str] = {
+    1: "medal_iron.png",
+    2: "medal_silver.png",
+    3: "medal_gold.png",
+}
 
 
 def _medal_grade_icon(level: int) -> str:
-    """等级档位徽记：优先三档六边形 PNG；缺图降级 FZ 剪影 mask 改色。超出 1/2/3 兜底用第 3 档。"""
-    png_level = level if level in _MEDAL_GRADE_COLORS else 3
-    url = _local_image_data_url(ASSET_DIR / f"medal_grade_{png_level}.png")
+    """等级档位徽记：优先三档 PNG（金/银/铁）；缺图降级 FZ 剪影 mask 改色。超出 1/2/3 兜底用第 3 档。"""
+    grade_level = level if level in _MEDAL_GRADE_COLORS else 3
+    url = _local_image_data_url(ASSET_DIR / _MEDAL_GRADE_FILES[grade_level])
     if url:
-        return f'<img class="grade-icon" alt="{png_level}级蚀刻章" src="{url}">'
+        return f'<img class="grade-icon" alt="{grade_level}级蚀刻章" src="{url}">'
     # 降级：FZ 剪影形状 + CSS mask 按等级变色
     color = _MEDAL_GRADE_COLORS.get(level, "#888")
     global _MEDAL_GRADE_MASK_URL
