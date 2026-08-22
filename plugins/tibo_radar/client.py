@@ -41,6 +41,8 @@ from .models import (
 
 TIBO_HANDLE = "thsottiaux"
 TIBO_PROFILE_URL = "https://x.com/thsottiaux"
+# CodexRadar exposes the profile image used in its Tibo radar rail.
+TIBO_AVATAR_URL = "https://codexradar.com/assets/tibo-x-avatar.jpg"
 CODEXRADAR_HOME = "https://codexradar.com/"
 CODEX_RESET_FEED = "https://codex-reset.com/api/feed?locale=zh"
 CODEX_RESET_TIMELINE = "https://codex-reset.com/api/timeline?locale=zh"

@@ -106,6 +106,65 @@ class TiboRadarTests(unittest.TestCase):
             self.assertEqual(set(saved[0].source_names), {"codex-reset", "codexradar"})
             store.close()
 
+    def test_subscription_starts_after_existing_history_and_tracks_cursor(self):
+        with TemporaryDirectory() as tmp:
+            store = TiboStore(Path(tmp) / "radar.db")
+            store.upsert_post(
+                TiboPost(
+                    post_id="old",
+                    text="old",
+                    url="https://x.com/thsottiaux/status/old",
+                    source_time=datetime(2026, 8, 20, tzinfo=timezone.utc),
+                    source_names=("codex-reset",),
+                )
+            )
+            already, subscription = store.subscribe("group-1", "channel-1")
+            self.assertFalse(already)
+            self.assertEqual(store.posts_after(subscription.last_notified_at.isoformat(), subscription.last_notified_post_id), [])
+
+            store.upsert_post(
+                TiboPost(
+                    post_id="new",
+                    text="new",
+                    url="https://x.com/thsottiaux/status/new",
+                    source_time=datetime(2026, 8, 21, tzinfo=timezone.utc),
+                    source_names=("codex-reset",),
+                )
+            )
+            pending = store.posts_after(subscription.last_notified_at.isoformat(), subscription.last_notified_post_id)
+            self.assertEqual([post.post_id for post in pending], ["new"])
+            cursor = pending[-1].first_seen_at.isoformat()
+            store.mark_subscription_delivered("group-1", cursor, pending[-1].post_id)
+            self.assertEqual(store.posts_after(cursor, "new"), [])
+
+            enabled_again, updated = store.subscribe("group-1", "channel-2")
+            self.assertTrue(enabled_again)
+            self.assertEqual(updated.channel_id, "channel-2")
+            self.assertEqual(updated.last_notified_post_id, "new")
+            store.close()
+
+    def test_new_subscription_skips_initial_snapshot_when_store_is_empty(self):
+        with TemporaryDirectory() as tmp:
+            store = TiboStore(Path(tmp) / "radar.db")
+            already, subscription = store.subscribe("group-1", "channel-1")
+            self.assertFalse(already)
+            self.assertTrue(subscription.baseline_pending)
+            store.upsert_post(
+                TiboPost(
+                    post_id="snapshot",
+                    text="snapshot",
+                    url="https://x.com/thsottiaux/status/snapshot",
+                    source_time=datetime(2026, 8, 20, tzinfo=timezone.utc),
+                    source_names=("codex-reset",),
+                )
+            )
+            store.mark_subscription_initialized("group-1")
+            initialized = store.subscription("group-1")
+            self.assertIsNotNone(initialized)
+            self.assertFalse(initialized.baseline_pending)
+            self.assertEqual(store.posts_after(initialized.last_notified_at.isoformat(), initialized.last_notified_post_id), [])
+            store.close()
+
     def test_service_status_does_not_promote_old_rejected_window(self):
         with TemporaryDirectory() as tmp:
             store = TiboStore(Path(tmp) / "radar.db")

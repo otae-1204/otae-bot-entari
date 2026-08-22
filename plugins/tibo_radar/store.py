@@ -14,6 +14,7 @@ from .models import (
     EVENT_CONFIRMED,
     ResetEvent,
     SourceState,
+    TiboSubscription,
     TiboPost,
     iso_or_empty,
     parse_datetime,
@@ -152,11 +153,33 @@ class TiboStore:
                 consecutive_failures INTEGER NOT NULL DEFAULT 0,
                 updated_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS tibo_subscriptions (
+                group_id TEXT PRIMARY KEY,
+                channel_id TEXT NOT NULL DEFAULT '',
+                enabled INTEGER NOT NULL DEFAULT 1,
+                last_notified_at TEXT NOT NULL DEFAULT '',
+                last_notified_post_id TEXT NOT NULL DEFAULT '',
+                subscribed_at TEXT NOT NULL,
+                baseline_pending INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_tibo_subscriptions_enabled
+                ON tibo_subscriptions(enabled, group_id);
             """
         )
+        subscription_columns = {
+            str(row[1])
+            for row in self.conn.execute("PRAGMA table_info(tibo_subscriptions)").fetchall()
+        }
+        if "baseline_pending" not in subscription_columns:
+            self.conn.execute(
+                "ALTER TABLE tibo_subscriptions ADD COLUMN baseline_pending INTEGER NOT NULL DEFAULT 0"
+            )
         self.conn.commit()
 
-    def upsert_post(self, post: TiboPost) -> None:
+    def upsert_post(self, post: TiboPost) -> bool:
+        """Persist a post and return ``True`` only when it is first seen."""
+
         now = _now()
         existing = self.conn.execute("SELECT * FROM tibo_posts WHERE post_id = ?", (post.post_id,)).fetchone()
         if existing is None:
@@ -172,6 +195,8 @@ class TiboStore:
                 """,
                 values,
             )
+            self.conn.commit()
+            return True
         else:
             current_sources = _tuple(existing["source_names"])
             incoming_sources = _union(current_sources, post.source_names)
@@ -198,6 +223,7 @@ class TiboStore:
                 (text, url, source_time, translation, analysis, relevance, phrases, page_updated_at, fingerprint, _ts(last_seen), _json(incoming_sources), _ts(now), post.post_id),
             )
         self.conn.commit()
+        return False
 
     @staticmethod
     def _post_values(post: TiboPost, first_seen: datetime, last_seen: datetime, source_names: Iterable[str], now: datetime) -> tuple:
@@ -308,8 +334,134 @@ class TiboStore:
     def posts(self, *, relevant_only: bool = False, limit: int = 6) -> list[TiboPost]:
         limit = max(1, min(int(limit), 100))
         where = "WHERE relevance != 'none'" if relevant_only else ""
-        rows = self.conn.execute(f"SELECT * FROM tibo_posts {where} ORDER BY COALESCE(source_time,last_seen_at) DESC LIMIT ?", (limit,)).fetchall()
+        cursor_expr = "COALESCE(NULLIF(source_time,''),NULLIF(last_seen_at,''),NULLIF(first_seen_at,''))"
+        rows = self.conn.execute(
+            f"SELECT * FROM tibo_posts {where} ORDER BY {cursor_expr} DESC, post_id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
         return [self._post_from_row(row) for row in rows]
+
+    def latest_post_cursor(self) -> tuple[str, str]:
+        """Return the newest persisted post cursor, or now for an empty store."""
+
+        cursor_expr = "COALESCE(NULLIF(first_seen_at,''),NULLIF(last_seen_at,''),NULLIF(source_time,''))"
+        row = self.conn.execute(
+            f"SELECT post_id, {cursor_expr} AS cursor_at FROM tibo_posts "
+            "ORDER BY cursor_at DESC, post_id DESC LIMIT 1"
+        ).fetchone()
+        if row and row["cursor_at"]:
+            return str(row["cursor_at"]), str(row["post_id"])
+        return _ts(_now()), ""
+
+    def posts_after(self, cursor_at: str = "", cursor_post_id: str = "", *, limit: int = 100) -> list[TiboPost]:
+        """Read posts strictly after a subscription cursor, oldest first."""
+
+        limit = max(1, min(int(limit), 500))
+        cursor_expr = "COALESCE(NULLIF(first_seen_at,''),NULLIF(last_seen_at,''),NULLIF(source_time,''))"
+        if cursor_at:
+            where = f"WHERE ({cursor_expr} > ? OR ({cursor_expr} = ? AND post_id > ?))"
+            params: tuple[object, ...] = (cursor_at, cursor_at, cursor_post_id, limit)
+        else:
+            where = "WHERE 1=1"
+            params = (limit,)
+        rows = self.conn.execute(
+            f"SELECT * FROM tibo_posts {where} ORDER BY {cursor_expr} ASC, post_id ASC LIMIT ?",
+            params,
+        ).fetchall()
+        return [self._post_from_row(row) for row in rows]
+
+    def subscribe(self, group_id: str | int, channel_id: str | int = "") -> tuple[bool, TiboSubscription]:
+        """Enable a group subscription and start at the current newest post."""
+
+        gid = str(group_id).strip()
+        if not gid:
+            raise ValueError("group_id is required")
+        target = str(channel_id or gid).strip()
+        now = _now()
+        cursor_at, cursor_post_id = self.latest_post_cursor()
+        baseline_pending = not bool(cursor_post_id)
+        existing = self.conn.execute(
+            "SELECT enabled FROM tibo_subscriptions WHERE group_id = ?", (gid,)
+        ).fetchone()
+        if existing and existing["enabled"]:
+            self.conn.execute(
+                "UPDATE tibo_subscriptions SET channel_id=?, updated_at=? WHERE group_id=?",
+                (target, _ts(now), gid),
+            )
+            self.conn.commit()
+            subscription = self.subscription(gid)
+            if subscription is None:  # pragma: no cover - guarded by the row above
+                raise RuntimeError("failed to load Tibo subscription")
+            return True, subscription
+        self.conn.execute(
+            """
+            INSERT INTO tibo_subscriptions(
+                group_id,channel_id,enabled,last_notified_at,last_notified_post_id,subscribed_at,baseline_pending,updated_at
+            ) VALUES(?,?,?,?,?,?,?,?)
+            ON CONFLICT(group_id) DO UPDATE SET
+                channel_id=excluded.channel_id,
+                enabled=1,
+                last_notified_at=excluded.last_notified_at,
+                last_notified_post_id=excluded.last_notified_post_id,
+                subscribed_at=excluded.subscribed_at,
+                baseline_pending=excluded.baseline_pending,
+                updated_at=excluded.updated_at
+            """,
+            (gid, target, 1, cursor_at, cursor_post_id, _ts(now), int(baseline_pending), _ts(now)),
+        )
+        self.conn.commit()
+        subscription = self.subscription(gid)
+        if subscription is None:  # pragma: no cover - guarded by the INSERT above
+            raise RuntimeError("failed to persist Tibo subscription")
+        return bool(existing and existing["enabled"]), subscription
+
+    def unsubscribe(self, group_id: str | int) -> bool:
+        gid = str(group_id).strip()
+        if not gid:
+            return False
+        updated = self.conn.execute(
+            "UPDATE tibo_subscriptions SET enabled=0, updated_at=? WHERE group_id=? AND enabled=1",
+            (_ts(_now()), gid),
+        )
+        self.conn.commit()
+        return updated.rowcount > 0
+
+    def subscription(self, group_id: str | int) -> TiboSubscription | None:
+        row = self.conn.execute(
+            "SELECT * FROM tibo_subscriptions WHERE group_id = ?", (str(group_id).strip(),)
+        ).fetchone()
+        return self._subscription_from_row(row) if row else None
+
+    def subscriptions(self) -> list[TiboSubscription]:
+        rows = self.conn.execute(
+            "SELECT * FROM tibo_subscriptions WHERE enabled=1 ORDER BY group_id"
+        ).fetchall()
+        return [self._subscription_from_row(row) for row in rows]
+
+    def mark_subscription_delivered(self, group_id: str | int, cursor_at: str, post_id: str) -> None:
+        self.conn.execute(
+            """
+            UPDATE tibo_subscriptions
+            SET last_notified_at=?, last_notified_post_id=?, baseline_pending=0, updated_at=?
+            WHERE group_id=? AND enabled=1
+            """,
+            (str(cursor_at or ""), str(post_id or ""), _ts(_now()), str(group_id).strip()),
+        )
+        self.conn.commit()
+
+    def mark_subscription_initialized(self, group_id: str | int) -> None:
+        """Discard the initial snapshot without sending it to a new subscriber."""
+
+        cursor_at, post_id = self.latest_post_cursor()
+        self.conn.execute(
+            """
+            UPDATE tibo_subscriptions
+            SET last_notified_at=?, last_notified_post_id=?, baseline_pending=0, updated_at=?
+            WHERE group_id=? AND enabled=1
+            """,
+            (cursor_at, post_id, _ts(_now()), str(group_id).strip()),
+        )
+        self.conn.commit()
 
     def events(self, *, limit: int = 20, include_rejected: bool = True) -> list[ResetEvent]:
         limit = max(1, min(int(limit), 100))
@@ -361,6 +513,18 @@ class TiboStore:
             translation=str(row["translation"] or ""), analysis=str(row["analysis"] or ""), relevance=str(row["relevance"] or "none"),
             phrases=str(row["phrases"] or ""), page_updated_at=_dt(row["page_updated_at"]), content_fingerprint=str(row["content_fingerprint"] or ""),
             first_seen_at=_dt(row["first_seen_at"]), last_seen_at=_dt(row["last_seen_at"]), source_names=_tuple(row["source_names"]),
+        )
+
+    @staticmethod
+    def _subscription_from_row(row: sqlite3.Row) -> TiboSubscription:
+        return TiboSubscription(
+            group_id=str(row["group_id"]),
+            channel_id=str(row["channel_id"] or ""),
+            enabled=bool(row["enabled"]),
+            last_notified_at=_dt(row["last_notified_at"]),
+            last_notified_post_id=str(row["last_notified_post_id"] or ""),
+            subscribed_at=_dt(row["subscribed_at"]),
+            baseline_pending=bool(row["baseline_pending"]),
         )
 
     @staticmethod

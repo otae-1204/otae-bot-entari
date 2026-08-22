@@ -84,6 +84,24 @@ class TiboPost:
 
 
 @dataclass(slots=True)
+class TiboSubscription:
+    """A persisted group subscription and its delivery cursor."""
+
+    group_id: str
+    channel_id: str = ""
+    enabled: bool = True
+    last_notified_at: datetime | None = None
+    last_notified_post_id: str = ""
+    subscribed_at: datetime | None = None
+    baseline_pending: bool = False
+
+    def __post_init__(self) -> None:
+        self.group_id = str(self.group_id).strip()
+        self.channel_id = str(self.channel_id or "").strip()
+        self.last_notified_post_id = str(self.last_notified_post_id or "").strip()
+
+
+@dataclass(slots=True)
 class ResetEvent:
     event_id: str
     summary: str

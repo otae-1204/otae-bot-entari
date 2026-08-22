@@ -17,13 +17,12 @@ caller can switch a card accent to a feed accent by importing this module.
 
 from __future__ import annotations
 
-import math
 import re
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from utils.image_executor import run_image_render
 
@@ -78,6 +77,9 @@ _CHIP_ALPHA = 30
 _CHIP_EDGE_ALPHA = 150
 
 TIBO_DISPLAY_NAME = "Tibo"
+TIBO_AVATAR_PATH = Path(__file__).resolve().parents[2] / "assets" / "image" / "tibo" / "tibo-x-avatar.jpg"
+# Downloaded from X's official brand toolkit (x-logo.zip).
+TIBO_X_LOGO_PATH = Path(__file__).resolve().parents[2] / "assets" / "image" / "tibo" / "x-logo-white.png"
 
 
 # ---------------------------------------------------------------------------
@@ -223,21 +225,17 @@ def _fmt_full(value: datetime | None) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Small vector emblems.
+# Small raster/vector helpers.
 # ---------------------------------------------------------------------------
 
-def _draw_x_logo(draw: ImageDraw.ImageDraw, cx: float, cy: float, half: float, color, alpha: int = 255) -> None:
-    """Geometric X glyph: two thick crossing bars."""
-    stroke = half * 0.44
-    for dx, dy in ((-1, -1), (1, -1)):
-        x0, y0 = cx + dx * half, cy + dy * half
-        x1, y1 = cx - dx * half, cy - dy * half
-        length = math.hypot(x1 - x0, y1 - y0)
-        nx, ny = -(y1 - y0) / length * stroke / 2, (x1 - x0) / length * stroke / 2
-        draw.polygon(
-            [(x0 + nx, y0 + ny), (x1 + nx, y1 + ny), (x1 - nx, y1 - ny), (x0 - nx, y0 - ny)],
-            fill=(*color, alpha),
-        )
+def _load_x_logo() -> Image.Image | None:
+    """Load the official X logo asset bundled with the plugin."""
+
+    try:
+        with Image.open(TIBO_X_LOGO_PATH) as source:
+            return source.convert("RGBA")
+    except (FileNotFoundError, OSError):
+        return None
 
 
 def _draw_verified(draw: ImageDraw.ImageDraw, cx: float, cy: float, r: float = 11) -> None:
@@ -246,8 +244,44 @@ def _draw_verified(draw: ImageDraw.ImageDraw, cx: float, cy: float, r: float = 1
     draw.line((cx - r * 0.1, cy + r * 0.34, cx + r * 0.5, cy - r * 0.38), fill=(255, 255, 255, 255), width=max(2, int(r * 0.22)))
 
 
-def _draw_avatar(draw: ImageDraw.ImageDraw, cx: float, cy: float, radius: float, letter: str, font, letter_size: float) -> None:
-    """Circular gradient avatar with a monogram letter."""
+def _load_avatar() -> Image.Image | None:
+    """Load the CodexRadar-sourced Tibo portrait, with a safe fallback."""
+
+    try:
+        with Image.open(TIBO_AVATAR_PATH) as source:
+            return ImageOps.exif_transpose(source).convert("RGBA")
+    except (FileNotFoundError, OSError):
+        return None
+
+
+def _draw_avatar(
+    image: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    cx: float,
+    cy: float,
+    radius: float,
+    letter: str,
+    font,
+    letter_size: float,
+    avatar: Image.Image | None = None,
+) -> None:
+    """Draw the real profile portrait, falling back to the monogram."""
+
+    if avatar is not None:
+        size = max(2, int(round(radius * 2)))
+        cropped = ImageOps.fit(
+            avatar,
+            (size, size),
+            method=Image.Resampling.LANCZOS,
+            centering=(0.5, 0.45),
+        )
+        mask = Image.new("L", (size, size), 0)
+        ImageDraw.Draw(mask).ellipse((0, 0, size - 1, size - 1), fill=255)
+        image.paste(cropped, (int(round(cx - radius)), int(round(cy - radius))), mask)
+        draw.ellipse((cx - radius, cy - radius, cx + radius, cy + radius), outline=(*X_BLUE, 180), width=1)
+        return
+
+    # Fallback: blue gradient avatar with a monogram letter.
     steps = max(6, int(radius))
     for i in range(steps):
         ratio = i / max(1, steps - 1)
@@ -349,7 +383,14 @@ def _draw_background(draw: ImageDraw.ImageDraw, height: int) -> None:
         draw.line((0, y, CANVAS_W, y), fill=color)
 
 
-def _draw_header(draw: ImageDraw.ImageDraw, title: str, subtitle: str, page: str) -> None:
+def _draw_header(
+    image: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    title: str,
+    subtitle: str,
+    page: str,
+    x_logo: Image.Image | None,
+) -> None:
     band_h = HEADER_H - 26
     for y in range(band_h):
         ratio = y / max(1, band_h - 1)
@@ -360,11 +401,13 @@ def _draw_header(draw: ImageDraw.ImageDraw, title: str, subtitle: str, page: str
         )
         draw.line((0, y, CANVAS_W, y), fill=color)
 
-    # X glyph emblem on the right.
+    # Use the official X logo asset; do not approximate the mark with vectors.
     emblem_cx, emblem_cy = CANVAS_W - 128, band_h // 2 + 8
-    draw.ellipse((emblem_cx - 62, emblem_cy - 62, emblem_cx + 62, emblem_cy + 62), outline=(*X_BLUE, 70), width=2)
-    draw.ellipse((emblem_cx - 52, emblem_cy - 52, emblem_cx + 52, emblem_cy + 52), outline=(*X_BLUE, 26), width=1)
-    _draw_x_logo(draw, emblem_cx, emblem_cy, 30, (255, 255, 255), alpha=235)
+    if x_logo is not None:
+        logo = ImageOps.contain(x_logo, (86, 86), method=Image.Resampling.LANCZOS)
+        logo_x = int(round(emblem_cx - logo.width / 2))
+        logo_y = int(round(emblem_cy - logo.height / 2))
+        image.paste(logo, (logo_x, logo_y), logo)
 
     kicker = "X · PUBLIC FEED"
     kicker_w = sum(FONT_KICKER.getlength(ch) + 3 for ch in kicker) - 3 + 28
@@ -390,12 +433,21 @@ def _draw_header(draw: ImageDraw.ImageDraw, title: str, subtitle: str, page: str
     draw.line((PAD_X + segment, rule_y + 1, CANVAS_W - PAD_X, rule_y + 1), fill=(*LINE, 26), width=1)
 
 
-def _draw_profile(draw: ImageDraw.ImageDraw, x: float, y: float, w: float, count: int, latest: datetime | None) -> None:
+def _draw_profile(
+    image: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    x: float,
+    y: float,
+    w: float,
+    count: int,
+    latest: datetime | None,
+    avatar: Image.Image | None,
+) -> None:
     draw.rounded_rectangle((x, y, x + w, y + PROFILE_H), radius=18, fill=(*PANEL, 246), outline=(*PANEL_EDGE, 170), width=1)
     draw.rounded_rectangle((x, y + 16, x + 6, y + PROFILE_H - 16), radius=3, fill=(*X_BLUE, 235))
 
     avatar_cx, avatar_cy = x + 78, y + PROFILE_H / 2
-    _draw_avatar(draw, avatar_cx, avatar_cy, 34, "T", FONT_AVATAR, 30)
+    _draw_avatar(image, draw, avatar_cx, avatar_cy, 34, "T", FONT_AVATAR, 30, avatar)
 
     name_x = x + 132
     _dtext(draw, (name_x, y + 32), TIBO_DISPLAY_NAME, FONT_NAME, TEXT)
@@ -408,7 +460,17 @@ def _draw_profile(draw: ImageDraw.ImageDraw, x: float, y: float, w: float, count
     _dtext(draw, (x + w - 30, y + 94), "北京时间 · 按来源时间倒序", FONT_TINY, FAINT, anchor="ra")
 
 
-def _draw_post_card(draw: ImageDraw.ImageDraw, x: float, y: float, w: float, post: TiboPost, meta: dict, time_text: str) -> None:
+def _draw_post_card(
+    image: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    x: float,
+    y: float,
+    w: float,
+    post: TiboPost,
+    meta: dict,
+    time_text: str,
+    avatar: Image.Image | None,
+) -> None:
     h = meta["height"]
     accent = meta["accent"]
     draw.rounded_rectangle((x, y, x + w, y + h), radius=18, fill=(*PANEL, 246), outline=(*PANEL_EDGE, 170), width=1)
@@ -420,7 +482,7 @@ def _draw_post_card(draw: ImageDraw.ImageDraw, x: float, y: float, w: float, pos
 
     # --- header row: mini avatar, name, handle, time, chip, id ---------------
     mini_cx, mini_cy = inner_x + 19, yy + 19
-    _draw_avatar(draw, mini_cx, mini_cy, 19, "T", FONT_AVATAR_MINI, 19)
+    _draw_avatar(image, draw, mini_cx, mini_cy, 19, "T", FONT_AVATAR_MINI, 19, avatar)
     name_x = inner_x + 52
     _dtext(draw, (name_x, yy + 3), TIBO_DISPLAY_NAME, FONT_SMALL_B, TEXT)
     _draw_verified(draw, name_x + FONT_SMALL_B.getlength(TIBO_DISPLAY_NAME) + 16, yy + 13, r=8)
@@ -498,11 +560,13 @@ def _render_xfeed(posts: list[TiboPost], relevance_label, title: str, subtitle: 
     height = max(430, min(MAX_HEIGHT, HEADER_H + body_h + FOOTER_H + 24))
     image = Image.new("RGB", (CANVAS_W, height), BG_TOP)
     draw = ImageDraw.Draw(image, "RGBA")
+    avatar = _load_avatar()
+    x_logo = _load_x_logo()
     _draw_background(draw, height)
-    _draw_header(draw, title, subtitle, page)
+    _draw_header(image, draw, title, subtitle, page, x_logo)
 
     latest = max((post.source_time for post in posts if post.source_time), default=None)
-    _draw_profile(draw, PAD_X, float(HEADER_H), CANVAS_W - PAD_X * 2, len(posts), latest)
+    _draw_profile(image, draw, PAD_X, float(HEADER_H), CANVAS_W - PAD_X * 2, len(posts), latest, avatar)
 
     y = float(HEADER_H + PROFILE_H + PANEL_GAP)
     for index, (post, meta) in enumerate(zip(posts, metas)):
@@ -511,7 +575,7 @@ def _render_xfeed(posts: list[TiboPost], relevance_label, title: str, subtitle: 
         if index < len(posts) - 1:
             next_y = y + meta["height"] + PANEL_GAP + 26
             draw.line((RAIL_X, dot_cy + 10, RAIL_X, next_y), fill=(*meta["accent"], 46), width=2)
-        _draw_post_card(draw, CARD_X, y, CARD_W, post, meta, _fmt_md(post.source_time))
+        _draw_post_card(image, draw, CARD_X, y, CARD_W, post, meta, _fmt_md(post.source_time), avatar)
         y += meta["height"] + PANEL_GAP
 
     _draw_footer(draw, min(y + 4, height - FOOTER_H + 4))
