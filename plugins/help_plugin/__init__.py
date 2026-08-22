@@ -18,6 +18,8 @@ TOPIC_MAP: dict[str, str] = {
     "minecraft": "minecraft",
     "bili":      "bili",
     "bilibili":  "bili",
+    "tibo":      "tibo",
+    "雷达":       "tibo",
     "endfield":  "endfield",
     "ef":        "endfield",
     "zmd":       "endfield",

@@ -1,0 +1,54 @@
+{
+  "pages": [
+    {
+      "id": "main",
+      "file": "main.png",
+      "title": "otaebot 使用说明",
+      "columns": [
+        [
+          {"heading": "Minecraft", "items": ["/help mc  查看服务器管理帮助", "/wiki <内容>  搜索 Minecraft 中文 Wiki", "/mod <mod名>  搜索 Mcmod 模组", "/资料 <资料名>  搜索 Mcmod 资料"]},
+          {"heading": "Steam", "items": ["/help steam  查看 Steam 功能帮助", "/steaminfo  查询自己的 Steam 信息", "/steamgame <游戏>  查本群玩家游戏时长"]},
+          {"heading": "娱乐", "items": ["@某人 /x  把群友叉出去", "/x @某人  同上", "/forkrank  查看被叉排行"]}
+        ],
+        [
+          {"heading": "MCSM", "items": ["/help mcsm  查看面板与实例管理帮助", "/mcsm list  查看实例列表", "/mcsm status <别名>  查看实例状态"]},
+          {"heading": "BiliBili", "items": ["/help bili  查看 B 站订阅帮助", "/bili list  查看订阅列表", "B站链接  自动生成预览卡片"]},
+          {"heading": "Tibo 雷达", "items": ["/tibo  查询雷达总览", "/tibo 动态  查看相关动态", "/tibo 最近  查看最近已确认重置"]}
+        ]
+      ]
+    },
+    {
+      "id": "usage",
+      "file": "使用说明.png",
+      "title": "otaebot 使用说明",
+      "columns": [
+        [
+          {"heading": "Minecraft", "items": ["/help mc  查看服务器管理帮助", "/wiki <内容>  搜索 Minecraft 中文 Wiki", "/mod <mod名>  搜索 Mcmod 模组", "/资料 <资料名>  搜索 Mcmod 资料"]},
+          {"heading": "Steam", "items": ["/help steam  查看 Steam 功能帮助", "/steaminfo  查询自己的 Steam 信息", "/steamgame <游戏>  查本群玩家游戏时长"]},
+          {"heading": "娱乐", "items": ["@某人 /x  把群友叉出去", "/x @某人  同上", "/forkrank  查看被叉排行"]}
+        ],
+        [
+          {"heading": "MCSM", "items": ["/help mcsm  查看面板与实例管理帮助", "/mcsm list  查看实例列表", "/mcsm status <别名>  查看实例状态"]},
+          {"heading": "BiliBili", "items": ["/help bili  查看 B 站订阅帮助", "/bili list  查看订阅列表", "B站链接  自动生成预览卡片"]},
+          {"heading": "Tibo 雷达", "items": ["/tibo 或 /雷达  雷达总览", "/tibo 状态  当前预告/窗口/疑似信号", "/tibo 历史 [数量]  查看事件历史"]}
+        ]
+      ]
+    },
+    {
+      "id": "tibo",
+      "file": "tibo.png",
+      "title": "Tibo 雷达功能说明",
+      "columns": [
+        [
+          {"heading": "查询", "items": ["/tibo  雷达总览", "/tibo 动态 [数量]  最近相关动态", "/tibo 状态  当前重置状态"]},
+          {"heading": "历史", "items": ["/tibo 最近  最近已确认重置", "/tibo 历史 [数量]  预告与完成历史", "/tibo 帮助  查看命令帮助"]}
+        ],
+        [
+          {"heading": "判定口径", "items": ["只把可核验内容标为已确认", "预告、预计窗口、疑似发生分开显示", "banked reset 不计为完成重置"]},
+          {"heading": "数据来源", "items": ["CodexRadar：动态翻译与语境", "codex-reset：公开 JSON 历史核验", "所有结果附原帖和来源链接"]}
+        ]
+      ],
+      "footnote": "公开信息；不代表实时在线或官方承诺"
+    }
+  ]
+}
