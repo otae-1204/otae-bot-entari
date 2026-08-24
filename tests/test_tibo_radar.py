@@ -8,9 +8,12 @@ from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 
 from PIL import Image
 
+from configs.config import Config as GlobalConfig
+from plugins.tibo_radar import _is_subscription_manager
 from plugins.tibo_radar.client import parse_codex_reset_feed, parse_codex_reset_timeline, parse_codexradar_html
 from plugins.tibo_radar.draw import CardSection, render_card
 from plugins.tibo_radar.draw_x import CardSection as XCardSection, render_card as render_x_card
@@ -164,6 +167,34 @@ class TiboRadarTests(unittest.TestCase):
             self.assertFalse(initialized.baseline_pending)
             self.assertEqual(store.posts_after(initialized.last_notified_at.isoformat(), initialized.last_notified_post_id), [])
             store.close()
+
+    def test_subscription_manager_accepts_group_admin_role_and_rejects_regular_member(self):
+        group = SimpleNamespace(id="group-1")
+        admin_event = SimpleNamespace(
+            guild=group,
+            user=SimpleNamespace(id="admin-1"),
+            member=SimpleNamespace(roles=[SimpleNamespace(id="admin", name="群管理员")]),
+        )
+        regular_event = SimpleNamespace(
+            guild=group,
+            user=SimpleNamespace(id="member-1"),
+            member=SimpleNamespace(roles=[]),
+        )
+
+        self.assertTrue(asyncio.run(_is_subscription_manager(object(), admin_event, "group-1", "admin-1")))
+        self.assertFalse(asyncio.run(_is_subscription_manager(object(), regular_event, "group-1", "member-1")))
+
+    def test_subscription_manager_accepts_superuser(self):
+        configured = GlobalConfig.SUPERUSERS
+        if not configured:
+            self.skipTest("no SUPERUSERS configured")
+        superuser_id = str(configured[0] if isinstance(configured, (list, tuple)) else configured)
+        event = SimpleNamespace(
+            guild=SimpleNamespace(id="group-1"),
+            user=SimpleNamespace(id=superuser_id),
+            member=SimpleNamespace(roles=[]),
+        )
+        self.assertTrue(asyncio.run(_is_subscription_manager(object(), event, "group-1", superuser_id)))
 
     def test_service_status_does_not_promote_old_rejected_window(self):
         with TemporaryDirectory() as tmp:

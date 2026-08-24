@@ -12,6 +12,7 @@ from typing import Iterable
 from arclet.entari import Account as Bot, Cleanup, Event, listen
 from loguru import logger
 
+from configs.config import Config as GlobalConfig
 from utils.entari_native import (
     ArgVal,
     ChainMsg,
@@ -26,6 +27,7 @@ from utils.entari_native import (
     make_image,
     on_ready,
     timer,
+    event_user_id,
 )
 from utils.temp_files import schedule_temp_file_cleanup
 
@@ -91,6 +93,78 @@ def _source_links() -> list[str]:
 
 def _chunk(items: list, size: int = 3) -> list[list]:
     return [items[index : index + size] for index in range(0, len(items), size)]
+
+
+_GROUP_ADMIN_ROLE_TOKENS = {
+    "admin",
+    "administrator",
+    "owner",
+    "manager",
+    "群主",
+    "管理员",
+}
+
+
+def _is_superuser(user_id: str) -> bool:
+    configured = GlobalConfig.SUPERUSERS
+    if isinstance(configured, str):
+        configured = [configured]
+    return str(user_id) in {str(value) for value in configured}
+
+
+def _member_has_group_admin_role(member: object) -> bool:
+    """Accept Satori roles and the common adapter-level admin flags."""
+
+    for attribute in ("is_owner", "is_admin", "is_administrator", "owner", "admin"):
+        value = getattr(member, attribute, False)
+        if value is True or (
+            isinstance(value, str) and value.strip().lower() in {"1", "true", "yes", "on"}
+        ):
+            return True
+
+    roles = getattr(member, "roles", None) or []
+    if isinstance(roles, (str, bytes, dict)):
+        roles = [roles]
+    for role in roles:
+        if isinstance(role, dict):
+            values = role.values()
+        else:
+            values = (
+                getattr(role, "id", ""),
+                getattr(role, "name", ""),
+            )
+        for value in values:
+            lowered = str(value or "").strip().lower()
+            if lowered and (
+                lowered in _GROUP_ADMIN_ROLE_TOKENS
+                or any(token in lowered for token in _GROUP_ADMIN_ROLE_TOKENS)
+            ):
+                return True
+    return False
+
+
+async def _is_subscription_manager(bot: Bot, event: Event, group_id: str, user_id: str) -> bool:
+    """Check SuperUser or the sender's current group owner/admin role."""
+
+    if _is_superuser(user_id):
+        return True
+    member = getattr(event, "member", None)
+    if member is not None and _member_has_group_admin_role(member):
+        return True
+    getter = getattr(bot, "guild_member_get", None)
+    if callable(getter) and group_id:
+        try:
+            member = await getter(guild_id=group_id, user_id=str(user_id))
+        except Exception as exc:
+            logger.debug("[tibo_radar] failed to fetch group member role: {}", exc)
+        else:
+            if member is not None and _member_has_group_admin_role(member):
+                return True
+    return False
+
+
+def _subscription_permission_text() -> str:
+    return "仅群主、群管理员或 SUPERUSER 可管理 Tibo 新帖订阅。"
 
 
 def _post_cursor(post: TiboPost) -> tuple[str, str]:
@@ -258,8 +332,8 @@ def _help_text() -> str:
         "/tibo 状态 —— 当前预告、窗口或疑似信号\n"
         "/tibo 最近 —— 最近一次已核验完成的重置\n"
         "/tibo 历史 [数量] —— 重置事件历史，默认 6 条\n"
-        "/tibo 订阅 —— 本群订阅 Tibo 新帖（仅群内）\n"
-        "/tibo 取消订阅 —— 停止本群的新帖推送\n"
+        "/tibo 订阅 —— 本群订阅 Tibo 新帖（仅群主/管理员/SUPERUSER）\n"
+        "/tibo 取消订阅 —— 停止本群的新帖推送（仅群主/管理员/SUPERUSER）\n"
         "/tibo 订阅状态 —— 查看本群订阅状态\n"
         "/tibo 帮助 —— 显示本帮助"
     )
@@ -269,7 +343,7 @@ tibo_cmd = _cmd("tibo", aliases={"雷达"}, priority=5, block=True)
 
 
 @tibo_cmd.handle()
-async def handle_tibo(rest: ArgVal[str], event: Event):
+async def handle_tibo(rest: ArgVal[str], event: Event, bot: Bot):
     parts = [part for part in get_rest(rest).split() if part]
     action = parts[0].lower() if parts else "总览"
     action = {
@@ -299,6 +373,9 @@ async def handle_tibo(rest: ArgVal[str], event: Event):
         if not group_id:
             await tibo_cmd.finish("Tibo 新帖订阅只支持在群内使用。")
             return
+        if not await _is_subscription_manager(bot, event, group_id, event_user_id(event)):
+            await tibo_cmd.finish(_subscription_permission_text())
+            return
         already_enabled, _subscription = store.subscribe(group_id, get_channel_id(event) or group_id)
         if already_enabled:
             await tibo_cmd.finish("本群已经订阅 Tibo 新帖；新帖子会按采集周期推送。")
@@ -309,6 +386,9 @@ async def handle_tibo(rest: ArgVal[str], event: Event):
         group_id = get_group_id(event)
         if not group_id:
             await tibo_cmd.finish("Tibo 新帖订阅只支持在群内使用。")
+            return
+        if not await _is_subscription_manager(bot, event, group_id, event_user_id(event)):
+            await tibo_cmd.finish(_subscription_permission_text())
             return
         if store.unsubscribe(group_id):
             await tibo_cmd.finish("已停止本群的 Tibo 新帖推送。")
