@@ -964,6 +964,42 @@ class EndfieldAkeDataStageSourceAsyncTests(unittest.IsolatedAsyncioTestCase):
         await source.stage("indie_hard022")
         self.assertEqual(client.akedata_public_json.await_count, 3)
 
+    async def test_missing_optional_spawner_manifest_keeps_stage_query_available(self):
+        version, fixture_tables = _akedata_fixture()
+        tables = list(fixture_tables)
+        tables[1] = {
+            dungeon_id: {**row, "sceneId": "indie_hdg002"}
+            for dungeon_id, row in tables[1].items()
+        }
+        names = (
+            "DungeonSeriesTable",
+            "DungeonTable",
+            "I18nTextTable_CN",
+            "RewardTable",
+            "ItemTable",
+            "EnemyTable",
+            "EnemyTemplateDisplayInfoTable",
+            "EnemyAttributeTemplateTable",
+        )
+        table_map = dict(zip(names, tables))
+        client = AsyncMock()
+        client.akedata_manifest.return_value = {
+            "latest": version.id,
+            "updatedAt": version.updated_at,
+            "versions": [{"id": version.id, "tableCfgPath": version.table_cfg_path}],
+        }
+        client.akedata_table.side_effect = lambda path, name: table_map[name]
+        client.akedata_public_json.side_effect = WarfarinAPIError("AkeData HTTP 404")
+
+        source = AkeDataStageSource(client)
+        catalog = await source.catalog()
+        stage, unreachable = await source.stage(catalog.groups[0].items[0].stage_key)
+
+        self.assertEqual((stage.name, unreachable), ("撼山雾火", ()))
+        client.akedata_public_json.assert_awaited_once_with(
+            "public/Json/SpawnerConfig/indie_hdg002/manifest.json"
+        )
+
 
 class EndfieldStageCatalogTests(unittest.IsolatedAsyncioTestCase):
     async def test_catalog_includes_registered_special_modes(self):

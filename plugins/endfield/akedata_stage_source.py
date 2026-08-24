@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from math import isfinite
 from typing import Any
 
+from loguru import logger
+
 from .account_i18n import localized_text
 from .client import WarfarinClient
 from .stage_models import (
@@ -155,8 +157,24 @@ class AkeDataStageSource:
             dict.fromkeys(str(row.get("sceneId") or "").strip() for row in records)
         )
         scene_ids = tuple(scene_id for scene_id in scene_ids if scene_id)
-        configs = await asyncio.gather(*(self._load_scene_spawners(scene_id) for scene_id in scene_ids))
-        return dict(zip(scene_ids, configs))
+        results = await asyncio.gather(
+            *(self._load_scene_spawners(scene_id) for scene_id in scene_ids),
+            return_exceptions=True,
+        )
+        configs: dict[str, tuple[dict[str, Any], ...]] = {}
+        for scene_id, result in zip(scene_ids, results):
+            if isinstance(result, BaseException):
+                # Spawner exports only enrich enemy panels with instance/born-buff
+                # modifiers. Some valid stages have no exported manifest, so a
+                # missing optional resource must not make the whole stage unusable.
+                logger.warning(
+                    f"[endfield] AkeData spawner config unavailable "
+                    f"scene={scene_id} error={type(result).__name__}: {result}"
+                )
+                configs[scene_id] = ()
+            else:
+                configs[scene_id] = result
+        return configs
 
     async def _load_scene_spawners(self, scene_id: str) -> tuple[dict[str, Any], ...]:
         base = f"public/Json/SpawnerConfig/{scene_id}"
