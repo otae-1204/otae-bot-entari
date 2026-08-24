@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Mapping
 
 from .account_detail_models import (
@@ -41,16 +42,6 @@ SKILL_PROPERTY_COLORS: dict[str, str] = {
 }
 
 ULTIMATE_SKILL_TYPE = "skill_type_ultimate_skill"
-
-_PROFESSION_ORDER: tuple[str, ...] = (
-    "先锋",
-    "近卫",
-    "重装",
-    "术师",
-    "辅助",
-    "突击",
-)
-
 
 def build_account_detail_view(
     detail: Mapping[str, Any],
@@ -113,20 +104,32 @@ def _build_stats(
 def _build_operators(
     detail: Mapping[str, Any], name_map: AccountDetailNameMap
 ) -> tuple[AccountOperatorView, ...]:
-    operators = [
-        _build_operator(_mapping(character), name_map)
-        for character in _sequence(detail.get("chars"))
-        if isinstance(character, Mapping)
-    ]
+    operators = []
+    for character in _sequence(detail.get("chars")):
+        if not isinstance(character, Mapping):
+            continue
+        raw = _mapping(character)
+        operators.append((_character_id(raw), _build_operator(raw, name_map)))
     operators.sort(
-        key=lambda operator: (
-            -operator.rarity,
-            -(operator.level or 0),
-            _profession_rank(operator.profession),
-            operator.name,
+        key=lambda item: (
+            -item[1].rarity,
+            -(item[1].level or 0),
+            _character_id_sort_key(item[0]),
         )
     )
-    return tuple(operators)
+    return tuple(operator for _, operator in operators)
+
+
+def _character_id(character: Mapping[str, Any]) -> str:
+    char_data = _mapping(character.get("charData"))
+    return _text(char_data.get("id") or character.get("charId") or character.get("id"))
+
+
+def _character_id_sort_key(character_id: str) -> tuple[int, int, str]:
+    match = re.search(r"(?:^|_)(\d+)(?:_|$)", character_id)
+    if match:
+        return (0, int(match.group(1)), character_id.casefold())
+    return (1, 0, character_id.casefold())
 
 
 def _build_operator(
@@ -277,13 +280,6 @@ def _equip_rarity(value: Any) -> int:
     key = _semantic_key(value)
     _, _, tail = key.rpartition("_")
     return _int_or_none(tail) or 0
-
-
-def _profession_rank(profession: str) -> int:
-    try:
-        return _PROFESSION_ORDER.index(profession)
-    except ValueError:
-        return len(_PROFESSION_ORDER)
 
 
 def _stamina_note(dungeon: Mapping[str, Any], current_ts: Any) -> str:

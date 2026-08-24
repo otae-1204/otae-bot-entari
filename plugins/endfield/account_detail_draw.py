@@ -190,7 +190,7 @@ def _count_badge(view: AccountDetailView) -> str:
 
 
 def _roster_note(view: AccountDetailView) -> str:
-    note = f"按稀有度与等级排序，共 {view.operator_count} 位"
+    note = f"按稀有度、等级与干员编号排序，共 {view.operator_count} 位"
     if view.page_count > 1:
         note += f"，本张 {view.page_operator_count} 位"
     return note

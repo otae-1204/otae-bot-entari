@@ -361,6 +361,28 @@ class EndfieldAccountDetailViewTests(unittest.TestCase):
         self.assertEqual(view.operators[0].rarity, 6)
         self.assertFalse(view.compact)
 
+    def test_sorts_equal_rarity_and_level_by_character_number(self):
+        detail = account_detail_fixture()
+        first = detail["chars"][0]
+        second = detail["chars"][1]
+        for character in (first, second):
+            character["level"] = 90
+            character["charData"]["rarity"] = {"key": "rarity_6", "value": "6"}
+        first["charData"].update(
+            id="chr_0032_lizhiyan",
+            name="编号三十二",
+            profession={"key": "profession_vanguard", "value": "先锋"},
+        )
+        second["charData"].update(
+            id="chr_0005_chen",
+            name="编号五",
+            profession={"key": "profession_guard", "value": "近卫"},
+        )
+
+        view = account_detail_module.build_account_detail_view(detail, uid="x")
+
+        self.assertEqual([operator.name for operator in view.operators], ["编号五", "编号三十二"])
+
     def test_reads_string_typed_numerics_and_progression(self):
         veteran = self.build().operators[0]
         self.assertEqual(
