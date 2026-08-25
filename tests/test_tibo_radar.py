@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import sys
 import unittest
@@ -13,7 +14,7 @@ from types import SimpleNamespace
 from PIL import Image
 
 from configs.config import Config as GlobalConfig
-from plugins.tibo_radar import _is_subscription_manager
+from plugins.tibo_radar import _is_subscription_manager, _subscription_image_segment
 from plugins.tibo_radar.client import parse_codex_reset_feed, parse_codex_reset_timeline, parse_codexradar_html
 from plugins.tibo_radar.draw import CardSection, render_card
 from plugins.tibo_radar.draw_x import CardSection as XCardSection, render_card as render_x_card
@@ -262,6 +263,14 @@ class TiboRadarTests(unittest.TestCase):
             self.assertEqual(image.mode, "RGB")
             self.assertEqual(image.width, 1080)
             self.assertGreaterEqual(image.height, 430)
+
+    def test_subscription_image_uses_inline_png_data_url(self):
+        raw = b"\x89PNG\r\nfixture"
+        segment = _subscription_image_segment(raw)
+
+        self.assertTrue(segment.src.startswith("data:image/png;base64,"))
+        encoded = segment.src.split(",", 1)[1]
+        self.assertEqual(base64.b64decode(encoded), raw)
 
 
 if __name__ == "__main__":
