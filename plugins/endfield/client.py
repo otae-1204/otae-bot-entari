@@ -10,6 +10,7 @@ from utils.http_client import fetch_json
 API_CACHE_NAMESPACE = "endfield-api"
 AKEDATA_MAX_TABLE_BYTES = 24 * 1024 * 1024
 AKEDATA_MAX_RESOURCE_BYTES = 6 * 1024 * 1024
+AKEDATA_MAX_ASSET_INDEX_BYTES = 8 * 1024 * 1024
 
 
 class WarfarinAPIError(Exception):
@@ -68,6 +69,17 @@ class WarfarinClient:
 
     async def akedata_manifest(self) -> dict[str, Any]:
         return await self._get_json(f"{self.AKEDATA_BASE_URL}/manifest.json")
+
+    async def akedata_asset_index(self) -> dict[str, Any]:
+        data = await self._get_json(
+            f"{self.AKEDATA_BASE_URL}/asset-sync-index.json",
+            max_bytes=AKEDATA_MAX_ASSET_INDEX_BYTES,
+        )
+        datasets = data.get("datasets")
+        json_files = datasets.get("json", {}).get("files") if isinstance(datasets, dict) else None
+        if data.get("schemaVersion") != 2 or not isinstance(json_files, dict):
+            raise WarfarinAPIError("AkeData 资产索引结构异常")
+        return data
 
     async def akedata_table(self, table_cfg_path: str, table_name: str) -> dict[str, Any]:
         path = str(table_cfg_path or "").strip("/")

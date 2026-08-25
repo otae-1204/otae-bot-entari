@@ -42,6 +42,7 @@ _ATTRIBUTE_TYPES: dict[str, int | str] = {
     "MaxHp": 1,
     "Attack": 2,
     "Defense": 3,
+    "PoiseRecTime": 21,
     _POISE_REC_TIME_SCALAR: _POISE_REC_TIME_SCALAR,
 }
 _FORMULA_MODIFIER_TYPES = {
@@ -79,6 +80,7 @@ class AkeDataStageSource:
         self._version: AkeDataVersion | None = None
         self._tables: dict[str, dict[str, Any]] = {}
         self._resources: dict[str, dict[str, Any] | list[Any]] = {}
+        self._asset_index: dict[str, Any] | None = None
 
     async def catalog(self) -> StageCatalogView:
         version = await self._latest_version()
@@ -125,6 +127,7 @@ class AkeDataStageSource:
         if self._version is None or self._version.id != version.id:
             self._tables.clear()
             self._resources.clear()
+            self._asset_index = None
         self._version = version
         return version
 
@@ -177,24 +180,33 @@ class AkeDataStageSource:
         return configs
 
     async def _load_scene_spawners(self, scene_id: str) -> tuple[dict[str, Any], ...]:
-        base = f"public/Json/SpawnerConfig/{scene_id}"
-        manifest = await self._load_resource(f"{base}/manifest.json")
-        if not isinstance(manifest, list):
+        paths = await self._asset_json_paths(f"SpawnerConfig/{scene_id}")
+        if not paths:
             raise StageDataIncomplete(f"AkeData 场景 {scene_id} 缺少刷怪配置清单。")
-        entries = sorted(
-            (entry for entry in manifest if isinstance(entry, dict) and not entry.get("hidden")),
-            key=lambda entry: (
-                _optional_int(entry.get("priority")) or 999,
-                str(entry.get("id") or ""),
-            ),
+        resources = await asyncio.gather(
+            *(self._load_resource(f"public/Json/{path}") for path in paths)
         )
-        paths = [
-            str(entry.get("contentFile") or f"{base}/{entry.get('id')}.json")
-            for entry in entries
-            if entry.get("contentFile") or entry.get("id")
-        ]
-        resources = await asyncio.gather(*(self._load_resource(path) for path in paths))
         return tuple(resource for resource in resources if isinstance(resource, dict))
+
+    async def _asset_json_paths(self, prefix: str) -> tuple[str, ...]:
+        if self._asset_index is None:
+            self._asset_index = await self.client.akedata_asset_index()
+        datasets = self._asset_index.get("datasets") or {}
+        json_dataset = datasets.get("json") if isinstance(datasets, dict) else {}
+        files = json_dataset.get("files") if isinstance(json_dataset, dict) else {}
+        normalized = str(prefix or "").strip("/")
+        prefix_parts = normalized.split("/") if normalized else []
+        paths: list[str] = []
+        for raw_path in files if isinstance(files, dict) else ():
+            path = str(raw_path or "").strip("/")
+            parts = path.split("/")
+            if (
+                len(parts) == len(prefix_parts) + 1
+                and parts[: len(prefix_parts)] == prefix_parts
+                and parts[-1].endswith(".json")
+            ):
+                paths.append(path)
+        return tuple(sorted(paths))
 
     async def _load_buffs(self, buff_ids: set[str]) -> dict[str, dict[str, Any]]:
         ordered_ids = sorted(buff_ids)
@@ -738,7 +750,9 @@ def _enemy_poise(
     poise = StageEnemyPoise(
         max_value=_optional_float(values.get(20)),
         damage_scalar=_optional_float(values.get(27)),
-        recover_seconds=_optional_float(values.get(21)),
+        recover_seconds=_optional_float(
+            _apply_modifiers(_optional_number(values.get(21)), modifiers, 21)
+        ),
         recover_scalar=_modified_scalar(modifiers, _POISE_REC_TIME_SCALAR),
         knots=knots,
     )

@@ -30,6 +30,9 @@ from plugins.endfield.stage_models import (
 from plugins.endfield.akedata_stage_source import (
     AkeDataStageSource,
     AkeDataVersion,
+    _enemy_metrics,
+    _enemy_modifiers,
+    _enemy_poise,
     _translated,
     parse_akedata_catalog,
     parse_akedata_stage,
@@ -820,6 +823,78 @@ class EndfieldAkeDataStageSourceTests(unittest.TestCase):
         self.assertIn("<span>失衡恢复时间系数</span><b>1.80</b>", html)
         self.assertNotIn("失衡节点", html)
 
+    def test_ritual_vortex_hard_applies_both_spawner_hp_buffs(self):
+        enemy = {
+            "attrModifiers": [
+                {"attrType": 1, "modifierType": 4, "attrValue": 2.5}
+            ],
+            "bornBuffs": [],
+        }
+        library_buffs = (
+            {"buffId": "buff_main_enemy", "blackboard": []},
+            {
+                "buffId": "buff_common_maxhpup",
+                "blackboard": [{"key": "ratio", "valueFloat": 0.3}],
+            },
+        )
+        buff_table = {
+            "buff_main_enemy": {
+                "attributeModifier": {
+                    "attributeModifiers": [
+                        {
+                            "attributeType": "MaxHp",
+                            "formulaItem": "BaseFinalMultiplier",
+                            "param": {"useBlackboardKey": False, "value": 1.8},
+                        },
+                        {
+                            "attributeType": "PoiseRecTime",
+                            "formulaItem": "Addition",
+                            "param": {"useBlackboardKey": False, "value": -3.0},
+                        },
+                    ]
+                }
+            },
+            "buff_common_maxhpup": {
+                "attributeModifier": {
+                    "attributeModifiers": [
+                        {
+                            "attributeType": "MaxHp",
+                            "formulaItem": "Multiplier",
+                            "param": {
+                                "useBlackboardKey": True,
+                                "blackboardKey": "ratio",
+                                "value": 0.5,
+                            },
+                        }
+                    ]
+                }
+            },
+        }
+        attributes = {
+            "levelDependentAttributes": [
+                {
+                    "attrs": [
+                        {"attrType": 0, "attrValue": 90},
+                        {"attrType": 1, "attrValue": 504440},
+                        {"attrType": 2, "attrValue": 3097},
+                        {"attrType": 3, "attrValue": 100},
+                    ]
+                }
+            ],
+            "levelIndependentAttributes": {
+                "attrs": [
+                    {"attrType": 20, "attrValue": 160},
+                    {"attrType": 21, "attrValue": 7},
+                    {"attrType": 27, "attrValue": 1.25},
+                ]
+            },
+        }
+
+        modifiers = _enemy_modifiers(enemy, library_buffs, buff_table)
+
+        self.assertEqual(_enemy_metrics(attributes, 90, modifiers), (2950974, 3097, 100))
+        self.assertEqual(_enemy_poise(attributes, modifiers).recover_seconds, 4.0)
+
 
 class EndfieldAkeDataStageSourceAsyncTests(unittest.IsolatedAsyncioTestCase):
     async def test_source_resolves_manifest_path_and_reuses_loaded_tables(self):
@@ -902,12 +977,6 @@ class EndfieldAkeDataStageSourceAsyncTests(unittest.IsolatedAsyncioTestCase):
         )
         table_map = dict(zip(names, tables))
         resource_map = {
-            "public/Json/SpawnerConfig/indie_hdg011/manifest.json": [
-                {
-                    "id": "sc_indie_hdg011_fixture",
-                    "contentFile": "/public/Json/SpawnerConfig/indie_hdg011/fixture.json",
-                }
-            ],
             "public/Json/SpawnerConfig/indie_hdg011/fixture.json": {
                 "configId": "sc_indie_hdg011_fixture",
                 "enemyLibrary": [
@@ -956,15 +1025,29 @@ class EndfieldAkeDataStageSourceAsyncTests(unittest.IsolatedAsyncioTestCase):
             "versions": [{"id": version.id, "tableCfgPath": version.table_cfg_path}],
         }
         client.akedata_table.side_effect = lambda path, name: table_map[name]
+        client.akedata_asset_index.return_value = {
+            "schemaVersion": 2,
+            "datasets": {
+                "json": {
+                    "files": {
+                        "SpawnerConfig/indie_hdg011/fixture.json": {
+                            "size": 1,
+                            "md5": "0" * 32,
+                        }
+                    }
+                }
+            },
+        }
         client.akedata_public_json.side_effect = lambda path: resource_map[path]
         source = AkeDataStageSource(client)
         stage, _ = await source.stage("indie_hard022")
         self.assertEqual(stage.variants[-1].enemies[0].hp, 2476342.8)
-        self.assertEqual(client.akedata_public_json.await_count, 3)
+        self.assertEqual(client.akedata_public_json.await_count, 2)
         await source.stage("indie_hard022")
-        self.assertEqual(client.akedata_public_json.await_count, 3)
+        self.assertEqual(client.akedata_public_json.await_count, 2)
+        self.assertEqual(client.akedata_asset_index.await_count, 1)
 
-    async def test_missing_optional_spawner_manifest_keeps_stage_query_available(self):
+    async def test_missing_optional_spawner_files_keep_stage_query_available(self):
         version, fixture_tables = _akedata_fixture()
         tables = list(fixture_tables)
         tables[1] = {
@@ -989,16 +1072,17 @@ class EndfieldAkeDataStageSourceAsyncTests(unittest.IsolatedAsyncioTestCase):
             "versions": [{"id": version.id, "tableCfgPath": version.table_cfg_path}],
         }
         client.akedata_table.side_effect = lambda path, name: table_map[name]
-        client.akedata_public_json.side_effect = WarfarinAPIError("AkeData HTTP 404")
+        client.akedata_asset_index.return_value = {
+            "schemaVersion": 2,
+            "datasets": {"json": {"files": {}}},
+        }
 
         source = AkeDataStageSource(client)
         catalog = await source.catalog()
         stage, unreachable = await source.stage(catalog.groups[0].items[0].stage_key)
 
         self.assertEqual((stage.name, unreachable), ("撼山雾火", ()))
-        client.akedata_public_json.assert_awaited_once_with(
-            "public/Json/SpawnerConfig/indie_hdg002/manifest.json"
-        )
+        client.akedata_public_json.assert_not_awaited()
 
 
 class EndfieldStageCatalogTests(unittest.IsolatedAsyncioTestCase):
