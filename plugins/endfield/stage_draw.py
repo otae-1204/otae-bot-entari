@@ -229,7 +229,7 @@ def render_stage_catalog_html(view: StageCatalogView) -> str:
         {f'<div class="hero-count muted"><b>{view.pending_count}</b><span>待完善</span></div>' if view.pending_count else ''}
       </div>
     </header>
-    <div class="notice">发送 <b>/zmd 副本 关卡名</b> 查询详情，默认展示排序最高的变体；<b>/zmd 副本 关卡名 总览</b> 对比全部变体。</div>
+    <div class="notice">发送 <b>/ef 副本 关卡名</b> 查询详情，默认展示排序最高的变体；<b>/ef 副本 关卡名 总览</b> 对比全部变体。</div>
     {groups or '<div class="empty">数据源暂未提供关卡资料目录。</div>'}
     <footer><span>来源 · {_escape(view.source)}</span><span>目录版本 · {_escape(view.revision)}{_updated_suffix(view.updated_at)}</span></footer>
     """

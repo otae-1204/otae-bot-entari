@@ -676,12 +676,12 @@ class EndfieldAccountDetailRoutingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_unknown_selector_reports_guidance(self):
         matcher, _, detail, _, _, _ = await self.run_accounts(group=False, roles=self.roles, selector="丙")
-        matcher.finish.assert_awaited_once_with("未找到对应账号，请使用 /zmd 账号 查看编号。")
+        matcher.finish.assert_awaited_once_with("未找到对应账号，请使用 /ef 账号 查看编号。")
         detail.assert_not_awaited()
 
     async def test_missing_binding_reports_bind_hint(self):
         matcher, _, detail, _, _, _ = await self.run_accounts(group=False, roles=[])
-        matcher.finish.assert_awaited_once_with("尚未绑定终末地账号。使用 /zmd 绑定 开始绑定。")
+        matcher.finish.assert_awaited_once_with("尚未绑定终末地账号。使用 /ef 绑定 开始绑定。")
         detail.assert_not_awaited()
 
     async def test_cancelled_reply_stops_without_rendering(self):
@@ -691,10 +691,10 @@ class EndfieldAccountDetailRoutingTests(unittest.IsolatedAsyncioTestCase):
         matcher.finish.assert_awaited_once_with("已取消账号查询。")
         detail.assert_not_awaited()
 
-    async def test_detail_render_never_claims_the_role_task_lock(self):
+    async def test_detail_fetch_claims_the_role_task_lock(self):
         with mock.patch.object(endfield.ROLE_TASKS, "claim") as claim:
             await self.run_accounts(group=False, roles=self.roles[:1])
-        claim.assert_not_called()
+        claim.assert_called_once_with(self.roles[0])
 
 
 if __name__ == "__main__":

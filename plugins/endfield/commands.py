@@ -51,6 +51,9 @@ CURRENCY_LOG_ALIASES = {
 MEDAL_ALIASES = {"奖章", "蚀刻章", "medal", "medals"}
 MEDAL_REFRESH_ALIASES = {"刷新", "refresh", "update"}
 MEDAL_MISSING_ALIASES = {"缺章", "未获得", "missing"}
+OWNERSHIP_ALIASES = {"持有率", "干员占比", "干员统计", "ownership", "ownership-rate"}
+OWNERSHIP_GROUP_ALIASES = {"群内", "本群", "当前群", "group", "guild"}
+OWNERSHIP_GLOBAL_ALIASES = {"全局", "全部", "global", "all"}
 
 SCOPE_LABELS = {
     "operator": "干员",
@@ -237,7 +240,7 @@ def parse_command(rest: str) -> ParsedEndfieldCommand:
 
 
 def _parse_quick_calc_command(parts: list[str]) -> ParsedEndfieldCommand:
-    usage = "用法：/zmd 速算 2腐蚀 200（效果可选腐蚀、导电、碎甲，等级为 1–4）"
+    usage = "用法：/ef 速算 2腐蚀 200（效果可选腐蚀、导电、碎甲，等级为 1–4）"
     if len(parts) != 2:
         return ParsedEndfieldCommand("quick_calc", error=usage)
 
@@ -267,6 +270,8 @@ def _parse_quick_calc_command(parts: list[str]) -> ParsedEndfieldCommand:
 
 def _parse_personal_command(parts: list[str]) -> ParsedEndfieldCommand | None:
     head = parts[0].lower()
+    if head in OWNERSHIP_ALIASES:
+        return _parse_ownership_command(parts[1:])
     if head in BIND_ALIASES:
         return ParsedEndfieldCommand("bind")
     if head in ACCOUNT_ALIASES:
@@ -323,6 +328,33 @@ def _parse_personal_command(parts: list[str]) -> ParsedEndfieldCommand | None:
             )
         return ParsedEndfieldCommand("medal_view")
     return None
+
+
+def _parse_ownership_command(parts: list[str]) -> ParsedEndfieldCommand:
+    scope = "auto"
+    refresh = False
+    for raw in parts:
+        token = raw.casefold()
+        if token in MEDAL_REFRESH_ALIASES:
+            if refresh:
+                return ParsedEndfieldCommand("ownership_stats", error="“刷新”参数不能重复")
+            refresh = True
+            continue
+        if token in OWNERSHIP_GROUP_ALIASES:
+            if scope != "auto":
+                return ParsedEndfieldCommand("ownership_stats", error="统计范围只能指定一次")
+            scope = "group"
+            continue
+        if token in OWNERSHIP_GLOBAL_ALIASES:
+            if scope != "auto":
+                return ParsedEndfieldCommand("ownership_stats", error="统计范围只能指定一次")
+            scope = "global"
+            continue
+        return ParsedEndfieldCommand(
+            "ownership_stats",
+            error="用法：/ef 持有率 [群内|全局]，或 /ef 持有率 刷新 [群内|全局]",
+        )
+    return ParsedEndfieldCommand("ownership_refresh" if refresh else "ownership_stats", scope=scope)
 
 
 def _parse_currency_log_command(parts: list[str]) -> ParsedEndfieldCommand:
@@ -671,6 +703,8 @@ def format_help() -> str:
             "  /ef 奖章（查看蚀刻章总数与本版本新增）",
             "  /ef 奖章 刷新（重新抓取 AKEData 数据并更新上一游戏版本基线）",
             "  /ef 奖章 缺章 [账号]（查询自己未获得/未升满/未镀层）",
+            "  /ef 持有率 [群内|全局]（匿名干员持有率；群聊默认群内，私聊默认全局）",
+            "  /ef 持有率 刷新 [群内|全局]（群管理员可刷新本群，SUPERUSER 可刷新全局）",
             "  /ef 速算 2腐蚀 200（效果可替换为导电或碎甲）",
             "  /ef 版本日历（查看当前版本全部开放日程）",
             "",
@@ -726,11 +760,11 @@ def format_error(error: str) -> str:
 def format_not_found(scope: str, query: str) -> str:
     label = SCOPE_LABELS.get(scope, "内容")
     if scope in {"stage", "stage_catalog"}:
-        return f"未找到{label}：{query}\n可以发送 /zmd 副本 浏览关卡资料目录"
+        return f"未找到{label}：{query}\n可以发送 /ef 副本 浏览关卡资料目录"
     if scope == "equipment_attribute":
         return (
             f"没有同时满足 {query} 的装备。\n"
-            "可以少写一条属性，例如 /zmd 装备 主力量；或加 --all 放开稀有度限制"
+            "可以少写一条属性，例如 /ef 装备 主力量；或加 --all 放开稀有度限制"
         )
     return f"未找到{label}：{query}\n可以尝试 /ef 搜索 {query}"
 

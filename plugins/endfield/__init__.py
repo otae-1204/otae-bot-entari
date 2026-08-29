@@ -17,7 +17,20 @@ from nepattern import AnyString
 
 from configs.config import Config
 from utils.async_cache import AsyncTTLCache, CacheStats
-from utils.entari_native import ArgVal, ChainMsg, event_user_id, is_group, make_image, on_alconna, prompt, prompt_silently
+from utils.entari_native import (
+    ArgVal,
+    ChainMsg,
+    event_user_id,
+    get_bot,
+    get_group_id,
+    is_group,
+    make_image,
+    on_alconna,
+    on_ready,
+    prompt,
+    prompt_silently,
+    timer,
+)
 from utils.http_client import clear_http_cache, get_http_cache_stats
 from utils.temp_files import schedule_temp_file_cleanup
 
@@ -127,6 +140,17 @@ from .service import (
     format_status_quick_calc,
 )
 from .medal_store import MedalSnapshotStore
+from .ownership_stats import (
+    GroupMemberListError,
+    OwnershipRefreshResult,
+    OwnershipStatsRendererUnavailable,
+    OwnershipStatsService,
+    collect_group_member_ids,
+    is_group_manager,
+    register_ownership_stats_renderer,
+    render_ownership_stats,
+)
+from .ownership_stats_draw import draw_ownership_stats
 from .sources import source_label, source_order
 from .version_calendar import AkeDataVersionCalendarSource, VersionCalendarError
 
@@ -137,6 +161,8 @@ stage_service = EndfieldStageService(client)
 gacha_asset_cache = EndfieldGachaAssetCache(service)
 account_store = EndfieldStore()
 official_client = EndfieldOfficialClient()
+ownership_stats_service = OwnershipStatsService(account_store, official_client)
+register_ownership_stats_renderer(draw_ownership_stats)
 calendar_source = AkeDataVersionCalendarSource(client)
 official_calendar_source = OfficialVersionCalendarSource()
 medal_store = MedalSnapshotStore()
@@ -233,8 +259,8 @@ endfield_search_shortcut = on_alconna(
 
 
 @endfield_cmd.handle()
-async def handle_endfield(event: Event, rest: ArgVal):
-    await _handle_command(endfield_cmd, event, parse_command(_rest(rest)))
+async def handle_endfield(event: Event, rest: ArgVal, bot=None):
+    await _handle_command(endfield_cmd, event, parse_command(_rest(rest)), bot=bot)
 
 
 @endfield_operator_shortcut.handle()
@@ -257,7 +283,7 @@ async def handle_endfield_search_shortcut(event: Event, rest: ArgVal):
     await _handle_command(endfield_search_shortcut, event, parse_shortcut_command("efs", _rest(rest)))
 
 
-async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand) -> None:
+async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand, bot=None) -> None:
     if command.error:
         return await matcher.finish(format_error(command.error))
     if command.action == "help":
@@ -290,6 +316,8 @@ async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand)
         )
     if command.action in {"medal_view", "medal_refresh"}:
         return await _handle_medal(matcher, command)
+    if command.action in {"ownership_stats", "ownership_refresh"}:
+        return await _handle_ownership_stats(matcher, event, command, bot=bot)
     if command.action in {"bind", "accounts", "account_base", "account_investment", "currency_log", "primary", "unbind", "attendance", "gacha", "gacha_history", "gacha_sync", "gacha_import", "medal_missing"}:
         return await _handle_personal_command(matcher, event, command)
     if command.action == "loadout":
@@ -421,7 +449,7 @@ async def _handle_medal(matcher, command: ParsedEndfieldCommand) -> None:
 
     current = medal_store.load_current_view()
     if current is None:
-        return await matcher.finish("暂无蚀刻章数据，请先发送「/zmd 奖章 刷新」。")
+        return await matcher.finish("暂无蚀刻章数据，请先发送「/ef 奖章 刷新」。")
     baseline = medal_store.load_baseline_view()
     try:
         diff = service.build_medal_diff(current, baseline)
@@ -435,16 +463,109 @@ async def _handle_medal(matcher, command: ParsedEndfieldCommand) -> None:
     return await _finish_pngs(matcher, pngs)
 
 
+async def _handle_ownership_stats(
+    matcher,
+    event: Event,
+    command: ParsedEndfieldCommand,
+    *,
+    bot=None,
+) -> None:
+    group_chat = is_group(event)
+    scope = command.scope
+    if scope == "auto":
+        scope = "group" if group_chat else "global"
+    if scope == "group" and not group_chat:
+        return await matcher.finish("私聊中无法统计“群内”范围，请改用 /ef 持有率 全局。")
+
+    user_id = str(event_user_id(event))
+    active_bot = bot
+    if scope == "group" and active_bot is None:
+        try:
+            active_bot = get_bot()
+        except RuntimeError:
+            return await matcher.finish("当前无法获取群成员列表，请稍后重试。")
+
+    if command.action == "ownership_refresh":
+        if scope == "global":
+            if not _is_endfield_superuser(user_id):
+                return await matcher.finish("仅 SUPERUSER 可以刷新全局持有率快照。")
+        else:
+            guild_id = get_group_id(event)
+            if not _is_endfield_superuser(user_id) and not await is_group_manager(
+                active_bot, event, guild_id, user_id
+            ):
+                return await matcher.finish("仅群主、群管理员或 SUPERUSER 可以刷新当前群快照。")
+
+    if scope == "group":
+        try:
+            member_ids = await collect_group_member_ids(active_bot, get_group_id(event))
+        except GroupMemberListError as exc:
+            logger.warning(
+                "[endfield-ownership] group member listing failed "
+                f"standard_error_type={exc.standard_error_type} "
+                f"fallback_error_type={exc.fallback_error_type}"
+            )
+            return await matcher.finish("获取当前群成员列表失败，已取消统计；不会回退为全局范围。")
+        roles = account_store.list_all_roles(member_ids)
+    else:
+        roles = account_store.list_all_roles()
+
+    refresh = None
+    if command.action == "ownership_refresh":
+        try:
+            cipher = CredentialCipher.from_env()
+            refresh = await ownership_stats_service.refresh_roles(roles, cipher, force=True)
+        except CredentialKeyError as exc:
+            return await matcher.finish(str(exc))
+        logger.info(
+            "[endfield-ownership] manual refresh "
+            f"scope={scope} attempted={refresh.attempted} succeeded={refresh.succeeded} "
+            f"failed={refresh.failed} skipped={refresh.skipped}"
+        )
+        return await matcher.finish(_format_ownership_refresh_result(scope, refresh))
+
+    report = ownership_stats_service.build_report(scope, roles, refresh=refresh)
+    try:
+        rendered = await render_ownership_stats(report)
+    except OwnershipStatsRendererUnavailable:
+        return await matcher.finish("持有率统计数据已生成，但展示组件尚未接入。")
+    if isinstance(rendered, bytes):
+        return await _finish_png(matcher, rendered)
+    if isinstance(rendered, (list, tuple)) and all(isinstance(item, bytes) for item in rendered):
+        return await _finish_pngs(matcher, tuple(rendered))
+    return await matcher.finish(rendered)
+
+
+def _is_endfield_superuser(user_id: str) -> bool:
+    configured = Config.SUPERUSERS or ()
+    if isinstance(configured, str):
+        configured = [configured]
+    return str(user_id) in {str(value) for value in configured}
+
+
+def _format_ownership_refresh_result(scope: str, refresh: OwnershipRefreshResult) -> str:
+    scope_label = "全局" if scope == "global" else "当前群"
+    catalog_label = "目录已更新" if refresh.catalog_updated else "目录无变化"
+    elapsed = max(0, int(refresh.finished_at) - int(refresh.started_at))
+    result = (
+        f"{scope_label}持有率刷新完成：尝试 {refresh.attempted}，成功 {refresh.succeeded}，"
+        f"失败 {refresh.failed}，跳过 {refresh.skipped}；{catalog_label}；耗时 {elapsed} 秒。"
+    )
+    if refresh.failed:
+        result += "失败通常由绑定登录过期或官方接口异常导致；账号所有者可私聊使用 /ef 绑定更新凭证。"
+    return result
+
+
 async def _handle_medal_missing(
     matcher, qq_user_id: str, command: ParsedEndfieldCommand, cipher: CredentialCipher, *, group: bool
 ) -> None:
     """F2：查询绑定账号未获得/未升满/未镀层的蚀刻章。"""
     role = account_store.resolve_role(qq_user_id, command.account_selector)
     if role is None:
-        return await matcher.finish("未找到对应账号，请先私聊使用 /zmd 绑定。")
+        return await matcher.finish("未找到对应账号，请先私聊使用 /ef 绑定。")
     snapshot = medal_store.load_current_view()
     if snapshot is None:
-        return await matcher.finish("暂无蚀刻章数据，请先发送「/zmd 奖章 刷新」建立快照。")
+        return await matcher.finish("暂无蚀刻章数据，请先发送「/ef 奖章 刷新」建立快照。")
     try:
         async with ROLE_TASKS.claim(role):
             token = account_store.decrypt_token(role, cipher)
@@ -494,12 +615,12 @@ async def _handle_personal_command(matcher, event: Event, command: ParsedEndfiel
         if command.action == "primary":
             role = account_store.set_primary(qq_user_id, command.account_selector)
             return await matcher.finish(
-                f"已将 {role.nickname}（{role.role_id}）设为主账号。" if role else "未找到对应账号，请使用 /zmd 账号 查看编号。"
+                f"已将 {role.nickname}（{role.role_id}）设为主账号。" if role else "未找到对应账号，请使用 /ef 账号 查看编号。"
             )
         if command.action == "unbind":
             role = account_store.unbind(qq_user_id, command.account_selector)
             return await matcher.finish(
-                f"已解绑 {role.nickname}（{role.role_id}）。" if role else "未找到对应账号，请使用 /zmd 账号 查看编号。"
+                f"已解绑 {role.nickname}（{role.role_id}）。" if role else "未找到对应账号，请使用 /ef 账号 查看编号。"
             )
         if command.action == "attendance":
             cipher = CredentialCipher.from_env()
@@ -602,6 +723,24 @@ async def _handle_binding(matcher, qq_user_id: str, cipher: CredentialCipher) ->
     if updated_count:
         summary += f"，更新 {updated_count} 个账号"
     summary += f"；当前共绑定 {len(bound_roles)} 个账号。"
+    selected_keys = {(role.role_id, role.server_id) for role in selected}
+    try:
+        refresh = await ownership_stats_service.refresh_roles(
+            [role for role in bound_roles if (role.role_id, role.server_id) in selected_keys],
+            cipher,
+            force=True,
+        )
+    except Exception as exc:
+        logger.warning(
+            "[endfield-ownership] binding refresh unavailable "
+            f"error_type={type(exc).__module__}.{type(exc).__name__}"
+        )
+    else:
+        logger.info(
+            "[endfield-ownership] binding refresh "
+            f"attempted={refresh.attempted} succeeded={refresh.succeeded} "
+            f"failed={refresh.failed} skipped={refresh.skipped}"
+        )
     return await matcher.finish(
         summary + "\n" + "\n".join(
             f"- {role.nickname} · {server_label(role.server_name or role.server_id)} · UID {role.role_id}" for role in selected
@@ -728,11 +867,11 @@ async def _handle_accounts(
 ) -> None:
     roles = account_store.list_roles(qq_user_id)
     if not roles:
-        return await matcher.finish("尚未绑定终末地账号。使用 /zmd 绑定 开始绑定。")
+        return await matcher.finish("尚未绑定终末地账号。使用 /ef 绑定 开始绑定。")
     if command.account_selector:
         role = account_store.resolve_role(qq_user_id, command.account_selector)
         if role is None:
-            return await matcher.finish("未找到对应账号，请使用 /zmd 账号 查看编号。")
+            return await matcher.finish("未找到对应账号，请使用 /ef 账号 查看编号。")
         return await _render_account_detail(matcher, role, cipher, group=group)
     if len(roles) == 1:
         return await _render_account_detail(matcher, roles[0], cipher, group=group)
@@ -751,6 +890,18 @@ async def _handle_accounts(
     if role is None:
         return await matcher.finish(f"编号无效，请输入 1-{len(roles)}。")
     return await _render_account_detail(matcher, role, cipher, group=group)
+
+
+async def _card_detail_with_snapshot(token: str, role: EndfieldRole) -> dict:
+    async with ROLE_TASKS.claim(role):
+        detail = await official_client.card_detail(token, role)
+    try:
+        await ownership_stats_service.persist_detail(role, detail)
+    except Exception:
+        # Opportunistic writes must not affect the account-detail response;
+        # refresh batches report aggregate failures without logging identities.
+        pass
+    return detail
 
 
 async def _render_account_detail(
@@ -772,7 +923,7 @@ async def _render_account_detail(
             return None
 
     detail, currency_balances, name_map = await asyncio.gather(
-        official_client.card_detail(token, role),
+        _card_detail_with_snapshot(token, role),
         load_currency_balances(),
         load_name_map(),
     )
@@ -797,11 +948,11 @@ async def _handle_account_investment(
 ) -> None:
     roles = account_store.list_roles(qq_user_id)
     if not roles:
-        return await matcher.finish("尚未绑定终末地账号。使用 /zmd 绑定 开始绑定。")
+        return await matcher.finish("尚未绑定终末地账号。使用 /ef 绑定 开始绑定。")
     if command.account_selector:
         role = account_store.resolve_role(qq_user_id, command.account_selector)
         if role is None:
-            return await matcher.finish("未找到对应账号，请使用 /zmd 账号 查看编号。")
+            return await matcher.finish("未找到对应账号，请使用 /ef 账号 查看编号。")
         return await _render_account_investment(matcher, role, cipher, group=group)
     if len(roles) == 1:
         return await _render_account_investment(matcher, roles[0], cipher, group=group)
@@ -842,7 +993,7 @@ async def _render_account_investment(
             return None
 
     detail, catalog = await asyncio.gather(
-        official_client.card_detail(token, role),
+        _card_detail_with_snapshot(token, role),
         fetch_account_investment_catalog(),
     )
     name_map = await load_name_map()
@@ -867,11 +1018,11 @@ async def _handle_account_currency(
 ) -> None:
     roles = account_store.list_roles(qq_user_id)
     if not roles:
-        return await matcher.finish("尚未绑定终末地账号。请先私聊使用 /zmd 绑定。")
+        return await matcher.finish("尚未绑定终末地账号。请先私聊使用 /ef 绑定。")
     if command.account_selector:
         role = account_store.resolve_role(qq_user_id, command.account_selector)
         if role is None:
-            return await matcher.finish("未找到对应账号，请使用 /zmd 账号 查看编号。")
+            return await matcher.finish("未找到对应账号，请使用 /ef 账号 查看编号。")
         return await _render_account_currency(matcher, role, command, cipher, group=group)
     if len(roles) == 1:
         return await _render_account_currency(matcher, roles[0], command, cipher, group=group)
@@ -1004,11 +1155,11 @@ async def _handle_account_base(
 ) -> None:
     roles = account_store.list_roles(qq_user_id)
     if not roles:
-        return await matcher.finish("尚未绑定终末地账号。使用 /zmd 绑定 开始绑定。")
+        return await matcher.finish("尚未绑定终末地账号。使用 /ef 绑定 开始绑定。")
     if command.account_selector:
         role = account_store.resolve_role(qq_user_id, command.account_selector)
         if role is None:
-            return await matcher.finish("未找到对应账号，请使用 /zmd 账号 查看编号。")
+            return await matcher.finish("未找到对应账号，请使用 /ef 账号 查看编号。")
         return await _render_account_base(matcher, role, cipher, group=group)
     if len(roles) == 1:
         return await _render_account_base(matcher, roles[0], cipher, group=group)
@@ -1046,7 +1197,7 @@ async def _render_account_base(
             return None
 
     detail, name_map = await asyncio.gather(
-        official_client.card_detail(token, role),
+        _card_detail_with_snapshot(token, role),
         load_name_map(),
     )
     view = build_account_base_view(
@@ -1067,7 +1218,7 @@ async def _handle_attendance(
 ) -> None:
     roles = account_store.resolve_roles(qq_user_id, command.account_selector)
     if not roles:
-        return await matcher.finish("未找到对应账号，请先私聊使用 /zmd 绑定。")
+        return await matcher.finish("未找到对应账号，请先私聊使用 /ef 绑定。")
     views: list[AttendanceRoleView] = []
     for role in roles:
         try:
@@ -1097,7 +1248,7 @@ async def _handle_gacha(
 ) -> None:
     role = account_store.resolve_role(qq_user_id, command.account_selector)
     if role is None:
-        return await matcher.finish("未找到对应账号，请先私聊使用 /zmd 绑定。")
+        return await matcher.finish("未找到对应账号，请先私聊使用 /ef 绑定。")
     gacha_service = EndfieldGachaService(account_store, official_client, cipher)
     states = account_store.list_sync_states(role)
     effective_full = command.full or not states
@@ -1133,7 +1284,7 @@ async def _handle_gacha(
 async def _handle_gacha_history(matcher, qq_user_id: str, command: ParsedEndfieldCommand, *, group: bool) -> None:
     role = account_store.resolve_role(qq_user_id, command.account_selector)
     if role is None:
-        return await matcher.finish("未找到对应账号，请先私聊使用 /zmd 绑定。")
+        return await matcher.finish("未找到对应账号，请先私聊使用 /ef 绑定。")
     total = account_store.count_gacha_records(role, command.pool_filter)
     total_pages = max(1, (total + 19) // 20)
     if command.page > total_pages and total:
@@ -1163,7 +1314,7 @@ async def _handle_gacha_history(matcher, qq_user_id: str, command: ParsedEndfiel
 async def _handle_xhh_import(matcher, qq_user_id: str, command: ParsedEndfieldCommand) -> None:
     role = account_store.resolve_role(qq_user_id, command.account_selector)
     if role is None:
-        return await matcher.finish("未找到对应账号，请先私聊使用 /zmd 绑定。")
+        return await matcher.finish("未找到对应账号，请先私聊使用 /ef 绑定。")
     phone = await _prompt_text("请输入小黑盒账号绑定的手机号；回复“取消”退出。", timeout=90)
     if phone is None:
         return await matcher.finish("导入已取消或等待超时。")
@@ -1206,7 +1357,7 @@ async def _handle_xhh_import(matcher, qq_user_id: str, command: ParsedEndfieldCo
     return await matcher.finish(
         f"{role.nickname} 的小黑盒历史统计导入完成：{len(imported.pools)} 个卡池，"
         f"{imported.total_count} 抽，{len(imported.six_stars)} 条六星记录。\n"
-        "发送 /zmd 抽卡 查看补齐后的分析卡；逐抽历史页仍只展示官方明细。"
+        "发送 /ef 抽卡 查看补齐后的分析卡；逐抽历史页仍只展示官方明细。"
     )
 
 
@@ -1224,7 +1375,7 @@ def _attendance_view(role: EndfieldRole, result: AttendanceResult) -> Attendance
 
 def _format_accounts(roles: list[EndfieldRole], *, reveal_uid: bool, detail_hint: bool = False) -> str:
     if not roles:
-        return "尚未绑定终末地账号。使用 /zmd 绑定 开始绑定。"
+        return "尚未绑定终末地账号。使用 /ef 绑定 开始绑定。"
     lines = ["已绑定的终末地账号："]
     for index, role in enumerate(roles, 1):
         marker = " [主账号]" if role.is_primary else ""
@@ -1232,7 +1383,7 @@ def _format_accounts(roles: list[EndfieldRole], *, reveal_uid: bool, detail_hint
         lines.append(f"{index}. {role.nickname}{marker} · {server_label(role.server_name or role.server_id)} · UID {uid}")
     if detail_hint:
         lines.append("回复编号查看该账号详情，或回复“取消”退出。")
-    lines.append("可使用 /zmd 添加账号 继续绑定，或用 /zmd 主账号 <编号>、/zmd 解绑 <编号> 管理。")
+    lines.append("可使用 /ef 添加账号 继续绑定，或用 /ef 主账号 <编号>、/ef 解绑 <编号> 管理。")
     return "\n".join(lines)
 
 
@@ -2123,7 +2274,7 @@ async def _handle_dev_command(command: ParsedEndfieldCommand) -> str:
 
 
 def _handle_alias_command(command: ParsedEndfieldCommand) -> str:
-    usage = "用法：/zmd 别名 添加 <干员|武器|装备> <正式名称> <新别名>"
+    usage = "用法：/ef 别名 添加 <干员|武器|装备> <正式名称> <新别名>"
     if command.alias_action != "add" or len(command.args) < 3:
         return usage
     kind = normalize_alias_kind(command.args[0])
@@ -2278,3 +2429,43 @@ def _parse_operator_query(rest: str) -> str:
 def _parse_query(rest: str) -> tuple[str, str]:
     command = parse_command(rest)
     return command.scope, command.query
+
+
+_ownership_startup_started = False
+_ownership_startup_task: asyncio.Task | None = None
+
+
+async def _refresh_due_ownership_snapshots() -> None:
+    try:
+        cipher = CredentialCipher.from_env()
+        refresh = await ownership_stats_service.refresh_due(cipher)
+    except Exception as exc:
+        logger.warning(
+            "[endfield-ownership] scheduled refresh unavailable "
+            f"error_type={type(exc).__module__}.{type(exc).__name__}"
+        )
+        return
+    logger.info(
+        "[endfield-ownership] scheduled refresh "
+        f"attempted={refresh.attempted} succeeded={refresh.succeeded} "
+        f"failed={refresh.failed} skipped={refresh.skipped}"
+    )
+
+
+@on_ready
+async def _warmup_ownership_snapshots(_bot=None) -> None:
+    global _ownership_startup_started, _ownership_startup_task
+    if _ownership_startup_started:
+        return
+    _ownership_startup_started = True
+    _ownership_startup_task = asyncio.create_task(_refresh_due_ownership_snapshots())
+
+
+timer.add_job(
+    _refresh_due_ownership_snapshots,
+    "interval",
+    hours=24,
+    id="endfield_ownership_refresh",
+    replace_existing=True,
+    max_instances=1,
+)
