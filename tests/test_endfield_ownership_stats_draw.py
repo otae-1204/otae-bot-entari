@@ -207,25 +207,29 @@ class OwnershipStatsDrawTests(unittest.TestCase):
         self.assertIn("37.5%", html)
 
     def test_overview_six_star_collection_donuts(self):
+        # 夹具名与真实目录对齐:管理员 6★、别礼/骏卫 6★常驻、汤汤 6★非常驻、佩丽卡 5★。
         operators = (
             _operator("管理员", owned=12, potential_level=1, rarity=6),
             _operator("别礼", owned=12, potential_level=1, rarity=6),
             _operator("骏卫", owned=6, potential_level=0, rarity=6),
-            _operator("佩丽卡", owned=3, potential_level=2, rarity=6),
-            _operator("汤汤", owned=4, rarity=5),
+            _operator("汤汤", owned=3, potential_level=2, rarity=6),
+            _operator("佩丽卡", owned=4, rarity=5),
         )
         html = _html(_report((_segment("all", operators),)))
         for title in ("6星干员收集率", "6星非常驻干员收集率", "6星干员潜能分布", "6星非常驻干员潜能分布"):
             self.assertIn(title, html)
-        # 6星含管理员:33/48 = 68.8%(金色 247.5°);非常驻仅佩丽卡:3/12 = 25.0%(金色 90°)。
-        self.assertIn("#ffd000 0.00deg 247.50deg", html)
-        self.assertIn("#d9dde0 247.50deg 360.00deg", html)
-        self.assertIn("68.8%", html)
+        # 6星不含管理员:21/36 = 58.3%(金色 210°);非常驻仅汤汤:3/12 = 25.0%(金色 90°)。
+        self.assertIn("#ffd000 0.00deg 210.00deg", html)
+        self.assertIn("#d9dde0 210.00deg 360.00deg", html)
+        self.assertIn("58.3%", html)
         self.assertIn("#ffd000 0.00deg 90.00deg", html)
         self.assertIn("25.0%", html)
+        # 管理员不参与饼图,但仍作为数据行展示在持有率列表中。
+        self.assertIn("管理员", html)
+        self.assertIn("100.0%", html)
         # 环形图下方的副标题注释已移除。
         self.assertNotIn("donut-sub", html)
-        # 汤汤是 5★,不参与 6星概况。
+        # 佩丽卡是 5★,不参与 6星概况。
         self.assertNotIn("5 名干员 · 60 槽位", html)
 
     def test_six_star_potential_donut_uses_owned_slots(self):
@@ -233,21 +237,21 @@ class OwnershipStatsDrawTests(unittest.TestCase):
             _operator("管理员", owned=12, potential_level=1, rarity=6),
             _operator("别礼", owned=12, potential_level=1, rarity=6),
             _operator("骏卫", owned=6, potential_level=0, rarity=6),
-            _operator("佩丽卡", owned=3, potential_level=2, rarity=6),
+            _operator("汤汤", owned=3, potential_level=2, rarity=6),
         )
         html = _html(_report((_segment("all", operators),)))
-        # 已持有 33 格:0潜 6/33、1潜 24/33、2潜 3/33;未持有格不参与潜能分布。
-        self.assertIn("#c9d9e6 0.00deg 65.45deg", html)
-        self.assertIn("#a6c4da 65.45deg 327.27deg", html)
-        self.assertIn("#7fa9cc 327.27deg 360.00deg", html)
+        # 管理员不计入;6星已持有 21 格:0潜 6/21、1潜 12/21、2潜 3/21,未持有格不参与潜能分布。
+        self.assertIn("#c9d9e6 0.00deg 102.86deg", html)
+        self.assertIn("#a6c4da 102.86deg 308.57deg", html)
+        self.assertIn("#7fa9cc 308.57deg 360.00deg", html)
         self.assertIn("满潜率", html)
-        # 所有标注外移并带引线,文本为"潜能名 + 占比";2潜扇区中点在 343.6°,居左。
+        # 所有标注外移并带引线,文本为"潜能名 + 占比";1潜、2潜扇区居左。
         self.assertEqual(html.count('class="donut-leader"'), 4)
         self.assertEqual(html.count('class="donut-slice-label"'), 2)
         self.assertEqual(html.count('class="donut-slice-label donut-slice-left"'), 2)
-        self.assertIn("0潜 18%", html)
-        self.assertIn("1潜 73%", html)
-        self.assertIn("2潜 9%", html)
+        self.assertIn("0潜 29%", html)
+        self.assertIn("1潜 57%", html)
+        self.assertIn("2潜 14%", html)
         self.assertIn("2潜 100%", html)
         # 环下注释已移除。
         self.assertNotIn("已持有 33 槽位", html)
@@ -277,7 +281,7 @@ class OwnershipStatsDrawTests(unittest.TestCase):
     def test_thin_potential_slices_get_outside_labels(self):
         buckets = _buckets({"unowned": 50, "potential_2": 47, "potential_5": 2, "unknown": 1}, 100)
         operator = OperatorOwnership(
-            operator_key="k", source_id="chr_x", name="佩丽卡", rarity=6,
+            operator_key="k", source_id="chr_x", name="汤汤", rarity=6,
             profession="术师", sort_order=1, owned_count=50, sample_count=100,
             ownership_rate=0.5, potential_buckets=buckets,
         )
