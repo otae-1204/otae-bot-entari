@@ -1,4 +1,8 @@
 import json
+import logging
+import os
+import shutil
+import tempfile
 import time
 from PIL import Image
 from pathlib import Path
@@ -6,6 +10,60 @@ from typing import Any, List, Dict, Optional, Tuple
 
 from configs.path_config import IMAGE_PATH
 from .models import PlayerSummariesResponse
+
+
+logger = logging.getLogger(__name__)
+
+
+def _atomic_write_json(path: Path, content: Any) -> None:
+    """Write JSON without exposing a partially written destination file."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(
+        dir=path.parent,
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+    )
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as file:
+            json.dump(content, file, indent=4)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temp_path, path)
+    except BaseException:
+        temp_path.unlink(missing_ok=True)
+        raise
+
+
+def _corrupt_backup_path(path: Path) -> Path:
+    timestamp = time.strftime("%Y%m%d-%H%M%S")
+    candidate = path.with_name(f"{path.name}.corrupt-{timestamp}")
+    index = 1
+    while candidate.exists():
+        candidate = path.with_name(f"{path.name}.corrupt-{timestamp}-{index}")
+        index += 1
+    return candidate
+
+
+def _load_json_or_default(path: Path, default: Any) -> Any:
+    if not path.exists():
+        _atomic_write_json(path, default)
+        return default
+
+    try:
+        return json.loads(path.read_text("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        backup_path = _corrupt_backup_path(path)
+        shutil.copy2(path, backup_path)
+        _atomic_write_json(path, default)
+        logger.warning(
+            "Recovered invalid JSON data file %s; original saved as %s: %s",
+            path,
+            backup_path,
+            exc,
+        )
+        return default
 
 
 def _unknown_avatar() -> Image.Image:
@@ -99,11 +157,8 @@ class BindData:
         self.content: Dict[str, List[Dict[str, str]]] = {}
         self._save_path = save_path
 
-        if save_path.exists():
-            self.content = json.loads(Path(save_path).read_text("utf-8"))
-            self._normalize()
-        else:
-            self.save()
+        self.content = _load_json_or_default(save_path, {})
+        self._normalize()
 
     def _normalize(self) -> None:
         normalized = normalize_bind_map(self.content)
@@ -112,9 +167,7 @@ class BindData:
             self.save()
 
     def save(self) -> None:
-        self._save_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self._save_path, "w", encoding="utf-8") as f:
-            json.dump(self.content, f, indent=4)
+        _atomic_write_json(self._save_path, self.content)
 
     def add(self, parent_id: str, content: Dict[str, str]) -> None:
         parent_id = str(parent_id)
@@ -189,15 +242,10 @@ class SteamInfoData:
         self.content: Dict[str, PlayerSummariesResponse] = {}
         self._save_path = save_path
 
-        if save_path.exists():
-            self.content = json.loads(save_path.read_text("utf-8"))
-        else:
-            self.save()
+        self.content = _load_json_or_default(save_path, {})
 
     def save(self) -> None:
-        self._save_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self._save_path, "w", encoding="utf-8") as f:
-            json.dump(self.content, f, indent=4)
+        _atomic_write_json(self._save_path, self.content)
 
     def update(self, parent_id: str, content: PlayerSummariesResponse) -> None:
         old_content = self.content.get(parent_id, {"players": []})
@@ -303,16 +351,10 @@ class ParentData:
         self.content: Dict[str, str] = {}  # parent_id: name
         self._save_path = save_path
 
-        if not save_path.exists():
-            save_path.parent.mkdir(parents=True, exist_ok=True)
-            self.save()
-        else:
-            self.content = json.loads(save_path.read_text("utf-8"))
+        self.content = _load_json_or_default(save_path, {})
 
     def save(self) -> None:
-        self._save_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self._save_path, "w", encoding="utf-8") as f:
-            json.dump(self.content, f, indent=4)
+        _atomic_write_json(self._save_path, self.content)
 
     def update(self, parent_id: str, avatar: Image.Image, name: str) -> None:
         self.content[parent_id] = name
@@ -350,14 +392,10 @@ class DisableParentData:
         self.content: List[str] = []
         self._save_path = save_path
 
-        if save_path.exists():
-            self.content = json.loads(save_path.read_text("utf-8"))
-        else:
-            self.save()
+        self.content = _load_json_or_default(save_path, [])
 
     def save(self) -> None:
-        with open(self._save_path, "w", encoding="utf-8") as f:
-            json.dump(self.content, f, indent=4)
+        _atomic_write_json(self._save_path, self.content)
 
     def add(self, parent_id: str) -> None:
         if parent_id not in self.content:

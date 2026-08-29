@@ -3579,6 +3579,37 @@ remotePort = {{ $v.Second }}
 
         self.assertEqual([item["type"] for item in result], ["start", "change", "stop"])
 
+    def test_steam_data_recovers_corrupt_json_with_backup(self):
+        steam_data = _load_steam_data_source()
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "steam_info.json"
+            corrupt_content = '{"10001": {"players": ['
+            path.write_text(corrupt_content, encoding="utf-8")
+
+            store = steam_data.SteamInfoData(path)
+
+            self.assertEqual(store.content, {})
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {})
+            backups = list(path.parent.glob("steam_info.json.corrupt-*"))
+            self.assertEqual(len(backups), 1)
+            self.assertEqual(backups[0].read_text(encoding="utf-8"), corrupt_content)
+
+    def test_steam_json_save_does_not_truncate_destination_on_replace_failure(self):
+        steam_data = _load_steam_data_source()
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "steam_info.json"
+            original = {"10001": {"players": [{"steamid": "old"}]}}
+            path.write_text(json.dumps(original), encoding="utf-8")
+            store = steam_data.SteamInfoData(path)
+            store.content = {"10001": {"players": [{"steamid": "new"}]}}
+
+            with patch.object(steam_data.os, "replace", side_effect=OSError("busy")):
+                with self.assertRaises(OSError):
+                    store.save()
+
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8")), original)
+            self.assertEqual(list(path.parent.glob("*.tmp")), [])
+
     def test_steam_bind_data_nickname_compatibility(self):
         steam_data = _load_steam_data_source()
         with TemporaryDirectory() as tmp:
