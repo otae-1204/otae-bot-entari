@@ -29,6 +29,10 @@ from .gacha import ROLE_TASKS, TaskAlreadyRunning
 SNAPSHOT_TTL_SECONDS = 48 * 60 * 60
 REFRESH_INTERVAL_SECONDS = 24 * 60 * 60
 REFRESH_CONCURRENCY = 2
+SYSTEMIC_FAILURE_THRESHOLD = 3
+SYSTEMIC_BACKOFF_BASE_SECONDS = 2.0
+_SYSTEMIC_COMMUNITY_OPERATIONS = {"账号授权", "获取社区凭据", "刷新社区签名"}
+_SYSTEMIC_COMMUNITY_CODES = {"405", "429", "502", "503", "504"}
 _TABLE_MAX_BYTES = 24 * 1024 * 1024
 _I18N_MAX_BYTES = 64 * 1024 * 1024
 _HEX_ID_RE = re.compile(r"[0-9a-f]{32}", re.IGNORECASE)
@@ -109,6 +113,14 @@ class OwnershipRefreshResult:
     catalog_updated: bool
     started_at: int
     finished_at: int
+    stopped_early: bool = False
+    stop_reason: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class _RefreshRoleOutcome:
+    status: Literal["success", "failed", "skipped"]
+    error: Exception | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -282,12 +294,16 @@ class OwnershipStatsService:
         snapshot_ttl_seconds: int = SNAPSHOT_TTL_SECONDS,
         refresh_interval_seconds: int = REFRESH_INTERVAL_SECONDS,
         concurrency: int = REFRESH_CONCURRENCY,
+        systemic_failure_threshold: int = SYSTEMIC_FAILURE_THRESHOLD,
+        systemic_backoff_base_seconds: float = SYSTEMIC_BACKOFF_BASE_SECONDS,
     ):
         self.store = store
         self.client = client
         self.snapshot_ttl_seconds = max(60, int(snapshot_ttl_seconds))
         self.refresh_interval_seconds = max(60, int(refresh_interval_seconds))
         self.concurrency = max(1, int(concurrency))
+        self.systemic_failure_threshold = max(1, int(systemic_failure_threshold))
+        self.systemic_backoff_base_seconds = max(0.0, float(systemic_backoff_base_seconds))
         self._catalog_lock = asyncio.Lock()
         self._refresh_lock = asyncio.Lock()
 
@@ -347,22 +363,64 @@ class OwnershipStatsService:
                 if key not in snapshots or snapshots[key].fetched_at < due_before
             }
         semaphore = asyncio.Semaphore(self.concurrency)
+        state_lock = asyncio.Lock()
+        stop_event = asyncio.Event()
+        systemic_failures = 0
+        backoff_until = 0.0
+        stop_reason = ""
 
-        async def run(candidates: tuple[EndfieldRole, ...]) -> str:
+        async def run(candidates: tuple[EndfieldRole, ...]) -> _RefreshRoleOutcome:
+            nonlocal systemic_failures, backoff_until, stop_reason
+            if stop_event.is_set():
+                return _RefreshRoleOutcome("skipped")
             async with semaphore:
-                return await self._refresh_one(candidates, cipher, catalog, started)
+                if stop_event.is_set():
+                    return _RefreshRoleOutcome("skipped")
+                async with state_lock:
+                    delay = max(0.0, backoff_until - time.monotonic())
+                if delay:
+                    await asyncio.sleep(delay)
+                if stop_event.is_set():
+                    return _RefreshRoleOutcome("skipped")
+
+                outcome = await self._refresh_one(candidates, cipher, catalog, started)
+                async with state_lock:
+                    systemic_code = _systemic_community_error_code(outcome.error)
+                    if outcome.status == "success":
+                        systemic_failures = 0
+                    elif systemic_code:
+                        systemic_failures += 1
+                        if systemic_failures >= self.systemic_failure_threshold:
+                            stop_reason = (
+                                f"官方社区接口连续返回 {systemic_code}，"
+                                "已保护性停止剩余刷新"
+                            )
+                            stop_event.set()
+                        else:
+                            backoff_seconds = self.systemic_backoff_base_seconds * (
+                                2 ** (systemic_failures - 1)
+                            )
+                            backoff_until = max(
+                                backoff_until,
+                                time.monotonic() + backoff_seconds,
+                            )
+                    elif outcome.status == "failed":
+                        systemic_failures = 0
+                return outcome
 
         async with self._refresh_lock:
             results = await asyncio.gather(*(run(candidates) for candidates in groups.values()))
         self.store.cleanup_orphan_operator_snapshots()
         return OwnershipRefreshResult(
             attempted=len(results),
-            succeeded=results.count("success"),
-            failed=results.count("failed"),
-            skipped=results.count("skipped"),
+            succeeded=sum(item.status == "success" for item in results),
+            failed=sum(item.status == "failed" for item in results),
+            skipped=sum(item.status == "skipped" for item in results),
             catalog_updated=catalog_updated,
             started_at=started,
             finished_at=int(time.time()),
+            stopped_early=stop_event.is_set(),
+            stop_reason=stop_reason,
         )
 
     async def _refresh_one(
@@ -371,7 +429,7 @@ class OwnershipStatsService:
         cipher: CredentialCipher,
         catalog: Sequence[OperatorCatalogEntry],
         attempted_at: int,
-    ) -> str:
+    ) -> _RefreshRoleOutcome:
         reference = candidates[0]
         region = "asia" if any(is_asia_role(role) for role in candidates) else "cn"
         last_error: Exception | None = None
@@ -389,27 +447,31 @@ class OwnershipStatsService:
                             fetched_at=attempted_at,
                             game_saved_at=game_saved_at,
                         )
-                        return "success"
+                        return _RefreshRoleOutcome("success")
                     except (CredentialKeyError, LookupError) as exc:
                         last_error = exc
                         continue
                     except EndfieldAPIError as exc:
                         last_error = exc
-                        if index + 1 < len(candidates) and _is_authentication_error(exc):
+                        if (
+                            index + 1 < len(candidates)
+                            and _is_authentication_error(exc)
+                            and not _systemic_community_error_code(exc)
+                        ):
                             continue
                         break
                     except Exception as exc:
                         last_error = exc
                         break
         except TaskAlreadyRunning:
-            return "skipped"
+            return _RefreshRoleOutcome("skipped")
         self.store.record_operator_snapshot_failure(
             reference,
             region,
             _safe_refresh_error(last_error),
             attempted_at=attempted_at,
         )
-        return "failed"
+        return _RefreshRoleOutcome("failed", last_error)
 
     def build_report(
         self,
@@ -721,6 +783,15 @@ def _is_authentication_error(error: EndfieldAPIError) -> bool:
     if error.operation in {"账号授权", "获取社区凭据", "刷新社区签名"}:
         return True
     return str(error.code).casefold() in {"401", "403", "10001", "10002", "10003", "10004"}
+
+
+def _systemic_community_error_code(error: Exception | None) -> str:
+    if not isinstance(error, EndfieldAPIError):
+        return ""
+    code = str(error.code)
+    if error.operation not in _SYSTEMIC_COMMUNITY_OPERATIONS:
+        return ""
+    return code if code in _SYSTEMIC_COMMUNITY_CODES else ""
 
 
 def _safe_refresh_error(error: Exception | None) -> str:

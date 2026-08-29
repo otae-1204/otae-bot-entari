@@ -316,6 +316,44 @@ class OwnershipRefreshAndGroupTests(unittest.TestCase):
         self.assertEqual(client.tokens, ["bad-token", "good-token"])
         self.assertEqual(self.store.list_operator_snapshots()[0].members[0].potential_level, 2)
 
+    def test_systemic_405_does_not_try_duplicate_binding_credentials(self):
+        self.store.bind_roles(
+            "first",
+            "first-token",
+            [RoleCandidate("first", "same", "1", "first")],
+            self.cipher,
+        )
+        self.store.bind_roles(
+            "second",
+            "second-token",
+            [RoleCandidate("second", "same", "1", "second")],
+            self.cipher,
+        )
+
+        class Client:
+            def __init__(self):
+                self.tokens = []
+
+            async def card_detail(self, token, _role):
+                self.tokens.append(token)
+                raise EndfieldAPIError("获取社区凭据", "405", "官方服务暂时不可用")
+
+        client = Client()
+        service = OwnershipStatsService(
+            self.store,
+            client,
+            concurrency=1,
+            systemic_failure_threshold=3,
+            systemic_backoff_base_seconds=0,
+        )
+        with mock.patch.object(service, "refresh_catalog", mock.AsyncMock(return_value=False)):
+            result = asyncio.run(
+                service.refresh_roles(self.store.list_all_roles(), self.cipher, now=NOW, force=True)
+            )
+
+        self.assertEqual((result.attempted, result.failed), (1, 1))
+        self.assertEqual(len(client.tokens), 1)
+
     def test_due_refresh_only_fetches_missing_or_older_than_twenty_four_hours(self):
         fresh = self.store.bind_roles(
             "fresh",
@@ -362,6 +400,42 @@ class OwnershipRefreshAndGroupTests(unittest.TestCase):
 
         self.assertEqual((result.attempted, result.succeeded), (1, 1))
         self.assertEqual(client.roles, ["due-role"])
+
+    def test_refresh_stops_after_repeated_systemic_community_failures(self):
+        for index in range(8):
+            self.store.bind_roles(
+                f"qq-{index}",
+                f"token-{index}",
+                [RoleCandidate(f"binding-{index}", f"role-{index}", "1", f"role-{index}")],
+                self.cipher,
+            )
+
+        class Client:
+            def __init__(self):
+                self.calls = 0
+
+            async def card_detail(self, _token, _role):
+                self.calls += 1
+                raise EndfieldAPIError("获取社区凭据", "405", "官方服务暂时不可用")
+
+        client = Client()
+        service = OwnershipStatsService(
+            self.store,
+            client,
+            concurrency=1,
+            systemic_failure_threshold=3,
+            systemic_backoff_base_seconds=0,
+        )
+        with mock.patch.object(service, "refresh_catalog", mock.AsyncMock(return_value=False)):
+            result = asyncio.run(
+                service.refresh_roles(self.store.list_all_roles(), self.cipher, now=NOW, force=True)
+            )
+
+        self.assertEqual((result.attempted, result.failed, result.skipped), (8, 3, 5))
+        self.assertEqual(client.calls, 3)
+        self.assertTrue(result.stopped_early)
+        self.assertIn("405", result.stop_reason)
+        self.assertEqual(len(self.store.list_operator_snapshots()), 3)
 
     def test_group_member_pagination_failure_and_admin_detection(self):
         class Bot:
@@ -525,6 +599,26 @@ class OwnershipRefreshAndGroupTests(unittest.TestCase):
         refresh_roles.assert_awaited_once_with(roles, self.cipher, force=True)
         build_report.assert_not_called()
         renderer.assert_not_awaited()
+
+    def test_refresh_text_reports_protective_stop_and_old_snapshot_policy(self):
+        refresh = OwnershipRefreshResult(
+            attempted=210,
+            succeeded=5,
+            failed=3,
+            skipped=202,
+            catalog_updated=False,
+            started_at=100,
+            finished_at=111,
+            stopped_early=True,
+            stop_reason="官方社区接口连续返回 405，已保护性停止剩余刷新",
+        )
+
+        result = endfield_plugin._format_ownership_refresh_result("global", refresh)
+
+        self.assertIn("失败 3，跳过 202", result)
+        self.assertIn("保护性停止", result)
+        self.assertIn("旧快照仍按 48 小时有效期参与统计", result)
+        self.assertNotIn("/ef 绑定更新凭证", result)
 
     def test_group_view_uses_live_member_filter_and_never_global_roles(self):
         class Matcher:

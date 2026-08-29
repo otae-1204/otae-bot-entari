@@ -520,7 +520,8 @@ async def _handle_ownership_stats(
         logger.info(
             "[endfield-ownership] manual refresh "
             f"scope={scope} attempted={refresh.attempted} succeeded={refresh.succeeded} "
-            f"failed={refresh.failed} skipped={refresh.skipped}"
+            f"failed={refresh.failed} skipped={refresh.skipped} "
+            f"stopped_early={refresh.stopped_early}"
         )
         return await matcher.finish(_format_ownership_refresh_result(scope, refresh))
 
@@ -551,7 +552,9 @@ def _format_ownership_refresh_result(scope: str, refresh: OwnershipRefreshResult
         f"{scope_label}持有率刷新完成：尝试 {refresh.attempted}，成功 {refresh.succeeded}，"
         f"失败 {refresh.failed}，跳过 {refresh.skipped}；{catalog_label}；耗时 {elapsed} 秒。"
     )
-    if refresh.failed:
+    if refresh.stopped_early:
+        result += f"{refresh.stop_reason}；旧快照仍按 48 小时有效期参与统计。"
+    elif refresh.failed:
         result += "失败通常由绑定登录过期或官方接口异常导致；账号所有者可私聊使用 /ef 绑定更新凭证。"
     return result
 

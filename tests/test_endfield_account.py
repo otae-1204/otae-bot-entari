@@ -1887,7 +1887,60 @@ class EndfieldOfficialClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("sk-game-role", captured["headers"])
         self.assertEqual(captured["content"], b"")
         self.assertEqual(detail, {"base": {"name": "otae"}})
-        self.assertTrue(client._skland_context.await_args.kwargs["refresh"])
+        client._skland_context.assert_awaited_once_with("account-token")
+        await http.aclose()
+
+    async def test_card_detail_reuses_cached_community_context(self):
+        http = httpx.AsyncClient(transport=httpx.MockTransport(lambda _request: httpx.Response(500)))
+        client = client_module.EndfieldOfficialClient(
+            http,
+            community_exchange_interval_seconds=0,
+        )
+        context = client_module._SklandContext(
+            "cred",
+            "sign-token",
+            1000,
+            1000,
+            float("inf"),
+        )
+        client._create_skland_context = mock.AsyncMock(return_value=context)
+        client._signed_skland_request = mock.AsyncMock(
+            return_value={"code": 0, "data": {"detail": {"base": {"name": "otae"}}}}
+        )
+        role = mock.Mock(role_id="role-a", server_id="1")
+
+        first = await client.card_detail("account-token", role)
+        second = await client.card_detail("account-token", role)
+
+        self.assertEqual(first, second)
+        self.assertEqual(client._create_skland_context.await_count, 1)
+        self.assertEqual(client._signed_skland_request.await_count, 2)
+        await http.aclose()
+
+    async def test_card_detail_refreshes_context_once_after_stale_signature(self):
+        http = httpx.AsyncClient(transport=httpx.MockTransport(lambda _request: httpx.Response(500)))
+        client = client_module.EndfieldOfficialClient(http)
+        stale = client_module._SklandContext("old", "old-sign", 1000, 1000, float("inf"))
+        fresh = client_module._SklandContext("new", "new-sign", 1000, 1000, float("inf"))
+        client._skland_context = mock.AsyncMock(side_effect=[stale, fresh])
+        client._signed_skland_request = mock.AsyncMock(
+            side_effect=[
+                client_module.EndfieldAPIError("社区请求", "401", "签名已失效"),
+                {"code": 0, "data": {"detail": {"base": {"name": "otae"}}}},
+            ]
+        )
+
+        detail = await client.card_detail(
+            "account-token",
+            mock.Mock(role_id="role-a", server_id="1"),
+        )
+
+        self.assertEqual(detail, {"base": {"name": "otae"}})
+        self.assertEqual(
+            client._skland_context.await_args_list,
+            [mock.call("account-token"), mock.call("account-token", refresh=True)],
+        )
+        self.assertEqual(client._signed_skland_request.await_count, 2)
         await http.aclose()
 
     async def test_card_detail_rejects_missing_detail_payload(self):

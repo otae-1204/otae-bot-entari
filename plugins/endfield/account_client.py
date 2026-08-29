@@ -33,6 +33,9 @@ GACHA_APP_CODE = "be36d44aa36bfb5b"
 SKLAND_REFRESH_USER_AGENT = (
     "Skland/1.21.0 (com.hypergryph.skland; build:102100065; iOS 17.6.0) Alamofire/5.7.1"
 )
+SKLAND_CONTEXT_TTL_SECONDS = 540
+SKLAND_EXCHANGE_INTERVAL_SECONDS = 2.0
+_SKLAND_CONTEXT_RETRY_CODES = {"401", "10000", "10003"}
 ACCOUNT_PROVIDER_CN = "hypergryph"
 ACCOUNT_PROVIDER_SKPORT = "gryphline"
 _ACCOUNT_CREDENTIAL_KIND = "endfield-account-v1"
@@ -188,10 +191,19 @@ class _SklandContext:
 
 
 class EndfieldOfficialClient:
-    def __init__(self, http: httpx.AsyncClient | None = None, *, timeout: float = 25.0):
+    def __init__(
+        self,
+        http: httpx.AsyncClient | None = None,
+        *,
+        timeout: float = 25.0,
+        community_exchange_interval_seconds: float = SKLAND_EXCHANGE_INTERVAL_SECONDS,
+    ):
         self.http = http or httpx.AsyncClient(timeout=timeout, follow_redirects=True, trust_env=False)
         self._owns_http = http is None
         self._skland_cache: dict[str, _SklandContext] = {}
+        self._skland_exchange_lock = asyncio.Lock()
+        self._skland_exchange_interval_seconds = max(0.0, float(community_exchange_interval_seconds))
+        self._next_skland_exchange_at = 0.0
         self._u8_cache: dict[tuple[str, str], tuple[str, float]] = {}
 
     async def close(self) -> None:
@@ -351,17 +363,26 @@ class EndfieldOfficialClient:
         return AttendanceResult(status, message, tuple(rewards), monthly_count)
 
     async def card_detail(self, account_token: str, role: RoleCandidate | Any) -> dict[str, Any]:
-        context = await self._skland_context(account_token, refresh=True)
-        extra_headers = None
-        if context.provider == ACCOUNT_PROVIDER_SKPORT:
-            extra_headers = {"sk-game-role": f"3_{role.role_id}_{role.server_id}"}
-        payload = await self._signed_skland_request(
-            context,
-            "GET",
-            "/api/v1/game/endfield/card/detail",
-            params={"roleId": str(role.role_id), "serverId": str(role.server_id)},
-            extra_headers=extra_headers,
-        )
+        async def request(context: _SklandContext) -> dict[str, Any]:
+            extra_headers = None
+            if context.provider == ACCOUNT_PROVIDER_SKPORT:
+                extra_headers = {"sk-game-role": f"3_{role.role_id}_{role.server_id}"}
+            return await self._signed_skland_request(
+                context,
+                "GET",
+                "/api/v1/game/endfield/card/detail",
+                params={"roleId": str(role.role_id), "serverId": str(role.server_id)},
+                extra_headers=extra_headers,
+            )
+
+        context = await self._skland_context(account_token)
+        try:
+            payload = await request(context)
+        except EndfieldAPIError as exc:
+            if not _should_refresh_skland_context(exc):
+                raise
+            context = await self._skland_context(account_token, refresh=True)
+            payload = await request(context)
         detail = (payload.get("data") or {}).get("detail")
         if not isinstance(detail, dict) or not detail:
             raise EndfieldAPIError("查询终末地档案", message="官方接口未返回角色档案")
@@ -635,6 +656,28 @@ class EndfieldOfficialClient:
         cached = self._skland_cache.get(key)
         if cached and not refresh and cached.expires_at > time.monotonic():
             return cached
+        async with self._skland_exchange_lock:
+            # Another role using the same binding may have filled the cache while
+            # this coroutine was waiting for the exchange gate.
+            cached = self._skland_cache.get(key)
+            if cached and not refresh and cached.expires_at > time.monotonic():
+                return cached
+            delay = self._next_skland_exchange_at - time.monotonic()
+            if delay > 0:
+                await asyncio.sleep(delay)
+            self._next_skland_exchange_at = (
+                time.monotonic() + self._skland_exchange_interval_seconds
+            )
+            context = await self._create_skland_context(account_token, provider, config)
+            self._skland_cache[key] = context
+            return context
+
+    async def _create_skland_context(
+        self,
+        account_token: str,
+        provider: str,
+        config: _ProviderConfig,
+    ) -> _SklandContext:
         cred = ""
         sign_token = ""
         server_time = 0
@@ -696,10 +739,9 @@ class EndfieldOfficialClient:
             sign_token=sign_token,
             server_time=server_time or now,
             client_time=now,
-            expires_at=time.monotonic() + 540,
+            expires_at=time.monotonic() + SKLAND_CONTEXT_TTL_SECONDS,
             provider=provider,
         )
-        self._skland_cache[key] = context
         return context
 
     async def _oauth_token(
@@ -1282,3 +1324,8 @@ def _sanitize_message(value: str) -> str:
     text = re.sub(r"(?i)(token|cred|code|sign|uid)\s*[:=]\s*[^\s,;]+", r"\1=<REDACTED>", text)
     text = re.sub(r"(?<!\d)\d{4,8}(?!\d)", "<NUMBER>", text)
     return text[:160]
+
+
+def _should_refresh_skland_context(error: EndfieldAPIError) -> bool:
+    """Retry only failures that a fresh signing context can actually repair."""
+    return error.operation == "社区请求" and str(error.code) in _SKLAND_CONTEXT_RETRY_CODES
