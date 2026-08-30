@@ -33,6 +33,7 @@ from plugins.endfield.akedata_stage_source import (
     _enemy_metrics,
     _enemy_modifiers,
     _enemy_poise,
+    _enemy_instance_config,
     _translated,
     parse_akedata_catalog,
     parse_akedata_stage,
@@ -556,8 +557,9 @@ class EndfieldStageCommandTests(unittest.TestCase):
 
     def test_help_and_source_list_stage(self):
         self.assertIn("/ef 副本 <关卡名> [变体名|总览]", commands.format_help())
-        self.assertIn("关卡：FZ Wiki、AkeData", commands.format_source())
-        self.assertEqual(source_order("stage"), ("fz", "akedata"))
+        self.assertIn("关卡：AkeData", commands.format_source())
+        self.assertIn("关卡数据仅使用 AkeData", commands.format_source())
+        self.assertEqual(source_order("stage"), ("akedata",))
 
     def test_akedata_source_option_and_alias(self):
         parsed = commands.parse_command("副本 撼山雾火 --source ake")
@@ -683,6 +685,40 @@ class EndfieldAkeDataStageSourceTests(unittest.TestCase):
             "中文关卡",
         )
         self.assertEqual(_localized({"zh-CN": "中文标题", "en": "English Title"}), "中文标题")
+
+    def test_level_script_enemies_are_normalized_as_spawner_instances(self):
+        config = _enemy_instance_config(
+            {
+                "scriptId": 47900010002,
+                "enemies": {
+                    "30001": {
+                        "entityDataIdKey": "eny_0120_klbear",
+                        "level": 90,
+                        "buffs": [
+                            {
+                                "buffId": "buff_common_maxhpup",
+                                "blackboard": [{"key": "ratio", "valueFloat": 1.3}],
+                            }
+                        ],
+                    }
+                },
+            }
+        )
+
+        self.assertEqual(config["configId"], "47900010002")
+        self.assertEqual(
+            config["enemyLibrary"][0],
+            {
+                "enemyId": "eny_0120_klbear",
+                "enemyLevel": 90,
+                "bornBuffList": [
+                    {
+                        "buffId": "buff_common_maxhpup",
+                        "blackboard": [{"key": "ratio", "valueFloat": 1.3}],
+                    }
+                ],
+            },
+        )
 
     def test_catalog_discovers_monument_stages_and_keeps_series(self):
         version, tables = _akedata_fixture()
@@ -811,7 +847,7 @@ class EndfieldAkeDataStageSourceTests(unittest.TestCase):
             buff_table=buffs,
         )
         enemy = stage.variants[-1].enemies[0]
-        self.assertEqual((enemy.hp, enemy.attack, enemy.defense), (2476342.8, 4130, 100))
+        self.assertEqual((enemy.hp, enemy.attack, enemy.defense), (2476342, 4130, 100))
         self.assertEqual((enemy.poise.max_value, enemy.poise.recover_seconds), (980.0, 10.0))
         self.assertEqual((enemy.poise.damage_scalar, enemy.poise.recover_scalar), (1.5, 1.8))
         self.assertIsNone(enemy.poise.knots)
@@ -897,6 +933,225 @@ class EndfieldAkeDataStageSourceTests(unittest.TestCase):
 
 
 class EndfieldAkeDataStageSourceAsyncTests(unittest.IsolatedAsyncioTestCase):
+    async def test_crisis_fragment_boss_stats_come_directly_from_akedata(self):
+        version, _ = _akedata_fixture()
+        series = {
+            "dung02_group_minibossrush02": {
+                "id": "dung02_group_minibossrush02",
+                "gameCategory": "dungeon_bossrush",
+                "sortId": 1,
+                "name": {"id": 1, "text": ""},
+                "includeDungeonIds": [
+                    "dung02_minibossrush02_01",
+                    "dung02_minibossrush02_02",
+                ],
+            },
+            "dung02_group_minibossrush01": {
+                "id": "dung02_group_minibossrush01",
+                "gameCategory": "dungeon_bossrush",
+                "sortId": 2,
+                "name": {"id": 2, "text": ""},
+                "includeDungeonIds": ["dung02_minibossrush01_02"],
+            },
+        }
+        dungeons = {
+            "dung02_minibossrush02_01": {
+                "dungeonId": "dung02_minibossrush02_01",
+                "dungeonSeriesId": "dung02_group_minibossrush02",
+                "dungeonCategory": "dungeon_bossrush",
+                "dungeonName": {"id": 1, "text": ""},
+                "dungeonLevelDesc": {"id": 3, "text": ""},
+                "sceneId": "dung02_bdg004",
+                "recommendLv": 75,
+                "enemyIds": ["eny_0120_klbear"],
+                "enemyLevels": [75],
+            },
+            "dung02_minibossrush02_02": {
+                "dungeonId": "dung02_minibossrush02_02",
+                "dungeonSeriesId": "dung02_group_minibossrush02",
+                "dungeonCategory": "dungeon_bossrush",
+                "dungeonName": {"id": 1, "text": ""},
+                "dungeonLevelDesc": {"id": 4, "text": ""},
+                "sceneId": "dung02_bdg004",
+                "recommendLv": 90,
+                "enemyIds": ["eny_0120_klbear"],
+                "enemyLevels": [90],
+            },
+            "dung02_minibossrush01_02": {
+                "dungeonId": "dung02_minibossrush01_02",
+                "dungeonSeriesId": "dung02_group_minibossrush01",
+                "dungeonCategory": "dungeon_bossrush",
+                "dungeonName": {"id": 2, "text": ""},
+                "dungeonLevelDesc": {"id": 4, "text": ""},
+                "sceneId": "dung02_bdg003",
+                "recommendLv": 90,
+                "enemyIds": ["eny_0114_jzmking"],
+                "enemyLevels": [90],
+            },
+        }
+        enemies = {
+            "eny_0120_klbear": {
+                "enemyId": "eny_0120_klbear",
+                "attrTemplateId": "eny_0120_klbear",
+                "bornBuffs": [],
+                "attrModifiers": [],
+            },
+            "eny_0114_jzmking": {
+                "enemyId": "eny_0114_jzmking",
+                "attrTemplateId": "eny_0114_jzmking",
+                "bornBuffs": [],
+                "attrModifiers": [
+                    {"attrType": 1, "modifierType": 1, "attrValue": 0.5}
+                ],
+            },
+        }
+        attributes = {
+            "eny_0120_klbear": {
+                "levelDependentAttributes": [
+                    {
+                        "attrs": [
+                            {"attrType": 0, "attrValue": 75},
+                            {"attrType": 1, "attrValue": 559347},
+                            {"attrType": 2, "attrValue": 3352},
+                            {"attrType": 3, "attrValue": 100},
+                        ]
+                    },
+                    {
+                        "attrs": [
+                            {"attrType": 0, "attrValue": 90},
+                            {"attrType": 1, "attrValue": 1008880},
+                            {"attrType": 2, "attrValue": 4130},
+                            {"attrType": 3, "attrValue": 100},
+                        ]
+                    }
+                ]
+            },
+            "eny_0114_jzmking": {
+                "levelDependentAttributes": [
+                    {
+                        "attrs": [
+                            {"attrType": 0, "attrValue": 90},
+                            {"attrType": 1, "attrValue": 1329887},
+                            {"attrType": 2, "attrValue": 3304},
+                            {"attrType": 3, "attrValue": 100},
+                        ]
+                    }
+                ]
+            },
+        }
+        texts = {
+            "1": "蚀影噪雷",
+            "2": "巨山犼兽",
+            "3": "一级",
+            "4": "二级",
+            "5": "蚀影噪雷",
+            "6": "巨山犼兽",
+        }
+        displays = {
+            "eny_0120_klbear": {"name": {"id": 5, "text": ""}},
+            "eny_0114_jzmking": {"name": {"id": 6, "text": ""}},
+        }
+        table_map = {
+            "DungeonSeriesTable": series,
+            "DungeonTable": dungeons,
+            "I18nTextTable_CN": texts,
+            "RewardTable": {},
+            "ItemTable": {},
+            "EnemyTable": enemies,
+            "EnemyTemplateDisplayInfoTable": displays,
+            "EnemyAttributeTemplateTable": attributes,
+        }
+        resource_map = {
+            "public/Json/LevelScriptData/dung02_bdg004/47900010001.json": {
+                "scriptId": 47900010001,
+                "enemies": {
+                    "30001": {
+                        "entityDataIdKey": "eny_0120_klbear",
+                        "level": 75,
+                        "buffs": [
+                            {
+                                "buffId": "buff_common_maxhpup",
+                                "blackboard": [{"key": "ratio", "valueFloat": 1.3}],
+                            }
+                        ],
+                    }
+                },
+            },
+            "public/Json/LevelScriptData/dung02_bdg004/47900010002.json": {
+                "scriptId": 47900010002,
+                "enemies": {
+                    "30001": {
+                        "entityDataIdKey": "eny_0120_klbear",
+                        "level": 90,
+                        "buffs": [
+                            {
+                                "buffId": "buff_common_maxhpup",
+                                "blackboard": [{"key": "ratio", "valueFloat": 1.3}],
+                            }
+                        ],
+                    }
+                },
+            },
+            "public/Json/BuffData/buff_common_maxhpup.json": {
+                "attributeModifier": {
+                    "attributeModifiers": [
+                        {
+                            "attributeType": "MaxHp",
+                            "formulaItem": "Multiplier",
+                            "param": {
+                                "useBlackboardKey": True,
+                                "blackboardKey": "ratio",
+                                "value": 0.5,
+                            },
+                        }
+                    ]
+                }
+            },
+        }
+        client = AsyncMock()
+        client.akedata_manifest.return_value = {
+            "latest": version.id,
+            "updatedAt": version.updated_at,
+            "versions": [{"id": version.id, "tableCfgPath": version.table_cfg_path}],
+        }
+        client.akedata_table.side_effect = lambda path, name: table_map[name]
+        client.akedata_asset_index.return_value = {
+            "schemaVersion": 2,
+            "datasets": {
+                "json": {
+                    "files": {
+                        "LevelScriptData/dung02_bdg004/47900010001.json": {
+                            "size": 1,
+                            "md5": "0" * 32,
+                        },
+                        "LevelScriptData/dung02_bdg004/47900010002.json": {
+                            "size": 1,
+                            "md5": "0" * 32,
+                        }
+                    }
+                }
+            },
+        }
+        client.akedata_public_json.side_effect = lambda path: resource_map[path]
+
+        source = AkeDataStageSource(client)
+        catalog = await source.catalog()
+        groups = {group.key: group for group in catalog.groups}
+        self.assertEqual(
+            [item.name for item in groups["crisis_fragment"].items],
+            ["巨山犼兽", "蚀影噪雷"],
+        )
+        noise_stage, _ = await source.stage("series:dung02_group_minibossrush02")
+        mountain_stage, _ = await source.stage("series:dung02_group_minibossrush01")
+
+        self.assertEqual(
+            [variant.enemies[0].hp for variant in noise_stage.variants],
+            [1286498, 2320424],
+        )
+        self.assertEqual(mountain_stage.variants[0].enemies[0].hp, 1994830)
+        self.assertEqual(noise_stage.source.source, "AkeData")
+        self.assertEqual(mountain_stage.source.source, "AkeData")
+
     async def test_source_resolves_manifest_path_and_reuses_loaded_tables(self):
         version, tables = _akedata_fixture()
         names = (
@@ -1041,7 +1296,7 @@ class EndfieldAkeDataStageSourceAsyncTests(unittest.IsolatedAsyncioTestCase):
         client.akedata_public_json.side_effect = lambda path: resource_map[path]
         source = AkeDataStageSource(client)
         stage, _ = await source.stage("indie_hard022")
-        self.assertEqual(stage.variants[-1].enemies[0].hp, 2476342.8)
+        self.assertEqual(stage.variants[-1].enemies[0].hp, 2476342)
         self.assertEqual(client.akedata_public_json.await_count, 2)
         await source.stage("indie_hard022")
         self.assertEqual(client.akedata_public_json.await_count, 2)
@@ -1086,6 +1341,24 @@ class EndfieldAkeDataStageSourceAsyncTests(unittest.IsolatedAsyncioTestCase):
 
 
 class EndfieldStageCatalogTests(unittest.IsolatedAsyncioTestCase):
+    async def test_stage_service_defaults_to_akedata_and_rejects_fz(self):
+        parsed = parse_fz_stage(_boss_fixture())
+        stage = replace(
+            parsed,
+            source=StageSourceRef("AkeData", "DungeonSeriesTable/fixture", "ake-r1"),
+        )
+        service = EndfieldStageService(AsyncMock())
+        akedata_source = AsyncMock()
+        akedata_source.stage.return_value = (stage, ())
+        service.sources = {"akedata": akedata_source}
+
+        view = await service.get_stage_view("series:fixture")
+
+        akedata_source.stage.assert_awaited_once_with("series:fixture")
+        self.assertEqual(view.stage.source.source, "AkeData")
+        with self.assertRaisesRegex(Exception, "fz 暂不支持关卡资料"):
+            await service.get_stage_view("series:fixture", source="fz")
+
     async def test_catalog_includes_registered_special_modes(self):
         client = AsyncMock()
         payloads = {
@@ -1147,45 +1420,20 @@ class EndfieldStageCatalogTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(names, ["罗丹", "供能高地", "折金票", "危机合约", "野性旧事"])
         self.assertEqual((catalog.queryable_count, catalog.pending_count), (5, 0))
 
-    async def test_default_catalog_merges_sources_and_matches_keep_origin(self):
+    async def test_default_catalog_uses_only_akedata(self):
         version, tables = _akedata_fixture()
         akedata_catalog = parse_akedata_catalog(version, *tables[:3])
-        fz_catalog = StageCatalogView(
-            (
-                StageCatalogGroup(
-                    "boss_rush",
-                    "危境再现",
-                    (
-                        StageCatalogItem(
-                            "危境再现/罗丹",
-                            "罗丹",
-                            "boss_rush",
-                            "危境再现",
-                            "fz-r1",
-                            "2026-07-24",
-                            source="fz",
-                        ),
-                    ),
-                ),
-            ),
-            "FZ Wiki",
-            "fz-r1",
-            "2026-07-24",
-        )
         service = EndfieldStageService(AsyncMock())
-        fz_source = AsyncMock()
         akedata_source = AsyncMock()
-        fz_source.catalog.return_value = fz_catalog
         akedata_source.catalog.return_value = akedata_catalog
-        service.sources = {"fz": fz_source, "akedata": akedata_source}
-        merged = await service.get_catalog_view()
-        match = next(
-            item
-            for item in await service.discover_matches("山中见犼 撼山雾火")
-            if item.source == "akedata"
-        )
-        self.assertEqual((merged.source, len(merged.groups)), ("FZ Wiki、AkeData", 2))
+        service.sources = {"akedata": akedata_source}
+
+        catalog = await service.get_catalog_view()
+        match = (await service.discover_matches("撼山雾火"))[0]
+
+        self.assertEqual((catalog.source, len(catalog.groups)), ("AkeData", 1))
         self.assertEqual((match.display_name, match.source), ("撼山雾火", "akedata"))
+        self.assertEqual(akedata_source.catalog.await_count, 2)
 
 
 class EndfieldStageIntegrationTests(unittest.IsolatedAsyncioTestCase):
@@ -1198,20 +1446,34 @@ class EndfieldStageIntegrationTests(unittest.IsolatedAsyncioTestCase):
             "query", scope="stage", query="罗丹", source="warfarin"
         )
         await endfield._handle_command(matcher, None, command)
-        matcher.finish.assert_awaited_once_with("Warfarin Wiki 暂不支持关卡资料。")
+        matcher.finish.assert_awaited_once_with(
+            "Warfarin Wiki 暂不支持关卡资料；关卡仅使用 AkeData。"
+        )
+
+    async def test_explicit_fz_stage_query_reports_akedata_only(self):
+        matcher = AsyncMock()
+        command = commands.ParsedEndfieldCommand(
+            "query", scope="stage", query="蚀影噪雷", source="fz"
+        )
+
+        await endfield._handle_command(matcher, None, command)
+
+        matcher.finish.assert_awaited_once_with(
+            "FZ Wiki 暂不支持关卡资料；关卡仅使用 AkeData。"
+        )
 
     async def test_stage_card_cache_key_includes_revision(self):
         renderer = AsyncMock(side_effect=(b"revision-one", b"revision-two"))
         first = commands.EndfieldCandidate(
-            "stage_catalog", "", "关卡资料目录", 100, "fz", revision="r1"
+            "stage_catalog", "", "关卡资料目录", 100, "akedata", revision="r1"
         )
         second = commands.EndfieldCandidate(
-            "stage_catalog", "", "关卡资料目录", 100, "fz", revision="r2"
+            "stage_catalog", "", "关卡资料目录", 100, "akedata", revision="r2"
         )
         with patch.dict(endfield.CONTENT_RENDERERS, {"stage_catalog": renderer}):
-            self.assertEqual(await endfield._render_candidate(first, "fz"), (b"revision-one",))
-            self.assertEqual(await endfield._render_candidate(first, "fz"), (b"revision-one",))
-            self.assertEqual(await endfield._render_candidate(second, "fz"), (b"revision-two",))
+            self.assertEqual(await endfield._render_candidate(first, "akedata"), (b"revision-one",))
+            self.assertEqual(await endfield._render_candidate(first, "akedata"), (b"revision-one",))
+            self.assertEqual(await endfield._render_candidate(second, "akedata"), (b"revision-two",))
         self.assertEqual(renderer.await_count, 2)
 
     async def test_auto_candidate_renders_from_its_discovered_source(self):

@@ -719,10 +719,10 @@ def format_help() -> str:
             "  /ef 配装（交互输入干员、可选武器与装备）",
             "  /ef 配装 佩丽卡 脉冲源石配件 脉冲甲 脉冲源石配件 超轻域手 角色潜能2 武器潜能3",
             "  /ef 搜索 <关键词> | /efs <关键词>",
-            "  /ef <关键词> --source <fz|akedata|warfarin>",
+            "  /ef <关键词> --source <fz|akedata|warfarin>（关卡仅支持 AkeData）",
             "  /ef 数据源",
             "",
-            "参数：-s/--source 可指定 FZ Wiki、AkeData 或 Warfarin Wiki。",
+            "参数：-s/--source 可指定 FZ Wiki、AkeData 或 Warfarin Wiki；关卡固定使用 AkeData。",
             "干员速查：/ef 干员；可按元素或职业筛选，例如 /ef 干员 灼热、/ef 干员 术师。",
             "武器速查：/ef 武器；可按类型筛选，例如 /ef 武器 单手剑。",
             "装备目录：默认仅金色；--all 显示全部，--rarity 可选 gold、purple、blue、all。",
@@ -739,12 +739,12 @@ def format_help() -> str:
 def format_source() -> str:
     return "\n".join(
         [
-            "数据源：默认优先使用 FZ Wiki。",
+            "数据源：各类资料按下列顺序使用。",
             f"干员：{source_labels(source_order('operator'))}",
             f"武器：{source_labels(source_order('weapon'))}",
             f"装备：{source_labels(source_order('equipment'))}",
             f"关卡：{source_labels(source_order('stage'))}",
-            "若主数据源暂时不可用或没有可用结果，会按顺序尝试备选源。",
+            "关卡数据仅使用 AkeData；其他资料会按顺序尝试备选源。",
         ]
     )
 

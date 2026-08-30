@@ -11,6 +11,7 @@ from loguru import logger
 from .account_i18n import localized_text
 from .client import WarfarinClient
 from .stage_models import (
+    BossRushStageDetails,
     MonumentStageDetails,
     Stage,
     StageCatalogGroup,
@@ -32,11 +33,41 @@ from .stage_source import StageDataIncomplete
 MONUMENT_FAMILY_KEY = "monument"
 MONUMENT_FAMILY_NAME = "影拓丰碑"
 HIGH_DIFFICULTY_CATEGORY = "dungeon_highdifficulty"
+SERIES_STAGE_KEY_PREFIX = "series:"
+_SERIES_WIDE_CATEGORIES = frozenset({"dungeon_bossrush", "dungeon_resource"})
+_CATEGORY_FAMILIES: dict[str, tuple[str, str]] = {
+    "dungeon_bossrush": ("boss_rush", "危境再现"),
+    HIGH_DIFFICULTY_CATEGORY: (MONUMENT_FAMILY_KEY, MONUMENT_FAMILY_NAME),
+    "dungeon_resource": ("resource", "资源副本"),
+    "dungeon_contract": ("crisis_contract", "危机合约"),
+    "dungeon_seasontower": ("war_echo", "战争回响"),
+    "dungeon_actmonster": ("challenge_activity", "挑战活动"),
+}
+_FAMILY_ORDER = (
+    "boss_rush",
+    "crisis_fragment",
+    MONUMENT_FAMILY_KEY,
+    "resource",
+    "crisis_contract",
+    "war_echo",
+    "challenge_activity",
+    "other",
+)
+_FAMILY_NAMES = {
+    "boss_rush": "危境再现",
+    "crisis_fragment": "危境碎片",
+    MONUMENT_FAMILY_KEY: MONUMENT_FAMILY_NAME,
+    "resource": "资源副本",
+    "crisis_contract": "危机合约",
+    "war_echo": "战争回响",
+    "challenge_activity": "挑战活动",
+    "other": "其他玩法",
+}
 AKEDATA_ASSET_BASE_URL = (
     "https://data.akedata.wiki/public/images/assets/beyond/dynamicassets/gameplay/ui/sprites"
 )
 _RICH_TAG_RE = re.compile(r"<@[^>]+>|</>")
-_DIFFICULTY_SUFFIX_RE = re.compile(r"[·・\s]*(?:苦难|困難)$")
+_DIFFICULTY_SUFFIX_RE = re.compile(r"[·・\s]*(?:普通|困难|困難|苦难|残酷|全限)$")
 _POISE_REC_TIME_SCALAR = "PoiseRecTimeScalar"
 _ATTRIBUTE_TYPES: dict[str, int | str] = {
     "MaxHp": 1,
@@ -102,13 +133,9 @@ class AkeDataStageSource:
             "EnemyAttributeTemplateTable",
         )
         tables = await self._load_tables(*table_names)
-        dungeon_table = tables[1]
-        base_id = str(key or "").removesuffix("_s")
-        records = tuple(
-            row
-            for dungeon_id in (base_id, f"{base_id}_s")
-            if isinstance((row := dungeon_table.get(dungeon_id)), dict)
-        )
+        records, _series = _resolve_stage_records(key, tables[0], tables[1])
+        if not records:
+            raise StageDataIncomplete(f"AkeData 中没有关卡“{key}”。")
         spawners_by_scene = await self._load_stage_spawners(records)
         buff_ids = _stage_buff_ids(records, tables[5], spawners_by_scene)
         buff_table = await self._load_buffs(buff_ids)
@@ -180,13 +207,21 @@ class AkeDataStageSource:
         return configs
 
     async def _load_scene_spawners(self, scene_id: str) -> tuple[dict[str, Any], ...]:
-        paths = await self._asset_json_paths(f"SpawnerConfig/{scene_id}")
+        paths = (
+            *(await self._asset_json_paths(f"SpawnerConfig/{scene_id}")),
+            *(await self._asset_json_paths(f"LevelScriptData/{scene_id}")),
+        )
         if not paths:
             raise StageDataIncomplete(f"AkeData 场景 {scene_id} 缺少刷怪配置清单。")
         resources = await asyncio.gather(
             *(self._load_resource(f"public/Json/{path}") for path in paths)
         )
-        return tuple(resource for resource in resources if isinstance(resource, dict))
+        return tuple(
+            config
+            for resource in resources
+            if isinstance(resource, dict)
+            if (config := _enemy_instance_config(resource)) is not None
+        )
 
     async def _asset_json_paths(self, prefix: str) -> tuple[str, ...]:
         if self._asset_index is None:
@@ -251,45 +286,49 @@ def parse_akedata_catalog(
     dungeon_table: dict[str, Any],
     text_table: dict[str, Any],
 ) -> StageCatalogView:
-    items: list[StageCatalogItem] = []
-    for series in _monument_series(series_table):
+    grouped: dict[str, list[StageCatalogItem]] = {key: [] for key in _FAMILY_ORDER}
+    for series in _stage_series(series_table):
         series_name = _translated(series.get("name"), text_table) or str(series.get("id") or "")
-        for dungeon_id in series.get("includeDungeonIds") or ():
-            dungeon_id = str(dungeon_id or "")
-            if not dungeon_id or dungeon_id.endswith("_s"):
+        for stage_key, records in _series_stage_groups(series, dungeon_table):
+            if not records:
                 continue
-            normal = dungeon_table.get(dungeon_id)
-            hard = dungeon_table.get(f"{dungeon_id}_s")
-            if not isinstance(normal, dict) and not isinstance(hard, dict):
-                continue
-            representative = normal if isinstance(normal, dict) else hard
-            if representative.get("dungeonCategory") != HIGH_DIFFICULTY_CATEGORY:
-                continue
-            name = _stage_name(representative, text_table)
+            family_key, family_name = _akedata_family(records[0], series)
+            name = _record_group_name(records, series_name, family_name, text_table)
             if not name:
                 continue
             levels = [
-                _optional_int(row.get("recommendLv"))
-                for row in (normal, hard)
-                if isinstance(row, dict)
+                level
+                for row in records
+                if (level := _optional_int(row.get("recommendLv"))) is not None
             ]
-            known_levels = [level for level in levels if level is not None]
-            items.append(
+            description = _translated(series.get("desc"), text_table)
+            if not description:
+                description = _translated(records[0].get("dungeonDesc"), text_table)
+            region = series_name if family_key == MONUMENT_FAMILY_KEY else ""
+            grouped[family_key].append(
                 StageCatalogItem(
-                    title=dungeon_id,
+                    title=stage_key,
                     name=name,
-                    family_key=MONUMENT_FAMILY_KEY,
-                    family_name=MONUMENT_FAMILY_NAME,
+                    family_key=family_key,
+                    family_name=family_name,
                     revision=version.id,
                     updated_at=version.updated_at,
-                    description=f"丰碑系列 · {series_name}",
-                    recommended_level=max(known_levels) if known_levels else None,
-                    region=series_name,
+                    description=description,
+                    recommended_level=max(levels) if levels else None,
+                    region=region,
                     source="akedata",
                 )
             )
-    group = StageCatalogGroup(MONUMENT_FAMILY_KEY, MONUMENT_FAMILY_NAME, tuple(items))
-    return StageCatalogView((group,), "AkeData", version.id, version.updated_at)
+    groups = tuple(
+        StageCatalogGroup(
+            key,
+            _FAMILY_NAMES[key],
+            tuple(sorted(grouped[key], key=lambda item: (item.name, item.title))),
+        )
+        for key in _FAMILY_ORDER
+        if grouped[key]
+    )
+    return StageCatalogView(groups, "AkeData", version.id, version.updated_at)
 
 
 def parse_akedata_stage(
@@ -307,53 +346,32 @@ def parse_akedata_stage(
     spawners_by_scene: dict[str, tuple[dict[str, Any], ...]] | None = None,
     buff_table: dict[str, dict[str, Any]] | None = None,
 ) -> Stage:
-    base_id = str(key or "").removesuffix("_s")
-    series = next(
-        (
-            row
-            for row in _monument_series(series_table)
-            if base_id in {str(item or "").removesuffix("_s") for item in row.get("includeDungeonIds") or ()}
-        ),
-        None,
-    )
-    if series is None:
-        raise StageDataIncomplete(f"AkeData 中没有丰碑关卡“{key}”。")
-    records = [
-        dungeon_table.get(base_id),
-        dungeon_table.get(f"{base_id}_s"),
-    ]
-    records = [
-        row
-        for row in records
-        if isinstance(row, dict) and row.get("dungeonCategory") == HIGH_DIFFICULTY_CATEGORY
-    ]
-    if not records:
-        raise StageDataIncomplete(f"AkeData 中没有丰碑关卡“{key}”的详情。")
-
+    records, series = _resolve_stage_records(key, series_table, dungeon_table)
+    if not records or series is None:
+        raise StageDataIncomplete(f"AkeData 中没有关卡“{key}”的详情。")
     series_id = str(series.get("id") or "")
     series_name = _translated(series.get("name"), text_table) or series_id
-    normal = next((row for row in records if not str(row.get("dungeonId") or "").endswith("_s")), None)
-    representative = normal or records[0]
-    name = _stage_name(representative, text_table) or base_id
-    summary = _translated(representative.get("dungeonDesc"), text_table)
+    representative = records[0]
+    family_key, family_name = _akedata_family(representative, series)
+    name = _record_group_name(records, series_name, family_name, text_table) or str(key)
+    summary = _translated(series.get("desc"), text_table) or _translated(
+        representative.get("dungeonDesc"), text_table
+    )
     variants = tuple(
-        sorted(
-            (
-                _variant(
-                    row,
-                    text_table,
-                    reward_table,
-                    item_table,
-                    enemy_table,
-                    enemy_display_table,
-                    enemy_attribute_table,
-                    spawners_by_scene or {},
-                    buff_table or {},
-                )
-                for row in records
-            ),
-            key=lambda item: item.sort_order,
+        _variant(
+            row,
+            text_table,
+            reward_table,
+            item_table,
+            enemy_table,
+            enemy_display_table,
+            enemy_attribute_table,
+            spawners_by_scene or {},
+            buff_table or {},
+            label=_variant_label(row, index, len(records), text_table),
+            sort_order=index,
         )
+        for index, row in enumerate(records, 1)
     )
     aliases = tuple(
         dict.fromkeys(
@@ -362,31 +380,49 @@ def parse_akedata_stage(
                 name,
                 *(_translated(row.get("dungeonName"), text_table) for row in records),
                 f"{series_name} {name}",
-                f"{MONUMENT_FAMILY_NAME} {name}",
+                f"{family_name} {name}",
             )
             if value
         )
     )
-    extension = MonumentStageDetails(series_id, series_name)
+    extension: MonumentStageDetails | BossRushStageDetails | None
+    if family_key == MONUMENT_FAMILY_KEY:
+        extension = MonumentStageDetails(series_id, series_name)
+    elif family_key in {"boss_rush", "crisis_fragment"}:
+        extension = BossRushStageDetails(
+            boss_name=name,
+            series_id=series_id,
+            series_name=series_name,
+            depth_count=len(variants),
+            icon_url=_first_enemy_icon(variants),
+        )
+    else:
+        extension = None
+    source_target = (
+        f"DungeonSeriesTable/{series_id}"
+        if str(key).startswith(SERIES_STAGE_KEY_PREFIX)
+        else f"DungeonTable/{key}"
+    )
     return Stage(
-        id=base_id,
+        id=series_id if str(key).startswith(SERIES_STAGE_KEY_PREFIX) else str(key),
         name=name,
         aliases=aliases,
-        family_key=MONUMENT_FAMILY_KEY,
-        family_name=MONUMENT_FAMILY_NAME,
+        family_key=family_key,
+        family_name=family_name,
         summary=summary,
         location="",
         unlock_condition="",
         source=StageSourceRef(
             "AkeData",
-            f"DungeonTable/{base_id}",
+            source_target,
             revision=version.id,
             updated_at=version.updated_at,
         ),
         variants=variants,
         extension=extension,
-        template_name="DungeonTable",
-        facts=(StageFact("丰碑系列", series_name),),
+        icon_url=_first_enemy_icon(variants),
+        template_name=str(representative.get("dungeonCategory") or "DungeonTable"),
+        facts=(StageFact("关卡系列", series_name),) if series_name else (),
     )
 
 
@@ -400,6 +436,9 @@ def _variant(
     enemy_attribute_table: dict[str, Any],
     spawners_by_scene: dict[str, tuple[dict[str, Any], ...]],
     buff_table: dict[str, dict[str, Any]],
+    *,
+    label: str = "",
+    sort_order: int = 0,
 ) -> StageVariant:
     dungeon_id = str(row.get("dungeonId") or "")
     hard = dungeon_id.endswith("_s")
@@ -412,8 +451,8 @@ def _variant(
         )
     return StageVariant(
         id=dungeon_id,
-        label="苦难" if hard else "普通",
-        sort_order=2 if hard else 1,
+        label=label or ("苦难" if hard else "普通"),
+        sort_order=sort_order or (2 if hard else 1),
         recommended_level=_optional_int(row.get("recommendLv")),
         stamina_cost=_optional_int(row.get("costStamina")),
         mechanics=_mechanics(_translated(row.get("featureDesc"), text_table)),
@@ -432,13 +471,143 @@ def _variant(
     )
 
 
-def _monument_series(series_table: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+def _stage_series(series_table: dict[str, Any]) -> tuple[dict[str, Any], ...]:
     rows = [
         row
         for row in series_table.values()
-        if isinstance(row, dict) and row.get("gameCategory") == HIGH_DIFFICULTY_CATEGORY
+        if isinstance(row, dict)
+        and str(row.get("gameCategory") or "")
+        and row.get("includeDungeonIds")
     ]
-    return tuple(sorted(rows, key=lambda row: (_optional_int(row.get("sortId")) or 0, str(row.get("id") or ""))))
+    return tuple(
+        sorted(
+            rows,
+            key=lambda row: (
+                _optional_int(row.get("sortId")) or 0,
+                str(row.get("gameCategory") or ""),
+                str(row.get("id") or ""),
+            ),
+        )
+    )
+
+
+def _series_stage_groups(
+    series: dict[str, Any], dungeon_table: dict[str, Any]
+) -> tuple[tuple[str, tuple[dict[str, Any], ...]], ...]:
+    category = str(series.get("gameCategory") or "")
+    rows = tuple(
+        row
+        for raw_id in series.get("includeDungeonIds") or ()
+        if isinstance((row := dungeon_table.get(str(raw_id or ""))), dict)
+        and str(row.get("dungeonCategory") or "") == category
+    )
+    if not rows:
+        return ()
+    if category in _SERIES_WIDE_CATEGORIES:
+        return ((f"{SERIES_STAGE_KEY_PREFIX}{series.get('id')}", rows),)
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        dungeon_id = str(row.get("dungeonId") or "")
+        base_id = _variant_base_id(dungeon_id, category)
+        grouped.setdefault(base_id, []).append(row)
+    return tuple((key, tuple(group)) for key, group in grouped.items())
+
+
+def _variant_base_id(dungeon_id: str, category: str) -> str:
+    if category == HIGH_DIFFICULTY_CATEGORY:
+        return dungeon_id.removesuffix("_s")
+    if category == "dungeon_seasontower":
+        return re.sub(r"_(?:s|ex)$", "", dungeon_id)
+    if category == "dungeon_takestwo":
+        return dungeon_id.removesuffix("_hard")
+    return dungeon_id
+
+
+def _resolve_stage_records(
+    key: str,
+    series_table: dict[str, Any],
+    dungeon_table: dict[str, Any],
+) -> tuple[tuple[dict[str, Any], ...], dict[str, Any] | None]:
+    normalized = str(key or "")
+    requested_series = (
+        normalized[len(SERIES_STAGE_KEY_PREFIX) :]
+        if normalized.startswith(SERIES_STAGE_KEY_PREFIX)
+        else ""
+    )
+    for series in _stage_series(series_table):
+        if requested_series and str(series.get("id") or "") != requested_series:
+            continue
+        for stage_key, records in _series_stage_groups(series, dungeon_table):
+            if stage_key == normalized or any(
+                str(row.get("dungeonId") or "") == normalized for row in records
+            ):
+                return records, series
+    return (), None
+
+
+def _akedata_family(
+    row: dict[str, Any], series: dict[str, Any]
+) -> tuple[str, str]:
+    category = str(row.get("dungeonCategory") or series.get("gameCategory") or "")
+    if category == "dungeon_bossrush" and "minibossrush" in str(series.get("id") or ""):
+        return "crisis_fragment", _FAMILY_NAMES["crisis_fragment"]
+    return _CATEGORY_FAMILIES.get(category, ("other", _FAMILY_NAMES["other"]))
+
+
+def _record_group_name(
+    records: tuple[dict[str, Any], ...],
+    series_name: str,
+    family_name: str,
+    text_table: dict[str, Any],
+) -> str:
+    category = str(records[0].get("dungeonCategory") or "")
+    if category in _SERIES_WIDE_CATEGORIES:
+        name = series_name
+    else:
+        name = _stage_name(records[0], text_table)
+    prefixes = (
+        f"{family_name}·",
+        f"{family_name}・",
+        "协议空间·",
+        "协议空间・",
+    )
+    for prefix in prefixes:
+        if name.startswith(prefix):
+            return name[len(prefix) :].strip()
+    return name.strip()
+
+
+def _variant_label(
+    row: dict[str, Any], index: int, count: int, text_table: dict[str, Any]
+) -> str:
+    dungeon_id = str(row.get("dungeonId") or "")
+    category = str(row.get("dungeonCategory") or "")
+    if category == HIGH_DIFFICULTY_CATEGORY:
+        return "苦难" if dungeon_id.endswith("_s") else "普通"
+    if category == "dungeon_seasontower":
+        if dungeon_id.endswith("_ex"):
+            return "残酷"
+        return "困难" if dungeon_id.endswith("_s") else "普通"
+    if category == "dungeon_takestwo":
+        return "困难" if dungeon_id.endswith("_hard") else "普通"
+    level_desc = _translated(row.get("dungeonLevelDesc"), text_table)
+    if level_desc:
+        return level_desc
+    if count > 1:
+        return f"第{index}档"
+    return "详情"
+
+
+def _first_enemy_icon(variants: tuple[StageVariant, ...]) -> str:
+    return next(
+        (
+            enemy.icon_url
+            for variant in variants
+            for enemy in variant.enemies or ()
+            if enemy.icon_url
+        ),
+        "",
+    )
 
 
 def _stage_name(row: dict[str, Any], text_table: dict[str, Any]) -> str:
@@ -549,10 +718,19 @@ def _enemy_metrics(
         }
         if _optional_int(values.get(0)) == level:
             return tuple(
-                _apply_modifiers(_optional_number(values.get(attr_type)), modifiers, attr_type)
+                _integer_combat_stat(
+                    _apply_modifiers(
+                        _optional_number(values.get(attr_type)), modifiers, attr_type
+                    )
+                )
                 for attr_type in (1, 2, 3)
             )
     return None, None, None
+
+
+def _integer_combat_stat(value: int | float | None) -> int | None:
+    """Game-facing HP/ATK/DEF are integer stats; positive fractions are truncated."""
+    return int(value) if value is not None else None
 
 
 def _stage_buff_ids(
@@ -576,6 +754,35 @@ def _stage_buff_ids(
                 if buff.get("buffId")
             )
     return buff_ids
+
+
+def _enemy_instance_config(resource: dict[str, Any]) -> dict[str, Any] | None:
+    """Normalize both scene export formats to the spawner ``enemyLibrary`` shape."""
+    if isinstance(resource.get("enemyLibrary"), list):
+        return resource
+    instances = resource.get("enemies")
+    if not isinstance(instances, dict):
+        return None
+    library: list[dict[str, Any]] = []
+    for instance in instances.values():
+        if not isinstance(instance, dict):
+            continue
+        enemy_id = str(instance.get("entityDataIdKey") or "")
+        if not enemy_id:
+            continue
+        library.append(
+            {
+                "enemyId": enemy_id,
+                "enemyLevel": instance.get("level"),
+                "bornBuffList": instance.get("buffs") or (),
+            }
+        )
+    if not library:
+        return None
+    return {
+        "configId": str(resource.get("scriptId") or resource.get("configId") or ""),
+        "enemyLibrary": library,
+    }
 
 
 def _matching_spawner_buffs(

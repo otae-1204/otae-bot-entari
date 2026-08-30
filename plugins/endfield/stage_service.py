@@ -16,7 +16,7 @@ from .stage_models import (
     StageCatalogView,
     StageVariant,
 )
-from .stage_source import FZStageSource, StageDataIncomplete
+from .stage_source import StageDataIncomplete
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,10 +46,7 @@ class StageVariantNotFound(ValueError):
 
 class EndfieldStageService:
     def __init__(self, client: WarfarinClient):
-        self.sources = {
-            "fz": FZStageSource(client),
-            "akedata": AkeDataStageSource(client),
-        }
+        self.sources = {"akedata": AkeDataStageSource(client)}
 
     async def get_catalog_view(self, source: str = "") -> StageCatalogView:
         if source:
@@ -90,9 +87,9 @@ class EndfieldStageService:
         *,
         mode: str = "detail",
         selector: str = "",
-        source: str = "fz",
+        source: str = "akedata",
     ) -> StageCardView:
-        stage, unreachable = await self._source(source or "fz").stage(key)
+        stage, unreachable = await self._source(source or "akedata").stage(key)
         if mode == "overview":
             return StageCardView(stage, "overview", unreachable_enemies=unreachable)
         selected = select_variant(stage, selector)

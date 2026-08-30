@@ -224,7 +224,6 @@ SOURCE_CANDIDATE_RESOLVERS: dict[str, dict[str, Resolver]] = {
         "fz": lambda query, rarity: _resolve_equipment_candidates_fz(query, rarity),
     },
     "stage": {
-        "fz": lambda query: _resolve_stage_candidates_fz(query),
         "akedata": lambda query: _resolve_stage_candidates_akedata(query),
     },
 }
@@ -324,8 +323,8 @@ async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand,
         return await _handle_loadout(matcher, command)
     if command.action not in {"query", "search"}:
         return await matcher.finish(format_unknown())
-    if command.scope == "stage" and command.source == "warfarin":
-        return await matcher.finish("Warfarin Wiki 暂不支持关卡资料。")
+    if command.scope == "stage" and command.source and command.source != "akedata":
+        return await matcher.finish(f"{source_label(command.source)} 暂不支持关卡资料；关卡仅使用 AkeData。")
     if not command.query:
         if command.action == "query" and command.scope in {"operator", "weapon", "equipment"}:
             command = ParsedEndfieldCommand(
@@ -1568,10 +1567,6 @@ async def _resolve_candidates_from_sources(
     return []
 
 
-async def _resolve_stage_candidates_fz(query: str) -> list[EndfieldCandidate]:
-    return await _resolve_stage_candidates(query, "fz")
-
-
 async def _resolve_stage_candidates_akedata(query: str) -> list[EndfieldCandidate]:
     return await _resolve_stage_candidates(query, "akedata")
 
@@ -2157,14 +2152,14 @@ async def _render_stage(
     selector: str = "",
 ) -> tuple[bytes | None, bool]:
     """Returns the card and whether it is missing data purely because a fetch failed."""
-    if source and source not in {"fz", "akedata"}:
+    if source and source != "akedata":
         return None, False
     started = perf_counter()
     view = await stage_service.get_stage_view(
         key,
         mode=mode,
         selector=selector,
-        source=source or "fz",
+        source=source or "akedata",
     )
     data_seconds = perf_counter() - started
     output = await draw_stage_card(view)
@@ -2178,9 +2173,11 @@ async def _render_stage(
 
 async def _render_stage_catalog(key: str, source: str = "") -> tuple[bytes, ...] | None:
     del key
-    if source and source not in {"fz", "akedata"}:
+    if source and source != "akedata":
         return None
-    return await draw_stage_catalog_cards(await stage_service.get_catalog_view(source))
+    return await draw_stage_catalog_cards(
+        await stage_service.get_catalog_view(source or "akedata")
+    )
 
 
 async def _finish_png(matcher, png: bytes) -> None:
