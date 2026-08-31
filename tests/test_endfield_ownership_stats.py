@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,6 +10,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 import plugins.endfield as endfield_plugin
+from loguru import logger
 from satori.model import IterablePageResult, PageResult
 from plugins.endfield.account_client import EndfieldAPIError
 from plugins.endfield.account_crypto import CredentialCipher
@@ -20,7 +22,9 @@ from plugins.endfield.account_store import (
 )
 from plugins.endfield.commands import parse_command
 from plugins.endfield.ownership_stats import (
+    CATALOG_MAPPING_REVISION,
     GroupMemberListError,
+    OwnershipRefreshIssue,
     OwnershipRefreshResult,
     OwnershipStatsService,
     build_operator_catalog,
@@ -273,6 +277,81 @@ class OwnershipStoreAndReportTests(unittest.TestCase):
         replaced = self.store.list_operator_snapshots()[0]
         self.assertEqual(replaced.fetched_at, 400)
         self.assertEqual([item.operator_key for item in replaced.members], ["op-b"])
+
+    def test_snapshot_failure_backoff_columns_migrate_and_success_resets_them(self):
+        role = self._bind("qq", "role", "1")
+        self.store.record_operator_snapshot_failure(
+            role,
+            "cn",
+            "temporary",
+            attempted_at=100,
+            retry_after_seconds=900,
+        )
+        failed = self.store.list_operator_snapshots()[0]
+        self.assertEqual((failed.failure_count, failed.next_attempt_at), (1, 1000))
+
+        self.store.close()
+        self.store = EndfieldStore(self.path)
+        migrated = self.store.list_operator_snapshots()[0]
+        self.assertEqual((migrated.failure_count, migrated.next_attempt_at), (1, 1000))
+
+        role = self.store.list_roles("qq")[0]
+        self.store.replace_operator_snapshot(
+            role,
+            "cn",
+            [OperatorSnapshotMember("op-a", 1)],
+            fetched_at=1100,
+        )
+        succeeded = self.store.list_operator_snapshots()[0]
+        self.assertEqual((succeeded.failure_count, succeeded.next_attempt_at), (0, 0))
+
+    def test_existing_snapshot_table_migrates_refresh_control_columns(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "legacy.db"
+            connection = sqlite3.connect(path)
+            connection.execute(
+                """
+                CREATE TABLE operator_roster_snapshots (
+                    role_id TEXT NOT NULL,
+                    server_id TEXT NOT NULL,
+                    region TEXT NOT NULL DEFAULT 'cn',
+                    fetched_at INTEGER NOT NULL DEFAULT 0,
+                    game_saved_at INTEGER NOT NULL DEFAULT 0,
+                    last_attempt_at INTEGER NOT NULL DEFAULT 0,
+                    last_error TEXT NOT NULL DEFAULT '',
+                    operator_count INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY(role_id, server_id)
+                )
+                """
+            )
+            connection.commit()
+            connection.close()
+
+            migrated = EndfieldStore(path)
+            columns = {
+                row["name"]
+                for row in migrated.conn.execute(
+                    "PRAGMA table_info(operator_roster_snapshots)"
+                ).fetchall()
+            }
+            migrated.close()
+
+        self.assertTrue(
+            {"failure_count", "next_attempt_at", "roster_fingerprint"}.issubset(columns)
+        )
+
+    def test_unchanged_roster_only_updates_snapshot_header(self):
+        role = self._bind("qq", "role", "1")
+        members = [OperatorSnapshotMember("op-a", 1)]
+        self.store.replace_operator_snapshot(role, "cn", members, fetched_at=100)
+        before = self.store.conn.total_changes
+
+        self.store.replace_operator_snapshot(role, "cn", members, fetched_at=200)
+
+        self.assertEqual(self.store.conn.total_changes - before, 1)
+        snapshot = self.store.list_operator_snapshots()[0]
+        self.assertEqual(snapshot.fetched_at, 200)
+        self.assertTrue(snapshot.roster_fingerprint)
 
     def test_duplicate_bindings_are_one_sample_and_snapshot_lives_until_last_unbind(self):
         first = self._bind("qq-1", "same-role", "1")
@@ -535,6 +614,42 @@ class OwnershipRefreshAndGroupTests(unittest.TestCase):
         self.assertEqual((result.attempted, result.succeeded), (1, 1))
         self.assertEqual(client.roles, ["due-role"])
 
+    def test_due_refresh_retries_a_failed_attempt_even_when_old_success_is_fresh(self):
+        role = self.store.bind_roles(
+            "qq",
+            "token",
+            [RoleCandidate("binding", "role", "1", "role")],
+            self.cipher,
+        )[0]
+        self.store.replace_operator_snapshot(
+            role,
+            "cn",
+            [OperatorSnapshotMember("op-a", 0)],
+            fetched_at=NOW - 60,
+        )
+        self.store.record_operator_snapshot_failure(
+            role,
+            "cn",
+            "temporary",
+            attempted_at=NOW - 30,
+            retry_after_seconds=10,
+        )
+
+        class Client:
+            async def card_detail(self, _token, _role):
+                return {
+                    "base": {"charNum": 1, "saveTime": NOW},
+                    "chars": [{"charData": {"id": "op-a"}, "potentialLevel": 1}],
+                }
+
+        service = OwnershipStatsService(self.store, Client())
+        with mock.patch.object(service, "refresh_catalog", mock.AsyncMock(return_value=False)):
+            result = asyncio.run(service.refresh_due(self.cipher, now=NOW))
+
+        self.assertEqual((result.attempted, result.succeeded), (1, 1))
+        snapshot = self.store.list_operator_snapshots()[0]
+        self.assertEqual((snapshot.failure_count, snapshot.next_attempt_at), (0, 0))
+
     def test_due_refresh_rebuilds_legacy_shared_manager_snapshot(self):
         role = self.store.bind_roles(
             "legacy",
@@ -590,14 +705,159 @@ class OwnershipRefreshAndGroupTests(unittest.TestCase):
             ),
         )
         service = OwnershipStatsService(self.store, object())
-        with mock.patch(
-            "plugins.endfield.ownership_stats.fetch_operator_catalog",
-            mock.AsyncMock(return_value=("v1", incoming)),
+        manifest = {"latest": "v1", "versions": [{"id": "v1", "tableCfgPath": "tables"}]}
+        with (
+            mock.patch(
+                "plugins.endfield.ownership_stats.fetch_akedata_manifest",
+                mock.AsyncMock(return_value=manifest),
+            ),
+            mock.patch(
+                "plugins.endfield.ownership_stats.fetch_operator_catalog",
+                mock.AsyncMock(return_value=("v1", incoming)),
+            ),
         ):
             updated = asyncio.run(service.refresh_catalog())
 
         self.assertTrue(updated)
         self.assertEqual(self.store.list_operator_catalog()[0].operator_key, incoming[0].operator_key)
+
+    def test_catalog_refresh_uses_manifest_and_skips_unchanged_large_tables(self):
+        self.store.replace_operator_catalog(
+            _catalog(),
+            "v1",
+            updated_at=NOW,
+            revision=CATALOG_MAPPING_REVISION,
+        )
+        service = OwnershipStatsService(self.store, object())
+        manifest = {"latest": "v1", "versions": [{"id": "v1", "tableCfgPath": "tables"}]}
+        with (
+            mock.patch(
+                "plugins.endfield.ownership_stats.fetch_akedata_manifest",
+                mock.AsyncMock(return_value=manifest),
+            ) as fetch_manifest,
+            mock.patch(
+                "plugins.endfield.ownership_stats.fetch_operator_catalog",
+                mock.AsyncMock(),
+            ) as fetch_tables,
+        ):
+            first = asyncio.run(service.refresh_catalog())
+            second = asyncio.run(service.refresh_catalog())
+
+        self.assertFalse(first)
+        self.assertFalse(second)
+        fetch_manifest.assert_awaited_once()
+        fetch_tables.assert_not_awaited()
+
+    def test_due_refresh_limits_oldest_ready_roles_and_defers_backoff(self):
+        oldest = self.store.bind_roles(
+            "oldest",
+            "token-oldest",
+            [RoleCandidate("oldest", "oldest", "1", "oldest")],
+            self.cipher,
+        )[0]
+        waiting = self.store.bind_roles(
+            "waiting",
+            "token-waiting",
+            [RoleCandidate("waiting", "waiting", "1", "waiting")],
+            self.cipher,
+        )[0]
+        missing = self.store.bind_roles(
+            "missing",
+            "token-missing",
+            [RoleCandidate("missing", "missing", "1", "missing")],
+            self.cipher,
+        )[0]
+        self.store.replace_operator_snapshot(
+            oldest,
+            "cn",
+            [OperatorSnapshotMember("op-a", 0)],
+            fetched_at=NOW - 30 * 60 * 60,
+        )
+        self.store.replace_operator_snapshot(
+            waiting,
+            "cn",
+            [OperatorSnapshotMember("op-a", 0)],
+            fetched_at=NOW - 26 * 60 * 60,
+        )
+        self.store.record_operator_snapshot_failure(
+            waiting,
+            "cn",
+            "temporary",
+            attempted_at=NOW - 10,
+            retry_after_seconds=900,
+        )
+
+        class Client:
+            def __init__(self):
+                self.roles = []
+
+            async def card_detail(self, _token, role):
+                self.roles.append(role.role_id)
+                return {
+                    "base": {"charNum": 1, "saveTime": NOW},
+                    "chars": [{"charData": {"id": "op-a"}, "potentialLevel": 1}],
+                }
+
+        client = Client()
+        service = OwnershipStatsService(self.store, client, batch_size=2)
+        with mock.patch.object(service, "refresh_catalog", mock.AsyncMock(return_value=False)):
+            result = asyncio.run(service.refresh_due(self.cipher, now=NOW))
+
+        self.assertEqual(client.roles, [missing.role_id, oldest.role_id])
+        self.assertEqual((result.eligible, result.attempted, result.deferred), (3, 2, 1))
+        self.assertEqual((result.requested, result.succeeded), (2, 2))
+
+    def test_overlapping_due_batches_recheck_after_lock_and_do_not_refetch(self):
+        self.store.bind_roles(
+            "qq",
+            "token",
+            [RoleCandidate("binding", "role", "1", "role")],
+            self.cipher,
+        )
+
+        class Client:
+            def __init__(self):
+                self.calls = 0
+                self.started = asyncio.Event()
+                self.release = asyncio.Event()
+
+            async def card_detail(self, _token, _role):
+                self.calls += 1
+                self.started.set()
+                await self.release.wait()
+                return {
+                    "base": {"charNum": 1, "saveTime": NOW},
+                    "chars": [{"charData": {"id": "op-a"}, "potentialLevel": 1}],
+                }
+
+        async def scenario():
+            client = Client()
+            service = OwnershipStatsService(self.store, client)
+            with mock.patch.object(service, "refresh_catalog", mock.AsyncMock(return_value=False)):
+                first = asyncio.create_task(
+                    service.refresh_roles(
+                        self.store.list_all_roles(),
+                        self.cipher,
+                        now=NOW,
+                        force=False,
+                    )
+                )
+                await client.started.wait()
+                second = asyncio.create_task(
+                    service.refresh_roles(
+                        self.store.list_all_roles(),
+                        self.cipher,
+                        now=NOW,
+                        force=False,
+                    )
+                )
+                client.release.set()
+                return client, await first, await second
+
+        client, first, second = asyncio.run(scenario())
+        self.assertEqual(client.calls, 1)
+        self.assertEqual(first.succeeded, 1)
+        self.assertEqual(second.attempted, 0)
 
     def test_refresh_stops_after_repeated_systemic_community_failures(self):
         for index in range(8):
@@ -631,9 +891,154 @@ class OwnershipRefreshAndGroupTests(unittest.TestCase):
 
         self.assertEqual((result.attempted, result.failed, result.skipped), (8, 3, 5))
         self.assertEqual(client.calls, 3)
+        self.assertEqual(result.requested, 3)
+        self.assertIn("获取社区凭据（405）", {item.label for item in result.issues})
         self.assertTrue(result.stopped_early)
         self.assertIn("405", result.stop_reason)
         self.assertEqual(len(self.store.list_operator_snapshots()), 3)
+
+    def test_systemic_failure_window_is_not_reset_by_interleaved_success(self):
+        for index in range(8):
+            self.store.bind_roles(
+                f"qq-{index}",
+                f"token-{index}",
+                [RoleCandidate(f"binding-{index}", f"role-{index}", "1", f"role-{index}")],
+                self.cipher,
+            )
+
+        class Client:
+            def __init__(self):
+                self.calls = 0
+
+            async def card_detail(self, _token, _role):
+                self.calls += 1
+                if self.calls in {1, 3, 5}:
+                    raise EndfieldAPIError("获取社区凭据", "405", "unavailable")
+                return {
+                    "base": {"charNum": 1, "saveTime": NOW},
+                    "chars": [{"charData": {"id": "op-a"}, "potentialLevel": 1}],
+                }
+
+        client = Client()
+        service = OwnershipStatsService(
+            self.store,
+            client,
+            concurrency=1,
+            systemic_failure_threshold=3,
+            systemic_backoff_base_seconds=0,
+        )
+        with mock.patch.object(service, "refresh_catalog", mock.AsyncMock(return_value=False)):
+            result = asyncio.run(
+                service.refresh_roles(self.store.list_all_roles(), self.cipher, now=NOW, force=True)
+            )
+
+        self.assertEqual(client.calls, 5)
+        self.assertEqual((result.failed, result.succeeded, result.skipped), (3, 2, 3))
+        self.assertTrue(result.stopped_early)
+
+    def test_successful_roles_use_their_own_completion_timestamps(self):
+        for index in range(2):
+            self.store.bind_roles(
+                f"qq-{index}",
+                f"token-{index}",
+                [RoleCandidate(f"binding-{index}", f"role-{index}", "1", f"role-{index}")],
+                self.cipher,
+            )
+
+        class Client:
+            async def card_detail(self, _token, _role):
+                return {
+                    "base": {"charNum": 1, "saveTime": NOW},
+                    "chars": [{"charData": {"id": "op-a"}, "potentialLevel": 1}],
+                }
+
+        service = OwnershipStatsService(self.store, Client(), concurrency=1)
+        with (
+            mock.patch.object(service, "refresh_catalog", mock.AsyncMock(return_value=False)),
+            mock.patch(
+                "plugins.endfield.ownership_stats.time.time",
+                side_effect=[100, 101, 102, 103],
+            ),
+        ):
+            result = asyncio.run(
+                service.refresh_roles(self.store.list_all_roles(), self.cipher, force=True)
+            )
+
+        self.assertEqual(result.started_at, 100)
+        self.assertEqual(
+            {item.fetched_at for item in self.store.list_operator_snapshots()},
+            {101, 102},
+        )
+
+    def test_refresh_result_reports_anonymous_batch_and_community_metrics(self):
+        self.store.bind_roles(
+            "qq",
+            "token",
+            [RoleCandidate("binding", "role", "1", "role")],
+            self.cipher,
+        )
+
+        class Client:
+            def __init__(self):
+                self.metrics = {
+                    "cache_hits": 0,
+                    "singleflight_reuses": 0,
+                    "exchange_attempts": 0,
+                    "exchange_succeeded": 0,
+                    "exchange_failed": 0,
+                    "circuit_rejections": 0,
+                }
+
+            def community_context_metrics(self):
+                return dict(self.metrics)
+
+            async def card_detail(self, _token, _role):
+                self.metrics["cache_hits"] += 1
+                self.metrics["exchange_attempts"] += 1
+                self.metrics["exchange_succeeded"] += 1
+                return {
+                    "base": {"charNum": 1, "saveTime": NOW},
+                    "chars": [{"charData": {"id": "op-a"}, "potentialLevel": 1}],
+                }
+
+        client = Client()
+        service = OwnershipStatsService(self.store, client)
+        messages: list[str] = []
+        sink = logger.add(messages.append, format="{message}", level="INFO")
+        try:
+            with mock.patch.object(service, "refresh_catalog", mock.AsyncMock(return_value=False)):
+                result = asyncio.run(
+                    service.refresh_roles(
+                        self.store.list_all_roles(),
+                        self.cipher,
+                        now=NOW,
+                        force=True,
+                        trigger="manual-global",
+                    )
+                )
+        finally:
+            logger.remove(sink)
+
+        self.assertTrue(result.batch_id)
+        self.assertEqual(result.trigger, "manual-global")
+        self.assertEqual(
+            (
+                result.cache_hits,
+                result.exchange_attempts,
+                result.exchange_succeeded,
+                result.exchange_failed,
+                result.circuit_rejections,
+            ),
+            (1, 1, 1, 0, 0),
+        )
+        batch_log = next(
+            message for message in messages if "refresh batch complete" in message
+        )
+        self.assertIn(f"batch_id={result.batch_id}", batch_log)
+        self.assertIn("trigger=manual-global", batch_log)
+        self.assertIn("cache_hits=1", batch_log)
+        self.assertIn("exchange_attempts=1", batch_log)
+        self.assertIn("issues=none", batch_log)
 
     def test_group_member_pagination_failure_and_admin_detection(self):
         class Bot:
@@ -756,6 +1161,10 @@ class OwnershipRefreshAndGroupTests(unittest.TestCase):
             catalog_updated=False,
             started_at=100,
             finished_at=111,
+            eligible=2,
+            requested=2,
+            catalog_checked=True,
+            issues=(OwnershipRefreshIssue("api:账号授权:401", "账号授权（401）", 1),),
         )
         with (
             mock.patch.object(endfield_plugin.Config, "SUPERUSERS", ["superuser"]),
@@ -790,11 +1199,18 @@ class OwnershipRefreshAndGroupTests(unittest.TestCase):
             )
 
         self.assertIn("全局持有率刷新完成", result)
-        self.assertIn("尝试 2，成功 1，失败 1，跳过 0", result)
+        self.assertIn("候选 2，入队 2，角色请求 2", result)
+        self.assertIn("成功 1，失败 1，跳过 0，延后 0", result)
         self.assertIn("目录无变化", result)
+        self.assertIn("账号授权（401） × 1", result)
         self.assertIn("耗时 11 秒", result)
         self.assertIn("/ef 绑定", result)
-        refresh_roles.assert_awaited_once_with(roles, self.cipher, force=True)
+        refresh_roles.assert_awaited_once_with(
+            roles,
+            self.cipher,
+            force=True,
+            trigger="manual-global",
+        )
         build_report.assert_not_called()
         renderer.assert_not_awaited()
 
@@ -817,6 +1233,24 @@ class OwnershipRefreshAndGroupTests(unittest.TestCase):
         self.assertIn("保护性停止", result)
         self.assertIn("旧快照仍按 48 小时有效期参与统计", result)
         self.assertNotIn("/ef 绑定更新凭证", result)
+
+    def test_refresh_text_distinguishes_catalog_failure_from_unchanged(self):
+        refresh = OwnershipRefreshResult(
+            attempted=0,
+            succeeded=0,
+            failed=0,
+            skipped=0,
+            catalog_updated=False,
+            started_at=100,
+            finished_at=100,
+            catalog_checked=True,
+            catalog_error="RuntimeError: 目录检查失败",
+        )
+
+        result = endfield_plugin._format_ownership_refresh_result("global", refresh)
+
+        self.assertIn("目录检查失败（RuntimeError: 目录检查失败）", result)
+        self.assertNotIn("目录无变化", result)
 
     def test_group_view_uses_live_member_filter_and_never_global_roles(self):
         class Matcher:

@@ -5,10 +5,12 @@ import hashlib
 import inspect
 import re
 import time
-from collections import defaultdict
+from collections import Counter, defaultdict, deque
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any, Literal
+
+from loguru import logger
 
 from utils.onebot_api import call_onebot_action
 
@@ -29,8 +31,17 @@ from .gacha import ROLE_TASKS, TaskAlreadyRunning
 SNAPSHOT_TTL_SECONDS = 48 * 60 * 60
 REFRESH_INTERVAL_SECONDS = 24 * 60 * 60
 REFRESH_CONCURRENCY = 2
+REFRESH_BATCH_SIZE = 20
+REFRESH_RETRY_BASE_SECONDS = 15 * 60
+REFRESH_RETRY_MAX_SECONDS = 6 * 60 * 60
+REFRESH_AUTH_RETRY_BASE_SECONDS = 6 * 60 * 60
+REFRESH_AUTH_RETRY_MAX_SECONDS = 24 * 60 * 60
 SYSTEMIC_FAILURE_THRESHOLD = 3
+SYSTEMIC_FAILURE_WINDOW = 10
 SYSTEMIC_BACKOFF_BASE_SECONDS = 2.0
+SYSTEMIC_CIRCUIT_SECONDS = 15 * 60
+CATALOG_CHECK_INTERVAL_SECONDS = 6 * 60 * 60
+CATALOG_MAPPING_REVISION = "endministrator-gender-v2"
 _SYSTEMIC_COMMUNITY_OPERATIONS = {"账号授权", "获取社区凭据", "刷新社区签名"}
 _SYSTEMIC_COMMUNITY_CODES = {"405", "429", "502", "503", "504"}
 _TABLE_MAX_BYTES = 24 * 1024 * 1024
@@ -46,6 +57,14 @@ _ENDMIN_DISPLAY_NAMES = {
     _ENDMIN_MALE_SOURCE: "管理员·男",
     _ENDMIN_FEMALE_SOURCE: "管理员·女",
 }
+_COMMUNITY_METRIC_KEYS = (
+    "cache_hits",
+    "singleflight_reuses",
+    "exchange_attempts",
+    "exchange_succeeded",
+    "exchange_failed",
+    "circuit_rejections",
+)
 
 
 class SnapshotValidationError(ValueError):
@@ -113,6 +132,13 @@ class OwnershipStatsSegment:
 
 
 @dataclass(frozen=True, slots=True)
+class OwnershipRefreshIssue:
+    key: str
+    label: str
+    count: int
+
+
+@dataclass(frozen=True, slots=True)
 class OwnershipRefreshResult:
     attempted: int
     succeeded: int
@@ -123,12 +149,29 @@ class OwnershipRefreshResult:
     finished_at: int
     stopped_early: bool = False
     stop_reason: str = ""
+    eligible: int = 0
+    requested: int = 0
+    deferred: int = 0
+    catalog_checked: bool = False
+    catalog_error: str = ""
+    issues: tuple[OwnershipRefreshIssue, ...] = ()
+    batch_id: str = ""
+    trigger: str = ""
+    cache_hits: int = 0
+    singleflight_reuses: int = 0
+    exchange_attempts: int = 0
+    exchange_succeeded: int = 0
+    exchange_failed: int = 0
+    circuit_rejections: int = 0
 
 
 @dataclass(frozen=True, slots=True)
 class _RefreshRoleOutcome:
     status: Literal["success", "failed", "skipped"]
     error: Exception | None = None
+    requested: int = 0
+    issue_key: str = ""
+    issue_label: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,8 +205,25 @@ async def render_ownership_stats(report: OwnershipStatsReport) -> Any:
     return await result if inspect.isawaitable(result) else result
 
 
-async def fetch_operator_catalog() -> tuple[str, tuple[OperatorCatalogEntry, ...]]:
-    manifest = await fetch_akedata_manifest()
+async def fetch_operator_catalog(
+    manifest: Mapping[str, Any] | None = None,
+) -> tuple[str, tuple[OperatorCatalogEntry, ...]]:
+    manifest = manifest or await fetch_akedata_manifest()
+    latest, table_path = _operator_catalog_manifest(manifest)
+    character_table, profession_table, i18n = await asyncio.gather(
+        _get(f"/{table_path}/CharacterTable.json", max_bytes=_TABLE_MAX_BYTES),
+        _get(f"/{table_path}/CharProfessionTable.json", max_bytes=4 * 1024 * 1024),
+        _get(f"/{table_path}/I18nTextTable_CN.json", max_bytes=_I18N_MAX_BYTES),
+    )
+    return latest, build_operator_catalog(
+        character_table,
+        profession_table,
+        i18n,
+        version=latest,
+    )
+
+
+def _operator_catalog_manifest(manifest: Mapping[str, Any]) -> tuple[str, str]:
     latest = str(manifest.get("latest") or "")
     version = next(
         (
@@ -176,17 +236,7 @@ async def fetch_operator_catalog() -> tuple[str, tuple[OperatorCatalogEntry, ...
     table_path = str((version or {}).get("tableCfgPath") or "").strip("/")
     if not latest or not table_path:
         raise RuntimeError("AKEData 当前版本缺少干员目录路径")
-    character_table, profession_table, i18n = await asyncio.gather(
-        _get(f"/{table_path}/CharacterTable.json", max_bytes=_TABLE_MAX_BYTES),
-        _get(f"/{table_path}/CharProfessionTable.json", max_bytes=4 * 1024 * 1024),
-        _get(f"/{table_path}/I18nTextTable_CN.json", max_bytes=_I18N_MAX_BYTES),
-    )
-    return latest, build_operator_catalog(
-        character_table,
-        profession_table,
-        i18n,
-        version=latest,
-    )
+    return latest, table_path
 
 
 def build_operator_catalog(
@@ -317,33 +367,100 @@ class OwnershipStatsService:
         snapshot_ttl_seconds: int = SNAPSHOT_TTL_SECONDS,
         refresh_interval_seconds: int = REFRESH_INTERVAL_SECONDS,
         concurrency: int = REFRESH_CONCURRENCY,
+        batch_size: int = REFRESH_BATCH_SIZE,
+        retry_base_seconds: int = REFRESH_RETRY_BASE_SECONDS,
+        retry_max_seconds: int = REFRESH_RETRY_MAX_SECONDS,
         systemic_failure_threshold: int = SYSTEMIC_FAILURE_THRESHOLD,
+        systemic_failure_window: int = SYSTEMIC_FAILURE_WINDOW,
         systemic_backoff_base_seconds: float = SYSTEMIC_BACKOFF_BASE_SECONDS,
+        systemic_circuit_seconds: int = SYSTEMIC_CIRCUIT_SECONDS,
+        catalog_check_interval_seconds: int = CATALOG_CHECK_INTERVAL_SECONDS,
     ):
         self.store = store
         self.client = client
         self.snapshot_ttl_seconds = max(60, int(snapshot_ttl_seconds))
         self.refresh_interval_seconds = max(60, int(refresh_interval_seconds))
         self.concurrency = max(1, int(concurrency))
+        self.batch_size = max(1, int(batch_size))
+        self.retry_base_seconds = max(1, int(retry_base_seconds))
+        self.retry_max_seconds = max(self.retry_base_seconds, int(retry_max_seconds))
         self.systemic_failure_threshold = max(1, int(systemic_failure_threshold))
+        self.systemic_failure_window = max(
+            self.systemic_failure_threshold,
+            int(systemic_failure_window),
+        )
         self.systemic_backoff_base_seconds = max(0.0, float(systemic_backoff_base_seconds))
+        self.systemic_circuit_seconds = max(60, int(systemic_circuit_seconds))
+        self.catalog_check_interval_seconds = max(60, int(catalog_check_interval_seconds))
         self._catalog_lock = asyncio.Lock()
         self._refresh_lock = asyncio.Lock()
+        self._next_catalog_check_at = 0.0
+        self._circuit_open_until = 0.0
+        self._circuit_reason = ""
+        self._batch_sequence = 0
 
-    async def refresh_catalog(self) -> bool:
+    async def refresh_catalog(self, *, force: bool = False) -> bool:
         async with self._catalog_lock:
-            version, entries = await fetch_operator_catalog()
+            check_started = time.monotonic()
             current = self.store.list_operator_catalog()
             current_version = next((item.version for item in current if item.source == "akedata"), "")
+            current_revision = self.store.get_meta("operator_catalog_revision")
+            monotonic_now = time.monotonic()
+            if (
+                not force
+                and current
+                and current_revision == CATALOG_MAPPING_REVISION
+                and monotonic_now < self._next_catalog_check_at
+            ):
+                logger.debug(
+                    "[endfield-ownership] catalog check skipped "
+                    f"reason=memory_ttl version={current_version or 'unknown'}"
+                )
+                return False
+            manifest = await fetch_akedata_manifest()
+            version, _table_path = _operator_catalog_manifest(manifest)
+            if (
+                current
+                and current_version == version
+                and current_revision == CATALOG_MAPPING_REVISION
+            ):
+                self._next_catalog_check_at = monotonic_now + self.catalog_check_interval_seconds
+                logger.info(
+                    "[endfield-ownership] catalog check complete "
+                    f"status=unchanged version={version} source=manifest "
+                    f"elapsed_seconds={time.monotonic() - check_started:.3f}"
+                )
+                return False
+            version, entries = await fetch_operator_catalog(manifest)
             current_signature = {
                 _catalog_entry_signature(item)
                 for item in current
                 if item.source == "akedata"
             }
             incoming_signature = {_catalog_entry_signature(item) for item in entries}
-            if current_version == version and current_signature == incoming_signature:
+            if (
+                current_version == version
+                and current_revision == CATALOG_MAPPING_REVISION
+                and current_signature == incoming_signature
+            ):
+                self._next_catalog_check_at = monotonic_now + self.catalog_check_interval_seconds
+                logger.info(
+                    "[endfield-ownership] catalog check complete "
+                    f"status=unchanged version={version} source=full_tables "
+                    f"elapsed_seconds={time.monotonic() - check_started:.3f}"
+                )
                 return False
-            self.store.replace_operator_catalog(entries, version)
+            self.store.replace_operator_catalog(
+                entries,
+                version,
+                revision=CATALOG_MAPPING_REVISION,
+            )
+            self._next_catalog_check_at = monotonic_now + self.catalog_check_interval_seconds
+            logger.info(
+                "[endfield-ownership] catalog check complete "
+                f"status=updated version={version} operators={len(entries)} "
+                f"elapsed_seconds={time.monotonic() - check_started:.3f}"
+            )
             return True
 
     async def persist_detail(
@@ -362,8 +479,21 @@ class OwnershipStatsService:
             game_saved_at=game_saved_at,
         )
 
-    async def refresh_due(self, cipher: CredentialCipher, *, now: int | None = None) -> OwnershipRefreshResult:
-        return await self.refresh_roles(self.store.list_all_roles(), cipher, now=now, force=False)
+    async def refresh_due(
+        self,
+        cipher: CredentialCipher,
+        *,
+        now: int | None = None,
+        limit: int | None = None,
+    ) -> OwnershipRefreshResult:
+        return await self.refresh_roles(
+            self.store.list_all_roles(),
+            cipher,
+            now=now,
+            force=False,
+            limit=self.batch_size if limit is None else limit,
+            trigger="scheduled",
+        )
 
     async def refresh_roles(
         self,
@@ -372,115 +502,337 @@ class OwnershipStatsService:
         *,
         now: int | None = None,
         force: bool = True,
+        limit: int | None = None,
+        trigger: str = "direct",
     ) -> OwnershipRefreshResult:
         started = int(now or time.time())
-        try:
-            catalog_updated = await self.refresh_catalog()
-        except Exception:
-            catalog_updated = False
-        catalog = self.store.list_operator_catalog()
-        groups = _group_roles(roles)
-        if not force:
+        trigger = _safe_log_token(trigger, "direct")
+        batch_started = time.monotonic()
+        metrics_before = _community_metric_snapshot(self.client)
+        self._batch_sequence += 1
+        batch_id = f"{started:x}-{self._batch_sequence:x}"
+        lock_started = time.monotonic()
+        async with self._refresh_lock:
+            lock_wait_seconds = time.monotonic() - lock_started
+            groups = _group_roles(roles)
             snapshots = {
                 (item.server_id, item.role_id): item
-                for item in self.store.list_operator_snapshots()
+                for item in self.store.list_operator_snapshots(groups.keys())
             }
             due_before = started - self.refresh_interval_seconds
-            groups = {
-                key: candidates
-                for key, candidates in groups.items()
-                if (
-                    key not in snapshots
-                    or snapshots[key].fetched_at < due_before
-                    or _has_legacy_shared_endministrator(snapshots[key])
+            eligible_items: list[
+                tuple[tuple[str, str], tuple[EndfieldRole, ...]]
+            ] = []
+            retry_deferred = 0
+            for key, candidates in groups.items():
+                snapshot = snapshots.get(key)
+                due = (
+                    force
+                    or snapshot is None
+                    or snapshot.fetched_at < due_before
+                    or bool(snapshot.last_error)
+                    or _has_legacy_shared_endministrator(snapshot)
                 )
-            }
-        semaphore = asyncio.Semaphore(self.concurrency)
+                if not due:
+                    continue
+                if (
+                    not force
+                    and snapshot is not None
+                    and snapshot.next_attempt_at > started
+                ):
+                    retry_deferred += 1
+                    continue
+                eligible_items.append((key, candidates))
+
+            eligible = len(eligible_items) + retry_deferred
+            eligible_items.sort(
+                key=lambda item: (
+                    snapshots[item[0]].fetched_at if item[0] in snapshots else -1,
+                    snapshots[item[0]].last_attempt_at if item[0] in snapshots else 0,
+                    item[0],
+                )
+            )
+            selected_limit = len(eligible_items) if limit is None else max(0, int(limit))
+            selected = eligible_items[:selected_limit]
+            limit_deferred = max(0, len(eligible_items) - len(selected))
+            deferred = retry_deferred + limit_deferred
+            selection_log = logger.info if eligible or force else logger.debug
+            selection_log(
+                "[endfield-ownership] refresh batch selected "
+                f"batch_id={batch_id} trigger={trigger} force={str(force).lower()} "
+                f"input_bindings={len(roles)} unique_roles={len(groups)} "
+                f"eligible={eligible} queued={len(selected)} "
+                f"retry_deferred={retry_deferred} limit_deferred={limit_deferred} "
+                f"limit={selected_limit} concurrency={self.concurrency} "
+                f"lock_wait_seconds={lock_wait_seconds:.3f}"
+            )
+            catalog_updated = False
+            catalog_checked = False
+            catalog_error = ""
+            if selected:
+                try:
+                    catalog_updated = await self.refresh_catalog()
+                    catalog_checked = True
+                except Exception as exc:
+                    catalog_checked = True
+                    catalog_error = _safe_catalog_error(exc)
+                    logger.warning(
+                        "[endfield-ownership] catalog check failed "
+                        f"batch_id={batch_id} trigger={trigger} "
+                        f"error_type={type(exc).__module__}.{type(exc).__name__}"
+                    )
+            catalog = self.store.list_operator_catalog()
+
+            if selected and not catalog:
+                issue = OwnershipRefreshIssue(
+                    "catalog-unavailable",
+                    "干员目录不可用",
+                    len(selected),
+                )
+                self.store.cleanup_orphan_operator_snapshots()
+                result = OwnershipRefreshResult(
+                    attempted=len(selected),
+                    succeeded=0,
+                    failed=0,
+                    skipped=len(selected),
+                    catalog_updated=False,
+                    started_at=started,
+                    finished_at=int(time.time()),
+                    stopped_early=True,
+                    stop_reason="干员目录不可用，已停止本批刷新",
+                    eligible=eligible,
+                    requested=0,
+                    deferred=deferred,
+                    catalog_checked=catalog_checked,
+                    catalog_error=catalog_error or "干员目录为空",
+                    issues=(issue,),
+                )
+                return self._finalize_refresh_result(
+                    result,
+                    metrics_before,
+                    batch_id=batch_id,
+                    trigger=trigger,
+                    force=force,
+                    batch_started=batch_started,
+                    lock_wait_seconds=lock_wait_seconds,
+                )
+
+            circuit_delay = self._circuit_open_until - time.monotonic()
+            if selected and circuit_delay > 0:
+                issue = OwnershipRefreshIssue(
+                    "community-circuit-open",
+                    "官方社区接口冷却中",
+                    len(selected),
+                )
+                self.store.cleanup_orphan_operator_snapshots()
+                result = OwnershipRefreshResult(
+                    attempted=len(selected),
+                    succeeded=0,
+                    failed=0,
+                    skipped=len(selected),
+                    catalog_updated=catalog_updated,
+                    started_at=started,
+                    finished_at=int(time.time()),
+                    stopped_early=True,
+                    stop_reason=self._circuit_reason or "官方社区接口冷却中",
+                    eligible=eligible,
+                    requested=0,
+                    deferred=deferred,
+                    catalog_checked=catalog_checked,
+                    catalog_error=catalog_error,
+                    issues=(issue,),
+                )
+                return self._finalize_refresh_result(
+                    result,
+                    metrics_before,
+                    batch_id=batch_id,
+                    trigger=trigger,
+                    force=force,
+                    batch_started=batch_started,
+                    lock_wait_seconds=lock_wait_seconds,
+                )
+
+            results, queue_skipped, stopped_early, stop_reason = await self._run_workers(
+                selected,
+                snapshots,
+                cipher,
+                catalog,
+                fixed_timestamp=started if now is not None else None,
+                batch_id=batch_id,
+            )
+            issue_counts: Counter[tuple[str, str]] = Counter(
+                (item.issue_key, item.issue_label)
+                for item in results
+                if item.issue_key
+            )
+            if queue_skipped:
+                issue_counts[
+                    (
+                        "community-protective-stop",
+                        "官方社区接口保护性停止",
+                    )
+                ] += queue_skipped
+            self.store.cleanup_orphan_operator_snapshots()
+            result = OwnershipRefreshResult(
+                attempted=len(selected),
+                succeeded=sum(item.status == "success" for item in results),
+                failed=sum(item.status == "failed" for item in results),
+                skipped=sum(item.status == "skipped" for item in results) + queue_skipped,
+                catalog_updated=catalog_updated,
+                started_at=started,
+                finished_at=int(time.time()),
+                stopped_early=stopped_early,
+                stop_reason=stop_reason,
+                eligible=eligible,
+                requested=sum(item.requested for item in results),
+                deferred=deferred,
+                catalog_checked=catalog_checked,
+                catalog_error=catalog_error,
+                issues=tuple(
+                    OwnershipRefreshIssue(key, label, count)
+                    for (key, label), count in sorted(
+                        issue_counts.items(),
+                        key=lambda item: (-item[1], item[0][1], item[0][0]),
+                    )
+                ),
+            )
+            return self._finalize_refresh_result(
+                result,
+                metrics_before,
+                batch_id=batch_id,
+                trigger=trigger,
+                force=force,
+                batch_started=batch_started,
+                lock_wait_seconds=lock_wait_seconds,
+            )
+
+    async def _run_workers(
+        self,
+        selected: Sequence[
+            tuple[tuple[str, str], tuple[EndfieldRole, ...]]
+        ],
+        snapshots: Mapping[tuple[str, str], OperatorRosterSnapshot],
+        cipher: CredentialCipher,
+        catalog: Sequence[OperatorCatalogEntry],
+        *,
+        fixed_timestamp: int | None,
+        batch_id: str,
+    ) -> tuple[list[_RefreshRoleOutcome], int, bool, str]:
+        if not selected:
+            return [], 0, False, ""
+        queue: asyncio.Queue[
+            tuple[tuple[str, str], tuple[EndfieldRole, ...]]
+        ] = asyncio.Queue()
+        for item in selected:
+            queue.put_nowait(item)
+        results: list[_RefreshRoleOutcome] = []
         state_lock = asyncio.Lock()
         stop_event = asyncio.Event()
-        systemic_failures = 0
+        systemic_window: deque[str] = deque(maxlen=self.systemic_failure_window)
         backoff_until = 0.0
         stop_reason = ""
 
-        async def run(candidates: tuple[EndfieldRole, ...]) -> _RefreshRoleOutcome:
-            nonlocal systemic_failures, backoff_until, stop_reason
-            if stop_event.is_set():
-                return _RefreshRoleOutcome("skipped")
-            async with semaphore:
-                if stop_event.is_set():
-                    return _RefreshRoleOutcome("skipped")
-                async with state_lock:
-                    delay = max(0.0, backoff_until - time.monotonic())
-                if delay:
-                    await asyncio.sleep(delay)
-                if stop_event.is_set():
-                    return _RefreshRoleOutcome("skipped")
-
-                outcome = await self._refresh_one(candidates, cipher, catalog, started)
-                async with state_lock:
-                    systemic_code = _systemic_community_error_code(outcome.error)
-                    if outcome.status == "success":
-                        systemic_failures = 0
-                    elif systemic_code:
-                        systemic_failures += 1
-                        if systemic_failures >= self.systemic_failure_threshold:
+        async def worker() -> None:
+            nonlocal backoff_until, stop_reason
+            while not stop_event.is_set():
+                try:
+                    key, candidates = queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    return
+                try:
+                    async with state_lock:
+                        delay = max(0.0, backoff_until - time.monotonic())
+                    if delay:
+                        await asyncio.sleep(delay)
+                    if stop_event.is_set():
+                        queue.put_nowait((key, candidates))
+                        return
+                    outcome = await self._refresh_one(
+                        candidates,
+                        cipher,
+                        catalog,
+                        snapshots.get(key),
+                        fixed_timestamp=fixed_timestamp,
+                    )
+                    results.append(outcome)
+                    async with state_lock:
+                        systemic_code = _systemic_community_error_code(outcome.error)
+                        systemic_window.append(systemic_code)
+                        if not systemic_code:
+                            continue
+                        matching_failures = sum(
+                            code == systemic_code for code in systemic_window
+                        )
+                        retry_after = _error_retry_after(outcome.error)
+                        if matching_failures >= self.systemic_failure_threshold:
                             stop_reason = (
-                                f"官方社区接口连续返回 {systemic_code}，"
+                                f"官方社区接口近期多次返回 {systemic_code}，"
                                 "已保护性停止剩余刷新"
+                            )
+                            self._circuit_open_until = time.monotonic() + max(
+                                self.systemic_circuit_seconds,
+                                retry_after,
+                            )
+                            self._circuit_reason = stop_reason
+                            logger.warning(
+                                "[endfield-ownership] refresh circuit opened "
+                                f"batch_id={batch_id} code={systemic_code} "
+                                f"matches={matching_failures} window={len(systemic_window)} "
+                                f"cooldown_seconds={int(max(self.systemic_circuit_seconds, retry_after))} "
+                                f"queue_remaining={queue.qsize()}"
                             )
                             stop_event.set()
                         else:
-                            backoff_seconds = self.systemic_backoff_base_seconds * (
-                                2 ** (systemic_failures - 1)
+                            backoff_seconds = max(
+                                retry_after,
+                                self.systemic_backoff_base_seconds
+                                * (2 ** (matching_failures - 1)),
                             )
                             backoff_until = max(
                                 backoff_until,
                                 time.monotonic() + backoff_seconds,
                             )
-                    elif outcome.status == "failed":
-                        systemic_failures = 0
-                return outcome
+                finally:
+                    queue.task_done()
 
-        async with self._refresh_lock:
-            results = await asyncio.gather(*(run(candidates) for candidates in groups.values()))
-        self.store.cleanup_orphan_operator_snapshots()
-        return OwnershipRefreshResult(
-            attempted=len(results),
-            succeeded=sum(item.status == "success" for item in results),
-            failed=sum(item.status == "failed" for item in results),
-            skipped=sum(item.status == "skipped" for item in results),
-            catalog_updated=catalog_updated,
-            started_at=started,
-            finished_at=int(time.time()),
-            stopped_early=stop_event.is_set(),
-            stop_reason=stop_reason,
-        )
+        workers = [
+            asyncio.create_task(worker())
+            for _ in range(min(self.concurrency, len(selected)))
+        ]
+        await asyncio.gather(*workers)
+        queue_skipped = queue.qsize()
+        return results, queue_skipped, stop_event.is_set(), stop_reason
 
     async def _refresh_one(
         self,
         candidates: tuple[EndfieldRole, ...],
         cipher: CredentialCipher,
         catalog: Sequence[OperatorCatalogEntry],
-        attempted_at: int,
+        previous: OperatorRosterSnapshot | None,
+        *,
+        fixed_timestamp: int | None = None,
     ) -> _RefreshRoleOutcome:
         reference = candidates[0]
         region = "asia" if any(is_asia_role(role) for role in candidates) else "cn"
         last_error: Exception | None = None
+        requested = 0
         try:
             async with ROLE_TASKS.claim(reference):
                 for index, role in enumerate(candidates):
                     try:
                         token = self.store.decrypt_token(role, cipher)
-                        detail = await self.client.card_detail(token, role)
+                        requested += 1
+                        detail = await _background_card_detail(self.client, token, role)
                         members, game_saved_at = parse_operator_snapshot(detail, catalog)
+                        succeeded_at = fixed_timestamp or int(time.time())
                         self.store.replace_operator_snapshot(
                             reference,
                             region,
                             members,
-                            fetched_at=attempted_at,
+                            fetched_at=succeeded_at,
                             game_saved_at=game_saved_at,
                         )
-                        return _RefreshRoleOutcome("success")
+                        return _RefreshRoleOutcome("success", requested=requested)
                     except (CredentialKeyError, LookupError) as exc:
                         last_error = exc
                         continue
@@ -497,14 +849,92 @@ class OwnershipStatsService:
                         last_error = exc
                         break
         except TaskAlreadyRunning:
-            return _RefreshRoleOutcome("skipped")
+            return _RefreshRoleOutcome(
+                "skipped",
+                requested=requested,
+                issue_key="role-busy",
+                issue_label="同角色已有任务",
+            )
+        attempted_at = fixed_timestamp or int(time.time())
+        failure_count = (previous.failure_count if previous is not None else 0) + 1
+        retry_after = _refresh_retry_delay(
+            last_error,
+            failure_count,
+            base_seconds=self.retry_base_seconds,
+            max_seconds=self.retry_max_seconds,
+        )
         self.store.record_operator_snapshot_failure(
             reference,
             region,
             _safe_refresh_error(last_error),
             attempted_at=attempted_at,
+            retry_after_seconds=retry_after,
         )
-        return _RefreshRoleOutcome("failed", last_error)
+        issue_key, issue_label = _refresh_issue(last_error)
+        return _RefreshRoleOutcome(
+            "failed",
+            last_error,
+            requested=requested,
+            issue_key=issue_key,
+            issue_label=issue_label,
+        )
+
+    def _finalize_refresh_result(
+        self,
+        result: OwnershipRefreshResult,
+        metrics_before: Mapping[str, int],
+        *,
+        batch_id: str,
+        trigger: str,
+        force: bool,
+        batch_started: float,
+        lock_wait_seconds: float,
+    ) -> OwnershipRefreshResult:
+        metrics_after = _community_metric_snapshot(self.client)
+        metric_delta = {
+            key: max(0, metrics_after.get(key, 0) - metrics_before.get(key, 0))
+            for key in _COMMUNITY_METRIC_KEYS
+        }
+        finalized = replace(
+            result,
+            batch_id=batch_id,
+            trigger=trigger,
+            **metric_delta,
+        )
+        if finalized.catalog_error:
+            catalog_status = "failed"
+        elif not finalized.catalog_checked:
+            catalog_status = "not_checked"
+        elif finalized.catalog_updated:
+            catalog_status = "updated"
+        else:
+            catalog_status = "unchanged"
+        issues = ",".join(
+            f"{item.key}:{item.count}" for item in finalized.issues
+        ) or "none"
+        message = (
+            "[endfield-ownership] refresh batch complete "
+            f"batch_id={batch_id} trigger={trigger} force={str(force).lower()} "
+            f"eligible={finalized.eligible} queued={finalized.attempted} "
+            f"requested={finalized.requested} succeeded={finalized.succeeded} "
+            f"failed={finalized.failed} skipped={finalized.skipped} "
+            f"deferred={finalized.deferred} stopped_early={str(finalized.stopped_early).lower()} "
+            f"catalog_status={catalog_status} cache_hits={finalized.cache_hits} "
+            f"singleflight_reuses={finalized.singleflight_reuses} "
+            f"exchange_attempts={finalized.exchange_attempts} "
+            f"exchange_succeeded={finalized.exchange_succeeded} "
+            f"exchange_failed={finalized.exchange_failed} "
+            f"circuit_rejections={finalized.circuit_rejections} "
+            f"issues={issues} lock_wait_seconds={lock_wait_seconds:.3f} "
+            f"elapsed_seconds={time.monotonic() - batch_started:.3f}"
+        )
+        if finalized.stopped_early:
+            logger.warning(message)
+        elif finalized.eligible or force:
+            logger.info(message)
+        else:
+            logger.debug(message)
+        return finalized
 
     def build_report(
         self,
@@ -522,7 +952,7 @@ class OwnershipStatsService:
         }
         snapshots = {
             (item.server_id, item.role_id): item
-            for item in self.store.list_operator_snapshots()
+            for item in self.store.list_operator_snapshots(grouped.keys())
         }
         fresh_after = current - self.snapshot_ttl_seconds
         valid = {
@@ -875,6 +1305,89 @@ def _systemic_community_error_code(error: Exception | None) -> str:
     if error.operation not in _SYSTEMIC_COMMUNITY_OPERATIONS:
         return ""
     return code if code in _SYSTEMIC_COMMUNITY_CODES else ""
+
+
+async def _background_card_detail(
+    client: EndfieldOfficialClient,
+    token: str,
+    role: EndfieldRole,
+) -> dict[str, Any]:
+    method = client.card_detail
+    try:
+        supports_background = "background" in inspect.signature(method).parameters
+    except (TypeError, ValueError):
+        supports_background = False
+    if supports_background:
+        return await method(token, role, background=True)
+    return await method(token, role)
+
+
+def _community_metric_snapshot(client: Any) -> dict[str, int]:
+    getter = getattr(client, "community_context_metrics", None)
+    if not callable(getter):
+        return {key: 0 for key in _COMMUNITY_METRIC_KEYS}
+    try:
+        values = getter()
+    except Exception:
+        return {key: 0 for key in _COMMUNITY_METRIC_KEYS}
+    if not isinstance(values, Mapping):
+        return {key: 0 for key in _COMMUNITY_METRIC_KEYS}
+    return {
+        key: max(0, _int(values.get(key)))
+        for key in _COMMUNITY_METRIC_KEYS
+    }
+
+
+def _safe_log_token(value: Any, fallback: str) -> str:
+    normalized = re.sub(r"[^a-z0-9_-]+", "-", str(value or "").strip().casefold())
+    return normalized.strip("-")[:32] or fallback
+
+
+def _error_retry_after(error: Exception | None) -> float:
+    if not isinstance(error, EndfieldAPIError):
+        return 0.0
+    return max(0.0, float(getattr(error, "retry_after_seconds", 0.0) or 0.0))
+
+
+def _refresh_retry_delay(
+    error: Exception | None,
+    failure_count: int,
+    *,
+    base_seconds: int,
+    max_seconds: int,
+) -> int:
+    if (
+        isinstance(error, EndfieldAPIError)
+        and _is_authentication_error(error)
+        and not _systemic_community_error_code(error)
+    ):
+        base_seconds = max(base_seconds, REFRESH_AUTH_RETRY_BASE_SECONDS)
+        max_seconds = max(max_seconds, REFRESH_AUTH_RETRY_MAX_SECONDS)
+    exponent = min(10, max(0, int(failure_count) - 1))
+    calculated = min(max_seconds, base_seconds * (2 ** exponent))
+    return int(max(calculated, _error_retry_after(error)))
+
+
+def _refresh_issue(error: Exception | None) -> tuple[str, str]:
+    if isinstance(error, CredentialKeyError):
+        return "credential-decrypt", "账号凭据无法解密"
+    if isinstance(error, LookupError):
+        return "credential-missing", "账号凭据不存在"
+    if isinstance(error, SnapshotValidationError):
+        return "snapshot-invalid", "官方档案结构不完整"
+    if isinstance(error, EndfieldAPIError):
+        operation = str(error.operation or "官方接口")
+        code = str(error.code or "未知错误")
+        return f"api:{operation}:{code}", f"{operation}（{code}）"
+    if error is None:
+        return "unknown", "未知刷新错误"
+    return f"internal:{type(error).__name__}", f"内部错误（{type(error).__name__}）"
+
+
+def _safe_catalog_error(error: Exception) -> str:
+    if isinstance(error, EndfieldAPIError):
+        return _refresh_issue(error)[1]
+    return f"{type(error).__name__}: 目录检查失败"
 
 
 def _safe_refresh_error(error: Exception | None) -> str:

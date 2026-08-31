@@ -10,7 +10,7 @@ from time import perf_counter
 
 import aiohttp
 from arclet.alconna import Alconna, Args, MultiVar
-from arclet.entari import Event
+from arclet.entari import Cleanup, Event, listen
 from arclet.letoderea.exceptions import _ExitException
 from loguru import logger
 from nepattern import AnyString
@@ -513,15 +513,14 @@ async def _handle_ownership_stats(
     if command.action == "ownership_refresh":
         try:
             cipher = CredentialCipher.from_env()
-            refresh = await ownership_stats_service.refresh_roles(roles, cipher, force=True)
+            refresh = await ownership_stats_service.refresh_roles(
+                roles,
+                cipher,
+                force=True,
+                trigger=f"manual-{scope}",
+            )
         except CredentialKeyError as exc:
             return await matcher.finish(str(exc))
-        logger.info(
-            "[endfield-ownership] manual refresh "
-            f"scope={scope} attempted={refresh.attempted} succeeded={refresh.succeeded} "
-            f"failed={refresh.failed} skipped={refresh.skipped} "
-            f"stopped_early={refresh.stopped_early}"
-        )
         return await matcher.finish(_format_ownership_refresh_result(scope, refresh))
 
     report = ownership_stats_service.build_report(scope, roles, refresh=refresh)
@@ -545,12 +544,24 @@ def _is_endfield_superuser(user_id: str) -> bool:
 
 def _format_ownership_refresh_result(scope: str, refresh: OwnershipRefreshResult) -> str:
     scope_label = "全局" if scope == "global" else "当前群"
-    catalog_label = "目录已更新" if refresh.catalog_updated else "目录无变化"
+    if refresh.catalog_error:
+        catalog_label = f"目录检查失败（{refresh.catalog_error}）"
+    elif not refresh.catalog_checked:
+        catalog_label = "目录未检查"
+    else:
+        catalog_label = "目录已更新" if refresh.catalog_updated else "目录无变化"
     elapsed = max(0, int(refresh.finished_at) - int(refresh.started_at))
+    eligible = refresh.eligible or refresh.attempted
     result = (
-        f"{scope_label}持有率刷新完成：尝试 {refresh.attempted}，成功 {refresh.succeeded}，"
-        f"失败 {refresh.failed}，跳过 {refresh.skipped}；{catalog_label}；耗时 {elapsed} 秒。"
+        f"{scope_label}持有率刷新完成：候选 {eligible}，入队 {refresh.attempted}，"
+        f"角色请求 {refresh.requested}，成功 {refresh.succeeded}，失败 {refresh.failed}，"
+        f"跳过 {refresh.skipped}，延后 {refresh.deferred}；{catalog_label}；"
+        f"耗时 {elapsed} 秒。"
     )
+    if refresh.issues:
+        result += "分类：" + "、".join(
+            f"{item.label} × {item.count}" for item in refresh.issues[:5]
+        ) + "。"
     if refresh.stopped_early:
         result += f"{refresh.stop_reason}；旧快照仍按 48 小时有效期参与统计。"
     elif refresh.failed:
@@ -731,17 +742,12 @@ async def _handle_binding(matcher, qq_user_id: str, cipher: CredentialCipher) ->
             [role for role in bound_roles if (role.role_id, role.server_id) in selected_keys],
             cipher,
             force=True,
+            trigger="binding",
         )
     except Exception as exc:
         logger.warning(
             "[endfield-ownership] binding refresh unavailable "
             f"error_type={type(exc).__module__}.{type(exc).__name__}"
-        )
-    else:
-        logger.info(
-            "[endfield-ownership] binding refresh "
-            f"attempted={refresh.attempted} succeeded={refresh.succeeded} "
-            f"failed={refresh.failed} skipped={refresh.skipped}"
         )
     return await matcher.finish(
         summary + "\n" + "\n".join(
@@ -2438,18 +2444,24 @@ _ownership_startup_task: asyncio.Task | None = None
 async def _refresh_due_ownership_snapshots() -> None:
     try:
         cipher = CredentialCipher.from_env()
-        refresh = await ownership_stats_service.refresh_due(cipher)
+        await ownership_stats_service.refresh_due(cipher)
     except Exception as exc:
         logger.warning(
             "[endfield-ownership] scheduled refresh unavailable "
             f"error_type={type(exc).__module__}.{type(exc).__name__}"
         )
         return
-    logger.info(
-        "[endfield-ownership] scheduled refresh "
-        f"attempted={refresh.attempted} succeeded={refresh.succeeded} "
-        f"failed={refresh.failed} skipped={refresh.skipped}"
-    )
+
+
+async def _refresh_ownership_catalog() -> None:
+    try:
+        await ownership_stats_service.refresh_catalog()
+    except Exception as exc:
+        logger.warning(
+            "[endfield-ownership] catalog refresh unavailable "
+            f"error_type={type(exc).__module__}.{type(exc).__name__}"
+        )
+        return
 
 
 @on_ready
@@ -2464,8 +2476,24 @@ async def _warmup_ownership_snapshots(_bot=None) -> None:
 timer.add_job(
     _refresh_due_ownership_snapshots,
     "interval",
-    hours=24,
+    minutes=10,
     id="endfield_ownership_refresh",
     replace_existing=True,
     max_instances=1,
 )
+
+timer.add_job(
+    _refresh_ownership_catalog,
+    "interval",
+    hours=6,
+    id="endfield_ownership_catalog_refresh",
+    replace_existing=True,
+    max_instances=1,
+)
+
+
+@listen(Cleanup)
+async def _close_ownership_startup_task() -> None:
+    if _ownership_startup_task is not None and not _ownership_startup_task.done():
+        _ownership_startup_task.cancel()
+        await asyncio.gather(_ownership_startup_task, return_exceptions=True)

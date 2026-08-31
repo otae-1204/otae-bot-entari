@@ -8,10 +8,13 @@ import logging
 import re
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any
 from urllib.parse import urlencode
 
 import httpx
+from loguru import logger
 
 from .account_store import GachaRecord, RoleCandidate
 from .account_i18n import localized_text
@@ -36,6 +39,8 @@ SKLAND_REFRESH_USER_AGENT = (
 SKLAND_CONTEXT_TTL_SECONDS = 540
 SKLAND_EXCHANGE_INTERVAL_SECONDS = 2.0
 _SKLAND_CONTEXT_RETRY_CODES = {"401", "10000", "10003"}
+_SKLAND_SYSTEMIC_OPERATIONS = {"账号授权", "获取社区凭据", "刷新社区签名"}
+_SKLAND_SYSTEMIC_CODES = {"405", "429", "502", "503", "504"}
 ACCOUNT_PROVIDER_CN = "hypergryph"
 ACCOUNT_PROVIDER_SKPORT = "gryphline"
 _ACCOUNT_CREDENTIAL_KIND = "endfield-account-v1"
@@ -113,12 +118,20 @@ _PROVIDER_CONFIGS = {
 
 
 class EndfieldAPIError(RuntimeError):
-    def __init__(self, operation: str, code: str = "", message: str = ""):
+    def __init__(
+        self,
+        operation: str,
+        code: str = "",
+        message: str = "",
+        *,
+        retry_after_seconds: float = 0.0,
+    ):
         safe_message = _sanitize_message(message)
         detail = f"（{code}）" if code else ""
         super().__init__(f"{operation}失败{detail}{'：' + safe_message if safe_message else ''}")
         self.operation = operation
         self.code = code
+        self.retry_after_seconds = max(0.0, float(retry_after_seconds))
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,13 +215,30 @@ class EndfieldOfficialClient:
         self._owns_http = http is None
         self._skland_cache: dict[str, _SklandContext] = {}
         self._skland_exchange_lock = asyncio.Lock()
+        self._skland_foreground_waiters = 0
+        self._skland_foreground_ready = asyncio.Event()
+        self._skland_foreground_ready.set()
         self._skland_exchange_interval_seconds = max(0.0, float(community_exchange_interval_seconds))
         self._next_skland_exchange_at = 0.0
+        self._skland_exchange_blocked_until = 0.0
+        self._skland_exchange_blocked_error: tuple[str, str] | None = None
+        self._skland_metrics = {
+            "cache_hits": 0,
+            "singleflight_reuses": 0,
+            "exchange_attempts": 0,
+            "exchange_succeeded": 0,
+            "exchange_failed": 0,
+            "circuit_rejections": 0,
+        }
         self._u8_cache: dict[tuple[str, str], tuple[str, float]] = {}
 
     async def close(self) -> None:
         if self._owns_http:
             await self.http.aclose()
+
+    def community_context_metrics(self) -> dict[str, int]:
+        """Return anonymous process-local counters for batch observability."""
+        return {key: int(value) for key, value in self._skland_metrics.items()}
 
     async def send_phone_code(self, phone: str) -> None:
         await self._json_request(
@@ -362,7 +392,13 @@ class EndfieldOfficialClient:
                 )
         return AttendanceResult(status, message, tuple(rewards), monthly_count)
 
-    async def card_detail(self, account_token: str, role: RoleCandidate | Any) -> dict[str, Any]:
+    async def card_detail(
+        self,
+        account_token: str,
+        role: RoleCandidate | Any,
+        *,
+        background: bool = False,
+    ) -> dict[str, Any]:
         async def request(context: _SklandContext) -> dict[str, Any]:
             extra_headers = None
             if context.provider == ACCOUNT_PROVIDER_SKPORT:
@@ -375,13 +411,23 @@ class EndfieldOfficialClient:
                 extra_headers=extra_headers,
             )
 
-        context = await self._skland_context(account_token)
+        context = (
+            await self._skland_context(account_token, background=True)
+            if background
+            else await self._skland_context(account_token)
+        )
         try:
             payload = await request(context)
         except EndfieldAPIError as exc:
             if not _should_refresh_skland_context(exc):
                 raise
-            context = await self._skland_context(account_token, refresh=True)
+            refresh_kwargs = {
+                "refresh": True,
+                "stale_context": context,
+            }
+            if background:
+                refresh_kwargs["background"] = True
+            context = await self._skland_context(account_token, **refresh_kwargs)
             payload = await request(context)
         detail = (payload.get("data") or {}).get("detail")
         if not isinstance(detail, dict) or not detail:
@@ -649,28 +695,103 @@ class EndfieldOfficialClient:
         next_seq_id = str(items[-1].get("seqId") or "") if items else ""
         return GachaPage(records, _response_has_more(payload), next_seq_id)
 
-    async def _skland_context(self, account_token: str, *, refresh: bool = False) -> _SklandContext:
+    async def _skland_context(
+        self,
+        account_token: str,
+        *,
+        refresh: bool = False,
+        stale_context: _SklandContext | None = None,
+        background: bool = False,
+    ) -> _SklandContext:
         provider, raw_account_token = decode_account_credential(account_token)
         config = _PROVIDER_CONFIGS[provider]
         key = hashlib.sha256(f"{provider}:{raw_account_token}".encode("utf-8")).hexdigest()[:24]
         cached = self._skland_cache.get(key)
-        if cached and not refresh and cached.expires_at > time.monotonic():
+        if _usable_skland_context(cached, refresh=refresh, stale_context=stale_context):
+            self._skland_metrics["cache_hits"] += 1
+            if refresh and stale_context is not None and cached is not stale_context:
+                self._skland_metrics["singleflight_reuses"] += 1
             return cached
-        async with self._skland_exchange_lock:
+        foreground_registered = False
+        lock_acquired = False
+        if not background:
+            self._skland_foreground_waiters += 1
+            self._skland_foreground_ready.clear()
+            foreground_registered = True
+        try:
+            while True:
+                if background:
+                    await self._skland_foreground_ready.wait()
+                await self._skland_exchange_lock.acquire()
+                lock_acquired = True
+                if not background or self._skland_foreground_waiters == 0:
+                    break
+                self._skland_exchange_lock.release()
+                lock_acquired = False
+                await asyncio.sleep(0)
+
             # Another role using the same binding may have filled the cache while
-            # this coroutine was waiting for the exchange gate.
+            # this coroutine was waiting for the exchange gate.  For a forced
+            # refresh, a context newer than the caller's stale generation is also
+            # reusable, preventing duplicate credential exchanges.
             cached = self._skland_cache.get(key)
-            if cached and not refresh and cached.expires_at > time.monotonic():
+            if _usable_skland_context(cached, refresh=refresh, stale_context=stale_context):
+                self._skland_metrics["cache_hits"] += 1
+                if refresh and stale_context is not None and cached is not stale_context:
+                    self._skland_metrics["singleflight_reuses"] += 1
                 return cached
+            blocked_for = self._skland_exchange_blocked_until - time.monotonic()
+            if blocked_for > 0 and self._skland_exchange_blocked_error is not None:
+                self._skland_metrics["circuit_rejections"] += 1
+                operation, code = self._skland_exchange_blocked_error
+                raise EndfieldAPIError(
+                    operation,
+                    code,
+                    "官方服务冷却中，请稍后重试",
+                    retry_after_seconds=blocked_for,
+                )
             delay = self._next_skland_exchange_at - time.monotonic()
             if delay > 0:
                 await asyncio.sleep(delay)
             self._next_skland_exchange_at = (
                 time.monotonic() + self._skland_exchange_interval_seconds
             )
-            context = await self._create_skland_context(account_token, provider, config)
+            self._skland_metrics["exchange_attempts"] += 1
+            try:
+                context = await self._create_skland_context(account_token, provider, config)
+            except EndfieldAPIError as exc:
+                self._skland_metrics["exchange_failed"] += 1
+                cooldown = _skland_systemic_cooldown(exc)
+                if cooldown > 0:
+                    self._skland_exchange_blocked_until = time.monotonic() + cooldown
+                    self._skland_exchange_blocked_error = (exc.operation, str(exc.code))
+                    logger.warning(
+                        "[endfield-community] exchange circuit opened "
+                        f"operation={exc.operation} code={exc.code or 'unknown'} "
+                        f"cooldown_seconds={int(cooldown)}"
+                    )
+                raise
+            self._skland_metrics["exchange_succeeded"] += 1
+            recovered_from = self._skland_exchange_blocked_error
+            self._skland_exchange_blocked_until = 0.0
+            self._skland_exchange_blocked_error = None
+            if recovered_from is not None:
+                logger.info(
+                    "[endfield-community] exchange circuit recovered "
+                    f"previous_operation={recovered_from[0]} previous_code={recovered_from[1]}"
+                )
             self._skland_cache[key] = context
             return context
+        finally:
+            if lock_acquired:
+                self._skland_exchange_lock.release()
+            if foreground_registered:
+                self._skland_foreground_waiters = max(
+                    0,
+                    self._skland_foreground_waiters - 1,
+                )
+                if self._skland_foreground_waiters == 0:
+                    self._skland_foreground_ready.set()
 
     async def _create_skland_context(
         self,
@@ -822,25 +943,51 @@ class EndfieldOfficialClient:
                     await asyncio.sleep(0.4)
                     continue
                 raise EndfieldAPIError(operation, message="网络请求失败，请稍后重试") from None
+        retry_after = _response_retry_after(response)
         try:
             payload = response.json()
         except ValueError:
             if response.status_code >= 400:
-                raise EndfieldAPIError(operation, code=str(response.status_code), message="官方服务暂时不可用") from None
+                raise EndfieldAPIError(
+                    operation,
+                    code=str(response.status_code),
+                    message="官方服务暂时不可用",
+                    retry_after_seconds=retry_after,
+                ) from None
             raise EndfieldAPIError(operation, message="官方接口返回了无法解析的数据") from None
         if not isinstance(payload, dict):
             if response.status_code >= 400:
-                raise EndfieldAPIError(operation, code=str(response.status_code), message="官方服务暂时不可用")
+                raise EndfieldAPIError(
+                    operation,
+                    code=str(response.status_code),
+                    message="官方服务暂时不可用",
+                    retry_after_seconds=retry_after,
+                )
             raise EndfieldAPIError(operation, message="官方接口返回格式异常")
         code = payload.get("code")
         if code not in (None, 0, "0"):
-            raise EndfieldAPIError(operation, str(code), str(payload.get("message") or payload.get("msg") or ""))
+            raise EndfieldAPIError(
+                operation,
+                str(code),
+                str(payload.get("message") or payload.get("msg") or ""),
+                retry_after_seconds=retry_after,
+            )
         status = payload.get("status")
         allowed_status_values = {str(item) for item in (allowed_statuses or set())}
         if status not in (None, 0, "0") and str(status) not in allowed_status_values:
-            raise EndfieldAPIError(operation, str(status), str(payload.get("message") or payload.get("msg") or ""))
+            raise EndfieldAPIError(
+                operation,
+                str(status),
+                str(payload.get("message") or payload.get("msg") or ""),
+                retry_after_seconds=retry_after,
+            )
         if response.status_code >= 400:
-            raise EndfieldAPIError(operation, code=str(response.status_code), message="官方服务暂时不可用")
+            raise EndfieldAPIError(
+                operation,
+                code=str(response.status_code),
+                message="官方服务暂时不可用",
+                retry_after_seconds=retry_after,
+            )
         return payload
 
 
@@ -1315,6 +1462,48 @@ def _as_bool(value: Any) -> bool:
     if isinstance(value, str):
         return value.strip().casefold() in {"1", "true", "yes"}
     return bool(value)
+
+
+def _usable_skland_context(
+    context: _SklandContext | None,
+    *,
+    refresh: bool,
+    stale_context: _SklandContext | None,
+) -> bool:
+    if context is None or context.expires_at <= time.monotonic():
+        return False
+    if not refresh:
+        return True
+    return stale_context is not None and context is not stale_context
+
+
+def _skland_systemic_cooldown(error: EndfieldAPIError) -> float:
+    code = str(error.code)
+    if error.operation not in _SKLAND_SYSTEMIC_OPERATIONS or code not in _SKLAND_SYSTEMIC_CODES:
+        return 0.0
+    configured = max(0.0, float(error.retry_after_seconds or 0.0))
+    if code == "405":
+        return max(configured, 15 * 60.0)
+    if code == "429":
+        return max(configured, 60.0)
+    return max(configured, 30.0)
+
+
+def _response_retry_after(response: httpx.Response) -> float:
+    value = str(response.headers.get("Retry-After") or "").strip()
+    if not value:
+        return 0.0
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        pass
+    try:
+        retry_at = parsedate_to_datetime(value)
+    except (TypeError, ValueError, OverflowError):
+        return 0.0
+    if retry_at.tzinfo is None:
+        retry_at = retry_at.replace(tzinfo=timezone.utc)
+    return max(0.0, (retry_at - datetime.now(timezone.utc)).total_seconds())
 
 
 def _sanitize_message(value: str) -> str:

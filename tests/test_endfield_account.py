@@ -1915,6 +1915,17 @@ class EndfieldOfficialClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first, second)
         self.assertEqual(client._create_skland_context.await_count, 1)
         self.assertEqual(client._signed_skland_request.await_count, 2)
+        self.assertEqual(
+            client.community_context_metrics(),
+            {
+                "cache_hits": 1,
+                "singleflight_reuses": 0,
+                "exchange_attempts": 1,
+                "exchange_succeeded": 1,
+                "exchange_failed": 0,
+                "circuit_rejections": 0,
+            },
+        )
         await http.aclose()
 
     async def test_card_detail_refreshes_context_once_after_stale_signature(self):
@@ -1938,9 +1949,129 @@ class EndfieldOfficialClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(detail, {"base": {"name": "otae"}})
         self.assertEqual(
             client._skland_context.await_args_list,
-            [mock.call("account-token"), mock.call("account-token", refresh=True)],
+            [
+                mock.call("account-token"),
+                mock.call(
+                    "account-token",
+                    refresh=True,
+                    stale_context=stale,
+                ),
+            ],
         )
         self.assertEqual(client._signed_skland_request.await_count, 2)
+        await http.aclose()
+
+    async def test_forced_context_refresh_reuses_newer_singleflight_generation(self):
+        http = httpx.AsyncClient(transport=httpx.MockTransport(lambda _request: httpx.Response(500)))
+        client = client_module.EndfieldOfficialClient(
+            http,
+            community_exchange_interval_seconds=0,
+        )
+        stale = client_module._SklandContext("old", "old", 1000, 1000, float("inf"))
+        fresh = client_module._SklandContext("new", "new", 1000, 1000, float("inf"))
+        provider, raw_token = client_module.decode_account_credential("account-token")
+        key = hashlib.sha256(f"{provider}:{raw_token}".encode()).hexdigest()[:24]
+        client._skland_cache[key] = stale
+        client._create_skland_context = mock.AsyncMock(return_value=fresh)
+
+        first, second = await asyncio.gather(
+            client._skland_context(
+                "account-token",
+                refresh=True,
+                stale_context=stale,
+                background=True,
+            ),
+            client._skland_context(
+                "account-token",
+                refresh=True,
+                stale_context=stale,
+                background=True,
+            ),
+        )
+
+        self.assertIs(first, fresh)
+        self.assertIs(second, fresh)
+        client._create_skland_context.assert_awaited_once()
+        metrics = client.community_context_metrics()
+        self.assertEqual(metrics["singleflight_reuses"], 1)
+        self.assertEqual(metrics["exchange_attempts"], 1)
+        await http.aclose()
+
+    async def test_foreground_context_exchange_overtakes_waiting_background_exchange(self):
+        http = httpx.AsyncClient(transport=httpx.MockTransport(lambda _request: httpx.Response(500)))
+        client = client_module.EndfieldOfficialClient(
+            http,
+            community_exchange_interval_seconds=0,
+        )
+        order = []
+
+        async def create(token, provider, _config):
+            order.append(token)
+            return client_module._SklandContext(
+                token,
+                token,
+                1000,
+                1000,
+                float("inf"),
+                provider,
+            )
+
+        client._create_skland_context = mock.AsyncMock(side_effect=create)
+        await client._skland_exchange_lock.acquire()
+        background = asyncio.create_task(
+            client._skland_context("background-token", background=True)
+        )
+        await asyncio.sleep(0)
+        foreground = asyncio.create_task(client._skland_context("foreground-token"))
+        await asyncio.sleep(0)
+        client._skland_exchange_lock.release()
+
+        await asyncio.gather(foreground, background)
+        self.assertEqual(order, ["foreground-token", "background-token"])
+        await http.aclose()
+
+    async def test_systemic_context_failure_opens_shared_exchange_circuit(self):
+        http = httpx.AsyncClient(transport=httpx.MockTransport(lambda _request: httpx.Response(500)))
+        client = client_module.EndfieldOfficialClient(
+            http,
+            community_exchange_interval_seconds=0,
+        )
+        client._create_skland_context = mock.AsyncMock(
+            side_effect=client_module.EndfieldAPIError(
+                "获取社区凭据",
+                "405",
+                "unavailable",
+            )
+        )
+
+        with self.assertRaises(client_module.EndfieldAPIError):
+            await client._skland_context("first", background=True)
+        with self.assertRaises(client_module.EndfieldAPIError) as caught:
+            await client._skland_context("second", background=True)
+
+        self.assertEqual(caught.exception.code, "405")
+        self.assertGreater(caught.exception.retry_after_seconds, 0)
+        client._create_skland_context.assert_awaited_once()
+        metrics = client.community_context_metrics()
+        self.assertEqual(metrics["exchange_failed"], 1)
+        self.assertEqual(metrics["circuit_rejections"], 1)
+        await http.aclose()
+
+    async def test_json_request_preserves_retry_after_header(self):
+        async def handler(_request: httpx.Request):
+            return httpx.Response(
+                429,
+                headers={"Retry-After": "17"},
+                json={"code": 429, "message": "slow down"},
+            )
+
+        http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        client = client_module.EndfieldOfficialClient(http)
+        with self.assertRaises(client_module.EndfieldAPIError) as caught:
+            await client._json_request("获取社区凭据", "GET", "https://example.test")
+
+        self.assertEqual(caught.exception.code, "429")
+        self.assertEqual(caught.exception.retry_after_seconds, 17)
         await http.aclose()
 
     async def test_card_detail_rejects_missing_detail_payload(self):

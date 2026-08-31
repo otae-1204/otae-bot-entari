@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
+from loguru import logger
+
 from .account_crypto import CredentialCipher, EncryptedCredential
 
 
@@ -117,6 +119,9 @@ class OperatorRosterSnapshot:
     last_attempt_at: int
     last_error: str
     operator_count: int
+    failure_count: int = 0
+    next_attempt_at: int = 0
+    roster_fingerprint: str = ""
     members: tuple[OperatorSnapshotMember, ...] = ()
 
 
@@ -174,6 +179,7 @@ class EndfieldStore:
                 self.conn = None
 
     def _init_schema(self) -> None:
+        added_snapshot_columns: list[str] = []
         with self._lock:
             self.conn.executescript(
                 """
@@ -230,6 +236,9 @@ class EndfieldStore:
                     last_attempt_at INTEGER NOT NULL DEFAULT 0,
                     last_error TEXT NOT NULL DEFAULT '',
                     operator_count INTEGER NOT NULL DEFAULT 0,
+                    failure_count INTEGER NOT NULL DEFAULT 0,
+                    next_attempt_at INTEGER NOT NULL DEFAULT 0,
+                    roster_fingerprint TEXT NOT NULL DEFAULT '',
                     PRIMARY KEY(role_id, server_id)
                 );
                 CREATE INDEX IF NOT EXISTS idx_endfield_operator_snapshot_freshness
@@ -243,6 +252,11 @@ class EndfieldStore:
                     FOREIGN KEY(role_id, server_id)
                         REFERENCES operator_roster_snapshots(role_id, server_id)
                         ON DELETE CASCADE
+                );
+                CREATE TABLE IF NOT EXISTS endfield_meta (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL DEFAULT '',
+                    updated_at INTEGER NOT NULL DEFAULT 0
                 );
                 CREATE TABLE IF NOT EXISTS gacha_records (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -396,6 +410,58 @@ class EndfieldStore:
                 self.conn.execute(
                     "ALTER TABLE xhh_gacha_six_stars ADD COLUMN is_free INTEGER NOT NULL DEFAULT 0"
                 )
+            snapshot_columns = {
+                str(row["name"])
+                for row in self.conn.execute(
+                    "PRAGMA table_info(operator_roster_snapshots)"
+                ).fetchall()
+            }
+            if "failure_count" not in snapshot_columns:
+                self.conn.execute(
+                    "ALTER TABLE operator_roster_snapshots "
+                    "ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 0"
+                )
+                added_snapshot_columns.append("failure_count")
+            if "next_attempt_at" not in snapshot_columns:
+                self.conn.execute(
+                    "ALTER TABLE operator_roster_snapshots "
+                    "ADD COLUMN next_attempt_at INTEGER NOT NULL DEFAULT 0"
+                )
+                added_snapshot_columns.append("next_attempt_at")
+            if "roster_fingerprint" not in snapshot_columns:
+                self.conn.execute(
+                    "ALTER TABLE operator_roster_snapshots "
+                    "ADD COLUMN roster_fingerprint TEXT NOT NULL DEFAULT ''"
+                )
+                added_snapshot_columns.append("roster_fingerprint")
+            self.conn.commit()
+        if added_snapshot_columns:
+            logger.info(
+                "[endfield-ownership] snapshot schema migrated "
+                f"added_columns={','.join(added_snapshot_columns)}"
+            )
+
+    def get_meta(self, key: str, default: str = "") -> str:
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT value FROM endfield_meta WHERE key = ?",
+                (str(key),),
+            ).fetchone()
+        return str(row["value"]) if row is not None else str(default)
+
+    def set_meta(self, key: str, value: str, *, updated_at: int | None = None) -> None:
+        current = int(updated_at or time.time())
+        with self._lock:
+            self.conn.execute(
+                """
+                INSERT INTO endfield_meta(key, value, updated_at)
+                VALUES(?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    value = excluded.value,
+                    updated_at = excluded.updated_at
+                """,
+                (str(key), str(value), current),
+            )
             self.conn.commit()
 
     def bind_roles(
@@ -526,10 +592,18 @@ class EndfieldStore:
         if allowed is not None and not allowed:
             return []
         with self._lock:
-            rows = self.conn.execute(
-                "SELECT * FROM roles ORDER BY updated_at DESC, id DESC"
-            ).fetchall()
-        if allowed is not None:
+            if allowed is not None and len(allowed) <= 900:
+                placeholders = ",".join("?" for _ in allowed)
+                rows = self.conn.execute(
+                    f"SELECT * FROM roles WHERE qq_user_id IN ({placeholders}) "
+                    "ORDER BY updated_at DESC, id DESC",
+                    sorted(allowed),
+                ).fetchall()
+            else:
+                rows = self.conn.execute(
+                    "SELECT * FROM roles ORDER BY updated_at DESC, id DESC"
+                ).fetchall()
+        if allowed is not None and len(allowed) > 900:
             rows = [row for row in rows if str(row["qq_user_id"]) in allowed]
         return [self._role(row) for row in rows]
 
@@ -539,6 +613,7 @@ class EndfieldStore:
         version: str,
         *,
         updated_at: int | None = None,
+        revision: str = "",
     ) -> int:
         normalized: dict[str, OperatorCatalogEntry] = {
             str(entry.operator_key).strip(): entry
@@ -584,6 +659,17 @@ class EndfieldStore:
                         for key, entry in normalized.items()
                     ],
                 )
+                if revision:
+                    self.conn.execute(
+                        """
+                        INSERT INTO endfield_meta(key, value, updated_at)
+                        VALUES('operator_catalog_revision', ?, ?)
+                        ON CONFLICT(key) DO UPDATE SET
+                            value = excluded.value,
+                            updated_at = excluded.updated_at
+                        """,
+                        (str(revision), current),
+                    )
                 self.conn.commit()
             except Exception:
                 self.conn.rollback()
@@ -634,22 +720,55 @@ class EndfieldStore:
             raise ValueError("干员快照不能为空")
         current = int(fetched_at or time.time())
         normalized_region = "asia" if str(region).casefold() == "asia" else "cn"
+        roster_fingerprint = hashlib.sha256(
+            "\n".join(
+                (
+                    f"{key}:{member.potential_level}:"
+                    f"{member.source_id}:{member.name}:{member.rarity}:{member.profession}"
+                )
+                for key, member in sorted(normalized.items())
+            ).encode("utf-8")
+        ).hexdigest()
         with self._lock:
             try:
                 self.conn.execute("BEGIN")
+                previous = self.conn.execute(
+                    """
+                    SELECT snapshots.roster_fingerprint, snapshots.operator_count,
+                           (
+                               SELECT COUNT(*)
+                               FROM operator_roster_members AS members
+                               WHERE members.role_id = snapshots.role_id
+                                 AND members.server_id = snapshots.server_id
+                           ) AS stored_member_count
+                    FROM operator_roster_snapshots AS snapshots
+                    WHERE snapshots.role_id = ? AND snapshots.server_id = ?
+                    """,
+                    (role.role_id, role.server_id),
+                ).fetchone()
+                roster_changed = (
+                    previous is None
+                    or str(previous["roster_fingerprint"] or "") != roster_fingerprint
+                    or int(previous["operator_count"] or 0) != len(normalized)
+                    or int(previous["stored_member_count"] or 0) != len(normalized)
+                )
                 self.conn.execute(
                     """
                     INSERT INTO operator_roster_snapshots(
                         role_id, server_id, region, fetched_at, game_saved_at,
-                        last_attempt_at, last_error, operator_count
-                    ) VALUES(?, ?, ?, ?, ?, ?, '', ?)
+                        last_attempt_at, last_error, operator_count,
+                        failure_count, next_attempt_at, roster_fingerprint
+                    ) VALUES(?, ?, ?, ?, ?, ?, '', ?, 0, 0, ?)
                     ON CONFLICT(role_id, server_id) DO UPDATE SET
                         region = excluded.region,
                         fetched_at = excluded.fetched_at,
                         game_saved_at = excluded.game_saved_at,
                         last_attempt_at = excluded.last_attempt_at,
                         last_error = '',
-                        operator_count = excluded.operator_count
+                        operator_count = excluded.operator_count,
+                        failure_count = 0,
+                        next_attempt_at = 0,
+                        roster_fingerprint = excluded.roster_fingerprint
                     """,
                     (
                         role.role_id,
@@ -659,71 +778,74 @@ class EndfieldStore:
                         max(0, int(game_saved_at)),
                         current,
                         len(normalized),
+                        roster_fingerprint,
                     ),
                 )
-                self.conn.execute(
-                    "DELETE FROM operator_roster_members WHERE role_id = ? AND server_id = ?",
-                    (role.role_id, role.server_id),
-                )
-                self.conn.executemany(
-                    """
-                    INSERT INTO operator_roster_members(
-                        role_id, server_id, operator_key, potential_level
-                    ) VALUES(?, ?, ?, ?)
-                    """,
-                    [
-                        (
-                            role.role_id,
-                            role.server_id,
-                            key,
-                            member.potential_level,
-                        )
-                        for key, member in normalized.items()
-                    ],
-                )
-                is_cn = 1 if normalized_region == "cn" else 0
-                is_asia = 1 if normalized_region == "asia" else 0
-                self.conn.executemany(
-                    """
-                    INSERT INTO operator_catalog(
-                        operator_key, source_id, name, rarity, profession, sort_order,
-                        source, version, available_cn, available_asia, updated_at
-                    ) VALUES(?, ?, ?, ?, ?, 1000000, 'observed', 'observed', ?, ?, ?)
-                    ON CONFLICT(operator_key) DO UPDATE SET
-                        source_id = CASE
-                            WHEN operator_catalog.source_id = '' THEN excluded.source_id
-                            ELSE operator_catalog.source_id
-                        END,
-                        name = CASE
-                            WHEN operator_catalog.source = 'observed' AND excluded.name <> '' THEN excluded.name
-                            ELSE operator_catalog.name
-                        END,
-                        rarity = CASE
-                            WHEN operator_catalog.source = 'observed' AND excluded.rarity > 0 THEN excluded.rarity
-                            ELSE operator_catalog.rarity
-                        END,
-                        profession = CASE
-                            WHEN operator_catalog.source = 'observed' AND excluded.profession <> '' THEN excluded.profession
-                            ELSE operator_catalog.profession
-                        END,
-                        available_cn = MAX(operator_catalog.available_cn, excluded.available_cn),
-                        available_asia = MAX(operator_catalog.available_asia, excluded.available_asia),
-                        updated_at = MAX(operator_catalog.updated_at, excluded.updated_at)
-                    """,
-                    [
-                        (
-                            key,
-                            str(member.source_id or ""),
-                            str(member.name or "未知干员"),
-                            max(0, int(member.rarity)),
-                            str(member.profession or "未知职业"),
-                            is_cn,
-                            is_asia,
-                            current,
-                        )
-                        for key, member in normalized.items()
-                    ],
-                )
+                if roster_changed:
+                    self.conn.execute(
+                        "DELETE FROM operator_roster_members WHERE role_id = ? AND server_id = ?",
+                        (role.role_id, role.server_id),
+                    )
+                    self.conn.executemany(
+                        """
+                        INSERT INTO operator_roster_members(
+                            role_id, server_id, operator_key, potential_level
+                        ) VALUES(?, ?, ?, ?)
+                        """,
+                        [
+                            (
+                                role.role_id,
+                                role.server_id,
+                                key,
+                                member.potential_level,
+                            )
+                            for key, member in normalized.items()
+                        ],
+                    )
+                    is_cn = 1 if normalized_region == "cn" else 0
+                    is_asia = 1 if normalized_region == "asia" else 0
+                    self.conn.executemany(
+                        """
+                        INSERT INTO operator_catalog(
+                            operator_key, source_id, name, rarity, profession, sort_order,
+                            source, version, available_cn, available_asia, updated_at
+                        ) VALUES(?, ?, ?, ?, ?, 1000000, 'observed', 'observed', ?, ?, ?)
+                        ON CONFLICT(operator_key) DO UPDATE SET
+                            source_id = CASE
+                                WHEN operator_catalog.source_id = '' THEN excluded.source_id
+                                ELSE operator_catalog.source_id
+                            END,
+                            name = CASE
+                                WHEN excluded.name <> '' THEN excluded.name
+                                ELSE operator_catalog.name
+                            END,
+                            rarity = CASE
+                                WHEN excluded.rarity > 0 THEN excluded.rarity
+                                ELSE operator_catalog.rarity
+                            END,
+                            profession = CASE
+                                WHEN excluded.profession <> '' THEN excluded.profession
+                                ELSE operator_catalog.profession
+                            END,
+                            available_cn = MAX(operator_catalog.available_cn, excluded.available_cn),
+                            available_asia = MAX(operator_catalog.available_asia, excluded.available_asia),
+                            updated_at = MAX(operator_catalog.updated_at, excluded.updated_at)
+                        WHERE operator_catalog.source = 'observed'
+                        """,
+                        [
+                            (
+                                key,
+                                str(member.source_id or ""),
+                                str(member.name or "未知干员"),
+                                max(0, int(member.rarity)),
+                                str(member.profession or "未知职业"),
+                                is_cn,
+                                is_asia,
+                                current,
+                            )
+                            for key, member in normalized.items()
+                        ],
+                    )
                 self.conn.commit()
             except Exception:
                 self.conn.rollback()
@@ -737,8 +859,10 @@ class EndfieldStore:
         error: str,
         *,
         attempted_at: int | None = None,
+        retry_after_seconds: int = 0,
     ) -> None:
         current = int(attempted_at or time.time())
+        next_attempt_at = current + max(0, int(retry_after_seconds))
         normalized_region = "asia" if str(region).casefold() == "asia" else "cn"
         safe_error = " ".join(str(error or "刷新失败").split())[:300]
         with self._lock:
@@ -746,33 +870,84 @@ class EndfieldStore:
                 """
                 INSERT INTO operator_roster_snapshots(
                     role_id, server_id, region, fetched_at, game_saved_at,
-                    last_attempt_at, last_error, operator_count
-                ) VALUES(?, ?, ?, 0, 0, ?, ?, 0)
+                    last_attempt_at, last_error, operator_count,
+                    failure_count, next_attempt_at, roster_fingerprint
+                ) VALUES(?, ?, ?, 0, 0, ?, ?, 0, 1, ?, '')
                 ON CONFLICT(role_id, server_id) DO UPDATE SET
                     region = excluded.region,
                     last_attempt_at = excluded.last_attempt_at,
-                    last_error = excluded.last_error
+                    last_error = excluded.last_error,
+                    failure_count = operator_roster_snapshots.failure_count + 1,
+                    next_attempt_at = excluded.next_attempt_at
                 """,
-                (role.role_id, role.server_id, normalized_region, current, safe_error),
+                (
+                    role.role_id,
+                    role.server_id,
+                    normalized_region,
+                    current,
+                    safe_error,
+                    next_attempt_at,
+                ),
             )
             self.conn.commit()
 
-    def list_operator_snapshots(self) -> list[OperatorRosterSnapshot]:
+    def list_operator_snapshots(
+        self,
+        role_keys: Iterable[tuple[str, str]] | None = None,
+        *,
+        include_members: bool = True,
+    ) -> list[OperatorRosterSnapshot]:
+        allowed = (
+            None
+            if role_keys is None
+            else {(str(server_id), str(role_id)) for server_id, role_id in role_keys}
+        )
+        if allowed is not None and not allowed:
+            return []
+        sql_filtered = allowed is not None and len(allowed) <= 400
+        where_sql = ""
+        params: list[str] = []
+        if sql_filtered:
+            where_sql = " WHERE " + " OR ".join(
+                "(server_id = ? AND role_id = ?)" for _ in allowed
+            )
+            for server_id, role_id in sorted(allowed):
+                params.extend((server_id, role_id))
         with self._lock:
             snapshots = self.conn.execute(
-                """
+                f"""
                 SELECT role_id, server_id, region, fetched_at, game_saved_at,
-                       last_attempt_at, last_error, operator_count
+                       last_attempt_at, last_error, operator_count,
+                       failure_count, next_attempt_at, roster_fingerprint
                 FROM operator_roster_snapshots
-                """
+                {where_sql}
+                """,
+                params,
             ).fetchall()
-            member_rows = self.conn.execute(
-                """
-                SELECT role_id, server_id, operator_key, potential_level
-                FROM operator_roster_members
-                ORDER BY operator_key
-                """
-            ).fetchall()
+            member_rows = (
+                self.conn.execute(
+                    f"""
+                    SELECT role_id, server_id, operator_key, potential_level
+                    FROM operator_roster_members
+                    {where_sql}
+                    ORDER BY operator_key
+                    """,
+                    params,
+                ).fetchall()
+                if include_members
+                else ()
+            )
+        if allowed is not None and not sql_filtered:
+            snapshots = [
+                row
+                for row in snapshots
+                if (str(row["server_id"]), str(row["role_id"])) in allowed
+            ]
+            member_rows = [
+                row
+                for row in member_rows
+                if (str(row["server_id"]), str(row["role_id"])) in allowed
+            ]
         grouped: dict[tuple[str, str], list[OperatorSnapshotMember]] = {}
         for row in member_rows:
             grouped.setdefault((str(row["server_id"]), str(row["role_id"])), []).append(
@@ -795,6 +970,9 @@ class EndfieldStore:
                 last_attempt_at=int(row["last_attempt_at"]),
                 last_error=str(row["last_error"]),
                 operator_count=int(row["operator_count"]),
+                failure_count=int(row["failure_count"]),
+                next_attempt_at=int(row["next_attempt_at"]),
+                roster_fingerprint=str(row["roster_fingerprint"]),
                 members=tuple(grouped.get((str(row["server_id"]), str(row["role_id"])), ())),
             )
             for row in snapshots
