@@ -22,7 +22,7 @@ import numpy as np
 from loguru import logger
 from PIL import Image
 
-from utils.http_client import fetch_many
+from utils.http_client import fetch_many_resilient
 from utils.image_executor import run_image_render
 from utils.image_utils import BrowserResource, screenshot_web_element
 from utils.temp_files import schedule_temp_file_cleanup
@@ -118,6 +118,7 @@ class _PreparedAssets:
     urls: dict[str, str]
     resources: dict[str, BrowserResource]
     contents: dict[str, bytes]
+    failures: dict[str, str]
 
 
 async def draw_operator_card(view: OperatorView) -> bytes:
@@ -2572,28 +2573,32 @@ async def _image_data_urls(urls: Iterable[str]) -> dict[str, str]:
     return (await _prepare_assets(urls, inline=True)).urls
 
 
+ASSET_FETCH_TIMEOUT_SECONDS = 10.0
+ASSET_FETCH_ATTEMPTS = 3
+ASSET_RETRY_BASE_DELAY_SECONDS = 0.25
+
+
 async def _prepare_assets(urls: Iterable[str], *, inline: bool) -> _PreparedAssets:
     unique_urls = tuple(dict.fromkeys(str(url) for url in urls if url))
     direct = {url: url for url in unique_urls if url.startswith("data:")}
     remote_urls = [url for url in unique_urls if not url.startswith("data:")]
-    # 图床（如 assets.fz.wiki）偶发超时/断连，对失败的 url 重试最多 3 轮，
-    # 已成功的走缓存命中，避免单次抖动导致渲染「无图」。
-    resources: dict[str, Any] = {}
-    pending = list(remote_urls)
-    for _ in range(3):
-        if not pending:
-            break
-        batch = await fetch_many(
-            pending,
-            namespace=REMOTE_ASSET_NAMESPACE,
-            timeout_seconds=10.0,
-        )
-        pending = [url for url, resource in batch.items() if resource is None]
-        for url, resource in batch.items():
-            if resource is not None:
-                resources[url] = resource
-    for url in pending:
-        resources[url] = None
+    # 图床（hycdn / assets.fz.wiki）的 404 与超时都是间歇的，交给共享的
+    # fetch_many_resilient 退避重试；成功的走缓存命中，避免单次抖动导致渲染「无图」。
+    # 缺图原因由它自己写日志，这里不再重复一遍。
+    fetched = await fetch_many_resilient(
+        remote_urls,
+        namespace=REMOTE_ASSET_NAMESPACE,
+        timeout_seconds=ASSET_FETCH_TIMEOUT_SECONDS,
+        attempts=ASSET_FETCH_ATTEMPTS,
+        base_delay_seconds=ASSET_RETRY_BASE_DELAY_SECONDS,
+        log_prefix="[endfield]",
+    )
+    # Accept the former mapping shape as well so existing render-test doubles
+    # and hot-reloaded callers do not fail while this shared API rolls over.
+    if isinstance(fetched, tuple):
+        resources, failures = fetched
+    else:
+        resources, failures = fetched, {}
     output = dict(direct)
     browser_resources: dict[str, BrowserResource] = {}
     contents: dict[str, bytes] = {}
@@ -2612,7 +2617,7 @@ async def _prepare_assets(urls: Iterable[str], *, inline: bool) -> _PreparedAsse
         browser_url = f"https://endfield.local/assets/{digest}"
         output[url] = browser_url
         browser_resources.setdefault(browser_url, BrowserResource(resource.content, mime))
-    return _PreparedAssets(output, browser_resources, contents)
+    return _PreparedAssets(output, browser_resources, contents, failures)
 
 
 async def _portrait_layout(view: OperatorView, content: bytes) -> PortraitLayout:

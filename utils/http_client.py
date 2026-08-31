@@ -12,6 +12,7 @@ from threading import RLock
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import httpx
+from loguru import logger
 
 from .async_cache import AsyncTTLCache, CacheStats
 
@@ -235,6 +236,91 @@ async def fetch_many(
         url: None if isinstance(result, BaseException) else result
         for url, result in zip(unique_urls, results)
     }
+
+
+def classify_failure(exc: BaseException) -> tuple[bool, str]:
+    """Return (give_up, human_reason) for an asset fetch exception.
+
+    图床（bbs.hycdn.cn）实测：同一批头像 URL 一组 15 次全 404、另一组 12 个全 200
+    ——404 是**间歇**的（边缘节点对象不一致），不能当永久失败，否则会把原有容错削掉。
+    只有确定性的失败才放弃：体积超过上限，重取也不会变小。
+    """
+    if isinstance(exc, httpx.HTTPStatusError):
+        return False, f"http {exc.response.status_code}"
+    if isinstance(exc, httpx.TimeoutException):
+        return False, type(exc).__name__.lower()
+    if isinstance(exc, httpx.TransportError):
+        return False, type(exc).__name__.lower()
+    if isinstance(exc, ValueError):
+        exceeds = "exceeds" in str(exc)
+        return exceeds, "too_large" if exceeds else "empty_body"
+    return False, type(exc).__name__.lower()
+
+
+async def fetch_many_resilient(
+    urls: Iterable[str],
+    *,
+    namespace: str,
+    headers: Mapping[str, str] | None = None,
+    timeout_seconds: float = 10.0,
+    ttl_seconds: float = DEFAULT_CACHE_TTL_SECONDS,
+    max_bytes: int = DEFAULT_MAX_RESOURCE_BYTES,
+    attempts: int = 3,
+    base_delay_seconds: float = 0.25,
+    log_prefix: str = "[assets]",
+) -> tuple[dict[str, HttpResource | None], dict[str, str]]:
+    """并发取多个资源，对间歇性失败退避重试，并返回失败原因。
+
+    与 fetch_many 的区别只有两点，都是为图床的抖动服务：
+    1. 失败会重试（默认 3 轮，0.25s / 0.5s 退避）——hycdn 的 404 与超时都是间歇的；
+    2. 放弃的原因会写进日志，调用方不再只看到「少了几张图」。
+    第一项覆盖**每一个**请求过的 url（失败为 None），第二项只保留最终失败原因，
+    调用方既不会悄悄少图，也能决定是否把失败详情带入诊断信息。
+    """
+    unique_urls = tuple(dict.fromkeys(str(url) for url in urls if url))
+    resolved: dict[str, HttpResource] = {}
+    failures: dict[str, str] = {}
+    pending = list(unique_urls)
+    for attempt in range(max(1, attempts)):
+        if not pending:
+            break
+        results = await asyncio.gather(
+            *(
+                fetch_bytes(
+                    url,
+                    namespace=namespace,
+                    headers=headers,
+                    timeout_seconds=timeout_seconds,
+                    ttl_seconds=ttl_seconds,
+                    max_bytes=max_bytes,
+                )
+                for url in pending
+            ),
+            return_exceptions=True,
+        )
+        retry: list[str] = []
+        for url, outcome in zip(pending, results):
+            if isinstance(outcome, BaseException):
+                give_up, reason = classify_failure(outcome)
+                failures[url] = reason
+                if not give_up and attempt + 1 < attempts:
+                    retry.append(url)
+                continue
+            resolved[url] = outcome
+            failures.pop(url, None)
+        pending = retry
+        if pending and attempt + 1 < attempts:
+            await asyncio.sleep(base_delay_seconds * (2**attempt))
+    if failures:
+        summary = ", ".join(
+            f"{url.rsplit('/', 1)[-1][:12]}={failures[url]}" for url in list(failures)[:6]
+        )
+        logger.warning(
+            f"{log_prefix} fetch incomplete "
+            f"namespace={namespace} requested={len(unique_urls)} resolved={len(resolved)} "
+            f"failed={len(failures)} detail={summary}"
+        )
+    return {url: resolved.get(url) for url in unique_urls}, failures
 
 
 async def fetch_json(

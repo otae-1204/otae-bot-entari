@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import unittest
+from unittest import mock
 
 import httpx
 
@@ -197,6 +198,93 @@ class SharedHttpClientTests(unittest.IsolatedAsyncioTestCase):
         self._install_transport(handler_two)
         resource = await http_client.fetch_bytes("https://example.test/two", namespace="close-test")
         self.assertEqual(resource.content, b"two")
+
+
+class AssetFetchResilienceTests(unittest.IsolatedAsyncioTestCase):
+    """图床的 404 与超时都是间歇的，取图链路必须重试并说清原因。"""
+
+    @staticmethod
+    def _status_error(code: int) -> httpx.HTTPStatusError:
+        request = httpx.Request("GET", "https://assets.invalid/a.png")
+        return httpx.HTTPStatusError("boom", request=request, response=httpx.Response(code, request=request))
+
+    def test_404_is_retryable_but_oversize_is_not(self):
+        # 实测：同一批头像 URL 一组 15 次全 404、另一组全 200，所以 404 不能当永久失败
+        self.assertEqual(http_client.classify_failure(self._status_error(404)), (False, "http 404"))
+        self.assertEqual(http_client.classify_failure(self._status_error(403)), (False, "http 403"))
+        self.assertEqual(http_client.classify_failure(self._status_error(429)), (False, "http 429"))
+        self.assertEqual(http_client.classify_failure(self._status_error(503)), (False, "http 503"))
+        self.assertEqual(http_client.classify_failure(httpx.ConnectTimeout("t")), (False, "connecttimeout"))
+        self.assertEqual(http_client.classify_failure(httpx.ReadTimeout("t")), (False, "readtimeout"))
+        self.assertEqual(
+            http_client.classify_failure(ValueError("HTTP resource exceeds 10 bytes: u")),
+            (True, "too_large"),
+        )
+        self.assertEqual(
+            http_client.classify_failure(ValueError("HTTP resource is empty: u")),
+            (False, "empty_body"),
+        )
+
+    async def test_flaky_404_recovers_on_retry(self):
+        calls = {"n": 0}
+
+        async def flaky(url, **_kwargs):
+            calls["n"] += 1
+            if calls["n"] < 3:
+                raise self._status_error(404)
+            return http_client.HttpResource(b"png", "image/png", 200, url)
+
+        with mock.patch.object(http_client, "fetch_bytes", side_effect=flaky):
+            results, failures = await http_client.fetch_many_resilient(
+                ["https://assets.invalid/a.png"], namespace="t", base_delay_seconds=0
+            )
+        self.assertEqual(calls["n"], 3)
+        self.assertEqual(failures, {})
+        self.assertIsNotNone(results["https://assets.invalid/a.png"])
+
+    async def test_every_url_gets_a_slot_and_a_reason(self):
+        async def always_404(url, **_kwargs):
+            raise self._status_error(404)
+
+        with mock.patch.object(http_client, "fetch_bytes", side_effect=always_404):
+            results, failures = await http_client.fetch_many_resilient(
+                ["https://assets.invalid/a.png", "https://assets.invalid/b.png"],
+                namespace="t",
+                base_delay_seconds=0,
+            )
+        # 调用方不能悄悄少图：失败的也要在映射里，值为 None
+        self.assertEqual(set(results), {"https://assets.invalid/a.png", "https://assets.invalid/b.png"})
+        self.assertEqual(list(results.values()), [None, None])
+        self.assertEqual(set(failures.values()), {"http 404"})
+        self.assertEqual(len(failures), 2)
+
+    async def test_oversize_is_not_retried(self):
+        calls = {"n": 0}
+
+        async def too_big(url, **_kwargs):
+            calls["n"] += 1
+            raise ValueError("HTTP resource exceeds 10 bytes: u")
+
+        with mock.patch.object(http_client, "fetch_bytes", side_effect=too_big):
+            _results, failures = await http_client.fetch_many_resilient(
+                ["https://assets.invalid/a.png"], namespace="t", base_delay_seconds=0
+            )
+        self.assertEqual(calls["n"], 1)
+        self.assertEqual(failures, {"https://assets.invalid/a.png": "too_large"})
+
+    async def test_transient_failures_back_off_between_rounds(self):
+        async def always_timeout(url, **_kwargs):
+            raise httpx.ConnectTimeout("t")
+
+        delays: list[float] = []
+
+        async def record(gap):
+            delays.append(gap)
+
+        with mock.patch.object(http_client, "fetch_bytes", side_effect=always_timeout):
+            with mock.patch.object(http_client.asyncio, "sleep", new=record):
+                await http_client.fetch_many_resilient(["https://assets.invalid/a.png"], namespace="t")
+        self.assertEqual(delays, [0.25, 0.5])
 
 
 if __name__ == "__main__":

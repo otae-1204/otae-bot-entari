@@ -3204,6 +3204,20 @@ remotePort = {{ $v.Second }}
         executor = asyncio.run(run_case())
         self.assertTrue(executor._shutdown)
 
+    def test_image_utils_prefers_playwright_bundled_chromium(self):
+        import utils.image_utils as image_utils
+
+        calls = []
+
+        class FakeChromium:
+            def launch(self, **kwargs):
+                calls.append(kwargs)
+                return "browser"
+
+        playwright = types.SimpleNamespace(chromium=FakeChromium())
+        self.assertEqual(image_utils._launch_browser(playwright, None), "browser")
+        self.assertEqual(calls, [{"headless": True}])
+
     def test_minecraft_data_manager_crud_and_rank(self):
         data_source = _load_module("minecraft_data_source_for_test", "plugins/minecraft_plugin/data_source.py")
         with TemporaryDirectory() as tmp:

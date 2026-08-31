@@ -379,6 +379,26 @@ class EndfieldVisualRegressionTests(unittest.IsolatedAsyncioTestCase):
                     settle_ms=0,
                 )
 
+    async def test_cdp_export_captures_the_measured_element(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "cdp-export.html"
+            path.write_text(
+                '<style>html,body{margin:0}.card{width:120px;height:80px;background:#286cd6}</style>'
+                '<div class="card"></div>',
+                encoding="utf-8",
+            )
+            content = await screenshot_web_element(
+                path.resolve().as_uri(),
+                ".card",
+                viewport=(120, 80),
+                settle_ms=0,
+                wait_for_fonts=True,
+                resource_wait_timeout_ms=1000,
+                screenshot_backend="cdp",
+            )
+            image = Image.open(io.BytesIO(content))
+            self.assertEqual(image.size, (120, 80))
+
 
 if __name__ == "__main__":
     unittest.main()

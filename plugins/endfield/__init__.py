@@ -5,12 +5,13 @@ import json
 import re
 import tempfile
 from collections.abc import Awaitable, Callable
+from datetime import datetime
 from pathlib import Path
 from time import perf_counter
 
 import aiohttp
 from arclet.alconna import Alconna, Args, MultiVar
-from arclet.entari import Cleanup, Event, listen
+from arclet.entari import At, Cleanup, Event, listen
 from arclet.letoderea.exceptions import _ExitException
 from loguru import logger
 from nepattern import AnyString
@@ -20,6 +21,7 @@ from utils.async_cache import AsyncTTLCache, CacheStats
 from utils.entari_native import (
     ArgVal,
     ChainMsg,
+    event_chain,
     event_user_id,
     get_bot,
     get_group_id,
@@ -29,8 +31,10 @@ from utils.entari_native import (
     on_ready,
     prompt,
     prompt_silently,
+    send_forward,
     timer,
 )
+from utils.onebot_api import send_forward_images
 from utils.http_client import clear_http_cache, get_http_cache_stats
 from utils.temp_files import schedule_temp_file_cleanup
 
@@ -85,6 +89,7 @@ from .commands import (
     parse_shortcut_command,
     score_candidate,
     score_entity_candidate,
+    strip_message_mentions,
 )
 from .draw import (
     draw_equipment_card,
@@ -114,6 +119,25 @@ from .account_investment_service import (
     build_account_investment_view,
     fetch_account_investment_catalog,
 )
+from .account_challenge import (
+    ChallengeAmbiguousError,
+    ChallengeIdentity,
+    ChallengeResolutionError,
+    draw_challenge_empty,
+    draw_monument_detail,
+    draw_monument_history,
+    draw_monument_history_pages,
+    draw_monument_overview,
+    draw_war_detail,
+    draw_war_history,
+    draw_war_history_pages,
+    draw_war_overview,
+    parse_monument,
+    parse_war_echoes,
+    resolve_monument_detail,
+    resolve_war_detail,
+)
+from .account_challenge_i18n import ChallengeLocale, get_challenge_locale, start_challenge_locale_warmup
 from .stage_draw import draw_stage_card, draw_stage_catalog_cards
 from .stage_service import EndfieldStageService, StageVariantNotFound
 from .stage_source import StageDataIncomplete
@@ -170,6 +194,7 @@ _MEDAL_LOCK = asyncio.Lock()
 ENDFIELD_HELP_IMAGE_PATH = (
     Path(__file__).resolve().parents[2] / "assets" / "image" / "help" / "endfield.png"
 )
+_FORWARD_SENDER_NAME = "Endfield"
 CARD_CACHE_TTL_SECONDS = 600.0
 CARD_CACHE_MAX_BYTES = 48 * 1024 * 1024
 CARD_RENDER_VERSION = "endfield-card-v41"
@@ -186,6 +211,20 @@ _CALENDAR_CACHE: AsyncTTLCache[str, bytes] = AsyncTTLCache(
     max_bytes=8 * 1024 * 1024,
     max_entries=4,
     sizeof=len,
+)
+CHALLENGE_CACHE_TTL_SECONDS = 60.0
+ChallengeCacheKey = tuple[str, str, str, str, str, str, int, bool, str, str]
+_CHALLENGE_DATA_CACHE: AsyncTTLCache[tuple[str, str, str], dict] = AsyncTTLCache(
+    ttl_seconds=CHALLENGE_CACHE_TTL_SECONDS,
+    max_bytes=12 * 1024 * 1024,
+    max_entries=16,
+    sizeof=lambda payload: len(json.dumps(payload, ensure_ascii=False, separators=(",", ":"))),
+)
+_CHALLENGE_RENDER_CACHE: AsyncTTLCache[ChallengeCacheKey, tuple[bytes, ...]] = AsyncTTLCache(
+    ttl_seconds=CHALLENGE_CACHE_TTL_SECONDS,
+    max_bytes=48 * 1024 * 1024,
+    max_entries=64,
+    sizeof=lambda pages: sum(len(page) for page in pages),
 )
 
 Resolver = Callable[..., Awaitable[list[EndfieldCandidate]]]
@@ -259,7 +298,11 @@ endfield_search_shortcut = on_alconna(
 
 @endfield_cmd.handle()
 async def handle_endfield(event: Event, rest: ArgVal, bot=None):
-    await _handle_command(endfield_cmd, event, parse_command(_rest(rest)), bot=bot)
+    command_rest = _rest(rest)
+    command = parse_command(command_rest)
+    if command.action == "challenge":
+        command = parse_command(strip_message_mentions(command_rest))
+    await _handle_command(endfield_cmd, event, command, bot=bot)
 
 
 @endfield_operator_shortcut.handle()
@@ -317,8 +360,8 @@ async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand,
         return await _handle_medal(matcher, command)
     if command.action in {"ownership_stats", "ownership_refresh"}:
         return await _handle_ownership_stats(matcher, event, command, bot=bot)
-    if command.action in {"bind", "accounts", "account_base", "account_investment", "currency_log", "primary", "unbind", "attendance", "gacha", "gacha_history", "gacha_sync", "gacha_import", "medal_missing"}:
-        return await _handle_personal_command(matcher, event, command)
+    if command.action in {"bind", "accounts", "account_base", "account_investment", "currency_log", "primary", "unbind", "attendance", "gacha", "gacha_history", "gacha_sync", "gacha_import", "medal_missing", "challenge"}:
+        return await _handle_personal_command(matcher, event, command, bot=bot)
     if command.action == "loadout":
         return await _handle_loadout(matcher, command)
     if command.action not in {"query", "search"}:
@@ -603,7 +646,7 @@ async def _handle_medal_missing(
     return await _finish_pngs(matcher, pngs)
 
 
-async def _handle_personal_command(matcher, event: Event, command: ParsedEndfieldCommand) -> None:
+async def _handle_personal_command(matcher, event: Event, command: ParsedEndfieldCommand, bot=None) -> None:
     private_only = {"bind", "primary", "unbind", "gacha_import"}
     if command.action in private_only and is_group(event):
         return await matcher.finish("该命令涉及账号凭据或手机号，仅支持私聊使用。")
@@ -613,6 +656,9 @@ async def _handle_personal_command(matcher, event: Event, command: ParsedEndfiel
         if command.action == "bind":
             cipher = CredentialCipher.from_env()
             return await _handle_binding(matcher, qq_user_id, cipher)
+        if command.action == "challenge":
+            cipher = CredentialCipher.from_env()
+            return await _handle_challenge(matcher, event, qq_user_id, command, cipher, bot=bot)
         if command.action == "accounts":
             cipher = CredentialCipher.from_env()
             return await _handle_accounts(matcher, qq_user_id, command, cipher, group=is_group(event))
@@ -658,6 +704,15 @@ async def _handle_personal_command(matcher, event: Event, command: ParsedEndfiel
     except InvestmentDataUnavailable as exc:
         logger.warning(f"[endfield-investment] AKEData unavailable: {exc}")
         return await matcher.finish("终末地养成数据源暂时不可用，请稍后重试。")
+    except ChallengeAmbiguousError as exc:
+        if command.action == "challenge":
+            head = "影拓" if command.challenge_kind == "monument" else "回响"
+            candidate = exc.candidates[0] if exc.candidates else ("名称" if command.challenge_kind == "monument" else "赛季")
+            difficulty = f" {command.challenge_difficulty}" if command.challenge_difficulty else ""
+            return await matcher.finish(f"{exc}\n示例：/ef {head} {candidate}{difficulty}")
+        return await matcher.finish(str(exc))
+    except ChallengeResolutionError as exc:
+        return await matcher.finish(str(exc))
     except XhhAPIError as exc:
         return await matcher.finish(str(exc))
     except aiohttp.ClientConnectionError:
@@ -666,11 +721,285 @@ async def _handle_personal_command(matcher, event: Event, command: ParsedEndfiel
     except _ExitException:
         raise
     except Exception as exc:
-        logger.error(
+        logger.opt(exception=exc).error(
             f"[endfield-account] action failed: action={command.action} "
             f"error_type={type(exc).__module__}.{type(exc).__name__}"
         )
         return await matcher.finish("终末地账号功能暂时不可用，请稍后重试。")
+
+
+def _challenge_mention_targets(event: Event, bot=None) -> tuple[str, ...]:
+    """Return distinct user mentions, excluding a leading mention of the bot."""
+    bot_ids = {
+        str(value)
+        for value in (
+            getattr(bot, "self_id", ""),
+            getattr(bot, "id", ""),
+        )
+        if value
+    }
+    targets: list[str] = []
+    for segment in event_chain(event):
+        if not isinstance(segment, At):
+            continue
+        target = str(
+            getattr(segment, "id", "")
+            or getattr(segment, "target", "")
+            or getattr(segment, "user_id", "")
+            or ""
+        ).strip()
+        if not target or target in bot_ids or target.casefold() in {"all", "here"}:
+            continue
+        if target not in targets:
+            targets.append(target)
+    return tuple(targets)
+
+
+async def _handle_challenge(
+    matcher,
+    event: Event,
+    qq_user_id: str,
+    command: ParsedEndfieldCommand,
+    cipher: CredentialCipher,
+    *,
+    bot=None,
+) -> None:
+    """Render one personal challenge query without prompting in group chats."""
+    mentioned_users = _challenge_mention_targets(event, bot)
+    if mentioned_users and not is_group(event):
+        return await matcher.finish("仅群聊支持通过 @群友查询对方的挑战数据。")
+    if len(mentioned_users) > 1:
+        return await matcher.finish("一次只能 @ 一名群友。")
+
+    target_user_id = mentioned_users[0] if mentioned_users else qq_user_id
+    roles = account_store.list_roles(target_user_id)
+    if not roles:
+        if mentioned_users:
+            return await matcher.finish("被 @ 的用户尚未绑定终末地账号。")
+        return await matcher.finish("尚未绑定终末地账号。使用 /ef 绑定 开始绑定。")
+    # Mention queries deliberately use the target user's primary account.  An
+    # account selector remains meaningful only for the command sender's own
+    # bindings, so it cannot expose a target user's secondary account by index.
+    role = account_store.resolve_role(
+        target_user_id,
+        "" if mentioned_users else command.account_selector,
+    )
+    if role is None:
+        candidates = _challenge_account_candidates(roles, command.account_selector)
+        if len(candidates) == 1:
+            role = candidates[0]
+        elif candidates:
+            group_chat = is_group(event)
+            lines = ["账号选择存在歧义，请从候选中选择："]
+            for candidate in candidates[:5]:
+                index = roles.index(candidate) + 1
+                uid = candidate.masked_uid if group_chat else candidate.role_id
+                lines.append(f"{index}. {candidate.nickname}（UID {uid}）")
+            lines.append("示例：/ef 影拓 账号 1")
+            return await matcher.finish("\n".join(lines))
+        else:
+            return await matcher.finish("未找到对应账号，请使用 /ef 账号 查看编号。")
+
+    token = account_store.decrypt_token(role, cipher)
+    provider, _raw_token = decode_account_credential(token)
+    if provider == ACCOUNT_PROVIDER_SKPORT or is_asia_role(role):
+        return await matcher.finish("影拓丰碑和战争回响目前仅支持国服账号，亚服暂不支持。")
+
+    group_chat = is_group(event)
+    identity = ChallengeIdentity(
+        nickname=role.nickname,
+        server_name=server_label(role.server_name or role.server_id),
+        uid=role.masked_uid if group_chat else role.role_id,
+        updated_at=datetime.now().strftime("%Y-%m-%d %H:%M"),
+    )
+    variant = "b"
+    async def load_data(kind: str) -> dict:
+        key = (str(role.role_id), str(role.server_id), kind)
+        if kind == "monument":
+            return await _CHALLENGE_DATA_CACHE.get_or_create(
+                key, lambda: official_client.indie_hard(token, role)
+            )
+        return await _CHALLENGE_DATA_CACHE.get_or_create(
+            key, lambda: official_client.war_echoes(token, role)
+        )
+
+    async def load_locale() -> ChallengeLocale | None:
+        try:
+            # A cold AKEData load includes two large i18n tables and normally
+            # takes several seconds.  Do not render and cache an English card
+            # merely because the background warmup missed the old 750 ms window.
+            locale = await get_challenge_locale(max_wait_seconds=12.0)
+            if locale is None:
+                logger.info("[endfield-challenge] i18n is warming up; using API copy for this request")
+            return locale
+        except Exception as exc:
+            logger.warning(f"[endfield-challenge] AKEData i18n unavailable, using API copy: {exc}")
+            return None
+
+    async def cached_pages(
+        kind: str,
+        view: str,
+        terms: str,
+        difficulty: str,
+        page: int,
+        factory,
+    ) -> tuple[bytes, ...]:
+        key: ChallengeCacheKey = (
+            str(role.role_id),
+            str(role.server_id),
+            kind,
+            view,
+            terms,
+            difficulty,
+            int(page),
+            group_chat,
+            variant,
+            locale.version if locale is not None else "api-copy",
+        )
+        return await _CHALLENGE_RENDER_CACHE.get_or_create(key, factory)
+
+    if command.challenge_kind == "monument":
+        raw, locale = await asyncio.gather(load_data("monument"), load_locale())
+        payload = parse_monument(raw, locale)
+        if command.challenge_view == "overview":
+            pngs = await cached_pages(
+                "monument", "overview", "", "", 0,
+                lambda: _one_page(
+                    draw_challenge_empty(identity, "影拓丰碑", variant=variant)
+                    if not payload.has_records
+                    else draw_monument_overview(identity, payload, variant=variant)
+                ),
+            )
+            return await _finish_pngs(matcher, pngs)
+        pages = payload.history_pages() if payload.has_records else ()
+        if command.challenge_view == "history":
+            if not pages:
+                pngs = await cached_pages(
+                    "monument", "history", "all", "", 0,
+                    lambda: _one_page(draw_challenge_empty(identity, "影拓丰碑", query="暂无历史主题", variant=variant)),
+                )
+                return await _finish_pngs(matcher, pngs)
+            if command.all_history:
+                rendered = await cached_pages(
+                    "monument", "history", "all", "", 0,
+                    lambda: draw_monument_history_pages(identity, pages, variant=variant),
+                )
+                return await _finish_challenge_pages(matcher, event, bot, rendered, "/ef 影拓 历史 第N页")
+            if command.page > len(pages):
+                return await matcher.finish(f"影拓历史共 {len(pages)} 页，请输入 1-{len(pages)}。")
+            rendered = await cached_pages(
+                "monument", "history", "", "", command.page,
+                lambda: _one_page(draw_monument_history(identity, pages[command.page - 1], page=command.page, page_count=len(pages), variant=variant)),
+            )
+            return await _finish_pngs(matcher, rendered)
+        group, dungeon = resolve_monument_detail(payload, command.challenge_terms, command.challenge_difficulty or "hard")
+        rendered = await cached_pages(
+            "monument", "detail", " ".join(command.challenge_terms), command.challenge_difficulty or "hard", 0,
+            lambda: _one_page(draw_monument_detail(identity, group, dungeon, variant=variant)),
+        )
+        return await _finish_pngs(matcher, rendered)
+
+    raw, locale = await asyncio.gather(load_data("war_echo"), load_locale())
+    payload = parse_war_echoes(raw, locale)
+    if command.challenge_view == "overview":
+        pngs = await cached_pages(
+            "war_echo", "overview", "", "", 0,
+            lambda: _one_page(
+                draw_challenge_empty(identity, "战争回响", variant=variant)
+                if not payload.has_records else draw_war_overview(identity, payload, variant=variant)
+            ),
+        )
+        return await _finish_pngs(matcher, pngs)
+    pages = payload.history_pages() if payload.has_records else ()
+    if command.challenge_view == "history":
+        if not pages:
+            rendered = await cached_pages(
+                "war_echo", "history", "all", "", 0,
+                lambda: _one_page(draw_challenge_empty(identity, "战争回响", query="暂无历史赛季", variant=variant)),
+            )
+            return await _finish_pngs(matcher, rendered)
+        if command.all_history:
+            rendered = await cached_pages(
+                "war_echo", "history", "all", "", 0,
+                lambda: draw_war_history_pages(
+                    identity,
+                    tuple(season for (season,) in pages),
+                    achievements=payload.achievements,
+                    variant=variant,
+                ),
+            )
+            return await _finish_challenge_pages(matcher, event, bot, rendered, "/ef 回响 历史 第N页")
+        if command.page > len(pages):
+            return await matcher.finish(f"战争回响历史共 {len(pages)} 页，请输入 1-{len(pages)}。")
+        season = pages[command.page - 1][0]
+        rendered = await cached_pages(
+            "war_echo", "history", "", "", command.page,
+            lambda: _one_page(draw_war_history(identity, season, page=command.page, page_count=len(pages), achievements=payload.achievements, variant=variant)),
+        )
+        return await _finish_pngs(matcher, rendered)
+    season, week, war_group, dungeon = resolve_war_detail(payload, command.challenge_terms, command.challenge_difficulty or "cruel")
+    rendered = await cached_pages(
+        "war_echo", "detail", " ".join(command.challenge_terms), command.challenge_difficulty or "cruel", 0,
+        lambda: _one_page(draw_war_detail(identity, season, week, war_group, dungeon, variant=variant)),
+    )
+    return await _finish_pngs(matcher, rendered)
+
+
+def _challenge_account_candidates(roles: list[EndfieldRole], selector: str) -> list[EndfieldRole]:
+    value = str(selector or "").strip().casefold()
+    if not value or value.isdigit():
+        return []
+    matches: list[EndfieldRole] = []
+    for role in roles:
+        nickname = str(role.nickname or "").strip().casefold()
+        suffix = str(role.role_id or "")[-4:].casefold()
+        if value == nickname or (len(value) >= 4 and value == suffix) or value in nickname or nickname in value:
+            matches.append(role)
+    return matches
+
+
+async def _finish_challenge_pages(matcher, event, bot, pngs: tuple[bytes, ...], page_hint: str) -> None:
+    if len(pngs) <= 2:
+        return await _finish_pngs(matcher, pngs)
+    try:
+        await _send_forward_pngs(bot, event, pngs)
+    except _ExitException:
+        raise
+    except Exception as exc:
+        logger.warning(f"[endfield-challenge] merged forward unavailable: {type(exc).__name__}")
+        return await matcher.finish(f"历史记录共 {len(pngs)} 页，当前连接不支持合并转发，请使用 {page_hint} 分页查看。")
+    return await matcher.finish()
+
+
+async def _send_forward_pngs(bot, event, pngs: tuple[bytes, ...]) -> None:
+    """Send PNG pages as one merged forward.
+
+    Satori's standard ``<message forward>`` element is tried first: LLOneBot's
+    Satori encoder turns it into a native QQ merged forward, so no OneBot
+    action is needed.  Implementations that ignore ``forward`` would silently
+    fan the pages out as separate messages, so a raised error (or a missing
+    session) falls back to the OneBot ``send_*_forward_msg`` action.
+    """
+    uin = str(getattr(bot, "self_id", "") or getattr(bot, "id", "") or "") or None
+    try:
+        await send_forward(
+            [_png_image(png) for png in pngs],
+            name=_FORWARD_SENDER_NAME,
+            uin=uin,
+        )
+        return
+    except _ExitException:
+        raise
+    except Exception as exc:
+        logger.warning(
+            f"[endfield-challenge] satori forward element failed, "
+            f"falling back to OneBot action: {type(exc).__name__}: {exc}"
+        )
+    await send_forward_images(bot, event, pngs)
+
+
+async def _one_page(page) -> tuple[bytes, ...]:
+    return (await page,)
 
 
 async def _handle_binding(matcher, qq_user_id: str, cipher: CredentialCipher) -> None:
@@ -2216,14 +2545,20 @@ async def _finish_endfield_help(matcher) -> None:
 
 
 async def _finish_pngs(matcher, pngs: tuple[bytes, ...]) -> None:
-    images = []
-    for png in pngs:
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as file:
-            file.write(png)
-            file.flush()
-            schedule_temp_file_cleanup(file.name)
-            images.append(make_image(path=file.name))
-    await matcher.finish(ChainMsg(images))
+    await matcher.finish(ChainMsg([_png_image(png) for png in pngs]))
+
+
+def _png_image(png: bytes):
+    """Persist one PNG to a temp file and wrap it as an image element.
+
+    LLOneBot resolves ``file://`` locally, so a temp file avoids inflating the
+    payload with a base64 data URI for every page of a merged forward.
+    """
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as file:
+        file.write(png)
+        file.flush()
+        schedule_temp_file_cleanup(file.name)
+        return make_image(path=file.name)
 
 
 async def _handle_dev_command(command: ParsedEndfieldCommand) -> str:
@@ -2439,6 +2774,11 @@ def _parse_query(rest: str) -> tuple[str, str]:
 
 _ownership_startup_started = False
 _ownership_startup_task: asyncio.Task | None = None
+
+
+@on_ready
+async def _warmup_challenge_i18n(_bot=None) -> None:
+    start_challenge_locale_warmup()
 
 
 async def _refresh_due_ownership_snapshots() -> None:

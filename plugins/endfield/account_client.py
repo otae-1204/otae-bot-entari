@@ -434,6 +434,65 @@ class EndfieldOfficialClient:
             raise EndfieldAPIError("查询终末地档案", message="官方接口未返回角色档案")
         return detail
 
+    async def indie_hard(self, account_token: str, role: RoleCandidate | Any) -> dict[str, Any]:
+        """查询绑定角色的影拓丰碑个人记录。
+
+        The endpoint is separate from ``card/detail``: the latter only carries a
+        compact summary while this response contains the per-stage records and
+        the historical groups needed by the account challenge cards.
+        """
+        context = await self._skland_context(account_token, refresh=True)
+        extra_headers = None
+        if context.provider == ACCOUNT_PROVIDER_SKPORT:
+            extra_headers = {"sk-game-role": f"3_{role.role_id}_{role.server_id}"}
+        payload = await self._signed_skland_request(
+            context,
+            "GET",
+            "/api/v1/game/endfield/card/indie-hard",
+            params={"roleId": str(role.role_id), "serverId": str(role.server_id)},
+            extra_headers=extra_headers,
+        )
+        data = payload.get("data") or {}
+        result = data.get("indieHard") if isinstance(data, dict) else None
+        if result is None:
+            return {}
+        if not isinstance(result, dict):
+            raise EndfieldAPIError("查询影拓丰碑", message="官方接口未返回影拓丰碑数据")
+        return result
+
+    async def war_echoes(
+        self,
+        account_token: str,
+        role: RoleCandidate | Any,
+        *,
+        season_id: str = "",
+    ) -> dict[str, Any]:
+        """查询绑定角色的战争回响赛季、轮换和个人记录。"""
+        context = await self._skland_context(account_token, refresh=True)
+        extra_headers = None
+        if context.provider == ACCOUNT_PROVIDER_SKPORT:
+            extra_headers = {"sk-game-role": f"3_{role.role_id}_{role.server_id}"}
+        params: dict[str, Any] = {
+            "roleId": str(role.role_id),
+            "serverId": str(role.server_id),
+        }
+        if season_id:
+            params["seasonId"] = str(season_id)
+        payload = await self._signed_skland_request(
+            context,
+            "GET",
+            "/api/v1/game/endfield/card/war-echoes",
+            params=params,
+            extra_headers=extra_headers,
+        )
+        data = payload.get("data") or {}
+        result = data.get("warEchoes") if isinstance(data, dict) else None
+        if result is None:
+            return {}
+        if not isinstance(result, dict):
+            raise EndfieldAPIError("查询战争回响", message="官方接口未返回战争回响数据")
+        return result
+
     async def currency_balances(self, account_token: str, role: RoleCandidate | Any) -> dict[int, int]:
         headers = await self._currency_headers(account_token, role, operation="查询终末地货币")
 

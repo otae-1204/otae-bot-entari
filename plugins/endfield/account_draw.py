@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
-from utils.http_client import fetch_many
+from utils.http_client import fetch_many_resilient
 from utils.image_utils import BrowserResource, screenshot_web_element
 from utils.temp_files import schedule_temp_file_cleanup
 
@@ -419,12 +419,16 @@ async def _prepare_assets(urls: Iterable[Any], *, inline: bool) -> _PreparedAsse
     unique_urls = tuple(
         dict.fromkeys(str(url) for url in urls if isinstance(url, str) and url)
     )
-    resources = await fetch_many(
+    # 图床的 404 与超时都是间歇的：走共享的退避重试。这里以前是单次 fetch_many，
+    # 一次抖动就静默丢图；缺图原因由 fetch_many_resilient 自己写日志。
+    fetched = await fetch_many_resilient(
         unique_urls,
         namespace=REMOTE_ASSET_NAMESPACE,
         timeout_seconds=12.0,
         max_bytes=16 * 1024 * 1024,
+        log_prefix="[endfield]",
     )
+    resources = fetched[0] if isinstance(fetched, tuple) else fetched
     output: dict[str, str] = {}
     browser_resources: dict[str, BrowserResource] = {}
     for url, resource in resources.items():

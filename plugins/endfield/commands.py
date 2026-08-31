@@ -28,6 +28,9 @@ ALIAS_COMMAND_ALIASES = {"别名", "alias"}
 ALIAS_ADD_ALIASES = {"添加", "新增", "add"}
 BIND_ALIASES = {"绑定", "添加账号", "新增账号", "bind", "add-account", "addaccount"}
 ACCOUNT_ALIASES = {"账号", "账户", "account", "accounts"}
+MONUMENT_ALIASES = {"影拓丰碑", "影拓", "丰碑", "monument", "indie-hard", "indiehard", "indie"}
+WAR_ECHO_ALIASES = {"战争回响", "回响", "war-echoes", "war_echoes", "warechoes", "war_echo"}
+CHALLENGE_HISTORY_ALIASES = {"历史", "history", "历届", "archive"}
 INVESTMENT_ALIASES = {"养成统计", "资源消耗", "养成消耗", "investment", "resource-usage", "resourceusage"}
 ACCOUNT_BASE_ALIASES = {"基建", "帝江号", "base", "infrastructure"}
 PRIMARY_ALIASES = {"主账号", "主账户", "primary"}
@@ -84,6 +87,7 @@ EQUIPMENT_ATTRIBUTE_ROLES = {"主": "main", "副": "sub", "main": "main", "sub":
 EQUIPMENT_ATTRIBUTE_ROLE_LABELS = {"main": "主", "sub": "副"}
 _EQUIPMENT_ATTRIBUTE_SEPARATORS = re.compile(r"[+＋、,，/／|｜]+")
 _EQUIPMENT_ATTRIBUTE_NOISE = re.compile(r"^[-_:：·\s]*(?:属性|能力|词条)?[-_:：·\s]*")
+_SERIALIZED_AT_SEGMENT = re.compile(r"<at\b[^>]*?/?>", flags=re.IGNORECASE)
 
 SHORTCUT_COMMANDS = {
     "efop": ("query", "operator"),
@@ -134,6 +138,10 @@ class ParsedEndfieldCommand:
     status_name: str = ""
     status_level: int = 0
     arts_strength: int = 0
+    challenge_kind: str = ""
+    challenge_view: str = ""
+    challenge_terms: tuple[str, ...] = ()
+    challenge_difficulty: str = ""
     error: str = ""
 
 
@@ -165,6 +173,16 @@ class LoadoutSlotSpec:
 @dataclass(frozen=True)
 class ParsedLoadoutSpec:
     items: tuple[LoadoutSlotSpec, ...]
+
+
+def strip_message_mentions(rest: str) -> str:
+    """Remove serialized At segments before parsing a text command.
+
+    Alconna's ``AnyString`` pattern serializes a Satori ``At`` element into an
+    XML-like token.  The target user is resolved from the original event; the
+    token must not accidentally become a challenge name or a history argument.
+    """
+    return " ".join(_SERIALIZED_AT_SEGMENT.sub(" ", str(rest or "")).split())
 
 
 def parse_command(rest: str) -> ParsedEndfieldCommand:
@@ -272,6 +290,10 @@ def _parse_personal_command(parts: list[str]) -> ParsedEndfieldCommand | None:
     head = parts[0].lower()
     if head in OWNERSHIP_ALIASES:
         return _parse_ownership_command(parts[1:])
+    if head in MONUMENT_ALIASES:
+        return _parse_challenge_command("monument", parts[1:])
+    if head in WAR_ECHO_ALIASES:
+        return _parse_challenge_command("war_echo", parts[1:])
     if head in BIND_ALIASES:
         return ParsedEndfieldCommand("bind")
     if head in ACCOUNT_ALIASES:
@@ -355,6 +377,100 @@ def _parse_ownership_command(parts: list[str]) -> ParsedEndfieldCommand:
             error="用法：/ef 持有率 [群内|全局]，或 /ef 持有率 刷新 [群内|全局]",
         )
     return ParsedEndfieldCommand("ownership_refresh" if refresh else "ownership_stats", scope=scope)
+
+
+def _parse_challenge_command(kind: str, parts: list[str]) -> ParsedEndfieldCommand:
+    """Parse personal challenge commands while keeping account selection explicit.
+
+    Challenge names are intentionally left as tokens for the data layer: the
+    API owns the canonical names and can therefore apply the same conservative
+    fuzzy matching to Chinese and English aliases.
+    """
+    remaining = list(parts)
+    account_selector = ""
+    for index, token in enumerate(remaining):
+        lowered = token.casefold()
+        if lowered in ACCOUNT_ALIASES or lowered.startswith(("账号=", "账户=", "account=")):
+            if "=" in token:
+                account_selector = token.split("=", 1)[1].strip()
+            else:
+                account_selector = " ".join(remaining[index + 1:]).strip()
+            remaining = remaining[:index]
+            break
+
+    view = "overview"
+    all_history = False
+    page = 1
+    if remaining and remaining[0].casefold() in CHALLENGE_HISTORY_ALIASES:
+        view = "history"
+        remaining.pop(0)
+        all_history = True
+        for index, token in enumerate(tuple(remaining)):
+            match = re.fullmatch(r"(?:第\s*)?(\d+)\s*页", token, flags=re.IGNORECASE)
+            if match is None:
+                match = re.fullmatch(r"page[-_ ]?(\d+)", token, flags=re.IGNORECASE)
+            if match is None and token.isdecimal() and len(remaining) == 1:
+                match = re.fullmatch(r"(\d+)", token)
+            if match is not None:
+                page = int(match.group(1))
+                if page < 1:
+                    return ParsedEndfieldCommand("challenge", challenge_kind=kind, error="页码必须大于 0")
+                all_history = False
+                remaining.pop(index)
+                break
+        if remaining:
+            return ParsedEndfieldCommand(
+                "challenge",
+                challenge_kind=kind,
+                challenge_view=view,
+                account_selector=account_selector,
+                page=page,
+                all_history=all_history,
+                error="历史查询只接受可选页码和账号参数",
+            )
+        return ParsedEndfieldCommand(
+            "challenge",
+            challenge_kind=kind,
+            challenge_view=view,
+            account_selector=account_selector,
+            page=page,
+            all_history=all_history,
+        )
+
+    difficulty_aliases = {
+        "monument": {
+            "普通": "normal", "normal": "normal", "n": "normal",
+            "苦难": "hard", "困难": "hard", "hard": "hard", "h": "hard",
+        },
+        "war_echo": {
+            "普通": "normal", "normal": "normal", "n": "normal",
+            "困难": "hard", "hard": "hard", "h": "hard",
+            "残酷": "cruel", "苦难": "cruel", "cruel": "cruel", "c": "cruel",
+        },
+    }[kind]
+    difficulty = ""
+    filtered: list[str] = []
+    for token in remaining:
+        normalized = difficulty_aliases.get(token.casefold())
+        if normalized:
+            if difficulty and difficulty != normalized:
+                return ParsedEndfieldCommand("challenge", challenge_kind=kind, error="只能指定一个难度")
+            difficulty = normalized
+        else:
+            filtered.append(token)
+    remaining = filtered
+    if remaining:
+        view = "detail"
+    return ParsedEndfieldCommand(
+        "challenge",
+        challenge_kind=kind,
+        challenge_view=view,
+        challenge_terms=tuple(remaining),
+        challenge_difficulty=difficulty,
+        account_selector=account_selector,
+        page=page,
+        all_history=all_history,
+    )
 
 
 def _parse_currency_log_command(parts: list[str]) -> ParsedEndfieldCommand:
@@ -692,6 +808,13 @@ def format_help() -> str:
             "  /ef 绑定 | /ef 添加账号（仅私聊；国服支持 Token/短信，二维码绑定暂不支持；亚服支持 Token；可重复追加多个账号）",
             "  /ef 账号 [编号]（账号详情图：干员、装备、武器、技能等级、潜能）",
             "  /ef 养成统计 [编号]（当前档案可见养成投入与材料明细；别名：资源消耗）",
+            "  /ef 影拓 [账号 <编号|昵称|UID后四位>] [@群友]（当前主题个人进度）",
+            "  /ef 影拓 历史 [第N页] [账号 ...] [@群友]（全部历史；超过 2 页合并转发）",
+            "  /ef 影拓 <主题> [关卡] [普通|苦难] [账号 ...] [@群友]（个人记录详情）",
+            "  /ef 回响 [账号 ...] [@群友]（当前赛季星数、轮换和个人记录）",
+            "  /ef 回响 历史 [第N页] [账号 ...] [@群友]（赛季历史分页）",
+            "  /ef 回响 <赛季> [轮换] [关卡] [普通|困难|残酷] [账号 ...] [@群友]",
+            "  群聊末尾 @群友 时查询对方绑定的主账号；未绑定时仅返回文字提示",
             "  /ef 资源流水 [账号] [日期|开始日期 结束日期|--天数 N/-d N]（源石、嵌晶玉、武库配额；默认最近一个月）",
             "  /ef 资源流水 [账号] [--资源 源石|嵌晶玉|武库配额] [--类型 获取|消耗] [-a/--all]",
             "  /ef 账号 基建 [账号]（据点存票、增长速度与帝江号心情）",

@@ -97,6 +97,10 @@ async def screenshot_web_element(
     wait_for_images: bool = False,
     strict_max_height: bool = False,
     overflow_selectors: Sequence[str] = (),
+    wait_for_fonts: bool = False,
+    resource_wait_timeout_ms: int = 5000,
+    screenshot_timeout_ms: int | None = None,
+    screenshot_backend: Literal["playwright", "cdp"] = "playwright",
 ) -> bytes:
     """Screenshot a single page element using a reusable browser."""
     loop = asyncio.get_running_loop()
@@ -114,6 +118,10 @@ async def screenshot_web_element(
         wait_for_images,
         strict_max_height,
         tuple(overflow_selectors),
+        wait_for_fonts,
+        resource_wait_timeout_ms,
+        screenshot_timeout_ms,
+        screenshot_backend,
     )
 
 
@@ -129,7 +137,13 @@ def _screenshot_web_element_sync(
     wait_for_images: bool,
     strict_max_height: bool,
     overflow_selectors: tuple[str, ...],
+    wait_for_fonts: bool,
+    resource_wait_timeout_ms: int,
+    screenshot_timeout_ms: int | None,
+    screenshot_backend: Literal["playwright", "cdp"],
 ) -> bytes:
+    if screenshot_backend not in {"playwright", "cdp"}:
+        raise ValueError(f"Unsupported screenshot backend: {screenshot_backend}")
     browser = _get_browser()
     context = browser.new_context(
         viewport={"width": viewport[0], "height": viewport[1]},
@@ -159,18 +173,12 @@ def _screenshot_web_element_sync(
             page.wait_for_selector("body", timeout=timeout_ms)
             locator = page.locator("body").first
 
-        if wait_for_images:
-            page.evaluate(
-                """async () => {
-                    const images = Array.from(document.images);
-                    await Promise.all(images.map(image => {
-                        if (image.complete) return Promise.resolve();
-                        return new Promise(resolve => {
-                            image.addEventListener('load', resolve, {once: true});
-                            image.addEventListener('error', resolve, {once: true});
-                        });
-                    }));
-                }"""
+        if wait_for_images or wait_for_fonts:
+            _settle_page_resources(
+                page,
+                wait_for_images=wait_for_images,
+                wait_for_fonts=wait_for_fonts,
+                timeout_ms=resource_wait_timeout_ms,
             )
 
         size = locator.evaluate(
@@ -214,24 +222,114 @@ def _screenshot_web_element_sync(
 
         box = locator.bounding_box()
         if not box:
-            return page.screenshot(type="png", full_page=True)
+            if screenshot_backend == "cdp":
+                return _capture_cdp_screenshot(
+                    context,
+                    page,
+                    {
+                        "x": 0,
+                        "y": 0,
+                        "width": target_width,
+                        "height": target_height,
+                    },
+                    device_scale_factor,
+                )
+            kwargs = {"type": "png", "full_page": True}
+            if screenshot_timeout_ms is not None:
+                kwargs["timeout"] = max(1, int(screenshot_timeout_ms))
+            return page.screenshot(**kwargs)
 
-        return page.screenshot(
-            clip={
-                "x": max(0, box["x"]),
-                "y": max(0, box["y"]),
-                "width": max(1, min(box["width"], target_width - max(0, box["x"]))),
-                "height": max(1, min(box["height"], target_height)),
-            },
-            type="png",
-        )
+        clip = {
+            "x": max(0, box["x"]),
+            "y": max(0, box["y"]),
+            "width": max(1, min(box["width"], target_width - max(0, box["x"]))),
+            "height": max(1, min(box["height"], target_height)),
+        }
+        if screenshot_backend == "cdp":
+            return _capture_cdp_screenshot(context, page, clip, device_scale_factor)
+        kwargs = {"clip": clip, "type": "png"}
+        if screenshot_timeout_ms is not None:
+            kwargs["timeout"] = max(1, int(screenshot_timeout_ms))
+        return page.screenshot(**kwargs)
     finally:
         context.close()
 
 
+def _settle_page_resources(
+    page,
+    *,
+    wait_for_images: bool,
+    wait_for_fonts: bool,
+    timeout_ms: int,
+) -> dict:
+    """Wait for export resources without allowing one broken asset to hang forever."""
+    return page.evaluate(
+        """async options => {
+            const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+            const tasks = [];
+            if (options.waitForFonts && document.fonts?.ready) {
+                tasks.push(document.fonts.ready.catch(() => undefined));
+            }
+            if (options.waitForImages) {
+                const pending = Array.from(document.images)
+                    .filter(image => !image.complete)
+                    .map(image => new Promise(resolve => {
+                        image.addEventListener('load', resolve, {once: true});
+                        image.addEventListener('error', resolve, {once: true});
+                    }));
+                tasks.push(Promise.all(pending));
+            }
+            let timedOut = false;
+            await Promise.race([
+                Promise.all(tasks),
+                delay(options.timeoutMs).then(() => { timedOut = true; }),
+            ]);
+            const failedImages = Array.from(document.images)
+                .filter(image => image.complete && !image.naturalWidth).length;
+            const failedRequiredImages = Array.from(document.images)
+                .filter(image => image.dataset.required === 'true' && (!image.complete || !image.naturalWidth)).length;
+            return {
+                timedOut,
+                fontsReady: !options.waitForFonts || !document.fonts || document.fonts.status === 'loaded',
+                failedImages,
+                failedRequiredImages,
+            };
+        }""",
+        {
+            "waitForImages": bool(wait_for_images),
+            "waitForFonts": bool(wait_for_fonts),
+            "timeoutMs": max(1, int(timeout_ms)),
+        },
+    )
+
+
+def _capture_cdp_screenshot(context, page, clip: dict[str, float], device_scale_factor: float) -> bytes:
+    """Capture Chromium pixels without Playwright's unbounded document.fonts.ready wait."""
+    session = context.new_cdp_session(page)
+    try:
+        result = session.send(
+            "Page.captureScreenshot",
+            {
+                "format": "png",
+                "fromSurface": True,
+                "captureBeyondViewport": True,
+                "clip": {
+                    "x": float(clip["x"]),
+                    "y": float(clip["y"]),
+                    "width": float(clip["width"]),
+                    "height": float(clip["height"]),
+                    "scale": max(0.1, float(device_scale_factor)),
+                },
+            },
+        )
+        return base64.b64decode(result["data"])
+    finally:
+        session.detach()
+
+
 def _launch_browser(playwright, proxy_conf):
-    """Try system Chrome/Edge first, fall back to bundled Chromium."""
-    for channel in ["chrome", "msedge", None]:
+    """Prefer Playwright's pinned Chromium, then fall back to system browsers."""
+    for channel in [None, "chrome", "msedge"]:
         try:
             kwargs = {"headless": True}
             if channel:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import inspect
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import timedelta
 from io import BytesIO
@@ -18,8 +19,10 @@ from arclet.entari import (
     Account,
     AccountUpdate,
     At,
+    Author,
     Image as _Image,
     LoginStatus,
+    Message as _MessageElement,
     MessageChain,
     MessageCreatedEvent,
     Quote,
@@ -81,6 +84,46 @@ def make_image(*, path: str | Path | None = None, url: str | None = None, raw: b
 Image = make_image
 Reply = Quote
 ReplySeg = Quote
+
+
+def make_forward(
+    nodes: Iterable[Any],
+    *,
+    name: str | None = None,
+    uin: str | int | None = None,
+) -> _MessageElement:
+    """Build a Satori merged-forward element (``<message forward>``).
+
+    Each node becomes one child ``<message>``; a node may be a single element, a
+    string, or a sequence of elements.  ``name``/``uin`` are emitted as an
+    ``<author>`` inside every node.  Note that LLOneBot keeps a single author
+    state per merged forward, so per-node senders are not portable: pass one
+    author for the whole forward instead.
+    """
+    children: list[_MessageElement] = []
+    for node in nodes:
+        if isinstance(node, str):
+            content: list[Any] = [Text(node)]
+        elif isinstance(node, (list, tuple, MessageChain)):
+            content = [Text(item) if isinstance(item, str) else item for item in node]
+        else:
+            content = [node]
+        if uin:
+            content.insert(0, Author(str(uin), name or None))
+        children.append(_MessageElement(content=content))
+    return _MessageElement(forward=True, content=children)
+
+
+async def send_forward(
+    nodes: Iterable[Any],
+    *,
+    name: str | None = None,
+    uin: str | int | None = None,
+    session: Session | None = None,
+):
+    """Send one merged-forward message through the current Satori session."""
+    target = session or _current_session()
+    return await target.send(MessageChain([make_forward(nodes, name=name, uin=uin)]))
 
 
 class ChainMsg(MessageChain):
