@@ -82,7 +82,7 @@ await render_ownership_stats(report)
 
 | 字段 | 类型 | 语义 |
 | --- | --- | --- |
-| `operator_key` | `str` | 账号接口使用的稳定 MD5 ID；展示层可用作稳定 key |
+| `operator_key` | `str` | 后端归一化后的稳定 MD5 ID；通常等于账号接口 ID，男女管理员使用各自 AKEData `charId` 的 MD5 |
 | `source_id` | `str` | AKEData 原始 `charId`；观测补录干员可能为空 |
 | `name` | `str` | 中文名；无法识别时为“未知干员” |
 | `rarity` | `int` | 稀有度 |
@@ -95,7 +95,7 @@ await render_ownership_stats(report)
 
 默认排序已经由后端完成：稀有度降序、同稀有度持有率降序、AKEData 顺序升序、稳定 ID 升序。展示层应保留此顺序。
 
-AKEData 的 `chr_9000_endmin` 是女管理员的账号接口兼容 ID，不是第三名干员。报告只输出男、女管理员两个独立条目；女管理员的 `source_id` 为 `chr_0003_endminf`，`operator_key` 使用 `md5("chr_9000_endmin")`。
+账号接口会对男女管理员统一返回 `md5("chr_9000_endmin")`，它是共享占位 ID，不代表女管理员，也不是第三名干员。后端根据档案条目的 `gender`（缺失时使用 `base.gender`）归一化为两个独立条目：男管理员使用 `chr_0002_endminm`，女管理员使用 `chr_0003_endminf`，`operator_key` 分别是各自 `charId` 的 MD5。无法判定性别的旧快照不会参与统计，并会在后台刷新时优先重建。
 
 ### `PotentialBucket`
 

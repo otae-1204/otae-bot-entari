@@ -254,16 +254,21 @@ def _sample_card(segment: OwnershipStatsSegment) -> str:
 # 6 星常驻干员名单(展示层静态配置):收集概况里除名单外的 6 星均计为非常驻。
 # 游戏新增常驻 6 星时需同步维护此名单。
 _PERMANENT_SIX_STAR = frozenset({"别礼", "骏卫", "黎风", "艾尔黛拉", "余烬"})
-# 管理员(男女两名同名条目)人人必得,不参与收集概况四图,
+# 管理员(男女两名独立条目)人人必得,不参与收集概况四图,
 # 仅保留在干员持有率列表中作数据展示。
-_ADMIN_SIX_STAR = frozenset({"管理员"})
+_ADMIN_SOURCE_IDS = frozenset({"chr_0002_endminm", "chr_0003_endminf", "chr_9000_endmin"})
+_ADMIN_NAMES = frozenset({"管理员", "管理员·男", "管理员·女", "男管理员", "女管理员"})
+
+
+def _is_administrator(operator) -> bool:
+    return operator.source_id in _ADMIN_SOURCE_IDS or operator.name in _ADMIN_NAMES
 
 
 def _six_star_groups(operators):
     six = [
         operator
         for operator in operators
-        if operator.rarity >= 6 and operator.name not in _ADMIN_SIX_STAR
+        if operator.rarity >= 6 and not _is_administrator(operator)
     ]
     limited = [
         operator

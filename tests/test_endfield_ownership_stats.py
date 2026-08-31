@@ -86,8 +86,8 @@ class OwnershipCatalogAndSnapshotTests(unittest.TestCase):
         }
         professions = {"0": {"profession": 0, "name": {"id": "profession-0"}}}
         i18n = {
-            "name-m": "男管理员",
-            "name-f": "女管理员",
+            "name-m": "管理员",
+            "name-f": "管理员",
             "profession-0": "先锋",
         }
 
@@ -101,12 +101,14 @@ class OwnershipCatalogAndSnapshotTests(unittest.TestCase):
             male.operator_key,
             hashlib.md5(male.source_id.encode("utf-8")).hexdigest(),
         )
-        self.assertEqual(female.operator_key, hashlib.md5(b"chr_9000_endmin").hexdigest())
-        self.assertEqual({item.name for item in catalog}, {"男管理员", "女管理员"})
+        self.assertEqual(
+            female.operator_key,
+            hashlib.md5(female.source_id.encode("utf-8")).hexdigest(),
+        )
+        self.assertEqual({item.name for item in catalog}, {"管理员·男", "管理员·女"})
         self.assertEqual({item.profession for item in catalog}, {"先锋"})
 
-        canonical_female_key = hashlib.md5(b"chr_0003_endminf").hexdigest()
-        for raw_id in (female.operator_key, canonical_female_key, "chr_9000_endmin"):
+        for raw_id in (female.operator_key, female.source_id):
             members, _ = parse_operator_snapshot(
                 {
                     "base": {"charNum": 1},
@@ -115,6 +117,92 @@ class OwnershipCatalogAndSnapshotTests(unittest.TestCase):
                 catalog,
             )
             self.assertEqual(members[0].operator_key, female.operator_key)
+
+    def test_shared_endministrator_id_uses_entry_gender_then_base_gender(self):
+        catalog = (
+            OperatorCatalogEntry(
+                hashlib.md5(b"chr_0002_endminm").hexdigest(),
+                "chr_0002_endminm",
+                "管理员·男",
+                6,
+                "先锋",
+                1,
+            ),
+            OperatorCatalogEntry(
+                hashlib.md5(b"chr_0003_endminf").hexdigest(),
+                "chr_0003_endminf",
+                "管理员·女",
+                6,
+                "先锋",
+                2,
+            ),
+        )
+        shared_key = hashlib.md5(b"chr_9000_endmin").hexdigest()
+        expected = {
+            "CHAR_GENDER_MALE": hashlib.md5(b"chr_0002_endminm").hexdigest(),
+            "CHAR_GENDER_FEMALE": hashlib.md5(b"chr_0003_endminf").hexdigest(),
+        }
+        for gender, operator_key in expected.items():
+            members, _ = parse_operator_snapshot(
+                {
+                    "base": {
+                        "charNum": 1,
+                        "gender": 2 if gender == "CHAR_GENDER_MALE" else 1,
+                    },
+                    "chars": [
+                        {
+                            "charData": {"id": shared_key},
+                            "gender": gender,
+                            "potentialLevel": 2,
+                        }
+                    ],
+                },
+                catalog,
+            )
+            self.assertEqual(members[0].operator_key, operator_key)
+
+        members, _ = parse_operator_snapshot(
+            {
+                "base": {"charNum": 1, "gender": 1},
+                "chars": [{"charData": {"id": shared_key}, "potentialLevel": 2}],
+            },
+            catalog,
+        )
+        self.assertEqual(members[0].operator_key, expected["CHAR_GENDER_MALE"])
+        legacy_catalog = (
+            catalog[0],
+            OperatorCatalogEntry(
+                shared_key,
+                "chr_0003_endminf",
+                "管理员",
+                6,
+                "先锋",
+                2,
+            ),
+        )
+        members, _ = parse_operator_snapshot(
+            {
+                "base": {"charNum": 1, "gender": 2},
+                "chars": [
+                    {
+                        "charData": {"id": shared_key},
+                        "gender": "CHAR_GENDER_FEMALE",
+                        "potentialLevel": 2,
+                    }
+                ],
+            },
+            legacy_catalog,
+        )
+        self.assertEqual(members[0].operator_key, expected["CHAR_GENDER_FEMALE"])
+        self.assertEqual(members[0].name, "管理员·女")
+        with self.assertRaisesRegex(ValueError, "缺少管理员性别"):
+            parse_operator_snapshot(
+                {
+                    "base": {"charNum": 1},
+                    "chars": [{"charData": {"id": shared_key}, "potentialLevel": 2}],
+                },
+                catalog,
+            )
 
     def test_snapshot_requires_complete_nonempty_roster_and_maps_exact_id(self):
         key = hashlib.md5(b"chr_a").hexdigest()
@@ -266,6 +354,52 @@ class OwnershipStoreAndReportTests(unittest.TestCase):
         self.assertTrue(all(item.ownership_rate is None for item in total.operators))
         self.assertTrue(all(item.collection_rate is None for item in total.professions))
 
+    def test_report_separates_manager_sexes_and_excludes_legacy_shared_id(self):
+        male_key = hashlib.md5(b"chr_0002_endminm").hexdigest()
+        female_key = hashlib.md5(b"chr_0003_endminf").hexdigest()
+        shared_key = hashlib.md5(b"chr_9000_endmin").hexdigest()
+        self.store.replace_operator_catalog(
+            (
+                OperatorCatalogEntry(male_key, "chr_0002_endminm", "管理员·男", 6, "先锋", 1),
+                OperatorCatalogEntry(female_key, "chr_0003_endminf", "管理员·女", 6, "先锋", 2),
+            ),
+            "v2",
+            updated_at=NOW,
+        )
+        male = self._bind("male", "male-role", "1")
+        female = self._bind("female", "female-role", "1")
+        legacy = self._bind("legacy", "legacy-role", "1")
+        self.store.replace_operator_snapshot(
+            male,
+            "cn",
+            [OperatorSnapshotMember(male_key, 2)],
+            fetched_at=NOW,
+        )
+        self.store.replace_operator_snapshot(
+            female,
+            "cn",
+            [OperatorSnapshotMember(female_key, 3)],
+            fetched_at=NOW,
+        )
+        self.store.replace_operator_snapshot(
+            legacy,
+            "cn",
+            [OperatorSnapshotMember(shared_key, 2)],
+            fetched_at=NOW,
+        )
+
+        report = self.service.build_report("global", self.store.list_all_roles(), now=NOW)
+        total = report.segment("all")
+        managers = {item.source_id: item for item in total.operators}
+
+        self.assertEqual(
+            (total.eligible_sample_count, total.valid_sample_count, total.excluded_sample_count),
+            (3, 2, 1),
+        )
+        self.assertEqual(managers["chr_0002_endminm"].ownership_rate, 0.5)
+        self.assertEqual(managers["chr_0003_endminf"].ownership_rate, 0.5)
+        self.assertNotIn(shared_key, {item.operator_key for item in total.operators})
+
 
 class OwnershipRefreshAndGroupTests(unittest.TestCase):
     def setUp(self):
@@ -400,6 +534,70 @@ class OwnershipRefreshAndGroupTests(unittest.TestCase):
 
         self.assertEqual((result.attempted, result.succeeded), (1, 1))
         self.assertEqual(client.roles, ["due-role"])
+
+    def test_due_refresh_rebuilds_legacy_shared_manager_snapshot(self):
+        role = self.store.bind_roles(
+            "legacy",
+            "legacy-token",
+            [RoleCandidate("legacy", "legacy-role", "1", "legacy")],
+            self.cipher,
+        )[0]
+        shared_key = hashlib.md5(b"chr_9000_endmin").hexdigest()
+        male_key = hashlib.md5(b"chr_0002_endminm").hexdigest()
+        self.store.replace_operator_snapshot(
+            role,
+            "cn",
+            [OperatorSnapshotMember(shared_key, 2)],
+            fetched_at=NOW,
+        )
+
+        class Client:
+            async def card_detail(self, _token, _role):
+                return {
+                    "base": {"charNum": 1, "saveTime": NOW, "gender": 1},
+                    "chars": [
+                        {
+                            "charData": {"id": shared_key},
+                            "gender": "CHAR_GENDER_MALE",
+                            "potentialLevel": 2,
+                        }
+                    ],
+                }
+
+        service = OwnershipStatsService(self.store, Client())
+        with mock.patch.object(service, "refresh_catalog", mock.AsyncMock(return_value=False)):
+            result = asyncio.run(
+                service.refresh_roles(self.store.list_all_roles(), self.cipher, now=NOW, force=False)
+            )
+
+        self.assertEqual((result.attempted, result.succeeded), (1, 1))
+        self.assertEqual(
+            [item.operator_key for item in self.store.list_operator_snapshots()[0].members],
+            [male_key],
+        )
+
+    def test_catalog_refresh_rebuilds_same_version_when_identity_mapping_changes(self):
+        incoming = (
+            OperatorCatalogEntry(
+                hashlib.md5(b"chr_a").hexdigest(),
+                "chr_a",
+                "甲",
+                6,
+                "先锋",
+                1,
+                source="akedata",
+                version="v1",
+            ),
+        )
+        service = OwnershipStatsService(self.store, object())
+        with mock.patch(
+            "plugins.endfield.ownership_stats.fetch_operator_catalog",
+            mock.AsyncMock(return_value=("v1", incoming)),
+        ):
+            updated = asyncio.run(service.refresh_catalog())
+
+        self.assertTrue(updated)
+        self.assertEqual(self.store.list_operator_catalog()[0].operator_key, incoming[0].operator_key)
 
     def test_refresh_stops_after_repeated_systemic_community_failures(self):
         for index in range(8):

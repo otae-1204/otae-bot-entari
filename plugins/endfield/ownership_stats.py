@@ -36,8 +36,16 @@ _SYSTEMIC_COMMUNITY_CODES = {"405", "429", "502", "503", "504"}
 _TABLE_MAX_BYTES = 24 * 1024 * 1024
 _I18N_MAX_BYTES = 64 * 1024 * 1024
 _HEX_ID_RE = re.compile(r"[0-9a-f]{32}", re.IGNORECASE)
+_ENDMIN_MALE_SOURCE = "chr_0002_endminm"
 _ENDMIN_ACCOUNT_ALIAS_SOURCE = "chr_9000_endmin"
 _ENDMIN_FEMALE_SOURCE = "chr_0003_endminf"
+_ENDMIN_MALE_KEY = hashlib.md5(_ENDMIN_MALE_SOURCE.encode("utf-8")).hexdigest()
+_ENDMIN_FEMALE_KEY = hashlib.md5(_ENDMIN_FEMALE_SOURCE.encode("utf-8")).hexdigest()
+_ENDMIN_ACCOUNT_ALIAS_KEY = hashlib.md5(_ENDMIN_ACCOUNT_ALIAS_SOURCE.encode("utf-8")).hexdigest()
+_ENDMIN_DISPLAY_NAMES = {
+    _ENDMIN_MALE_SOURCE: "管理员·男",
+    _ENDMIN_FEMALE_SOURCE: "管理员·女",
+}
 
 
 class SnapshotValidationError(ValueError):
@@ -199,20 +207,19 @@ def build_operator_catalog(
         source_id = _text(row.get("charId")) or key
         if not source_id:
             continue
-        # AKEData publishes chr_9000_endmin as the account-facing alias of
-        # the female Endministrator. It is not a third playable operator.
+        # AKEData also publishes chr_9000_endmin, but the account API uses its
+        # MD5 as a shared placeholder for either selected Endministrator sex.
+        # Gender, not this alias, decides which of the two operators is owned.
         if source_id == _ENDMIN_ACCOUNT_ALIAS_SOURCE:
             continue
-        account_source_id = (
-            _ENDMIN_ACCOUNT_ALIAS_SOURCE
-            if source_id == _ENDMIN_FEMALE_SOURCE
-            else source_id
-        )
+        name = localized_text(row.get("name"), translations=translations) or source_id
+        if source_id in _ENDMIN_DISPLAY_NAMES:
+            name = _ENDMIN_DISPLAY_NAMES[source_id]
         entries.append(
             OperatorCatalogEntry(
-                operator_key=hashlib.md5(account_source_id.encode("utf-8")).hexdigest(),
+                operator_key=hashlib.md5(source_id.encode("utf-8")).hexdigest(),
                 source_id=source_id,
-                name=localized_text(row.get("name"), translations=translations) or source_id,
+                name=name,
                 rarity=max(0, _int(row.get("rarity"))),
                 profession=professions.get(_text(row.get("profession")), "未知职业"),
                 sort_order=_int(row.get("sortOrder")),
@@ -239,8 +246,7 @@ def parse_operator_snapshot(
     for item in catalog:
         if item.source_id:
             by_key.setdefault(hashlib.md5(item.source_id.encode("utf-8")).hexdigest(), item)
-        if item.source_id == _ENDMIN_FEMALE_SOURCE:
-            by_source[_ENDMIN_ACCOUNT_ALIAS_SOURCE] = item
+    base_gender = _mapping(detail.get("base")).get("gender")
     parsed: dict[str, OperatorSnapshotMember] = {}
     for raw_character in raw_characters:
         if not isinstance(raw_character, Mapping):
@@ -250,8 +256,21 @@ def parse_operator_snapshot(
         if not raw_id:
             continue
         lowered = raw_id.casefold()
-        catalog_entry = by_key.get(lowered) or by_source.get(lowered)
-        if catalog_entry is not None:
+        endministrator_source = _endministrator_source(
+            lowered,
+            raw_character.get("gender"),
+            char_data.get("gender"),
+            base_gender,
+        )
+        catalog_entry = (
+            by_source.get(endministrator_source)
+            if endministrator_source
+            else by_key.get(lowered) or by_source.get(lowered)
+        )
+        if endministrator_source:
+            operator_key = hashlib.md5(endministrator_source.encode("utf-8")).hexdigest()
+            source_id = endministrator_source
+        elif catalog_entry is not None:
             operator_key = catalog_entry.operator_key
             source_id = catalog_entry.source_id
         elif _HEX_ID_RE.fullmatch(raw_id):
@@ -267,7 +286,11 @@ def parse_operator_snapshot(
             operator_key=operator_key,
             potential_level=potential,
             source_id=source_id,
-            name=(catalog_entry.name if catalog_entry else localized_text(char_data.get("name"))) or "未知干员",
+            name=(
+                _ENDMIN_DISPLAY_NAMES.get(source_id)
+                or (catalog_entry.name if catalog_entry else localized_text(char_data.get("name")))
+                or "未知干员"
+            ),
             rarity=(catalog_entry.rarity if catalog_entry else _int(_semantic_value(char_data.get("rarity")))),
             profession=(catalog_entry.profession if catalog_entry else semantic_label(char_data.get("profession")))
             or "未知职业",
@@ -312,7 +335,13 @@ class OwnershipStatsService:
             version, entries = await fetch_operator_catalog()
             current = self.store.list_operator_catalog()
             current_version = next((item.version for item in current if item.source == "akedata"), "")
-            if current_version == version and any(item.source == "akedata" for item in current):
+            current_signature = {
+                _catalog_entry_signature(item)
+                for item in current
+                if item.source == "akedata"
+            }
+            incoming_signature = {_catalog_entry_signature(item) for item in entries}
+            if current_version == version and current_signature == incoming_signature:
                 return False
             self.store.replace_operator_catalog(entries, version)
             return True
@@ -360,7 +389,11 @@ class OwnershipStatsService:
             groups = {
                 key: candidates
                 for key, candidates in groups.items()
-                if key not in snapshots or snapshots[key].fetched_at < due_before
+                if (
+                    key not in snapshots
+                    or snapshots[key].fetched_at < due_before
+                    or _has_legacy_shared_endministrator(snapshots[key])
+                )
             }
         semaphore = asyncio.Semaphore(self.concurrency)
         state_lock = asyncio.Lock()
@@ -499,6 +532,7 @@ class OwnershipStatsService:
             and snapshot.fetched_at >= fresh_after
             and snapshot.members
             and snapshot.operator_count == len(snapshot.members)
+            and not _has_legacy_shared_endministrator(snapshot)
         }
         catalog = self.store.list_operator_catalog()
         catalog_version = next((item.version for item in catalog if item.source == "akedata"), "")
@@ -541,6 +575,11 @@ def _build_segment(
         segment_catalog = [item for item in catalog if item.available_asia]
     else:
         segment_catalog = [item for item in catalog if item.available_cn or item.available_asia]
+    segment_catalog = [
+        item
+        for item in segment_catalog
+        if item.operator_key.casefold() != _ENDMIN_ACCOUNT_ALIAS_KEY
+    ]
 
     member_maps = [
         {member.operator_key: member for member in snapshot.members}
@@ -766,6 +805,50 @@ def _group_roles(roles: Sequence[EndfieldRole]) -> dict[tuple[str, str], tuple[E
     for role in roles:
         grouped[(str(role.server_id), str(role.role_id))].append(role)
     return {key: tuple(items) for key, items in grouped.items()}
+
+
+def _catalog_entry_signature(entry: OperatorCatalogEntry) -> tuple[Any, ...]:
+    return (
+        entry.operator_key,
+        entry.source_id,
+        entry.name,
+        entry.rarity,
+        entry.profession,
+        entry.sort_order,
+        entry.available_cn,
+        entry.available_asia,
+    )
+
+
+def _endministrator_source(raw_id: str, *gender_values: Any) -> str:
+    normalized_id = str(raw_id or "").strip().casefold()
+    if normalized_id in {_ENDMIN_MALE_SOURCE, _ENDMIN_MALE_KEY}:
+        return _ENDMIN_MALE_SOURCE
+    if normalized_id in {_ENDMIN_FEMALE_SOURCE, _ENDMIN_FEMALE_KEY}:
+        return _ENDMIN_FEMALE_SOURCE
+    if normalized_id not in {_ENDMIN_ACCOUNT_ALIAS_SOURCE, _ENDMIN_ACCOUNT_ALIAS_KEY}:
+        return ""
+    for value in gender_values:
+        source_id = _endministrator_source_from_gender(value)
+        if source_id:
+            return source_id
+    raise SnapshotValidationError("官方档案缺少管理员性别，无法生成准确快照")
+
+
+def _endministrator_source_from_gender(value: Any) -> str:
+    normalized = _text(_semantic_value(value)).casefold().replace("-", "_").replace(" ", "_")
+    if normalized in {"1", "m", "male", "char_gender_male"}:
+        return _ENDMIN_MALE_SOURCE
+    if normalized in {"2", "f", "female", "char_gender_female"}:
+        return _ENDMIN_FEMALE_SOURCE
+    return ""
+
+
+def _has_legacy_shared_endministrator(snapshot: OperatorRosterSnapshot) -> bool:
+    return any(
+        member.operator_key.casefold() == _ENDMIN_ACCOUNT_ALIAS_KEY
+        for member in snapshot.members
+    )
 
 
 def _member_user_id(member: Any) -> str:

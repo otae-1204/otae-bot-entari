@@ -209,7 +209,20 @@ class OwnershipStatsDrawTests(unittest.TestCase):
     def test_overview_six_star_collection_donuts(self):
         # 夹具名与真实目录对齐:管理员 6★、别礼/骏卫 6★常驻、汤汤 6★非常驻、佩丽卡 5★。
         operators = (
-            _operator("管理员", owned=12, potential_level=1, rarity=6),
+            _operator(
+                "管理员·男",
+                source_id="chr_0002_endminm",
+                owned=12,
+                potential_level=1,
+                rarity=6,
+            ),
+            _operator(
+                "管理员·女",
+                source_id="chr_0003_endminf",
+                owned=12,
+                potential_level=1,
+                rarity=6,
+            ),
             _operator("别礼", owned=12, potential_level=1, rarity=6),
             _operator("骏卫", owned=6, potential_level=0, rarity=6),
             _operator("汤汤", owned=3, potential_level=2, rarity=6),
@@ -225,7 +238,8 @@ class OwnershipStatsDrawTests(unittest.TestCase):
         self.assertIn("#ffd000 0.00deg 90.00deg", html)
         self.assertIn("25.0%", html)
         # 管理员不参与饼图,但仍作为数据行展示在持有率列表中。
-        self.assertIn("管理员", html)
+        self.assertIn("管理员·男", html)
+        self.assertIn("管理员·女", html)
         self.assertIn("100.0%", html)
         # 环形图下方的副标题注释已移除。
         self.assertNotIn("donut-sub", html)
@@ -234,7 +248,20 @@ class OwnershipStatsDrawTests(unittest.TestCase):
 
     def test_six_star_potential_donut_uses_owned_slots(self):
         operators = (
-            _operator("管理员", owned=12, potential_level=1, rarity=6),
+            _operator(
+                "管理员·男",
+                source_id="chr_0002_endminm",
+                owned=12,
+                potential_level=1,
+                rarity=6,
+            ),
+            _operator(
+                "管理员·女",
+                source_id="chr_0003_endminf",
+                owned=12,
+                potential_level=1,
+                rarity=6,
+            ),
             _operator("别礼", owned=12, potential_level=1, rarity=6),
             _operator("骏卫", owned=6, potential_level=0, rarity=6),
             _operator("汤汤", owned=3, potential_level=2, rarity=6),
