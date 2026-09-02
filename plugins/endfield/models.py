@@ -32,6 +32,7 @@ class SkillView:
     form_descriptions: list[tuple[str, str]] = field(default_factory=list)
     levels: list[SkillLevelView] = field(default_factory=list)
     extra_levels: dict[str, list[SkillLevelView]] = field(default_factory=dict)
+    icon_fallbacks: tuple[str, ...] = ()
 
 
 @dataclass(slots=True)
@@ -41,6 +42,7 @@ class EffectView:
     description: str
     kind: str
     icon_url: str = ""
+    icon_fallbacks: tuple[str, ...] = ()
 
 
 @dataclass(slots=True)
@@ -195,6 +197,7 @@ class EquipmentPieceView:
     name: str
     slot_type: str = "装备"
     icon_url: str = ""
+    equipment_id: str = ""
 
 
 @dataclass(slots=True)
@@ -275,6 +278,7 @@ class LoadoutEquipmentView:
     slot_type: str
     enhance_levels: tuple[int, ...] = ()
     icon_url: str = ""
+    equipment_id: str = ""
     suit_name: str = ""
     stats: list[EquipmentStatView] = field(default_factory=list)
 
@@ -316,6 +320,8 @@ class LoadoutView:
     weapon_type: str
     operator_icon_url: str = ""
     weapon_icon_url: str = ""
+    operator_id: str = ""
+    weapon_id: str = ""
     equipment: list[LoadoutEquipmentView] = field(default_factory=list)
     primary_stats: list[LoadoutPanelStatView] = field(default_factory=list)
     ability_stats: list[LoadoutPanelStatView] = field(default_factory=list)

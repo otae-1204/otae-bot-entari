@@ -15,7 +15,7 @@ from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
 from time import perf_counter
-from typing import Any, Iterable
+from typing import Any, Iterable, Sequence
 
 import cv2
 import numpy as np
@@ -62,6 +62,14 @@ from .gacha import (
     format_timestamp,
 )
 from .account_i18n import server_label
+from .asset_urls import (
+    item_icon_urls,
+    operator_icon_urls,
+    operator_portrait_urls,
+    operator_round_icon_urls,
+    skill_icon_urls,
+    unique_urls,
+)
 from .skill_metrics import fz_metric_replaces_generic, is_generic_fz_metric
 
 
@@ -1247,13 +1255,15 @@ async def prepare_loadout_card_html(view: LoadoutView) -> PreparedCardHtml:
 
 
 async def _prepare_loadout_card_html(view: LoadoutView, *, inline: bool) -> PreparedCardHtml:
-    equipment_urls = [item.icon_url for item in view.equipment if item.icon_url]
-    assets = await _prepare_assets(
-        [view.operator_icon_url, view.weapon_icon_url, *equipment_urls],
-        inline=inline,
-    )
+    groups: dict[str, tuple[str, ...]] = {
+        "operator": operator_icon_urls(view.operator_id, view.operator_icon_url),
+        "weapon": item_icon_urls(view.weapon_id, view.weapon_icon_url),
+    }
+    for index, item in enumerate(view.equipment):
+        groups[f"equip:{index}"] = item_icon_urls(item.equipment_id, item.icon_url)
+    assets, mapped, _sources = await _resolve_asset_groups(groups, inline=inline)
     return PreparedCardHtml(
-        _render_loadout_html(view, assets.urls),
+        _render_loadout_html(view, mapped),
         assets.resources,
         1500,
     )
@@ -1264,31 +1274,42 @@ async def prepare_operator_card_html(view: OperatorView) -> PreparedCardHtml:
 
 
 async def _prepare_operator_card_html(view: OperatorView, *, inline: bool) -> PreparedCardHtml:
-    portrait_candidates = tuple(
-        dict.fromkeys(url for url in (view.portrait_url, view.icon_url, view.round_icon_url) if url)
+    portrait_candidates = unique_urls(
+        *operator_portrait_urls(view.operator_id, view.portrait_url),
+        *operator_icon_urls(view.operator_id, view.icon_url),
+        *operator_round_icon_urls(view.operator_id, view.round_icon_url),
     )
-    skill_urls = {skill.icon_id: skill_icon_url(skill.icon_id) for skill in view.skills if skill.icon_id}
-    talent_urls = {effect.effect_id: effect.icon_url for effect in view.talents if effect.icon_url}
+    groups: dict[str, tuple[str, ...]] = {"portrait": portrait_candidates}
+    for skill in view.skills:
+        groups[f"skill:{skill.skill_id}"] = skill_icon_urls(skill.icon_id, skill.skill_id, *skill.icon_fallbacks)
+    for effect in view.talents:
+        groups[f"talent:{effect.effect_id}"] = unique_urls(effect.icon_url, *effect.icon_fallbacks)
     term_styles = merged_term_styles(view)
     used_terms = _operator_terms_used(view, term_styles)
-    term_urls = {
-        term: style.icon_url
+    for term, style in term_styles.items():
+        if style.icon_url and term in used_terms:
+            groups[f"term:{term}"] = unique_urls(style.icon_url)
+    assets, mapped, sources = await _resolve_asset_groups(groups, inline=inline)
+    portrait_source = sources.get("portrait", "")
+    skill_icons = {
+        skill.icon_id: mapped.get(f"skill:{skill.skill_id}", "")
+        for skill in view.skills
+    }
+    skill_icons.update(
+        {
+            skill.skill_id: mapped.get(f"skill:{skill.skill_id}", "")
+            for skill in view.skills
+        }
+    )
+    talent_icons = {effect.effect_id: mapped.get(f"talent:{effect.effect_id}", "") for effect in view.talents}
+    term_icons = {
+        term: mapped.get(f"term:{term}", "")
         for term, style in term_styles.items()
         if style.icon_url and term in used_terms
     }
-    assets = await _prepare_assets(
-        [*portrait_candidates, *skill_urls.values(), *talent_urls.values(), *term_urls.values()]
-        ,
-        inline=inline,
-    )
-    portrait_url = next((url for url in portrait_candidates if assets.urls.get(url)), "")
-    portrait = assets.urls.get(portrait_url, "")
-    skill_icons = {key: assets.urls.get(url, "") for key, url in skill_urls.items()}
-    talent_icons = {key: assets.urls.get(url, "") for key, url in talent_urls.items()}
-    term_icons = {key: assets.urls.get(url, "") for key, url in term_urls.items()}
-    layout = await _portrait_layout(view, assets.contents.get(portrait_url, b""))
+    layout = await _portrait_layout(view, assets.contents.get(portrait_source, b""))
     return PreparedCardHtml(
-        _render_html(view, portrait, skill_icons, talent_icons, term_styles, term_icons, layout),
+        _render_html(view, mapped.get("portrait", ""), skill_icons, talent_icons, term_styles, term_icons, layout),
         assets.resources,
         OPERATOR_CARD_WIDTH,
     )
@@ -1303,13 +1324,16 @@ async def prepare_weapon_card_html(view: WeaponView) -> PreparedCardHtml:
 
 
 async def _prepare_weapon_card_html(view: WeaponView, *, inline: bool) -> PreparedCardHtml:
-    icon_urls = [view.icon_url, *_weapon_rich_icon_urls_used(view)]
-    assets = await _prepare_assets(icon_urls, inline=inline)
-    weapon_img = assets.urls.get(view.icon_url, "")
-    rich_icons = {url: assets.urls.get(url, "") for url in icon_urls if url}
+    groups: dict[str, tuple[str, ...]] = {
+        "weapon": item_icon_urls(view.weapon_id, view.icon_url),
+    }
+    for url in _weapon_rich_icon_urls_used(view):
+        groups[f"rich:{url}"] = unique_urls(url)
+    assets, mapped, _sources = await _resolve_asset_groups(groups, inline=inline)
+    rich_icons = {url: mapped.get(f"rich:{url}", "") for url in _weapon_rich_icon_urls_used(view) if url}
     width = weapon_card_width(view)
     return PreparedCardHtml(
-        _render_weapon_html(view, weapon_img, rich_icons, width),
+        _render_weapon_html(view, mapped.get("weapon", ""), rich_icons, width),
         assets.resources,
         width,
     )
@@ -1324,22 +1348,28 @@ async def prepare_equipment_card_html(view: EquipmentView) -> PreparedCardHtml:
 
 
 async def _prepare_equipment_card_html(view: EquipmentView, *, inline: bool) -> PreparedCardHtml:
-    piece_urls = [piece.icon_url for piece in view.suit_pieces if piece.icon_url]
     used_text = view.suit_description
-    term_urls = {
-        key: style.icon_url
+    groups: dict[str, tuple[str, ...]] = {
+        "equipment": item_icon_urls(view.equipment_id, view.icon_url),
+    }
+    for index, piece in enumerate(view.suit_pieces):
+        groups[f"piece:{index}"] = item_icon_urls(piece.equipment_id, piece.icon_url)
+    for key, style in view.term_styles.items():
+        if style.icon_url and (key in used_text or style.term in used_text):
+            groups[f"term:{key}"] = unique_urls(style.icon_url)
+    assets, mapped, _sources = await _resolve_asset_groups(groups, inline=inline)
+    piece_icons = {}
+    for index, piece in enumerate(view.suit_pieces):
+        loaded = mapped.get(f"piece:{index}", "")
+        piece_icons[piece.icon_url] = loaded
+        piece_icons[f"piece:{index}"] = loaded
+    term_icons = {
+        key: mapped.get(f"term:{key}", "")
         for key, style in view.term_styles.items()
         if style.icon_url and (key in used_text or style.term in used_text)
     }
-    assets = await _prepare_assets(
-        [view.icon_url, *piece_urls, *term_urls.values()],
-        inline=inline,
-    )
-    equipment_img = assets.urls.get(view.icon_url, "")
-    piece_icons = {url: assets.urls.get(url, "") for url in piece_urls}
-    term_icons = {key: assets.urls.get(url, "") for key, url in term_urls.items()}
     return PreparedCardHtml(
-        _render_equipment_html(view, equipment_img, piece_icons, term_icons),
+        _render_equipment_html(view, mapped.get("equipment", ""), piece_icons, term_icons),
         assets.resources,
         1500,
     )
@@ -1358,14 +1388,19 @@ async def _prepare_equipment_catalog_card_html(
     *,
     inline: bool,
 ) -> PreparedCardHtml:
-    icon_urls = [
-        item.icon_url
-        for group in view.groups
-        for item in group.items
-        if item.icon_url
-    ]
-    assets = await _prepare_assets(icon_urls, inline=inline)
-    item_icons = {url: assets.urls.get(url, "") for url in icon_urls}
+    groups = {
+        f"item:{index}": item_icon_urls(item.equipment_id, item.icon_url)
+        for index, item in enumerate(item for group in view.groups for item in group.items)
+    }
+    assets, mapped, _sources = await _resolve_asset_groups(groups, inline=inline)
+    item_icons: dict[str, str] = {}
+    for index, item in enumerate(item for group in view.groups for item in group.items):
+        loaded = mapped.get(f"item:{index}", "")
+        for url in groups[f"item:{index}"]:
+            item_icons[url] = loaded
+        if item.icon_url:
+            item_icons[item.icon_url] = loaded
+        item_icons[f"item:{index}"] = loaded
     card_width, columns = equipment_catalog_layout(view)
     return PreparedCardHtml(
         _render_equipment_catalog_html(view, item_icons, card_width, columns),
@@ -1387,21 +1422,21 @@ async def _prepare_operator_catalog_card_html(
     *,
     inline: bool,
 ) -> PreparedCardHtml:
-    icon_urls = list(dict.fromkeys(
-        url
-        for element in view.elements
-        for profession in element.professions
-        for item in profession.items
-        for url in (
-            item.icon_url,
-            item.element_icon_url,
-            item.profession_icon_url,
-            item.weapon_type_icon_url,
-        )
-        if url
-    ))
-    assets = await _prepare_assets(icon_urls, inline=inline)
-    icon_map = {url: assets.urls.get(url, "") for url in icon_urls}
+    groups: dict[str, tuple[str, ...]] = {}
+    for element_index, element in enumerate(view.elements):
+        groups[f"element:{element_index}"] = unique_urls(element.icon_url)
+        for profession_index, profession in enumerate(element.professions):
+            groups[f"profession:{element_index}:{profession_index}"] = unique_urls(profession.icon_url)
+            for item_index, item in enumerate(profession.items):
+                groups[f"op:{element_index}:{profession_index}:{item_index}"] = operator_icon_urls(
+                    item.operator_id,
+                    item.icon_url,
+                )
+                groups[f"op-element:{element_index}:{profession_index}:{item_index}"] = unique_urls(item.element_icon_url)
+                groups[f"op-profession:{element_index}:{profession_index}:{item_index}"] = unique_urls(item.profession_icon_url)
+                groups[f"op-weapon:{element_index}:{profession_index}:{item_index}"] = unique_urls(item.weapon_type_icon_url)
+    assets, mapped, _sources = await _resolve_asset_groups(groups, inline=inline)
+    icon_map = _alias_group_assets(groups, mapped)
     return PreparedCardHtml(_render_operator_catalog_html(view, icon_map), assets.resources, 1900)
 
 
@@ -1418,20 +1453,19 @@ async def _prepare_weapon_catalog_card_html(
     *,
     inline: bool,
 ) -> PreparedCardHtml:
-    icon_urls = list(dict.fromkeys(
-        url
-        for group in view.groups
-        for url in (group.icon_url, *(item.icon_url for item in group.items))
-        if url
-    ))
-    assets = await _prepare_assets(icon_urls, inline=inline)
-    icon_map = {url: assets.urls.get(url, "") for url in icon_urls}
+    groups: dict[str, tuple[str, ...]] = {}
+    for group_index, group in enumerate(view.groups):
+        groups[f"type:{group_index}"] = unique_urls(group.icon_url)
+        for item_index, item in enumerate(group.items):
+            groups[f"weapon:{group_index}:{item_index}"] = item_icon_urls(item.weapon_id, item.icon_url)
+    assets, mapped, _sources = await _resolve_asset_groups(groups, inline=inline)
+    icon_map = _alias_group_assets(groups, mapped)
     return PreparedCardHtml(_render_weapon_catalog_html(view, icon_map), assets.resources, 1900)
 
 
 def _render_loadout_html(view: LoadoutView, asset_urls: dict[str, str]) -> str:
-    operator_img = asset_urls.get(view.operator_icon_url, "")
-    weapon_img = asset_urls.get(view.weapon_icon_url, "")
+    operator_img = asset_urls.get("operator", "")
+    weapon_img = asset_urls.get("weapon", "")
 
     def equipment_stats(item) -> str:
         return "".join(
@@ -1442,12 +1476,12 @@ def _render_loadout_html(view: LoadoutView, asset_urls: dict[str, str]) -> str:
     equipment_html = "".join(
         f'''<article class="loadout-item">
           <div class="loadout-item-top"><span class="loadout-slot">{esc(item.slot_type)}</span><span class="loadout-forge">{esc(_loadout_forge_summary(item.enhance_levels))}</span></div>
-          <div class="loadout-item-visual">{f'<img src="{esc_attr(asset_urls.get(item.icon_url, ""))}" alt="">' if asset_urls.get(item.icon_url, "") else '<span>EQ</span>'}</div>
+          <div class="loadout-item-visual">{f'<img src="{esc_attr(asset_urls.get(f"equip:{index}", ""))}" alt="">' if asset_urls.get(f"equip:{index}", "") else '<span>EQ</span>'}</div>
           <div class="loadout-item-name">{esc(item.name)}</div>
           <div class="loadout-item-suit">{esc(item.suit_name or "独立装备")}</div>
           <div class="loadout-item-stats">{equipment_stats(item)}</div>
         </article>'''
-        for item in view.equipment
+        for index, item in enumerate(view.equipment)
     ) or '<div class="loadout-empty">未装备护甲、护手或配件</div>'
 
     def stat_cards(rows, class_name: str = "") -> str:
@@ -2035,8 +2069,8 @@ def equipment_piece_cards(view: EquipmentView, piece_icons: dict[str, str]) -> s
     if not pieces:
         return ""
     cards = []
-    for piece in pieces:
-        icon_url = piece_icons.get(piece.icon_url, "")
+    for index, piece in enumerate(pieces):
+        icon_url = piece_icons.get(piece.icon_url, "") or piece_icons.get(f"piece:{index}", "")
         icon = image(icon_url, piece.name) or "--"
         cards.append(
             '<div class="equipment-piece">'
@@ -2167,7 +2201,7 @@ def equipment_catalog_item(
     item: EquipmentCatalogItemView,
     item_icons: dict[str, str],
 ) -> str:
-    icon_url = item_icons.get(item.icon_url, "")
+    icon_url = _first_mapped(item_icons, item_icon_urls(item.equipment_id, item.icon_url))
     icon = image(icon_url, item.name)
     if not icon:
         icon = '<span class="catalog-item-image-fallback">暂无图标</span>'
@@ -2322,7 +2356,7 @@ def _operator_catalog_item(
     element_color: str,
     icon_map: dict[str, str],
 ) -> str:
-    portrait = _gallery_image(icon_map, item.icon_url, "", item.name)
+    portrait = _gallery_image_any(icon_map, operator_icon_urls(item.operator_id, item.icon_url), "", item.name)
     if not portrait:
         portrait = '<div class="operator-image-fallback">暂无头像</div>'
     icons = "".join(
@@ -2408,7 +2442,7 @@ def _weapon_catalog_groups(view: WeaponCatalogView, icon_map: dict[str, str]) ->
 
 
 def _weapon_catalog_item(item: WeaponCatalogItemView, icon_map: dict[str, str]) -> str:
-    weapon_image = _gallery_image(icon_map, item.icon_url, "", item.name)
+    weapon_image = _gallery_image_any(icon_map, item_icon_urls(item.weapon_id, item.icon_url), "", item.name)
     if not weapon_image:
         weapon_image = '<div class="weapon-image-fallback">暂无武器图</div>'
     terms = [*item.terms_main[:1], *item.terms_sub[:1], *item.terms_skill[:1]]
@@ -2432,8 +2466,24 @@ def _gallery_image(icon_map: dict[str, str], source_url: str, class_name: str, a
     return rendered
 
 
+def _gallery_image_any(icon_map: dict[str, str], source_urls: Iterable[str], class_name: str, alt: str) -> str:
+    for url in source_urls:
+        rendered = _gallery_image(icon_map, url, class_name, alt)
+        if rendered:
+            return rendered
+    return ""
+
+
 def _gallery_icon(icon_map: dict[str, str], source_url: str, class_name: str, alt: str) -> str:
     return _gallery_image(icon_map, source_url, class_name, alt)
+
+
+def _first_mapped(icon_map: dict[str, str], source_urls: Iterable[str]) -> str:
+    for url in source_urls:
+        mapped = icon_map.get(url, "")
+        if mapped:
+            return mapped
+    return ""
 
 
 def equipment_catalog_attribute_icon(attribute: EquipmentCatalogAttributeView) -> str:
@@ -2573,15 +2623,16 @@ async def _image_data_urls(urls: Iterable[str]) -> dict[str, str]:
     return (await _prepare_assets(urls, inline=True)).urls
 
 
-ASSET_FETCH_TIMEOUT_SECONDS = 10.0
+ASSET_FETCH_TIMEOUT_SECONDS = 20.0
 ASSET_FETCH_ATTEMPTS = 3
 ASSET_RETRY_BASE_DELAY_SECONDS = 0.25
+ASSET_FETCH_MAX_BYTES = 24 * 1024 * 1024
 
 
 async def _prepare_assets(urls: Iterable[str], *, inline: bool) -> _PreparedAssets:
-    unique_urls = tuple(dict.fromkeys(str(url) for url in urls if url))
-    direct = {url: url for url in unique_urls if url.startswith("data:")}
-    remote_urls = [url for url in unique_urls if not url.startswith("data:")]
+    unique = tuple(dict.fromkeys(str(url) for url in urls if url))
+    direct = {url: url for url in unique if url.startswith("data:")}
+    remote_urls = [url for url in unique if not url.startswith("data:")]
     # 图床（hycdn / assets.fz.wiki）的 404 与超时都是间歇的，交给共享的
     # fetch_many_resilient 退避重试；成功的走缓存命中，避免单次抖动导致渲染「无图」。
     # 缺图原因由它自己写日志，这里不再重复一遍。
@@ -2591,6 +2642,7 @@ async def _prepare_assets(urls: Iterable[str], *, inline: bool) -> _PreparedAsse
         timeout_seconds=ASSET_FETCH_TIMEOUT_SECONDS,
         attempts=ASSET_FETCH_ATTEMPTS,
         base_delay_seconds=ASSET_RETRY_BASE_DELAY_SECONDS,
+        max_bytes=ASSET_FETCH_MAX_BYTES,
         log_prefix="[endfield]",
     )
     # Accept the former mapping shape as well so existing render-test doubles
@@ -2618,6 +2670,83 @@ async def _prepare_assets(urls: Iterable[str], *, inline: bool) -> _PreparedAsse
         output[url] = browser_url
         browser_resources.setdefault(browser_url, BrowserResource(resource.content, mime))
     return _PreparedAssets(output, browser_resources, contents, failures)
+
+
+def _asset_ready(assets: _PreparedAssets, url: str) -> bool:
+    if not url:
+        return False
+    if url.startswith("data:"):
+        return True
+    return bool(assets.urls.get(url))
+
+
+def _mapped_asset(assets: _PreparedAssets, url: str) -> str:
+    if not url:
+        return ""
+    if url.startswith("data:"):
+        return assets.urls.get(url, url)
+    return assets.urls.get(url, "")
+
+
+def _merge_prepared_assets(left: _PreparedAssets, right: _PreparedAssets) -> _PreparedAssets:
+    return _PreparedAssets(
+        {**left.urls, **right.urls},
+        {**left.resources, **right.resources},
+        {**left.contents, **right.contents},
+        {**left.failures, **right.failures},
+    )
+
+
+def _alias_group_assets(
+    groups: dict[str, tuple[str, ...]],
+    mapped: dict[str, str],
+) -> dict[str, str]:
+    icon_map: dict[str, str] = dict(mapped)
+    for key, candidates in groups.items():
+        loaded = mapped.get(key, "")
+        for url in candidates:
+            icon_map[url] = loaded
+    return icon_map
+
+
+async def _resolve_asset_groups(
+    groups: dict[str, Sequence[str]],
+    *,
+    inline: bool,
+) -> tuple[_PreparedAssets, dict[str, str], dict[str, str]]:
+    """先拉每组首选 URL，失败的再补拉备用源，避免目录页一次打出大量空链。"""
+    normalized = {key: unique_urls(*candidates) for key, candidates in groups.items()}
+    chosen_source: dict[str, str] = {}
+    first_batch: list[str] = []
+    pending: dict[str, tuple[str, ...]] = {}
+    for key, candidates in normalized.items():
+        if not candidates:
+            chosen_source[key] = ""
+            continue
+        first_batch.append(candidates[0])
+        pending[key] = candidates
+    assets = await _prepare_assets(first_batch, inline=inline)
+    retry_urls: list[str] = []
+    retry_keys: list[str] = []
+    for key, candidates in pending.items():
+        source = candidates[0]
+        if _asset_ready(assets, source):
+            chosen_source[key] = source
+            continue
+        rest = candidates[1:]
+        if rest:
+            retry_urls.extend(rest)
+            pending[key] = rest
+            retry_keys.append(key)
+        else:
+            chosen_source[key] = ""
+    if retry_urls:
+        extra = await _prepare_assets(retry_urls, inline=inline)
+        assets = _merge_prepared_assets(assets, extra)
+        for key in retry_keys:
+            chosen_source[key] = next((url for url in pending[key] if _asset_ready(assets, url)), "")
+    mapped = {key: _mapped_asset(assets, source) for key, source in chosen_source.items()}
+    return assets, mapped, chosen_source
 
 
 async def _portrait_layout(view: OperatorView, content: bytes) -> PortraitLayout:
@@ -2780,7 +2909,16 @@ def optimize_png_container(content: bytes) -> bytes:
 
 
 def skill_cards(skills: Iterable[SkillView], icons: dict[str, str], term_styles: dict[str, TermStyleView], term_icons: dict[str, str]) -> str:
-    cards = [skill_card(skill, index + 1, icons.get(skill.icon_id, ""), term_styles, term_icons) for index, skill in enumerate(skills)]
+    cards = [
+        skill_card(
+            skill,
+            index + 1,
+            icons.get(skill.icon_id, "") or icons.get(skill.skill_id, ""),
+            term_styles,
+            term_icons,
+        )
+        for index, skill in enumerate(skills)
+    ]
     if not cards:
         return '<div class="skill-card"><div class="skill-name">暂无技能数据</div></div>'
     return "".join(cards[:4])

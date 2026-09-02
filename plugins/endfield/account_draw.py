@@ -425,7 +425,7 @@ async def _prepare_assets(urls: Iterable[Any], *, inline: bool) -> _PreparedAsse
         unique_urls,
         namespace=REMOTE_ASSET_NAMESPACE,
         timeout_seconds=12.0,
-        max_bytes=16 * 1024 * 1024,
+        max_bytes=24 * 1024 * 1024,
         log_prefix="[endfield]",
     )
     resources = fetched[0] if isinstance(fetched, tuple) else fetched

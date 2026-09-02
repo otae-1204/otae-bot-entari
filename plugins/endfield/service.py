@@ -19,6 +19,12 @@ from .akedata_client import (
     game_version_label,
     pick_previous_game_version,
 )
+from .asset_urls import (
+    apply_operator_asset_donor,
+    apply_weapon_asset_donor,
+    operator_needs_asset_donor,
+    weapon_needs_asset_donor,
+)
 from .commands import (
     AMBIGUITY_MARGIN,
     CLEAR_SCORE,
@@ -159,6 +165,7 @@ class EndfieldService:
         self.client = client
 
     async def get_operator_view(self, query: str) -> OperatorView | None:
+        primary: OperatorView | None = None
         for source in source_order("operator"):
             try:
                 if source == "fz":
@@ -170,8 +177,12 @@ class EndfieldService:
             except (WarfarinAPIError, ValueError, KeyError, TypeError):
                 continue
             if view is not None:
-                return view
-        return None
+                primary = view
+                break
+        if primary is None:
+            return None
+        await self._supplement_operator_assets(primary, query)
+        return primary
 
     async def get_operator_view_from_warfarin(self, query: str) -> OperatorView | None:
         query = _strip_title_prefix(query, "干员/")
@@ -186,9 +197,13 @@ class EndfieldService:
         if not title:
             return None
         raw, richtext = await _fz_article_and_richtext(self.client, title)
-        return build_fz_operator_view(raw, richtext)
+        view = build_fz_operator_view(raw, richtext)
+        if not view.operator_id:
+            view.operator_id = await self._lookup_fz_operator_id(view.name)
+        return view
 
     async def get_weapon_view(self, query: str) -> WeaponView | None:
+        primary: WeaponView | None = None
         for source in source_order("weapon"):
             try:
                 if source == "fz":
@@ -200,8 +215,12 @@ class EndfieldService:
             except (WarfarinAPIError, ValueError, KeyError, TypeError):
                 continue
             if view is not None:
-                return view
-        return None
+                primary = view
+                break
+        if primary is None:
+            return None
+        await self._supplement_weapon_assets(primary, query)
+        return primary
 
     async def get_weapon_view_from_fz(self, query: str) -> WeaponView | None:
         title = await self.find_weapon_title(query)
@@ -210,6 +229,8 @@ class EndfieldService:
         raw, richtext = await _fz_article_and_richtext(self.client, title)
         view = build_weapon_view(raw, richtext)
         view.operator_names = await self.find_weapon_operator_names(view)
+        if not view.weapon_id:
+            view.weapon_id = await self._lookup_fz_weapon_id(view.name)
         return view
 
     async def get_weapon_view_from_warfarin(self, query: str) -> WeaponView | None:
@@ -270,7 +291,7 @@ class EndfieldService:
         growth_result = raw_results[-1]
         operator_growth = growth_result if isinstance(growth_result, dict) else {}
         equipment_raws = [(raw, equipment[index][1], equipment[index][2]) for index, raw in enumerate(raws[2:])]
-        return build_fz_loadout_view(
+        view = build_fz_loadout_view(
             raws[0],
             raws[1],
             equipment_raws,
@@ -282,6 +303,11 @@ class EndfieldService:
             richtext=richtext,
             operator_growth=operator_growth,
         )
+        if not view.operator_id:
+            view.operator_id = await self._lookup_fz_operator_id(view.operator_name)
+        if not view.weapon_id:
+            view.weapon_id = await self._lookup_fz_weapon_id(view.weapon_name)
+        return view
 
     async def _get_loadout_operator_growth(self, operator_title: str) -> dict[str, Any]:
         name = _strip_title_prefix(operator_title, "干员/")
@@ -762,6 +788,59 @@ class EndfieldService:
         data = await self.client.weapons()
         return _best_slug_match(query, data.get("data") or [])
 
+    async def _supplement_operator_assets(self, view: OperatorView, query: str) -> None:
+        if not view.operator_id:
+            view.operator_id = await self._lookup_fz_operator_id(view.name)
+        if not operator_needs_asset_donor(view):
+            return
+        try:
+            donor = await self.get_operator_view_from_warfarin(view.name or query)
+        except (WarfarinAPIError, ValueError, KeyError, TypeError):
+            return
+        if donor is not None:
+            apply_operator_asset_donor(view, donor)
+
+    async def _supplement_weapon_assets(self, view: WeaponView, query: str) -> None:
+        if not view.weapon_id:
+            view.weapon_id = await self._lookup_fz_weapon_id(view.name)
+        if not weapon_needs_asset_donor(view):
+            return
+        try:
+            donor = await self.get_weapon_view_from_warfarin(view.name or query)
+        except (WarfarinAPIError, ValueError, KeyError, TypeError):
+            return
+        if donor is not None:
+            apply_weapon_asset_donor(view, donor)
+
+    async def _lookup_fz_operator_id(self, name: str) -> str:
+        name = clean_text(name)
+        if not name:
+            return ""
+        try:
+            catalog = build_fz_operator_catalog_view(await self.client.fz_article_by_title("干员"))
+        except (WarfarinAPIError, ValueError, KeyError, TypeError):
+            return ""
+        for element in catalog.elements:
+            for profession in element.professions:
+                for item in profession.items:
+                    if item.name == name or item.english_name == name:
+                        return item.operator_id
+        return ""
+
+    async def _lookup_fz_weapon_id(self, name: str) -> str:
+        name = clean_text(name)
+        if not name:
+            return ""
+        try:
+            catalog = build_fz_weapon_catalog_view(await self.client.fz_article_by_title("武器"))
+        except (WarfarinAPIError, ValueError, KeyError, TypeError):
+            return ""
+        for group in catalog.groups:
+            for item in group.items:
+                if item.name == name or item.english_name == name:
+                    return item.weapon_id
+        return ""
+
 
 async def _fz_article_and_richtext(client: WarfarinClient, title: str) -> tuple[dict[str, Any], dict[str, Any]]:
     article_result, richtext_result = await asyncio.gather(
@@ -864,7 +943,11 @@ def build_fz_operator_view(raw: dict[str, Any], richtext: dict[str, Any] | None 
     return OperatorView(
         name=name,
         slug=title or name,
-        operator_id=str(_first_value(hero, "id", "charId", "operatorId") or ""),
+        operator_id=str(
+            _first_value(hero, "id", "charId", "operatorId")
+            or ((hero.get("meta") or {}) if isinstance(hero.get("meta"), dict) else {}).get("charId")
+            or ""
+        ),
         english_name=_first_text(hero, "nameEn", "englishName", "engName"),
         rarity=rarity,
         profession=_first_text(hero, "profession", "class", "job") or "未知职业",
@@ -950,6 +1033,7 @@ def build_fz_equipment_view(raw: dict[str, Any], richtext: dict[str, Any] | None
                 name=piece_name.split("/", 1)[-1],
                 slot_type=_first_text(piece, "slotType", "partType") or "装备",
                 icon_url=_fz_asset_raw_url(_first_text(piece, "iconUrl", "icon")),
+                equipment_id=piece_id,
             )
         )
     if not has_suit_effect:
@@ -1188,6 +1272,7 @@ def build_fz_loadout_view(
                 slot_type=_first_text(hero, "slotType", "partType") or "装备",
                 enhance_levels=forge_levels,
                 icon_url=_fz_asset_raw_url(_first_text(hero, "iconUrl", "icon")),
+                equipment_id=str(suit.get("selfEquipId") or _first_value(hero, "id", "equipId") or ""),
                 suit_name=suit_name,
                 stats=equipment_stats,
             )
@@ -1294,6 +1379,11 @@ def build_fz_loadout_view(
         weapon_type=weapon_type,
         operator_icon_url=_fz_asset_raw_url(_first_text(operator_hero, "iconUrl", "avatarUrl", "icon")),
         weapon_icon_url=_fz_asset_raw_url(_first_text(weapon_hero, "iconUrl", "icon")),
+        operator_id=str(_first_value(operator_hero, "id", "charId", "operatorId") or ""),
+        weapon_id=str(
+            _first_value(weapon_hero, "id", "weaponId")
+            or _fz_weapon_id(_unwrap_fz_list(weapon_attrs.get("skills"), "skills", "items", "list"))
+        ),
         equipment=equipment_views,
         primary_stats=primary_stats,
         ability_stats=ability_stats,
