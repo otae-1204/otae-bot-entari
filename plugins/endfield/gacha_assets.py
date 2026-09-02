@@ -11,9 +11,10 @@ from typing import Iterable
 
 from PIL import Image
 
-from utils.http_client import fetch_many
+from utils.http_client import fetch_many_resilient
 
 from .account_store import GachaRecord
+from .asset_urls import item_icon_urls, operator_icon_urls, operator_portrait_urls, unique_urls
 from .service import EndfieldService
 
 
@@ -23,7 +24,9 @@ CATALOG_TTL_SECONDS = 24 * 60 * 60
 IMAGE_NAMESPACE = "endfield-gacha-images"
 POOL_ARTICLE_PREFIX = "卡池/"
 KEEPSAKE_ARTICLE_PREFIX = "物品/干员信物/"
-WARFARIN_STATIC_BASE = "https://static.warfarin.wiki/v4"
+IMAGE_FETCH_TIMEOUT_SECONDS = 20.0
+IMAGE_FETCH_ATTEMPTS = 3
+IMAGE_FETCH_MAX_BYTES = 24 * 1024 * 1024
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,13 +78,14 @@ class EndfieldGachaAssetCache:
         download_all: bool = False,
     ) -> dict[str, GachaItemMetadata]:
         record_list = list(records)
-        catalog = await self._load_catalog()
         requested_ids = {record.item_id for record in record_list if record.item_id}
+        catalog = await self._load_catalog(required_ids=requested_ids)
+        catalog = _merge_records_into_catalog(catalog, record_list)
         selected = {item_id: catalog[item_id] for item_id in requested_ids if item_id in catalog}
         image_items = [
             item
             for item in selected.values()
-            if item.icon_url and (download_all or item.rarity >= 6)
+            if download_all or item.rarity >= 6
         ]
         cached_paths = await self._cache_images(image_items)
         return {
@@ -99,8 +103,15 @@ class EndfieldGachaAssetCache:
             for item in catalog.values()
             if _normalized_name(item.name) in requested
         }
+        if requested - set(selected):
+            catalog = await self._load_catalog(force=True)
+            selected = {
+                _normalized_name(item.name): item
+                for item in catalog.values()
+                if _normalized_name(item.name) in requested
+            }
         cached_paths = await self._cache_images(
-            [item for item in selected.values() if item.icon_url and item.rarity >= 6]
+            [item for item in selected.values() if item.rarity >= 6]
         )
         return {
             name: replace(item, icon_path=cached_paths.get(item.item_id, self._existing_icon_path(item.item_id)))
@@ -111,27 +122,32 @@ class EndfieldGachaAssetCache:
         self,
         pool_rules: dict[str, GachaPoolRule],
     ) -> dict[str, GachaItemMetadata]:
-        catalog = await self._load_catalog()
+        catalog = await self._load_catalog(required_ids=(
+            item_id
+            for rule in pool_rules.values()
+            for item_id in rule.up_item_ids
+        ))
         operator_ids = tuple(dict.fromkeys(
             item_id
             for rule in pool_rules.values()
             for item_id in rule.up_item_ids
-            if item_id in catalog and catalog[item_id].item_type == "角色"
+            if item_id.startswith("chr_")
+            or (item_id in catalog and catalog[item_id].item_type == "角色")
         ))
         result: dict[str, GachaItemMetadata] = {}
         requests: list[tuple[str, str, GachaItemMetadata]] = []
         for operator_id in operator_ids:
-            operator = catalog[operator_id]
+            operator = catalog.get(operator_id)
             keepsake_id = f"item_charpotentialup_{operator_id}"
             fallback = GachaItemMetadata(
                 keepsake_id,
-                f"{operator.name}的信物",
+                f"{operator.name}的信物" if operator else "干员信物",
                 6,
                 "信物",
                 icon_path=self._existing_icon_path(keepsake_id),
             )
             result[operator_id] = fallback
-            if not fallback.icon_path:
+            if not fallback.icon_path and operator:
                 requests.append((operator_id, f"{KEEPSAKE_ARTICLE_PREFIX}{fallback.name}", fallback))
         payloads = await asyncio.gather(
             *(self.service.client.fz_article_by_title(title) for _, title, _ in requests),
@@ -141,7 +157,7 @@ class EndfieldGachaAssetCache:
             if isinstance(payload, dict):
                 result[operator_id] = extract_keepsake_metadata(payload, fallback)
         cached_paths = await self._cache_images([
-            item for item in result.values() if item.icon_url and not item.icon_path
+            item for item in result.values() if not item.icon_path
         ])
         prepared = {
             operator_id: replace(
@@ -163,36 +179,45 @@ class EndfieldGachaAssetCache:
         self,
         pool_rules: dict[str, GachaPoolRule],
     ) -> dict[str, tuple[GachaPoolBanner, ...]]:
-        catalog = await self._load_catalog()
         requested_ids = tuple(dict.fromkeys(
             item_id
             for rule in pool_rules.values()
             for item_id in rule.up_item_ids
-            if item_id in catalog
+            if item_id
         ))
+        catalog = await self._load_catalog(required_ids=requested_ids)
         cache_items: list[GachaItemMetadata] = []
         cache_ids: dict[str, str] = {}
+        banner_candidates: dict[str, tuple[str, ...]] = {}
+        resolved_items: dict[str, GachaItemMetadata] = {}
         for item_id in requested_ids:
-            item = catalog[item_id]
-            if item.item_type == "角色":
+            item = catalog.get(item_id) or GachaItemMetadata(
+                item_id,
+                item_id,
+                6,
+                "角色" if item_id.startswith("chr_") else "武器",
+            )
+            resolved_items[item_id] = item
+            if item.item_type == "角色" or item_id.startswith("chr_"):
                 cache_id = f"banner_{item_id}"
-                cache_items.append(replace(
-                    item,
-                    item_id=cache_id,
-                    icon_url=f"{WARFARIN_STATIC_BASE}/characterportrait/{item_id}.webp",
-                ))
+                cache_items.append(replace(item, item_id=cache_id, item_type="角色"))
+                banner_candidates[cache_id] = operator_portrait_urls(item_id)
             else:
                 cache_id = item_id
                 cache_items.append(item)
+                banner_candidates[cache_id] = item_icon_urls(item_id, item.icon_url)
             cache_ids[item_id] = cache_id
-        cached_paths = await self._cache_images([
-            item for item in cache_items if item.icon_url
-        ])
+        cached_paths = await self._cache_images(cache_items, candidates=banner_candidates)
         banners_by_item: dict[str, GachaPoolBanner] = {}
         for item_id in requested_ids:
-            item = catalog[item_id]
-            image_path = cached_paths.get(cache_ids[item_id], self._existing_icon_path(item_id))
-            if item.item_type == "角色" and image_path:
+            item = resolved_items[item_id]
+            cache_id = cache_ids[item_id]
+            image_path = (
+                cached_paths.get(cache_id)
+                or self._existing_icon_path(cache_id)
+                or self._existing_icon_path(item_id)
+            )
+            if (item.item_type == "角色" or item_id.startswith("chr_")) and image_path:
                 image_path = self._crop_character_banner(item_id, image_path)
             banners_by_item[item_id] = GachaPoolBanner(
                 item_id,
@@ -245,10 +270,17 @@ class EndfieldGachaAssetCache:
                 rules.update(extract_gacha_pool_rules(payload))
         return rules
 
-    async def _load_catalog(self) -> dict[str, GachaItemMetadata]:
+    async def _load_catalog(
+        self,
+        *,
+        required_ids: Iterable[str] = (),
+        force: bool = False,
+    ) -> dict[str, GachaItemMetadata]:
+        wanted = {item_id for item_id in required_ids if item_id}
         async with self._catalog_lock:
             cached = self._read_catalog()
-            if cached and self._catalog_is_fresh():
+            missing = [item_id for item_id in wanted if item_id not in cached]
+            if cached and self._catalog_is_fresh() and not missing and not force:
                 return cached
             try:
                 operators, weapons = await asyncio.gather(
@@ -329,7 +361,12 @@ class EndfieldGachaAssetCache:
         temporary.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
         temporary.replace(self.catalog_path)
 
-    async def _cache_images(self, items: list[GachaItemMetadata]) -> dict[str, str]:
+    async def _cache_images(
+        self,
+        items: list[GachaItemMetadata],
+        *,
+        candidates: dict[str, tuple[str, ...]] | None = None,
+    ) -> dict[str, str]:
         result = {
             item.item_id: path
             for item in items
@@ -338,26 +375,67 @@ class EndfieldGachaAssetCache:
         missing = [item for item in items if item.item_id not in result]
         if not missing:
             return result
-        resources = await fetch_many(
-            (item.icon_url for item in missing),
-            namespace=IMAGE_NAMESPACE,
-            timeout_seconds=12.0,
-        )
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        pending: dict[str, tuple[GachaItemMetadata, tuple[str, ...]]] = {}
+        first_batch: list[str] = []
         for item in missing:
-            resource = resources.get(item.icon_url)
-            if resource is None:
+            urls = unique_urls(*(candidates[item.item_id] if candidates and item.item_id in candidates else _gacha_icon_urls(item)))
+            if not urls:
                 continue
-            suffix = _image_suffix(resource.content_type, item.icon_url)
-            path = self.cache_dir / f"{_safe_item_id(item.item_id)}{suffix}"
-            try:
-                temporary = path.with_suffix(path.suffix + ".tmp")
-                temporary.write_bytes(resource.content)
-                temporary.replace(path)
-            except OSError:
+            pending[item.item_id] = (item, urls)
+            first_batch.append(urls[0])
+        resources = await self._fetch_image_urls(first_batch)
+        retry_urls: list[str] = []
+        retry_ids: list[str] = []
+        for item_id, (item, urls) in pending.items():
+            path = self._store_resource(item_id, resources.get(urls[0]), urls[0])
+            if path:
+                result[item_id] = path
                 continue
-            result[item.item_id] = str(path.resolve())
+            rest = urls[1:]
+            if rest:
+                retry_urls.extend(rest)
+                pending[item_id] = (item, rest)
+                retry_ids.append(item_id)
+        if retry_urls:
+            extra = await self._fetch_image_urls(retry_urls)
+            resources.update(extra)
+            for item_id in retry_ids:
+                _item, urls = pending[item_id]
+                for url in urls:
+                    path = self._store_resource(item_id, resources.get(url), url)
+                    if path:
+                        result[item_id] = path
+                        break
         return result
+
+    async def _fetch_image_urls(self, urls: Iterable[str]) -> dict[str, object]:
+        fetched = await fetch_many_resilient(
+            urls,
+            namespace=IMAGE_NAMESPACE,
+            timeout_seconds=IMAGE_FETCH_TIMEOUT_SECONDS,
+            attempts=IMAGE_FETCH_ATTEMPTS,
+            max_bytes=IMAGE_FETCH_MAX_BYTES,
+            log_prefix="[endfield-gacha]",
+        )
+        if isinstance(fetched, tuple):
+            resources, _failures = fetched
+        else:
+            resources = fetched
+        return dict(resources)
+
+    def _store_resource(self, item_id: str, resource, url: str) -> str:
+        if resource is None:
+            return ""
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        suffix = _image_suffix(getattr(resource, "content_type", ""), url)
+        path = self.cache_dir / f"{_safe_item_id(item_id)}{suffix}"
+        try:
+            temporary = path.with_suffix(path.suffix + ".tmp")
+            temporary.write_bytes(resource.content)
+            temporary.replace(path)
+        except OSError:
+            return ""
+        return str(path.resolve())
 
     def _existing_icon_path(self, item_id: str) -> str:
         stem = _safe_item_id(item_id)
@@ -433,6 +511,30 @@ def apply_gacha_metadata(
                 item_type=item.item_type or record.item_type,
                 weapon_type=item.weapon_type or record.weapon_type,
             )
+        )
+    return result
+
+
+def _gacha_icon_urls(item: GachaItemMetadata) -> tuple[str, ...]:
+    if item.item_type == "角色" or str(item.item_id).startswith("chr_"):
+        return operator_icon_urls(item.item_id, item.icon_url)
+    return item_icon_urls(item.item_id, item.icon_url)
+
+
+def _merge_records_into_catalog(
+    catalog: dict[str, GachaItemMetadata],
+    records: Iterable[GachaRecord],
+) -> dict[str, GachaItemMetadata]:
+    result = dict(catalog)
+    for record in records:
+        if not record.item_id or record.item_id in result:
+            continue
+        result[record.item_id] = GachaItemMetadata(
+            record.item_id,
+            record.item_name,
+            record.rarity or 0,
+            record.item_type or ("角色" if record.item_id.startswith("chr_") else "武器"),
+            weapon_type=record.weapon_type or "",
         )
     return result
 

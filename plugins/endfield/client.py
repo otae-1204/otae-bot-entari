@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import httpx
@@ -68,7 +69,11 @@ class WarfarinClient:
         return await self._get_json(f"{self.FZ_BASE_URL}/game-richtext")
 
     async def akedata_manifest(self) -> dict[str, Any]:
-        return await self._get_json(f"{self.AKEDATA_BASE_URL}/manifest.json")
+        return await self._get_json(
+            f"{self.AKEDATA_BASE_URL}/manifest.json",
+            params={"t": str(int(time.time() // 60))},
+            ttl_seconds=60.0,
+        )
 
     async def akedata_asset_index(self) -> dict[str, Any]:
         data = await self._get_json(
@@ -114,8 +119,14 @@ class WarfarinClient:
         *,
         params: dict[str, Any] | None = None,
         max_bytes: int = 10 * 1024 * 1024,
+        ttl_seconds: float | None = None,
     ) -> dict[str, Any]:
-        data = await self._get_json_value(url, params=params, max_bytes=max_bytes)
+        data = await self._get_json_value(
+            url,
+            params=params,
+            max_bytes=max_bytes,
+            ttl_seconds=ttl_seconds,
+        )
         if not isinstance(data, dict):
             if url.startswith(self.FZ_BASE_URL):
                 source = "FZ Wiki"
@@ -132,6 +143,7 @@ class WarfarinClient:
         *,
         params: dict[str, Any] | None = None,
         max_bytes: int = 10 * 1024 * 1024,
+        ttl_seconds: float | None = None,
     ) -> Any:
         if url.startswith(self.FZ_BASE_URL):
             source = "FZ Wiki"
@@ -139,15 +151,17 @@ class WarfarinClient:
             source = "AkeData"
         else:
             source = "Warfarin Wiki"
+        fetch_kwargs: dict[str, Any] = {
+            "namespace": API_CACHE_NAMESPACE,
+            "params": params,
+            "headers": self._headers_for(url),
+            "timeout_seconds": self.timeout,
+            "max_bytes": max_bytes,
+        }
+        if ttl_seconds is not None:
+            fetch_kwargs["ttl_seconds"] = ttl_seconds
         try:
-            data = await fetch_json(
-                url,
-                namespace=API_CACHE_NAMESPACE,
-                params=params,
-                headers=self.headers,
-                timeout_seconds=self.timeout,
-                max_bytes=max_bytes,
-            )
+            data = await fetch_json(url, **fetch_kwargs)
         except httpx.TimeoutException as exc:
             raise WarfarinAPIError(f"{source} 请求超时") from exc
         except httpx.HTTPStatusError as exc:
@@ -157,3 +171,11 @@ class WarfarinClient:
         except httpx.HTTPError as exc:
             raise WarfarinAPIError(f"{source} 请求失败: {exc}") from exc
         return data
+
+    def _headers_for(self, url: str) -> dict[str, str]:
+        headers = dict(self.headers)
+        if url.startswith(self.AKEDATA_BASE_URL):
+            headers["Referer"] = "https://cf.akedata.top/"
+            headers["Cache-Control"] = "no-cache"
+            headers["Pragma"] = "no-cache"
+        return headers

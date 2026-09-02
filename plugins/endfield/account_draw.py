@@ -16,6 +16,7 @@ from utils.temp_files import schedule_temp_file_cleanup
 
 from .account_models import AccountUiPayload, JsonObject
 from .account_i18n import localized_text, semantic_label
+from .asset_urls import sprite_png
 
 
 CANVAS_WIDTH = 1920
@@ -24,7 +25,6 @@ PROFILE_CANVAS_WIDTH = 1700
 PROFILE_CANVAS_HEIGHT = 998
 REMOTE_ASSET_NAMESPACE = "endfield-account-ui-assets"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-WARFARIN_STATIC_BASE = "https://static.warfarin.wiki/v4"
 FONT_ASSETS = {
     "cn": (
         "https://endfield-account.local/fonts/HarmonyOS-Sans-SC-Regular.ttf",
@@ -762,14 +762,14 @@ def _profession_icon_url(key: str) -> str:
     profession_id = PROFESSION_ICON_IDS.get(key)
     if profession_id is None:
         return ""
-    return f"{WARFARIN_STATIC_BASE}/charprofessionicon/icon_profession_{profession_id}_s.webp"
+    return sprite_png("charprofessionicon", f"icon_profession_{profession_id}_s")
 
 
 def _property_icon_url(key: str) -> str:
     icon_name = PROPERTY_ICON_NAMES.get(key)
     if not icon_name:
         return ""
-    return f"{WARFARIN_STATIC_BASE}/elementicon/{icon_name}.webp"
+    return sprite_png("elementicon", icon_name)
 
 
 def _icon_img(src: str, class_name: str) -> str:

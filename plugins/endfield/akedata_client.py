@@ -19,6 +19,7 @@ achv_id 与森空岛 ``achievementData.id`` 经 md5 一一对应（见 ``docs/sk
 from __future__ import annotations
 
 from typing import Any
+import time
 
 from utils.http_client import fetch_json
 
@@ -55,7 +56,7 @@ async def _get(
 
 async def fetch_akedata_manifest() -> dict[str, Any]:
     """``manifest.json`` → ``{latest, versions:[{id, tableCfgPath, ...}], sharedRevision}``。"""
-    manifest = await _get("/manifest.json")
+    manifest = await _get(f"/manifest.json?t={int(time.time() // 60)}", ttl_seconds=60.0)
     if not isinstance(manifest, dict) or not manifest.get("latest"):
         raise RuntimeError("AKEData manifest 结构异常")
     return manifest

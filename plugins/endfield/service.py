@@ -20,10 +20,20 @@ from .akedata_client import (
     pick_previous_game_version,
 )
 from .asset_urls import (
+    apply_akedata_growth_icons,
     apply_operator_asset_donor,
     apply_weapon_asset_donor,
+    element_icon_urls,
+    item_icon_urls,
+    operator_icon_urls,
     operator_needs_asset_donor,
+    operator_portrait_urls,
+    operator_round_icon_urls,
+    profession_icon_urls,
+    skill_icon_urls,
+    static_sprite_url,
     weapon_needs_asset_donor,
+    weapon_type_icon_urls,
 )
 from .commands import (
     AMBIGUITY_MARGIN,
@@ -84,7 +94,6 @@ OPERATOR_PROFESSION_ORDER = {
 WEAPON_TYPE_ORDER = {
     name: index for index, name in enumerate(("单手剑", "双手剑", "施术单元", "长柄武器", "手铳"))
 }
-STATIC_BASE = "https://static.warfarin.wiki/v4"
 _MIN_AKEDATA_MEDAL_COMPLETENESS = 0.8
 FZ_ASSET_HOST = "assets.fz.wiki"
 WEAPON_OPTIONS = ("单手剑", "双手剑", "施术单元", "长枪", "手铳")
@@ -163,9 +172,12 @@ WARFARIN_PERCENT_METRIC_KEYS = {
 class EndfieldService:
     def __init__(self, client: WarfarinClient):
         self.client = client
+        self._char_growth_table: dict[str, Any] | None = None
+        self._char_growth_version = ""
 
     async def get_operator_view(self, query: str) -> OperatorView | None:
         primary: OperatorView | None = None
+        used_source = ""
         for source in source_order("operator"):
             try:
                 if source == "fz":
@@ -178,10 +190,12 @@ class EndfieldService:
                 continue
             if view is not None:
                 primary = view
+                used_source = source
                 break
         if primary is None:
             return None
-        await self._supplement_operator_assets(primary, query)
+        if used_source != "fz":
+            await self._supplement_operator_assets(primary, query)
         return primary
 
     async def get_operator_view_from_warfarin(self, query: str) -> OperatorView | None:
@@ -200,6 +214,7 @@ class EndfieldService:
         view = build_fz_operator_view(raw, richtext)
         if not view.operator_id:
             view.operator_id = await self._lookup_fz_operator_id(view.name)
+        await self._supplement_operator_assets(view, query)
         return view
 
     async def get_weapon_view(self, query: str) -> WeaponView | None:
@@ -791,6 +806,9 @@ class EndfieldService:
     async def _supplement_operator_assets(self, view: OperatorView, query: str) -> None:
         if not view.operator_id:
             view.operator_id = await self._lookup_fz_operator_id(view.name)
+        growth = await self._akedata_char_growth(view.operator_id)
+        if growth:
+            apply_akedata_growth_icons(view, growth)
         if not operator_needs_asset_donor(view):
             return
         try:
@@ -799,6 +817,43 @@ class EndfieldService:
             return
         if donor is not None:
             apply_operator_asset_donor(view, donor)
+
+    async def _akedata_char_growth(self, operator_id: str) -> dict[str, Any]:
+        operator_id = str(operator_id or "").strip()
+        if not operator_id:
+            return {}
+        table = await self._load_char_growth_table()
+        row = table.get(operator_id)
+        return row if isinstance(row, dict) else {}
+
+    async def _load_char_growth_table(self) -> dict[str, Any]:
+        try:
+            manifest = await self.client.akedata_manifest()
+            latest = str(manifest.get("latest") or "")
+            path = ""
+            for entry in manifest.get("versions") or []:
+                if isinstance(entry, dict) and str(entry.get("id") or "") == latest:
+                    path = str(entry.get("tableCfgPath") or "").strip("/")
+                    break
+        except (WarfarinAPIError, ValueError, TypeError, KeyError):
+            return self._char_growth_table or {}
+        if (
+            latest
+            and latest == self._char_growth_version
+            and isinstance(self._char_growth_table, dict)
+        ):
+            return self._char_growth_table
+        table: dict[str, Any] = {}
+        try:
+            if path:
+                loaded = await self.client.akedata_table(path, "CharGrowthTable")
+                if isinstance(loaded, dict):
+                    table = loaded
+        except (WarfarinAPIError, ValueError, TypeError, KeyError):
+            return self._char_growth_table or {}
+        self._char_growth_table = table
+        self._char_growth_version = latest
+        return table
 
     async def _supplement_weapon_assets(self, view: WeaponView, query: str) -> None:
         if not view.weapon_id:
@@ -907,9 +962,9 @@ def build_operator_view(raw: dict[str, Any]) -> OperatorView:
         weapon_type=_weapon_name(character.get("weaponType"), item_table.get("desc")),
         species=_extract_species(character),
         tags=tags[:4],
-        icon_url=f"{STATIC_BASE}/charicon/icon_{operator_id}.webp" if operator_id else "",
-        round_icon_url=f"{STATIC_BASE}/charroundicon/icon_round_{operator_id}.webp" if operator_id else "",
-        portrait_url=f"{STATIC_BASE}/characterportrait/{operator_id}.webp" if operator_id else "",
+        icon_url=(operator_icon_urls(operator_id) or ("",))[0],
+        round_icon_url=(operator_round_icon_urls(operator_id) or ("",))[0],
+        portrait_url=(operator_portrait_urls(operator_id) or ("",))[0],
         skills=_build_skills(data.get("skillPatchTable") or {}, growth.get("skillGroupMap") or {}),
         talents=_build_talents(
             data.get("potentialTalentEffectTable") or {},
@@ -2373,8 +2428,9 @@ def build_fz_operator_catalog_view(
             continue
         if profession_filter and profession != profession_filter:
             continue
-        element_icon_url = _fz_asset_raw_url(_first_text(entry, "elementIconUrl"))
-        profession_icon_url = _fz_asset_raw_url(_first_text(entry, "professionIconUrl"))
+        element_icon_url = (element_icon_urls(element) or ("",))[0]
+        profession_icon_url = (profession_icon_urls(profession) or ("",))[0]
+        weapon_type_icon_url = (weapon_type_icon_urls(_first_text(entry, "weaponType")) or ("",))[0]
         item = OperatorCatalogItemView(
             name=name,
             title=title,
@@ -2388,7 +2444,7 @@ def build_fz_operator_catalog_view(
             icon_url=_fz_asset_raw_url(_first_text(entry, "iconUrl", "icon")),
             element_icon_url=element_icon_url,
             profession_icon_url=profession_icon_url,
-            weapon_type_icon_url=_fz_asset_raw_url(_first_text(entry, "weaponTypeIconUrl")),
+            weapon_type_icon_url=weapon_type_icon_url,
         )
         grouped.setdefault(element, {}).setdefault(profession, []).append(item)
         element_meta.setdefault(element, (item.element_color, element_icon_url))
@@ -2447,7 +2503,7 @@ def build_fz_weapon_catalog_view(
             continue
         if weapon_type_filter and weapon_type != weapon_type_filter:
             continue
-        type_icon_url = _fz_asset_raw_url(_first_text(entry, "weaponTypeIconUrl"))
+        type_icon_url = (weapon_type_icon_urls(weapon_type) or ("",))[0]
         grouped.setdefault(weapon_type, []).append(
             WeaponCatalogItemView(
                 name=name,
@@ -3136,6 +3192,7 @@ def _map_fz_param_label(label: str) -> str:
         "所需终结技能量": "所需能量",
         "所需能量": "所需能量",
         "冷却": "冷却",
+        "冷却时间": "冷却",
         "技力消耗": "技力消耗",
         "获得终结技能量": "获得终结技能量",
         "持续时间": "持续时间",
@@ -3161,7 +3218,7 @@ def _map_fz_skill_values(values: dict[str, Any]) -> dict[str, str]:
     add("失衡值", "display_poise", "poise")
     add("持续时间", "duration")
     add("技力", "usp")
-    add("冷却", "cooldown", "CoolDown")
+    add("冷却", "cooldown", "CoolDown", "coolDown")
     return result
 
 
@@ -3483,7 +3540,8 @@ def _warfarin_rich_text_styles(raw: dict[str, Any]) -> dict[str, dict]:
 
 
 def _warfarin_weapon_icon_url(icon_id: str) -> str:
-    return f"{STATIC_BASE}/itemicon/{icon_id}.webp" if icon_id else ""
+    urls = item_icon_urls(icon_id)
+    return urls[0] if urls else ""
 
 
 def _fz_weapon_id(skills: list[dict[str, Any]]) -> str:
@@ -3543,14 +3601,7 @@ def clean_text(value: Any) -> str:
 
 
 def static_resource_url(path: str) -> str:
-    path = str(path or "").strip().replace("\\", "/")
-    if not path:
-        return ""
-    if path.startswith(("http://", "https://", "data:")):
-        return path
-    if path.lower().startswith("termicon/"):
-        return f"{STATIC_BASE}/termicon/{path.rsplit('/', 1)[-1].lower()}.webp"
-    return f"{STATIC_BASE}/{path}.webp"
+    return static_sprite_url(path)
 
 
 def _fz_asset_raw_url(url: Any) -> str:
@@ -3566,7 +3617,8 @@ def _fz_asset_raw_url(url: Any) -> str:
 
 
 def skill_icon_url(icon_id: str) -> str:
-    return f"{STATIC_BASE}/skillicon/{icon_id}.webp" if icon_id else ""
+    urls = skill_icon_urls(icon_id)
+    return urls[0] if urls else ""
 
 
 def _build_term_styles(refs: dict[str, Any]) -> dict[str, TermStyleView]:
@@ -4114,10 +4166,12 @@ def _potential_icon_url(potential_table: dict[str, Any], item: dict[str, Any]) -
     if item_ids:
         item_id = str(item_ids[0] or "")
         if item_id:
-            return f"{STATIC_BASE}/itemicon/{item_id}.webp"
+            urls = item_icon_urls(item_id)
+            return urls[0] if urls else ""
     first_item_id = str(potential_table.get("firstItemId") or "")
     if first_item_id:
-        return f"{STATIC_BASE}/itemicon/{first_item_id}.webp"
+        urls = item_icon_urls(first_item_id)
+        return urls[0] if urls else ""
     return ""
 
 

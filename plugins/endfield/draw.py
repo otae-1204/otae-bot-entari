@@ -63,12 +63,17 @@ from .gacha import (
 )
 from .account_i18n import server_label
 from .asset_urls import (
+    element_icon_urls,
     item_icon_urls,
     operator_icon_urls,
     operator_portrait_urls,
     operator_round_icon_urls,
+    profession_icon_urls,
     skill_icon_urls,
+    sprite_png,
+    term_icon_urls,
     unique_urls,
+    weapon_type_icon_urls,
 )
 from .skill_metrics import fz_metric_replaces_generic, is_generic_fz_metric
 
@@ -84,13 +89,13 @@ ASSET_DIR = Path(__file__).resolve().parents[2] / "assets" / "image" / "endfield
 REMOTE_ASSET_NAMESPACE = "endfield-assets"
 FALLBACK_TERM_STYLES = {
     "物理伤害": TermStyleView("物理伤害", "#e3c19a", ""),
-    "击飞": TermStyleView("击飞", "#e3c19a", "https://static.warfarin.wiki/v4/termicon/icon_term_ba_airborne.webp"),
-    "破防": TermStyleView("破防", "#e3c19a", "https://static.warfarin.wiki/v4/termicon/icon_term_ba_noguard.webp"),
+    "击飞": TermStyleView("击飞", "#e3c19a", sprite_png("termicon", "icon_term_ba_airborne")),
+    "破防": TermStyleView("破防", "#e3c19a", sprite_png("termicon", "icon_term_ba_noguard")),
     "物理异常": TermStyleView("物理异常", "#e3c19a", ""),
-    "猛击": TermStyleView("猛击", "#e3c19a", "https://static.warfarin.wiki/v4/termicon/icon_term_ba_crush.webp"),
-    "倒地": TermStyleView("倒地", "#e3c19a", "https://static.warfarin.wiki/v4/termicon/icon_term_ba_knockdown.webp"),
-    "物理脆弱": TermStyleView("物理脆弱", "#e3c19a", "https://static.warfarin.wiki/v4/termicon/icon_term_ba_physicalvul.webp"),
-    "碎甲": TermStyleView("碎甲", "#e3c19a", "https://static.warfarin.wiki/v4/termicon/icon_term_ba_fracture.webp"),
+    "猛击": TermStyleView("猛击", "#e3c19a", sprite_png("termicon", "icon_term_ba_crush")),
+    "倒地": TermStyleView("倒地", "#e3c19a", sprite_png("termicon", "icon_term_ba_knockdown")),
+    "物理脆弱": TermStyleView("物理脆弱", "#e3c19a", sprite_png("termicon", "icon_term_ba_physicalvul")),
+    "碎甲": TermStyleView("碎甲", "#e3c19a", sprite_png("termicon", "icon_term_ba_fracture")),
 }
 TEXT_ONLY_TERMS = {"消耗", "法术附着"}
 PLAIN_TEXT_TERMS = {"法术脆弱"}
@@ -1281,14 +1286,16 @@ async def _prepare_operator_card_html(view: OperatorView, *, inline: bool) -> Pr
     )
     groups: dict[str, tuple[str, ...]] = {"portrait": portrait_candidates}
     for skill in view.skills:
-        groups[f"skill:{skill.skill_id}"] = skill_icon_urls(skill.icon_id, skill.skill_id, *skill.icon_fallbacks)
+        groups[f"skill:{skill.skill_id}"] = skill_icon_urls(skill.icon_id, *skill.icon_fallbacks)
     for effect in view.talents:
-        groups[f"talent:{effect.effect_id}"] = unique_urls(effect.icon_url, *effect.icon_fallbacks)
+        groups[f"talent:{effect.effect_id}"] = skill_icon_urls(effect.icon_url, *effect.icon_fallbacks)
     term_styles = merged_term_styles(view)
     used_terms = _operator_terms_used(view, term_styles)
     for term, style in term_styles.items():
         if style.icon_url and term in used_terms:
-            groups[f"term:{term}"] = unique_urls(style.icon_url)
+            urls = term_icon_urls(style.icon_url)
+            if urls:
+                groups[f"term:{term}"] = urls
     assets, mapped, sources = await _resolve_asset_groups(groups, inline=inline)
     portrait_source = sources.get("portrait", "")
     skill_icons = {
@@ -1328,7 +1335,9 @@ async def _prepare_weapon_card_html(view: WeaponView, *, inline: bool) -> Prepar
         "weapon": item_icon_urls(view.weapon_id, view.icon_url),
     }
     for url in _weapon_rich_icon_urls_used(view):
-        groups[f"rich:{url}"] = unique_urls(url)
+        urls = term_icon_urls(url)
+        if urls:
+            groups[f"rich:{url}"] = urls
     assets, mapped, _sources = await _resolve_asset_groups(groups, inline=inline)
     rich_icons = {url: mapped.get(f"rich:{url}", "") for url in _weapon_rich_icon_urls_used(view) if url}
     width = weapon_card_width(view)
@@ -1356,7 +1365,9 @@ async def _prepare_equipment_card_html(view: EquipmentView, *, inline: bool) -> 
         groups[f"piece:{index}"] = item_icon_urls(piece.equipment_id, piece.icon_url)
     for key, style in view.term_styles.items():
         if style.icon_url and (key in used_text or style.term in used_text):
-            groups[f"term:{key}"] = unique_urls(style.icon_url)
+            urls = term_icon_urls(style.icon_url)
+            if urls:
+                groups[f"term:{key}"] = urls
     assets, mapped, _sources = await _resolve_asset_groups(groups, inline=inline)
     piece_icons = {}
     for index, piece in enumerate(view.suit_pieces):
@@ -1424,17 +1435,29 @@ async def _prepare_operator_catalog_card_html(
 ) -> PreparedCardHtml:
     groups: dict[str, tuple[str, ...]] = {}
     for element_index, element in enumerate(view.elements):
-        groups[f"element:{element_index}"] = unique_urls(element.icon_url)
+        groups[f"element:{element_index}"] = element_icon_urls(element.name, element.icon_url)
         for profession_index, profession in enumerate(element.professions):
-            groups[f"profession:{element_index}:{profession_index}"] = unique_urls(profession.icon_url)
+            groups[f"profession:{element_index}:{profession_index}"] = profession_icon_urls(
+                profession.name,
+                profession.icon_url,
+            )
             for item_index, item in enumerate(profession.items):
                 groups[f"op:{element_index}:{profession_index}:{item_index}"] = operator_icon_urls(
                     item.operator_id,
                     item.icon_url,
                 )
-                groups[f"op-element:{element_index}:{profession_index}:{item_index}"] = unique_urls(item.element_icon_url)
-                groups[f"op-profession:{element_index}:{profession_index}:{item_index}"] = unique_urls(item.profession_icon_url)
-                groups[f"op-weapon:{element_index}:{profession_index}:{item_index}"] = unique_urls(item.weapon_type_icon_url)
+                groups[f"op-element:{element_index}:{profession_index}:{item_index}"] = element_icon_urls(
+                    item.element,
+                    item.element_icon_url,
+                )
+                groups[f"op-profession:{element_index}:{profession_index}:{item_index}"] = profession_icon_urls(
+                    item.profession,
+                    item.profession_icon_url,
+                )
+                groups[f"op-weapon:{element_index}:{profession_index}:{item_index}"] = weapon_type_icon_urls(
+                    item.weapon_type,
+                    item.weapon_type_icon_url,
+                )
     assets, mapped, _sources = await _resolve_asset_groups(groups, inline=inline)
     icon_map = _alias_group_assets(groups, mapped)
     return PreparedCardHtml(_render_operator_catalog_html(view, icon_map), assets.resources, 1900)
@@ -1455,7 +1478,7 @@ async def _prepare_weapon_catalog_card_html(
 ) -> PreparedCardHtml:
     groups: dict[str, tuple[str, ...]] = {}
     for group_index, group in enumerate(view.groups):
-        groups[f"type:{group_index}"] = unique_urls(group.icon_url)
+        groups[f"type:{group_index}"] = weapon_type_icon_urls(group.name, group.icon_url)
         for item_index, item in enumerate(group.items):
             groups[f"weapon:{group_index}:{item_index}"] = item_icon_urls(item.weapon_id, item.icon_url)
     assets, mapped, _sources = await _resolve_asset_groups(groups, inline=inline)
@@ -3002,16 +3025,28 @@ def format_weapon_value(value: object, fmt: str | None = None) -> str:
 
 def render_weapon_rich_text(text: str, view: WeaponView, rich_icons: dict[str, str]) -> str:
     rendered = esc(text or "")
-    rendered = re.sub(
-        r"&lt;@([a-z0-9_.]+)&gt;(.*?)&lt;/&gt;",
-        lambda match: _render_weapon_style_tag(match, view),
-        rendered,
+    style_tag = re.compile(
+        r"&lt;@([A-Za-z0-9_.-]+)&gt;((?:(?!&lt;[@#]).)*?)&lt;/&gt;",
+        flags=re.DOTALL,
     )
-    rendered = re.sub(
-        r"&lt;#([a-z0-9_.]+)&gt;(.*?)&lt;/&gt;",
-        lambda match: _render_weapon_link_tag(match, view, rich_icons),
-        rendered,
+    link_tag = re.compile(
+        r"&lt;#([A-Za-z0-9_.-]+)&gt;((?:(?!&lt;[@#]).)*?)&lt;/&gt;",
+        flags=re.DOTALL,
     )
+    changed = True
+    while changed:
+        changed = False
+        updated = style_tag.sub(lambda match: _render_weapon_style_tag(match, view), rendered)
+        if updated != rendered:
+            rendered = updated
+            changed = True
+        updated = link_tag.sub(
+            lambda match: _render_weapon_link_tag(match, view, rich_icons),
+            rendered,
+        )
+        if updated != rendered:
+            rendered = updated
+            changed = True
     rendered = re.sub(r"\{([^{}:]+)(:[^{}]+)?\}", lambda match: f"<strong>{esc(match.group(1))}</strong>", rendered)
     return rendered.replace("\n", "<br>")
 
@@ -3236,7 +3271,7 @@ def _prioritize_combo_metric_rows(rows: list[tuple[str, list[str]]]) -> list[tup
 
 
 def _is_top_ultimate_metric(name: str) -> bool:
-    return name in {"所需能量", "所需终结技能量", "冷却"}
+    return name in {"所需能量", "所需终结技能量", "冷却", "冷却时间"}
 
 
 def _generic_metric_shadowed(name: str, specific_names: list[str]) -> bool:
@@ -3477,7 +3512,11 @@ def skill_meta(skill: SkillView) -> str:
     target = target or (skill.levels[-1] if skill.levels else None)
     if target:
         cost = _display_value(target.cost, target.values.get("所需能量"), target.values.get("所需终结技能量"))
-        cooldown = _display_value(target.cooldown, target.values.get("冷却"))
+        cooldown = _display_value(
+            target.cooldown,
+            target.values.get("冷却"),
+            target.values.get("冷却时间"),
+        )
     return f'<div class="skill-meta"><span>所需能量 <strong>{esc(cost)}</strong></span><span>冷却 <strong>{esc(cooldown)}</strong></span></div>'
 
 
@@ -3502,10 +3541,8 @@ def term_image(url: str, alt: str) -> str:
 
 
 def skill_icon_url(icon_id: str) -> str:
-    icon_id = str(icon_id or "").strip()
-    if icon_id.startswith(("http://", "https://", "data:")):
-        return icon_id
-    return f"https://static.warfarin.wiki/v4/skillicon/{icon_id}.webp" if icon_id else ""
+    urls = skill_icon_urls(icon_id)
+    return urls[0] if urls else ""
 
 
 def operator_level_labels(view: OperatorView) -> list[str]:
