@@ -12,6 +12,7 @@ from utils.entari_native import ChainMsg, SendDest, event_chain, event_plain_tex
 
 from configs.config import Config, _env
 from .ark import parse_ark_invite_segment
+from .text import entity_label, parse_decision, text_or_empty
 
 superuser = str(Config.SUPERUSERS[0]) if Config.SUPERUSERS else ""
 
@@ -180,10 +181,63 @@ def _iter_request_dicts(data: Any) -> list[dict]:
     return result
 
 
+def _origin_payload(event: Event) -> dict:
+    origin = getattr(event, "_origin", None)
+    data = getattr(origin, "_data", None)
+    return data if isinstance(data, dict) else {}
+
+
+def _apply_system_item(info: dict, item: dict) -> None:
+    group_name = text_or_empty(item.get("group_name"), item.get("groupName"))
+    if group_name:
+        info["group_name"] = group_name
+        info["guild_name"] = group_name
+    nick = text_or_empty(
+        item.get("invitor_nick"),
+        item.get("inviter_nick"),
+        item.get("requester_nick"),
+        item.get("nickname"),
+        item.get("user_name"),
+    )
+    if nick:
+        info["user_name"] = nick
+    uin = text_or_empty(
+        item.get("invitor_uin"),
+        item.get("inviter_uin"),
+        item.get("user_id"),
+        item.get("requester_uin"),
+    )
+    if uin and not info.get("inviter_uin"):
+        info["inviter_uin"] = uin
+
+
+async def _enrich_invite_labels(bot: Bot, info: dict) -> dict:
+    """Satori 入群邀请经常只有 id、没有名称，尝试从系统请求列表补群名/邀请人。"""
+    group_code = text_or_empty(info.get("group_code"), info.get("guild_id"))
+    inviter = text_or_empty(info.get("inviter_uin"))
+    if not group_code:
+        return info
+    try:
+        raw = await _try_api(bot, "get_group_system_msg")
+        items = _iter_system_requests(_result_data(raw))
+        for candidates in (
+            [(sub, item) for sub, item in items if _request_is_unchecked(item)],
+            items,
+        ):
+            for target_user in (inviter, ""):
+                for _, item in candidates:
+                    if _match_request(item, group_code, target_user):
+                        _apply_system_item(info, item)
+                        return info
+    except Exception as e:
+        logger.debug(f"补全群邀请名称失败: {e}")
+    return info
+
+
 async def _fill_onebot_request(bot: Bot, info: dict) -> dict:
     """从 LLOneBot 的请求列表中补齐 flag/request_id/sub_type。"""
-    group_code = str(info.get("group_code", ""))
-    inviter = str(info.get("user_name", "") or info.get("inviter_uin", ""))
+    group_code = str(info.get("group_code", "") or info.get("guild_id", ""))
+    inviter = text_or_empty(info.get("inviter_uin"), info.get("user_id"))
     info.setdefault("probe_errors", [])
     info.setdefault("probe_summary", [])
 
@@ -213,7 +267,7 @@ async def _fill_onebot_request(bot: Bot, info: dict) -> dict:
                                 if not info.get("flag"):
                                     info["flag"] = str(request_id)
                                 info["sub_type"] = sub_type
-                                info["group_name"] = item.get("group_name") or info.get("group_name", "")
+                                _apply_system_item(info, item)
                                 state = "unchecked" if _request_is_unchecked(item) else "checked"
                                 logger.info(
                                     f"从 get_group_system_msg 匹配到群邀请 request_id: {request_id} ({state})"
@@ -281,23 +335,63 @@ async def handle_guild_request(event: Event, bot: Bot):
         await guild_req.finish()
         return
 
-    guild_name = event.guild.name if event.guild else "未知群"
-    inviter = getattr(event, "operator", None) or event.user
-    user_name = inviter.name if inviter else "未知用户"
+    extra = _origin_payload(event)
+    guild = getattr(event, "guild", None)
+    operator = getattr(event, "operator", None)
+    user = getattr(event, "user", None)
+    member = getattr(event, "member", None)
+
+    guild_id = text_or_empty(
+        getattr(guild, "id", None) if guild else None,
+        extra.get("group_id"),
+        extra.get("group_code"),
+        extra.get("guild_id"),
+    )
+    guild_name = (
+        entity_label(guild, extra.get("group_name"), extra.get("guild_name"))
+        or guild_id
+        or "未知群"
+    )
+    inviter_uin = text_or_empty(
+        getattr(operator, "id", None) if operator else None,
+        getattr(user, "id", None) if user else None,
+        extra.get("user_id"),
+        extra.get("invitor_uin"),
+        extra.get("inviter_uin"),
+    )
+    user_name = (
+        entity_label(operator)
+        or entity_label(user)
+        or entity_label(member)
+        or text_or_empty(
+            extra.get("invitor_nick"),
+            extra.get("nickname"),
+            extra.get("user_name"),
+            inviter_uin,
+        )
+        or "未知用户"
+    )
     msg_id = event.message.id if event.message else str(event.sn)
     event_type = "member" if event.__class__.__name__ == "GuildMemberRequestEvent" else "guild"
 
-    async with _lock:
-        _pending[msg_id] = {
-            "guild_name": guild_name,
-            "user_name": user_name,
-            "api_type": "satori",
-            "event_type": event_type,
-            "request_id": msg_id,
-            "guild_id": str(event.guild.id) if event.guild else "",
-        }
+    info = {
+        "guild_name": guild_name,
+        "user_name": user_name,
+        "api_type": "satori",
+        "event_type": event_type,
+        "request_id": msg_id,
+        "guild_id": guild_id,
+        "group_code": guild_id,
+        "inviter_uin": inviter_uin,
+    }
+    info = await _enrich_invite_labels(bot, info)
+    guild_name = text_or_empty(info.get("guild_name")) or guild_name
+    user_name = text_or_empty(info.get("user_name")) or user_name
 
-    await _notify_superuser(bot, guild_name, user_name, msg_id)
+    async with _lock:
+        _pending[msg_id] = info
+
+    await _notify_superuser(bot, guild_name, user_name, msg_id, guild_id)
     await guild_req.finish()
 
 
@@ -328,9 +422,10 @@ async def handle_ark_group_invite(event: Event, bot: Bot):
         if not info:
             continue
 
-        key = info["token"] or info["msgseq"] or info["group_code"]
-        guild_name = info["group_name"] or f"group {info['group_code']}"
-        inviter_name = info["inviter_uin"] or "未知用户"
+        guild_name = text_or_empty(info.get("group_name")) or (
+            f"群 {info['group_code']}" if info.get("group_code") else "未知群"
+        )
+        inviter_name = text_or_empty(info.get("inviter_uin")) or "未知用户"
 
         await _notify_ark_invite(bot, guild_name, inviter_name, info)
         break
@@ -340,18 +435,24 @@ async def handle_ark_group_invite(event: Event, bot: Bot):
 
 # 通用：通知超级用户
 
-async def _notify_superuser(bot: Bot, guild_name: str, user_name: str, key: str):
+async def _notify_superuser(bot: Bot, guild_name: str, user_name: str, key: str, guild_id: str = ""):
     try:
         target = SendDest(
             superuser, "", False, True, "",
             account_adapter_name(bot),
         )
-        await ChainMsg.text(
-            f"收到群邀请\n"
-            f"群名: {guild_name}\n"
-            f"邀请人: {user_name}\n\n"
-            f"回复 同意 尝试自动加群，或 拒绝 忽略"
-        ).send(target, bot)
+        lines = [
+            "收到群邀请",
+            f"群名: {guild_name}",
+        ]
+        if guild_id:
+            lines.append(f"群号: {guild_id}")
+        lines.extend([
+            f"邀请人: {user_name}",
+            "",
+            "回复 同意 尝试自动加群，或 拒绝 忽略",
+        ])
+        await ChainMsg.text("\n".join(lines)).send(target, bot)
         logger.info(f"群邀请已转发给超级用户: {guild_name}")
     except Exception as e:
         logger.error(f"通知超级用户失败: {e}")
@@ -369,7 +470,7 @@ async def _notify_ark_invite(bot: Bot, guild_name: str, user_name: str, info: di
         await ChainMsg.text(
             f"检测到群邀请卡片\n"
             f"群名: {guild_name}\n"
-            f"群号: {info.get('group_code') or '未知'}\n"
+            f"群号: {text_or_empty(info.get('group_code')) or '未知'}\n"
             f"邀请人: {user_name}\n\n"
             f"这是 Ark 群卡片，不是 LLOneBot 暴露的系统入群请求。\n"
             f"当前没有 request_id/flag，无法自动同意；请在 QQ 客户端手动处理。"
@@ -392,13 +493,10 @@ approve_handler = listen_message(rule=Pred(_is_superuser_reply), priority=4, blo
 @approve_handler.handle()
 async def handle_approve_reply(event: Event, bot: Bot):
     text = event_plain_text(event).strip()
+    decision = parse_decision(text)
 
-    lowered = text.lower()
-    approved = lowered.startswith("yes") or lowered.startswith("approve")
-    rejected = lowered.startswith("no") or lowered.startswith("reject")
-
-    if not approved and not rejected:
-        await approve_handler.finish("Reply yes/approve or no/reject to handle the invite.")
+    if decision is None:
+        await approve_handler.finish("请回复 同意 或 拒绝")
 
     async with _lock:
         if not _pending:
@@ -409,12 +507,13 @@ async def handle_approve_reply(event: Event, bot: Bot):
 
         try:
             api_type = info.get("api_type", "satori")
-            if approved:
+            label = text_or_empty(info.get("guild_name"), info.get("guild_id"), info.get("group_code")) or "该群"
+            if decision:
                 await _approve_invite(bot, key, info, api_type)
-                await approve_handler.send(f"已同意 {info['guild_name']}")
+                await approve_handler.send(f"已同意 {label}")
             else:
                 await _reject_invite(bot, key, info, api_type)
-                await approve_handler.send(f"已拒绝 {info['guild_name']}")
+                await approve_handler.send(f"已拒绝 {label}")
         except Exception as e:
             await approve_handler.send(f"操作失败: {e}")
             logger.error(f"群邀请审批失败: {e}")

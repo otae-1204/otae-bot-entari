@@ -3021,6 +3021,24 @@ remotePort = {{ $v.Second }}
         self.assertEqual(info["token"], "token-1")
         self.assertIsNone(ark_module.parse_ark_invite_raw('{"meta": {"news": {"title": "normal card"}}}'))
 
+    def test_request_handler_decision_and_labels(self):
+        text_module = _load_module("request_handler_text_for_test", "plugins/request_handler/text.py")
+
+        self.assertTrue(text_module.parse_decision("同意"))
+        self.assertTrue(text_module.parse_decision("Yes"))
+        self.assertTrue(text_module.parse_decision("approve"))
+        self.assertFalse(text_module.parse_decision("拒绝"))
+        self.assertFalse(text_module.parse_decision("No"))
+        self.assertIsNone(text_module.parse_decision("hello"))
+        self.assertIsNone(text_module.parse_decision("note"))
+
+        self.assertEqual(text_module.text_or_empty(None, "None", " 测试群 "), "测试群")
+        self.assertEqual(text_module.entity_label(types.SimpleNamespace(name=None, id="123456")), "123456")
+        self.assertEqual(
+            text_module.entity_label(types.SimpleNamespace(nick=None, name=None), "246"),
+            "246",
+        )
+
     def test_mcwiki_url_builders_encode_keywords(self):
         wiki_module = _load_module("mcwiki_for_test", "plugins/McWikiQuery/__init__.py")
 
