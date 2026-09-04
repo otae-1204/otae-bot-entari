@@ -2878,11 +2878,7 @@ def weapon_card_width(view: WeaponView) -> int:
 
 
 def _weapon_level_plain_text(template: str, values: dict[str, object]) -> str:
-    def repl(match: re.Match[str]) -> str:
-        fmt = match.group(2)[1:] if match.group(2) else None
-        return format_weapon_value(values.get(match.group(1)), fmt)
-
-    text = re.sub(r"\{([^{}:]+)(:[^{}]+)?\}", repl, template or "")
+    text = _substitute_weapon_placeholders(template, values)
     text = re.sub(r"<[^>]+>", "", text)
     return " ".join(text.replace("\\n", "\n").split())
 
@@ -2981,13 +2977,13 @@ def weapon_skill_level_rows(skill: WeaponSkillView, index: int, view: WeaponView
 
 
 def render_weapon_level_text(template: str, values: dict[str, object], view: WeaponView, rich_icons: dict[str, str]) -> str:
-    def repl(match: re.Match[str]) -> str:
-        name = match.group(1)
-        fmt = match.group(2)[1:] if match.group(2) else None
-        return format_weapon_value(values.get(name), fmt)
+    return render_weapon_rich_text(_substitute_weapon_placeholders(template, values), view, rich_icons)
 
-    text = re.sub(r"\{([^{}:]+)(:[^{}]+)?\}", repl, template or "")
-    return render_weapon_rich_text(text, view, rich_icons)
+
+def _substitute_weapon_placeholders(template: str, values: dict[str, object]) -> str:
+    from .service import _substitute_fz_placeholders
+
+    return _substitute_fz_placeholders(template or "", values)
 
 
 def _weapon_rich_icon_urls_used(view: WeaponView) -> list[str]:
@@ -3003,24 +2999,6 @@ def _weapon_rich_icon_urls_used(view: WeaponView) -> list[str]:
             seen.add(icon_url)
             urls.append(icon_url)
     return urls
-
-
-def format_weapon_value(value: object, fmt: str | None = None) -> str:
-    if value is None:
-        return "--"
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return str(value)
-    if fmt == "0.0%":
-        return f"{number * 100:.1f}%"
-    if fmt == "0%":
-        return f"{number * 100:.0f}%"
-    if fmt == "0":
-        return f"{number:.0f}"
-    if number.is_integer():
-        return str(int(number))
-    return f"{number:g}"
 
 
 def render_weapon_rich_text(text: str, view: WeaponView, rich_icons: dict[str, str]) -> str:

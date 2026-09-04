@@ -2350,10 +2350,40 @@ class EndfieldGachaAssetCacheTests(unittest.IsolatedAsyncioTestCase):
             output = Path(cache._normalize_keepsake_icon("keepsake", str(source)))
             normalized = Image.open(output).convert("RGBA")
 
-        self.assertEqual(output.name, "keepsake.png")
+        self.assertEqual(output.name, "keepsake_v1_keepsake.png")
         self.assertEqual(normalized.width, normalized.height)
         self.assertLess(normalized.width, 180)
         self.assertGreater(normalized.getchannel("A").getbbox()[0], 0)
+
+    def test_normalize_keepsake_icon_recenters_akedata_png_already_in_cache(self):
+        item_id = "item_charpotentialup_chr_0034_typhoea"
+        with tempfile.TemporaryDirectory() as directory:
+            cache = gacha_assets_module.EndfieldGachaAssetCache(
+                types.SimpleNamespace(), cache_dir=directory,
+            )
+            source = Path(directory) / f"{item_id}.png"
+            image = Image.new("RGBA", (256, 256), (0, 0, 0, 0))
+            image.paste((200, 160, 180, 255), (15, 68, 155, 210))
+            image.save(source, format="PNG")
+
+            output = Path(cache._normalize_keepsake_icon(item_id, str(source)))
+            with Image.open(output) as normalized:
+                normalized = normalized.convert("RGBA")
+                bbox = normalized.getchannel("A").getbbox()
+                width, height = normalized.size
+
+            again = Path(cache._normalize_keepsake_icon(item_id, str(source)))
+
+        self.assertEqual(output.name, f"keepsake_v1_{item_id}.png")
+        self.assertNotEqual(output.resolve(), source.resolve())
+        self.assertEqual(width, height)
+        self.assertLess(width, 180)
+        self.assertGreater(bbox[0], 0)
+        self.assertGreater(bbox[1], 0)
+        self.assertGreater(bbox[2] - bbox[0], width * 0.7)
+        self.assertAlmostEqual(bbox[0], width - bbox[2], delta=2)
+        self.assertAlmostEqual(bbox[1], height - bbox[3], delta=2)
+        self.assertEqual(again.resolve(), output.resolve())
 
     async def test_prepare_pool_rules_loads_entire_directory_without_existing_records(self):
         class FakeClient:

@@ -447,7 +447,7 @@ class EndfieldGachaAssetCache:
 
     def _normalize_keepsake_icon(self, item_id: str, source_path: str) -> str:
         source = Path(source_path)
-        target = self.cache_dir / f"{_safe_item_id(item_id)}.png"
+        target = self.cache_dir / f"keepsake_v1_{_safe_item_id(item_id)}.png"
         try:
             if target.is_file() and target.stat().st_size > 0:
                 return str(target.resolve())

@@ -2418,6 +2418,14 @@ class EndfieldServiceTests(unittest.TestCase):
 
         self.assertEqual(rendered, "无视<@ba.vup>20</>点抗性。")
 
+    def test_fz_template_supports_key_multiplication(self):
+        rendered = service._format_fz_template(
+            "最多<@ba.vup>+{spell_dmg_up2*max_stack:0.0%}</>。",
+            {"spell_dmg_up2": 0.049, "max_stack": 3},
+        )
+
+        self.assertEqual(rendered, "最多<@ba.vup>+14.7%</>。")
+
     def test_fz_template_supports_constant_minus_negative_value(self):
         rendered = service._format_fz_template(
             "虚弱效果<@ba.vup>+{0-weak_scale:0%}</>。",
@@ -3194,6 +3202,34 @@ class EndfieldServiceTests(unittest.TestCase):
         self.assertEqual(view.icon_url, "https://static.warfarin.wiki/v4/itemicon/wpn_claym_0004.webp")
         self.assertEqual(view.skills[0].levels[-1].values["mainattr"], 132)
         self.assertIn("ba.physicalvul", view.rich_text_links)
+
+    def test_weapon_level_text_evaluates_scaled_max_placeholder(self):
+        view = models.WeaponView("使命必达", "mission-must-be-done", "武器/使命必达")
+        template = (
+            "自然伤害<@ba.vup>+{nature_dmg_up:0.0%}</>。"
+            "每有一个被<#ba.airborne>击飞</>的敌人，全队造成的法术伤害额外"
+            "<@ba.vup>+{spell_dmg_up2:0.0%}</>，最多<@ba.vup>+{spell_dmg_up2*max_stack:0.0%}</>。"
+        )
+        values = {
+            "nature_dmg_up": 0.224,
+            "spell_dmg_up": 0.168,
+            "spell_dmg_up2": 0.049,
+            "max_stack": 3.0,
+            "duration": 15.0,
+        }
+
+        html = draw.render_weapon_level_text(template, values, view, {})
+        plain = draw._weapon_level_plain_text(template, values)
+
+        self.assertIn("22.4%", html)
+        self.assertIn("4.9%", html)
+        self.assertIn("14.7%", html)
+        self.assertNotIn("--", html)
+        self.assertNotIn("spell_dmg_up2*max_stack", html)
+        self.assertEqual(
+            plain,
+            "自然伤害+22.4%。每有一个被击飞的敌人，全队造成的法术伤害额外+4.9%，最多+14.7%。",
+        )
 
     def test_render_weapon_card_html_contains_preview_layout_and_rich_icons(self):
         view = build_weapon_view(_sample_weapon(), _sample_richtext())

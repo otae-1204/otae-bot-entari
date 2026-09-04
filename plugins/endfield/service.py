@@ -3240,6 +3240,10 @@ def _format_fz_metric_value(value: Any, *, percent: bool = False) -> str:
 
 
 def _format_fz_template(desc: Any, values: Any) -> str:
+    return _clean_fz_rich_text(_substitute_fz_placeholders(desc, values))
+
+
+def _substitute_fz_placeholders(desc: Any, values: Any) -> str:
     value_map = _normalized_value_map(values if isinstance(values, dict) else {})
 
     def replace(match: re.Match[str]) -> str:
@@ -3248,7 +3252,7 @@ def _format_fz_template(desc: Any, values: Any) -> str:
         value = _eval_fz_template_expr(key_expr.strip(), value_map)
         return _format_template_value(value, fmt)
 
-    return _clean_fz_rich_text(re.sub(r"\{([^{}]+)\}", replace, str(desc or "")))
+    return re.sub(r"\{([^{}]+)\}", replace, str(desc or ""))
 
 
 def _clean_fz_rich_text(value: Any) -> str:
