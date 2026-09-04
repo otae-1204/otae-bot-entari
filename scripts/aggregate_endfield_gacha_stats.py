@@ -80,11 +80,18 @@ def _is_beginner_character_pool(record: GachaRecord) -> bool:
     return "beginner" in f"{record.pool_type} {record.pool_id}".casefold()
 
 
+def _is_standard_character_pool(record: GachaRecord) -> bool:
+    identity = f"{record.pool_type} {record.pool_id}".casefold()
+    return "standard" in identity or record.pool_name.strip() == "基础寻访"
+
+
 def _character_pity_family(record: GachaRecord) -> str:
     if _is_joint_character_pool(record):
         return f"joint:{record.pool_id.casefold()}"
     if _is_beginner_character_pool(record):
         return f"beginner:{record.pool_id.casefold()}"
+    if _is_standard_character_pool(record):
+        return "standard"
     return "special"
 
 

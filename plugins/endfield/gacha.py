@@ -1310,11 +1310,19 @@ def _is_xhh_special_character_pool(pool: XhhGachaPool) -> bool:
     )
 
 
-
-
 def _is_joint_character_pool(record: GachaRecord) -> bool:
     identity = f"{record.pool_type} {record.pool_id}".casefold()
     return "joint" in identity
+
+
+def _is_beginner_character_pool(record: GachaRecord) -> bool:
+    identity = f"{record.pool_type} {record.pool_id}".casefold()
+    return "beginner" in identity
+
+
+def _is_standard_character_pool(record: GachaRecord) -> bool:
+    identity = f"{record.pool_type} {record.pool_id}".casefold()
+    return "standard" in identity or record.pool_name.strip() == "基础寻访"
 
 
 def _character_pity_family(record: GachaRecord) -> str:
@@ -1322,12 +1330,9 @@ def _character_pity_family(record: GachaRecord) -> str:
         return f"joint:{record.pool_id.casefold()}"
     if _is_beginner_character_pool(record):
         return f"beginner:{record.pool_id.casefold()}"
+    if _is_standard_character_pool(record):
+        return "standard"
     return "special"
-
-
-def _is_beginner_character_pool(record: GachaRecord) -> bool:
-    identity = f"{record.pool_type} {record.pool_id}".casefold()
-    return "beginner" in identity
 
 
 def _record_sort_key(record: GachaRecord) -> tuple[int, tuple[int, str]]:

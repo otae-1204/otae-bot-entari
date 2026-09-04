@@ -2784,6 +2784,46 @@ class EndfieldGachaServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(pools["current"].free_batches), 1)
         self.assertEqual(len(pools["current"].free_batches[0].six_stars), 1)
 
+    def test_analysis_does_not_reset_special_pity_on_standard_six_star(self):
+        records: list[store_module.GachaRecord] = []
+        seq = 1
+
+        def add(pool_id: str, pool_name: str, pool_type: str, rarity: int, name: str) -> None:
+            nonlocal seq
+            records.append(
+                store_module.GachaRecord(
+                    "role", "server", pool_id, pool_name, pool_type,
+                    str(seq), seq, f"{pool_id}-{seq}", name, rarity, "角色",
+                )
+            )
+            seq += 1
+
+        special = ("winter", "冬猎", "E_CharacterGachaPoolType_Special")
+        standard = ("standard", "基础寻访", "E_CharacterGachaPoolType_Standard")
+        for _ in range(3):
+            add(*special, 4, "垫抽")
+        add(*special, 6, "骏卫")
+        for _ in range(6):
+            add(*special, 4, "垫抽")
+        add(*standard, 6, "艾尔黛拉")
+        add(*standard, 4, "常驻垫")
+        add(*standard, 4, "常驻垫")
+        add(*special, 4, "垫抽")
+        add(*special, 4, "垫抽")
+        add(*special, 6, "提弗洛斯")
+        for _ in range(3):
+            add(*special, 4, "垫抽")
+
+        result = gacha_module.build_gacha_analysis(self.role, records, [])
+        winter = {item.pool_id: item for item in result.pools}["winter"]
+        typhoea, junwei = winter.six_stars
+
+        self.assertEqual([item.name for item in winter.six_stars], ["提弗洛斯", "骏卫"])
+        self.assertEqual((junwei.pool_position, junwei.interval), (4, 4))
+        self.assertEqual((typhoea.pool_position, typhoea.interval), (13, 9))
+        self.assertEqual((winter.since_six_star, winter.small_pity_progress), (3, 3))
+        self.assertEqual(result.intervals, (9,))
+
     def test_analysis_consumes_first_large_pity_when_paid_pull_gets_current_up(self):
         records = [
             store_module.GachaRecord(
