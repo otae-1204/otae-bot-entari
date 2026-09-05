@@ -1,5 +1,8 @@
 # End 查询性能优化与实测
 
+后续更新：本文保留第一轮历史数据；缓存修复、账号实测及原 29 项失败的处理结果见
+[第二轮实施报告](endfield_cache_execution.md)。全部工作现统一发布到 `refactor/project-architecture`。
+
 测试日期：2026-09-05。分支：`perf/endfield-query-latency`。
 
 对照基线是结构重构后的 `877a3165021858f6d834ff5a5c984b4999d854d6`，

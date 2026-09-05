@@ -1,0 +1,165 @@
+{
+  "baseline_failures": [
+    {
+      "test": "tests.test_endfield.EndfieldCommandParserTests.test_endfield_help_image_and_spec_cover_account_features",
+      "reason": "AssertionError: Tuples differ: ((1075, 761), 'RGBA') != ((1204, 852), 'RGBA')"
+    },
+    {
+      "test": "tests.test_endfield.EndfieldServiceTests.test_build_operator_view_extracts_four_skill_levels",
+      "reason": "AssertionError: 'https://data.akedata.wiki/public/images/assets/be[70 chars].png' != 'https://static.warfarin.wiki/v4/characterportrait[15 chars]webp'"
+    },
+    {
+      "test": "tests.test_endfield.EndfieldServiceTests.test_build_warfarin_weapon_view_extracts_backup_data",
+      "reason": "AssertionError: 'https://data.akedata.wiki/public/images/assets/be[65 chars].png' != 'https://static.warfarin.wiki/v4/itemicon/wpn_claym_0004.webp'"
+    },
+    {
+      "test": "tests.test_endfield.EndfieldServiceTests.test_loadout_card_html_shows_static_and_triggered_effects",
+      "reason": "AttributeError: <module 'endfield_for_test.rendering.cards' from '/root/code/otae-bot-entari/plugins/endfield/rendering/cards.py'> does not have the attribute 'fetch_many'"
+    },
+    {
+      "test": "tests.test_endfield.EndfieldServiceTests.test_loadout_service_fetches_operator_growth_data",
+      "reason": "StopAsyncIteration"
+    },
+    {
+      "test": "tests.test_endfield.EndfieldServiceTests.test_render_equipment_attribute_catalog_card_html_marks_main_and_sub",
+      "reason": "AttributeError: <module 'endfield_for_test.rendering.cards' from '/root/code/otae-bot-entari/plugins/endfield/rendering/cards.py'> does not have the attribute 'fetch_many'"
+    },
+    {
+      "test": "tests.test_endfield.EndfieldServiceTests.test_render_equipment_card_html_contains_reference_layout",
+      "reason": "AttributeError: <module 'endfield_for_test.rendering.cards' from '/root/code/otae-bot-entari/plugins/endfield/rendering/cards.py'> does not have the attribute 'fetch_many'"
+    },
+    {
+      "test": "tests.test_endfield.EndfieldServiceTests.test_render_equipment_catalog_card_html_has_groups_and_attribute_icons",
+      "reason": "AttributeError: <module 'endfield_for_test.rendering.cards' from '/root/code/otae-bot-entari/plugins/endfield/rendering/cards.py'> does not have the attribute 'fetch_many'"
+    },
+    {
+      "test": "tests.test_endfield.EndfieldServiceTests.test_render_fz_operator_card_html_uses_mastery_level_labels",
+      "reason": "AttributeError: <module 'endfield_for_test.rendering.cards' from '/root/code/otae-bot-entari/plugins/endfield/rendering/cards.py'> does not have the attribute 'fetch_many'"
+    },
+    {
+      "test": "tests.test_endfield.EndfieldServiceTests.test_render_operator_card_html_contains_fixed_columns_and_values",
+      "reason": "AttributeError: <module 'endfield_for_test.rendering.cards' from '/root/code/otae-bot-entari/plugins/endfield/rendering/cards.py'> does not have the attribute 'fetch_many'"
+    },
+    {
+      "test": "tests.test_endfield.EndfieldServiceTests.test_render_operator_catalog_card_html_has_reference_gallery_structure",
+      "reason": "AttributeError: <module 'endfield_for_test.rendering.cards' from '/root/code/otae-bot-entari/plugins/endfield/rendering/cards.py'> does not have the attribute 'fetch_many'"
+    },
+    {
+      "test": "tests.test_endfield.EndfieldServiceTests.test_render_specific_equipment_catalog_uses_compact_four_column_layout",
+      "reason": "AttributeError: <module 'endfield_for_test.rendering.cards' from '/root/code/otae-bot-entari/plugins/endfield/rendering/cards.py'> does not have the attribute 'fetch_many'"
+    },
+    {
+      "test": "tests.test_endfield.EndfieldServiceTests.test_render_weapon_card_html_contains_preview_layout_and_rich_icons",
+      "reason": "AttributeError: <module 'endfield_for_test.rendering.cards' from '/root/code/otae-bot-entari/plugins/endfield/rendering/cards.py'> does not have the attribute 'fetch_many'"
+    },
+    {
+      "test": "tests.test_endfield.EndfieldServiceTests.test_render_weapon_catalog_card_html_has_reference_gallery_structure",
+      "reason": "AttributeError: <module 'endfield_for_test.rendering.cards' from '/root/code/otae-bot-entari/plugins/endfield/rendering/cards.py'> does not have the attribute 'fetch_many'"
+    },
+    {
+      "test": "tests.test_endfield.EndfieldServiceTests.test_specific_equipment_catalog_view_fetches_and_annotates_every_item",
+      "reason": "AttributeError: <module 'endfield_for_test.rendering.cards' from '/root/code/otae-bot-entari/plugins/endfield/rendering/cards.py'> does not have the attribute 'fetch_many'"
+    },
+    {
+      "test": "tests.test_endfield.EndfieldSlugResolutionTests.test_operator_view_falls_back_to_warfarin_when_fz_fails",
+      "reason": "AttributeError: '_FakeWarfarinClient' object has no attribute 'akedata_manifest'"
+    },
+    {
+      "test": "tests.test_endfield.EndfieldSlugResolutionTests.test_weapon_card_uses_generic_owner_when_relation_lookup_fails",
+      "reason": "AttributeError: <module 'endfield_for_test.rendering.cards' from '/root/code/otae-bot-entari/plugins/endfield/rendering/cards.py'> does not have the attribute 'fetch_many'"
+    },
+    {
+      "test": "tests.test_endfield_account.EndfieldGachaAssetCacheTests.test_fz_catalog_corrects_rarity_and_caches_high_star_images",
+      "reason": "AttributeError: <module 'endfield_account_for_test.gacha.assets' from '/root/code/otae-bot-entari/plugins/endfield/gacha/assets.py'> does not have the attribute 'fetch_many'"
+    },
+    {
+      "test": "tests.test_endfield_account.EndfieldGachaAssetCacheTests.test_image_download_failure_keeps_metadata_without_icon",
+      "reason": "AttributeError: <module 'endfield_account_for_test.gacha.assets' from '/root/code/otae-bot-entari/plugins/endfield/gacha/assets.py'> does not have the attribute 'fetch_many'"
+    },
+    {
+      "test": "tests.test_endfield_account.EndfieldGachaAssetCacheTests.test_prepare_pool_banners_uses_warfarin_portrait_and_fz_weapon_icon",
+      "reason": "AssertionError: 'https://assets.fz.wiki/operator.png' != 'https://static.warfarin.wiki/v4/characterportrait/chr_up.webp'"
+    },
+    {
+      "test": "tests.test_endfield_account_ui.EndfieldAccountUiTests.test_warfarin_semantic_icon_urls_match_endfield_keys",
+      "reason": "AssertionError: 'https://data.akedata.wiki/public/images/assets/be[77 chars].png' != 'https://static.warfarin.wiki/v4/charprofessionico[22 chars]webp'"
+    },
+    {
+      "test": "tests.test_endfield_account_ui.EndfieldAccountUiAsyncTests.test_prepare_assets_registers_local_ui_fonts_and_icons",
+      "reason": "AssertionError: False is not true"
+    },
+    {
+      "test": "tests.test_endfield_challenge.EndfieldChallengeTests.test_best_cleared_reports_the_highest_cleared_tier",
+      "reason": "AssertionError: Tuples differ: ('01:05', '普通 · 2027-01-15 09:00') != ('01:05', '普通 · 2027-01-15 16:00')"
+    },
+    {
+      "test": "tests.test_endfield_performance.EndfieldPerformanceBehaviorTests.test_operator_card_allows_five_long_potentials_to_expand_rail",
+      "reason": "AttributeError: <module 'plugins.endfield.rendering.cards' from '/root/code/otae-bot-entari/plugins/endfield/rendering/cards.py'> does not have the attribute 'fetch_many'"
+    },
+    {
+      "test": "tests.test_endfield_performance.EndfieldPerformanceBehaviorTests.test_operator_portrait_falls_back_to_vertical_icon_when_primary_asset_fails",
+      "reason": "AttributeError: <module 'plugins.endfield.rendering.cards' from '/root/code/otae-bot-entari/plugins/endfield/rendering/cards.py'> does not have the attribute 'fetch_many'"
+    },
+    {
+      "test": "tests.test_endfield_performance.EndfieldPerformanceBehaviorTests.test_production_card_resources_use_virtual_urls_without_remote_base64",
+      "reason": "AttributeError: <module 'plugins.endfield.rendering.cards' from '/root/code/otae-bot-entari/plugins/endfield/rendering/cards.py'> does not have the attribute 'fetch_many'"
+    },
+    {
+      "test": "tests.test_endfield_performance.EndfieldPerformanceBehaviorTests.test_remote_image_batch_deduplicates_urls",
+      "reason": "AttributeError: <module 'plugins.endfield.rendering.cards' from '/root/code/otae-bot-entari/plugins/endfield/rendering/cards.py'> does not have the attribute 'fetch_many'"
+    },
+    {
+      "test": "tests.test_endfield_visual.EndfieldVisualRegressionTests.test_four_card_density_snapshots",
+      "reason": "AssertionError: 20 not less than or equal to 12"
+    },
+    {
+      "test": "tests.test_http_client.SharedHttpClientTests.test_close_allows_a_fresh_client",
+      "reason": "RuntimeError: Event loop is closed"
+    }
+  ],
+  "final_suite": {
+    "errors": "0",
+    "failures": "0",
+    "skipped": "3",
+    "tests": "945",
+    "time": "40.204",
+    "timestamp": "2026-09-05T07:16:15.431090+02:00"
+  },
+  "baseline_commit": "9d0b1bba8bc341e63b9d20038c4b6ea0fd6ada2d",
+  "publish_branch": "refactor/project-architecture",
+  "pytest_summary": {
+    "passed": 896,
+    "failed": 0,
+    "skipped": 3,
+    "subtests_passed": 46,
+    "new_repair_tests": 28
+  },
+  "public_output_comparison": {
+    "cases": 14,
+    "phase_comparisons": 42,
+    "mismatches": []
+  },
+  "frozen_account_comparison": {
+    "page_types": 3,
+    "total_renders": 36,
+    "png_and_rgba_identical": true
+  },
+  "offline_visual_fixture": {
+    "baseline_commit": "9d0b1bba8bc341e63b9d20038c4b6ea0fd6ada2d",
+    "cards": 4,
+    "png_and_rgba_identical": true
+  },
+  "checks": {
+    "targeted_ruff_fatal": true,
+    "compileall": true,
+    "diff_check": true,
+    "whole_repository_all_ruff_rules_claimed": false
+  },
+  "limitations": [
+    "No production bot restart or QQ transport measurement",
+    "No live attendance/binding/import/write operations",
+    "Single-account small-sample benchmark, not production throughput",
+    "Legacy gacha directory not covered by the new SQLite image budget",
+    "Source image 404s deliberately prevent complete-page cache admission"
+  ]
+}

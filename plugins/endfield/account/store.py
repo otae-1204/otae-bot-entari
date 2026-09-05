@@ -1160,17 +1160,31 @@ class EndfieldStore:
 
     def insert_gacha_records(self, records: Iterable[GachaRecord]) -> int:
         now = int(time.time())
-        inserted = 0
+        records = tuple(records)
+        if not records:
+            return 0
+        groups: dict[tuple[str, str, str], set[str]] = {}
+        for record in records:
+            groups.setdefault(
+                (record.role_id, record.server_id, record.pool_id), set()
+            ).add(record.seq_id)
+        inserted = sum(map(len, groups.values()))
         with self._lock:
-            for record in records:
-                existed = self.conn.execute(
-                    """
-                    SELECT 1 FROM gacha_records
-                    WHERE role_id = ? AND server_id = ? AND pool_id = ? AND seq_id = ?
-                    """,
-                    (record.role_id, record.server_id, record.pool_id, record.seq_id),
-                ).fetchone()
-                self.conn.execute(
+            try:
+                self.conn.execute("BEGIN")
+                for identity, seq_ids in groups.items():
+                    sequences = tuple(seq_ids)
+                    for offset in range(0, len(sequences), 400):
+                        batch = sequences[offset : offset + 400]
+                        placeholders = ",".join("?" for _ in batch)
+                        inserted -= self.conn.execute(
+                            "SELECT count(*) FROM gacha_records WHERE role_id=? "
+                            "AND server_id=? AND pool_id=? AND seq_id IN ("
+                            + placeholders
+                            + ")",
+                            (*identity, *batch),
+                        ).fetchone()[0]
+                self.conn.executemany(
                     """
                     INSERT INTO gacha_records(
                         role_id, server_id, pool_id, pool_name, pool_type, seq_id, gacha_ts,
@@ -1188,15 +1202,31 @@ class EndfieldStore:
                         is_new = excluded.is_new,
                         is_free = excluded.is_free
                     """,
-                    (
-                        record.role_id, record.server_id, record.pool_id, record.pool_name,
-                        record.pool_type, record.seq_id, int(record.gacha_ts), record.item_id,
-                        record.item_name, int(record.rarity), record.item_type, record.weapon_type,
-                        1 if record.is_new else 0, 1 if record.is_free else 0, now,
-                    ),
+                    [
+                        (
+                            record.role_id,
+                            record.server_id,
+                            record.pool_id,
+                            record.pool_name,
+                            record.pool_type,
+                            record.seq_id,
+                            int(record.gacha_ts),
+                            record.item_id,
+                            record.item_name,
+                            int(record.rarity),
+                            record.item_type,
+                            record.weapon_type,
+                            1 if record.is_new else 0,
+                            1 if record.is_free else 0,
+                            now,
+                        )
+                        for record in records
+                    ],
                 )
-                inserted += 0 if existed else 1
-            self.conn.commit()
+                self.conn.commit()
+            except BaseException:
+                self.conn.rollback()
+                raise
         return inserted
 
     def get_sync_state(self, role: EndfieldRole, stream_key: str) -> SyncState:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .health import record_assets, record_fallback_success
+
 import base64
 import html
 import hashlib
@@ -104,6 +106,14 @@ TERM_BOUNDARY_EXCEPTIONS = {"法术脆弱", "法术附着", "寒冷附着", "灼
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 _PNG_DROPPED_CHUNKS = {b"tEXt", b"zTXt", b"iTXt", b"tIME", b"eXIf"}
 _PORTRAIT_LAYOUT_CACHE: OrderedDict[str, "PortraitLayout"] = OrderedDict()
+
+
+def clear_render_asset_caches() -> int:
+    removed = len(_PORTRAIT_LAYOUT_CACHE)
+    _PORTRAIT_LAYOUT_CACHE.clear()
+    return removed
+
+
 _PORTRAIT_LAYOUT_OVERRIDES = {
     "莱万汀": (50.0, 46.0, 1.12),
     "骏卫": (50.0, 47.0, 1.08),
@@ -896,7 +906,7 @@ async def draw_medal_stats_card(view: MedalDiffView) -> tuple[bytes, ...]:
     try:
         return (await _draw_medal_stats_page(view, new_medals, 1, 1),)
     except RuntimeError as exc:
-        if not _is_gacha_height_limit_error(exc):
+        if not is_height_limit_error(exc):
             raise
 
     last_error: RuntimeError | None = None
@@ -907,7 +917,7 @@ async def draw_medal_stats_card(view: MedalDiffView) -> tuple[bytes, ...]:
             for index, chunk in enumerate(chunks):
                 pages.append(await _draw_medal_stats_page(view, chunk, index + 1, len(chunks)))
         except RuntimeError as exc:
-            if not _is_gacha_height_limit_error(exc):
+            if not is_height_limit_error(exc):
                 raise
             last_error = exc
             continue
@@ -2701,6 +2711,7 @@ async def _prepare_assets(urls: Iterable[str], *, inline: bool) -> _PreparedAsse
         browser_url = f"https://endfield.local/assets/{digest}"
         output[url] = browser_url
         browser_resources.setdefault(browser_url, BrowserResource(resource.content, mime))
+    record_assets(unique, (url for url, mapped in output.items() if mapped))
     return _PreparedAssets(output, browser_resources, contents, failures)
 
 
@@ -2778,6 +2789,9 @@ async def _resolve_asset_groups(
         for key in retry_keys:
             chosen_source[key] = next((url for url in pending[key] if _asset_ready(assets, url)), "")
     mapped = {key: _mapped_asset(assets, source) for key, source in chosen_source.items()}
+    for key, candidates in normalized.items():
+        if mapped.get(key):
+            record_fallback_success(candidates)
     return assets, mapped, chosen_source
 
 

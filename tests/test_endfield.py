@@ -839,7 +839,7 @@ class EndfieldCommandParserTests(unittest.TestCase):
         spec = (ROOT / "scripts/help_pages.json").read_text(encoding="utf-8")
 
         with Image.open(image_path) as image:
-            self.assertEqual((image.size, image.mode), ((1204, 852), "RGBA"))
+            self.assertEqual((image.size, image.mode), ((1075, 761), "RGBA"))
         self.assertIn("/ef 绑定 / 添加账号  多账号追加（仅私聊）", spec)
         self.assertIn("/ef 账号 [编号]  账号详情图：干员配装总览", spec)
         self.assertIn("/ef 账号 基建 [账号]  据点与帝江号", spec)
@@ -1818,7 +1818,7 @@ def _sample_warfarin_weapon():
 class EndfieldServiceTests(unittest.TestCase):
     def test_loadout_service_fetches_operator_growth_data(self):
         client = types.SimpleNamespace(
-            fz_article_by_title=AsyncMock(side_effect=[_sample_loadout_operator(), _sample_loadout_weapon()]),
+            fz_article_by_title=AsyncMock(side_effect=[_sample_loadout_operator(), _sample_loadout_weapon(), {}, {}]),
             fz_game_richtext=AsyncMock(return_value={}),
             search=AsyncMock(
                 return_value={
@@ -2388,7 +2388,7 @@ class EndfieldServiceTests(unittest.TestCase):
             _sample_loadout_weapon(),
             [(_sample_loadout_equipment("Body"), 2, ())],
         )
-        with patch.object(draw, "fetch_many", AsyncMock(return_value={})):
+        with patch.object(draw, "fetch_many_resilient", AsyncMock(return_value={})):
             html = asyncio.run(render_loadout_card_html(view))
         self.assertIn("终末地 · 配装模拟器", html)
         self.assertIn("干员 · LEVEL 90 · 潜能 5", html)
@@ -2457,7 +2457,7 @@ class EndfieldServiceTests(unittest.TestCase):
         self.assertEqual(view.species, "龙")
         self.assertEqual(
             view.portrait_url,
-            "https://static.warfarin.wiki/v4/characterportrait/chr_0005_chen.webp",
+            "https://data.akedata.wiki/public/images/assets/beyond/dynamicassets/gameplay/ui/sprites/characterportrait/chr_0005_chen.png",
         )
         self.assertEqual(len(view.skills), 4)
         self.assertEqual(len(view.talents), 2)
@@ -2692,7 +2692,7 @@ class EndfieldServiceTests(unittest.TestCase):
 
     def test_render_operator_card_html_contains_fixed_columns_and_values(self):
         view = build_operator_view(_sample_operator())
-        with patch.object(draw, "fetch_many", AsyncMock(return_value={})):
+        with patch.object(draw, "fetch_many_resilient", AsyncMock(return_value={})):
             html = asyncio.run(render_operator_card_html(view))
 
         for _, label in LEVEL_COLUMNS:
@@ -2742,7 +2742,7 @@ class EndfieldServiceTests(unittest.TestCase):
 
     def test_render_equipment_card_html_contains_reference_layout(self):
         view = build_fz_equipment_view(_sample_fz_equipment(), _sample_richtext())
-        with patch.object(draw, "fetch_many", AsyncMock(return_value={})):
+        with patch.object(draw, "fetch_many_resilient", AsyncMock(return_value={})):
             html = asyncio.run(render_equipment_card_html(view))
 
         self.assertIn('class="equipment-card"', html)
@@ -2913,7 +2913,7 @@ class EndfieldServiceTests(unittest.TestCase):
             [(attribute.label, attribute.role) for attribute in view.groups[0].items[0].attributes],
             [("力量", "main"), ("敏捷", "sub"), ("终结技充能效率", "")],
         )
-        with patch.object(draw, "fetch_many", AsyncMock(return_value={})):
+        with patch.object(draw, "fetch_many_resilient", AsyncMock(return_value={})):
             html = asyncio.run(render_equipment_catalog_card_html(view))
         self.assertEqual(html.count('<span class="catalog-attr-role">主</span>'), 2)
         self.assertEqual(html.count('<span class="catalog-attr-role">副</span>'), 2)
@@ -3052,7 +3052,7 @@ class EndfieldServiceTests(unittest.TestCase):
     def test_render_equipment_catalog_card_html_has_groups_and_attribute_icons(self):
         view = build_fz_equipment_catalog_view(_sample_fz_equipment_catalog())
         service._apply_fz_equipment_catalog_suit_effects(view, [_sample_fz_equipment()])
-        with patch.object(draw, "fetch_many", AsyncMock(return_value={})):
+        with patch.object(draw, "fetch_many_resilient", AsyncMock(return_value={})):
             html = asyncio.run(render_equipment_catalog_card_html(view))
 
         self.assertIn('class="equipment-catalog-card"', html)
@@ -3075,7 +3075,7 @@ class EndfieldServiceTests(unittest.TestCase):
             _sample_fz_equipment_details(),
             commands.parse_equipment_attribute_filters("力量"),
         )
-        with patch.object(draw, "fetch_many", AsyncMock(return_value={})):
+        with patch.object(draw, "fetch_many_resilient", AsyncMock(return_value={})):
             html = asyncio.run(render_equipment_catalog_card_html(view))
 
         self.assertIn('<div class="catalog-title">力量</div>', html)
@@ -3114,7 +3114,7 @@ class EndfieldServiceTests(unittest.TestCase):
     def test_render_specific_equipment_catalog_uses_compact_four_column_layout(self):
         view = build_fz_equipment_catalog_view(_sample_fz_equipment_catalog())
         view.title = view.groups[0].name
-        with patch.object(draw, "fetch_many", AsyncMock(return_value={})):
+        with patch.object(draw, "fetch_many_resilient", AsyncMock(return_value={})):
             html = asyncio.run(render_equipment_catalog_card_html(view))
 
         self.assertIn("width:1040px", html)
@@ -3136,7 +3136,7 @@ class EndfieldServiceTests(unittest.TestCase):
     def test_render_operator_catalog_card_html_has_reference_gallery_structure(self):
         view = build_fz_operator_catalog_view(_sample_fz_operator_catalog())
         view.elements[1].professions[1].items[0].rarity = 6
-        with patch.object(draw, "fetch_many", AsyncMock(return_value={})):
+        with patch.object(draw, "fetch_many_resilient", AsyncMock(return_value={})):
             html = asyncio.run(render_operator_catalog_card_html(view))
 
         self.assertIn('class="operator-catalog-card"', html)
@@ -3165,7 +3165,7 @@ class EndfieldServiceTests(unittest.TestCase):
 
     def test_render_weapon_catalog_card_html_has_reference_gallery_structure(self):
         view = build_fz_weapon_catalog_view(_sample_fz_weapon_catalog())
-        with patch.object(draw, "fetch_many", AsyncMock(return_value={})):
+        with patch.object(draw, "fetch_many_resilient", AsyncMock(return_value={})):
             html = asyncio.run(render_weapon_catalog_card_html(view))
 
         self.assertIn('class="weapon-catalog-card"', html)
@@ -3203,7 +3203,7 @@ class EndfieldServiceTests(unittest.TestCase):
         self.assertEqual(view.source_name, "Warfarin Wiki")
         self.assertEqual(view.weapon_type, "双手剑")
         self.assertEqual(view.max_atk, 512)
-        self.assertEqual(view.icon_url, "https://static.warfarin.wiki/v4/itemicon/wpn_claym_0004.webp")
+        self.assertEqual(view.icon_url, "https://data.akedata.wiki/public/images/assets/beyond/dynamicassets/gameplay/ui/sprites/itemiconbig/wpn_claym_0004.png")
         self.assertEqual(view.skills[0].levels[-1].values["mainattr"], 132)
         self.assertIn("ba.physicalvul", view.rich_text_links)
 
@@ -3237,7 +3237,7 @@ class EndfieldServiceTests(unittest.TestCase):
 
     def test_render_weapon_card_html_contains_preview_layout_and_rich_icons(self):
         view = build_weapon_view(_sample_weapon(), _sample_richtext())
-        with patch.object(draw, "fetch_many", AsyncMock(return_value={})):
+        with patch.object(draw, "fetch_many_resilient", AsyncMock(return_value={})):
             html = asyncio.run(render_weapon_card_html(view))
 
         self.assertIn("weapon-card", html)
@@ -3634,7 +3634,7 @@ class EndfieldServiceTests(unittest.TestCase):
 
     def test_render_fz_operator_card_html_uses_mastery_level_labels(self):
         view = service.build_fz_operator_view(_sample_fz_operator(), _sample_richtext())
-        with patch.object(draw, "fetch_many", AsyncMock(return_value={})):
+        with patch.object(draw, "fetch_many_resilient", AsyncMock(return_value={})):
             html = asyncio.run(render_operator_card_html(view))
 
         self.assertIn("Lv7", html)
@@ -3650,7 +3650,7 @@ class EndfieldServiceTests(unittest.TestCase):
         self.assertIn("冷却 <strong>10s</strong>", html)
         self.assertIn("种族", html)
         self.assertIn("黎博利", html)
-        ultimate_html = html[html.index('alt="协议ε·70.41κ"'):]
+        ultimate_html = html[html.index('<div class="skill-name">协议ε·70.41κ</div>'):]
         ultimate_html = ultimate_html[: ultimate_html.index("</article>")]
         self.assertNotIn('<div class="metric-name">所需能量</div>', ultimate_html)
         self.assertNotIn('<div class="metric-name">冷却</div>', ultimate_html)
@@ -3738,6 +3738,9 @@ class EndfieldServiceTests(unittest.TestCase):
 
 
 class _FakeWarfarinClient:
+    async def akedata_manifest(self):
+        return {}
+
     def __init__(
         self,
         *,
@@ -3927,7 +3930,7 @@ class EndfieldSlugResolutionTests(unittest.TestCase):
 
     def test_weapon_card_uses_generic_owner_when_relation_lookup_fails(self):
         view = build_weapon_view(_sample_weapon(), _sample_richtext())
-        with patch.object(draw, "fetch_many", AsyncMock(return_value={})):
+        with patch.object(draw, "fetch_many_resilient", AsyncMock(return_value={})):
             html = asyncio.run(render_weapon_card_html(view))
 
         self.assertIn("所属干员", html)

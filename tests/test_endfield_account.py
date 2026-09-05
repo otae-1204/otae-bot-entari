@@ -2227,7 +2227,7 @@ class EndfieldGachaAssetCacheTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["42式"].icon_path, "C:/cache/42.png")
         cache_images.assert_awaited_once()
 
-    async def test_prepare_pool_banners_uses_warfarin_portrait_and_fz_weapon_icon(self):
+    async def test_prepare_pool_banners_passes_portrait_and_weapon_candidates(self):
         operator = gacha_assets_module.GachaItemMetadata(
             "chr_up", "UP干员", 6, "角色", icon_url="https://assets.fz.wiki/operator.png",
         )
@@ -2264,8 +2264,8 @@ class EndfieldGachaAssetCacheTests(unittest.IsolatedAsyncioTestCase):
 
         requested = {item.item_id: item.icon_url for item in cache_images.await_args.args[0]}
         self.assertEqual(
-            requested["banner_chr_up"],
-            "https://static.warfarin.wiki/v4/characterportrait/chr_up.webp",
+            cache_images.await_args.kwargs["candidates"]["banner_chr_up"][0],
+            "https://data.akedata.wiki/public/images/assets/beyond/dynamicassets/gameplay/ui/sprites/characterportrait/chr_up.png",
         )
         self.assertEqual(requested["wpn_up"], weapon.icon_url)
         self.assertEqual(result["character-pool"][0].name, "UP干员")
@@ -2460,8 +2460,8 @@ class EndfieldGachaAssetCacheTests(unittest.IsolatedAsyncioTestCase):
             cache = gacha_assets_module.EndfieldGachaAssetCache(FakeService(), cache_dir=directory)
             with mock.patch.object(
                 gacha_assets_module,
-                "fetch_many",
-                mock.AsyncMock(return_value={weapon.icon_url: resource}),
+                "fetch_many_resilient",
+                mock.AsyncMock(side_effect=lambda urls, **kwargs: {url: resource for url in urls}),
             ) as fetch:
                 metadata = await cache.prepare(records)
                 second = await cache.prepare(records)
@@ -2493,7 +2493,7 @@ class EndfieldGachaAssetCacheTests(unittest.IsolatedAsyncioTestCase):
         record = store_module.GachaRecord("role", "server", "p", "池", "x", "1", 1, operator.operator_id, operator.name, 6, "角色")
         with tempfile.TemporaryDirectory() as directory, mock.patch.object(
             gacha_assets_module,
-            "fetch_many",
+            "fetch_many_resilient",
             mock.AsyncMock(return_value={operator.icon_url: None}),
         ):
             metadata = await gacha_assets_module.EndfieldGachaAssetCache(

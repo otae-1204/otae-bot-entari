@@ -168,6 +168,16 @@ class _OperatorResult:
 
 _catalog_cache: InvestmentCatalog | None = None
 _catalog_lock = asyncio.Lock()
+_catalog_generation = 0
+
+
+def clear_account_investment_catalog() -> int:
+    global _catalog_cache, _catalog_generation, _catalog_lock
+    removed = int(_catalog_cache is not None)
+    _catalog_generation += 1
+    _catalog_cache = None
+    _catalog_lock = asyncio.Lock()
+    return removed
 
 
 async def fetch_account_investment_catalog() -> InvestmentCatalog:
@@ -178,6 +188,8 @@ async def fetch_account_investment_catalog() -> InvestmentCatalog:
     invalidated automatically when AKEData changes its revision.
     """
     global _catalog_cache
+    generation = _catalog_generation
+    lock = _catalog_lock
     try:
         manifest = await fetch_akedata_manifest()
     except Exception as exc:  # pragma: no cover - exercised by integration failures
@@ -188,7 +200,7 @@ async def fetch_account_investment_catalog() -> InvestmentCatalog:
     if _catalog_cache is not None and _catalog_cache.version == latest:
         return _catalog_cache
 
-    async with _catalog_lock:
+    async with lock:
         if _catalog_cache is not None and _catalog_cache.version == latest:
             return _catalog_cache
         version_entry = next(
@@ -239,7 +251,8 @@ async def fetch_account_investment_catalog() -> InvestmentCatalog:
             catalog = _build_catalog(tables, latest)
         except Exception as exc:  # malformed upstream tables should not escape as a 500
             raise InvestmentDataUnavailable("AKEData 养成表结构异常") from exc
-        _catalog_cache = catalog
+        if generation == _catalog_generation:
+            _catalog_cache = catalog
         return catalog
 
 

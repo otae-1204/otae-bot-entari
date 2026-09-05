@@ -6,6 +6,7 @@ from typing import Any
 import httpx
 
 from otae_bot.infrastructure.http.client import fetch_json
+from .akedata import AKEDATA_HEADERS
 
 
 API_CACHE_NAMESPACE = "endfield-api"
@@ -70,8 +71,7 @@ class WarfarinClient:
 
     async def akedata_manifest(self) -> dict[str, Any]:
         return await self._get_json(
-            f"{self.AKEDATA_BASE_URL}/manifest.json",
-            params={"t": str(int(time.time() // 60))},
+            f"{self.AKEDATA_BASE_URL}/manifest.json?t={int(time.time() // 60)}",
             ttl_seconds=60.0,
         )
 
@@ -152,11 +152,12 @@ class WarfarinClient:
         else:
             source = "Warfarin Wiki"
         fetch_kwargs: dict[str, Any] = {
-            "namespace": API_CACHE_NAMESPACE,
+            "namespace": "akedata" if url.startswith(self.AKEDATA_BASE_URL + "/") else API_CACHE_NAMESPACE,
             "params": params,
-            "headers": self._headers_for(url),
+            "headers": AKEDATA_HEADERS if url.startswith(self.AKEDATA_BASE_URL + "/") else self._headers_for(url),
             "timeout_seconds": self.timeout,
             "max_bytes": max_bytes,
+            "read_only": True,
         }
         if ttl_seconds is not None:
             fetch_kwargs["ttl_seconds"] = ttl_seconds

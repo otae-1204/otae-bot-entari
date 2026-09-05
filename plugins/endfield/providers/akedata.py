@@ -18,6 +18,8 @@ achv_id 与森空岛 ``achievementData.id`` 经 md5 一一对应（见 ``docs/sk
 """
 from __future__ import annotations
 
+import asyncio
+
 from typing import Any
 import time
 
@@ -50,6 +52,7 @@ async def _get(
         headers=AKEDATA_HEADERS,
         timeout_seconds=30.0,
         max_bytes=max_bytes,
+        read_only=True,
         **({"ttl_seconds": ttl_seconds} if ttl_seconds is not None else {}),
     )
 
@@ -70,9 +73,11 @@ async def fetch_akedata_medal_tables() -> tuple[dict[str, Any], dict[str, Any], 
     if not entry or not entry.get("tableCfgPath"):
         raise RuntimeError(f"AKEData manifest 缺少版本 {latest} 的 tableCfgPath")
     table_cfg = str(entry["tableCfgPath"]).lstrip("/")
-    achievement = await _get(f"/{table_cfg}/AchievementTable.json")
-    type_table = await _get(f"/{table_cfg}/AchievementTypeTable.json")
-    i18n = await _get(f"/{table_cfg}/I18nTextTable_CN.json", max_bytes=_I18N_MAX_BYTES)
+    achievement, type_table, i18n = await asyncio.gather(
+        _get(f"/{table_cfg}/AchievementTable.json"),
+        _get(f"/{table_cfg}/AchievementTypeTable.json"),
+        _get(f"/{table_cfg}/I18nTextTable_CN.json", max_bytes=_I18N_MAX_BYTES),
+    )
     return achievement, type_table, i18n, latest
 
 

@@ -1,0 +1,293 @@
+{
+  "started_at_utc": "2026-09-05T04:44:33.245485+00:00",
+  "commit": "9d0b1bba8bc341e63b9d20038c4b6ea0fd6ada2d",
+  "dirty": false,
+  "mode": "record",
+  "network_delay_included": true,
+  "python": "3.12.3 (main, Jul 15 2026, 23:46:41) [GCC 13.3.0]",
+  "cold_runs": 3,
+  "warm_runs": 5,
+  "concurrent_runs": 2,
+  "cold_definition": "HTTP, domain, PNG and pinyin caches cleared; HTTP connections and browser may be reused.",
+  "concurrent_definition": "Four identical queries, HTTP/pinyin warm, domain/PNG cold; batch completion time.",
+  "cases": {
+    "stage_card": {
+      "cold": [
+        {
+          "seconds": 3.4296207550214604,
+          "http_calls": 11,
+          "response_bytes": 34249161,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 514552,
+                "png_sha256": "4c9fbaa8b4319914bf26b8dd043b103cc9f1002ce95bfe6230c784011a4e416f",
+                "size": [
+                  1875,
+                  1900
+                ],
+                "rgba_sha256": "1220f537e5e2234947a60e219ab5c61fa6d0059c9501d133cd67f7bb3b2fd520"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 2.497628045035526,
+          "http_calls": 11,
+          "response_bytes": 34249161,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 514552,
+                "png_sha256": "4c9fbaa8b4319914bf26b8dd043b103cc9f1002ce95bfe6230c784011a4e416f",
+                "size": [
+                  1875,
+                  1900
+                ],
+                "rgba_sha256": "1220f537e5e2234947a60e219ab5c61fa6d0059c9501d133cd67f7bb3b2fd520"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 2.390075010014698,
+          "http_calls": 11,
+          "response_bytes": 34249161,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 514552,
+                "png_sha256": "4c9fbaa8b4319914bf26b8dd043b103cc9f1002ce95bfe6230c784011a4e416f",
+                "size": [
+                  1875,
+                  1900
+                ],
+                "rgba_sha256": "1220f537e5e2234947a60e219ab5c61fa6d0059c9501d133cd67f7bb3b2fd520"
+              }
+            ]
+          ]
+        }
+      ],
+      "warm": [
+        {
+          "seconds": 0.00345258298330009,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 514552,
+                "png_sha256": "4c9fbaa8b4319914bf26b8dd043b103cc9f1002ce95bfe6230c784011a4e416f",
+                "size": [
+                  1875,
+                  1900
+                ],
+                "rgba_sha256": "1220f537e5e2234947a60e219ab5c61fa6d0059c9501d133cd67f7bb3b2fd520"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.003514676005579531,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 514552,
+                "png_sha256": "4c9fbaa8b4319914bf26b8dd043b103cc9f1002ce95bfe6230c784011a4e416f",
+                "size": [
+                  1875,
+                  1900
+                ],
+                "rgba_sha256": "1220f537e5e2234947a60e219ab5c61fa6d0059c9501d133cd67f7bb3b2fd520"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.0032831290154717863,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 514552,
+                "png_sha256": "4c9fbaa8b4319914bf26b8dd043b103cc9f1002ce95bfe6230c784011a4e416f",
+                "size": [
+                  1875,
+                  1900
+                ],
+                "rgba_sha256": "1220f537e5e2234947a60e219ab5c61fa6d0059c9501d133cd67f7bb3b2fd520"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.0032822489738464355,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 514552,
+                "png_sha256": "4c9fbaa8b4319914bf26b8dd043b103cc9f1002ce95bfe6230c784011a4e416f",
+                "size": [
+                  1875,
+                  1900
+                ],
+                "rgba_sha256": "1220f537e5e2234947a60e219ab5c61fa6d0059c9501d133cd67f7bb3b2fd520"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.0033129589864984155,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 514552,
+                "png_sha256": "4c9fbaa8b4319914bf26b8dd043b103cc9f1002ce95bfe6230c784011a4e416f",
+                "size": [
+                  1875,
+                  1900
+                ],
+                "rgba_sha256": "1220f537e5e2234947a60e219ab5c61fa6d0059c9501d133cd67f7bb3b2fd520"
+              }
+            ]
+          ]
+        }
+      ],
+      "concurrent": [
+        {
+          "seconds": 0.9105935719562694,
+          "http_calls": 1,
+          "response_bytes": 10755473,
+          "http_failures": [],
+          "concurrency": 4,
+          "outputs": [
+            [
+              {
+                "png_bytes": 514552,
+                "png_sha256": "4c9fbaa8b4319914bf26b8dd043b103cc9f1002ce95bfe6230c784011a4e416f",
+                "size": [
+                  1875,
+                  1900
+                ],
+                "rgba_sha256": "1220f537e5e2234947a60e219ab5c61fa6d0059c9501d133cd67f7bb3b2fd520"
+              }
+            ],
+            [
+              {
+                "png_bytes": 514552,
+                "png_sha256": "4c9fbaa8b4319914bf26b8dd043b103cc9f1002ce95bfe6230c784011a4e416f",
+                "size": [
+                  1875,
+                  1900
+                ],
+                "rgba_sha256": "1220f537e5e2234947a60e219ab5c61fa6d0059c9501d133cd67f7bb3b2fd520"
+              }
+            ],
+            [
+              {
+                "png_bytes": 514552,
+                "png_sha256": "4c9fbaa8b4319914bf26b8dd043b103cc9f1002ce95bfe6230c784011a4e416f",
+                "size": [
+                  1875,
+                  1900
+                ],
+                "rgba_sha256": "1220f537e5e2234947a60e219ab5c61fa6d0059c9501d133cd67f7bb3b2fd520"
+              }
+            ],
+            [
+              {
+                "png_bytes": 514552,
+                "png_sha256": "4c9fbaa8b4319914bf26b8dd043b103cc9f1002ce95bfe6230c784011a4e416f",
+                "size": [
+                  1875,
+                  1900
+                ],
+                "rgba_sha256": "1220f537e5e2234947a60e219ab5c61fa6d0059c9501d133cd67f7bb3b2fd520"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.9008094790042378,
+          "http_calls": 1,
+          "response_bytes": 10755473,
+          "http_failures": [],
+          "concurrency": 4,
+          "outputs": [
+            [
+              {
+                "png_bytes": 514552,
+                "png_sha256": "4c9fbaa8b4319914bf26b8dd043b103cc9f1002ce95bfe6230c784011a4e416f",
+                "size": [
+                  1875,
+                  1900
+                ],
+                "rgba_sha256": "1220f537e5e2234947a60e219ab5c61fa6d0059c9501d133cd67f7bb3b2fd520"
+              }
+            ],
+            [
+              {
+                "png_bytes": 514552,
+                "png_sha256": "4c9fbaa8b4319914bf26b8dd043b103cc9f1002ce95bfe6230c784011a4e416f",
+                "size": [
+                  1875,
+                  1900
+                ],
+                "rgba_sha256": "1220f537e5e2234947a60e219ab5c61fa6d0059c9501d133cd67f7bb3b2fd520"
+              }
+            ],
+            [
+              {
+                "png_bytes": 514552,
+                "png_sha256": "4c9fbaa8b4319914bf26b8dd043b103cc9f1002ce95bfe6230c784011a4e416f",
+                "size": [
+                  1875,
+                  1900
+                ],
+                "rgba_sha256": "1220f537e5e2234947a60e219ab5c61fa6d0059c9501d133cd67f7bb3b2fd520"
+              }
+            ],
+            [
+              {
+                "png_bytes": 514552,
+                "png_sha256": "4c9fbaa8b4319914bf26b8dd043b103cc9f1002ce95bfe6230c784011a4e416f",
+                "size": [
+                  1875,
+                  1900
+                ],
+                "rgba_sha256": "1220f537e5e2234947a60e219ab5c61fa6d0059c9501d133cd67f7bb3b2fd520"
+              }
+            ]
+          ]
+        }
+      ],
+      "cold_median_seconds": 2.497628045035526,
+      "warm_median_seconds": 0.0033129589864984155,
+      "concurrent_median_seconds": 0.9057015254802536
+    }
+  },
+  "note": "No QQ/Satori transport, account API, or interactive user wait is included. Browser is prestarted."
+}

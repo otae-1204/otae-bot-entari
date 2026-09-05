@@ -41,6 +41,10 @@ from otae_bot.infrastructure.http.client import clear_http_cache, get_http_cache
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
 
 from .providers.warfarin import WarfarinAPIError, WarfarinClient
+from .rendering.health import track_render_health
+from .account.detail.names import clear_account_detail_name_map
+from .account.investment.service import clear_account_investment_catalog
+from .account.challenge.i18n import clear_challenge_locale, close_challenge_locale
 from .account.client import (
     ACCOUNT_PROVIDER_CN,
     ACCOUNT_PROVIDER_SKPORT,
@@ -94,6 +98,7 @@ from .catalog.commands import (
     strip_message_mentions,
 )
 from .rendering.cards import (
+    clear_render_asset_caches,
     draw_equipment_card,
     draw_equipment_catalog_card,
     draw_loadout_card_with_status,
@@ -210,6 +215,11 @@ _CARD_CACHE: AsyncTTLCache[CardCacheKey, tuple[bytes, ...]] = AsyncTTLCache(
 _LOADOUT_CACHE: AsyncTTLCache[tuple[str, str], bytes] = AsyncTTLCache(
     ttl_seconds=60.0, max_bytes=24 * 1024 * 1024, max_entries=32, sizeof=len,
 )
+_ACCOUNT_PAGE_CACHE: AsyncTTLCache[tuple[str, ...], tuple[bytes, ...]] = AsyncTTLCache(
+    ttl_seconds=60.0, max_bytes=32 * 1024 * 1024, max_entries=24,
+    sizeof=lambda pages: sum(map(len, pages)),
+)
+_ASSET_GENERATION = 0
 _CALENDAR_CACHE: AsyncTTLCache[str, bytes] = AsyncTTLCache(
     ttl_seconds=600.0,
     max_bytes=8 * 1024 * 1024,
@@ -217,7 +227,7 @@ _CALENDAR_CACHE: AsyncTTLCache[str, bytes] = AsyncTTLCache(
     sizeof=len,
 )
 CHALLENGE_CACHE_TTL_SECONDS = 60.0
-ChallengeCacheKey = tuple[str, str, str, str, str, str, int, bool, str, str]
+ChallengeCacheKey = tuple
 _CHALLENGE_DATA_CACHE: AsyncTTLCache[tuple[str, str, str], dict] = AsyncTTLCache(
     ttl_seconds=CHALLENGE_CACHE_TTL_SECONDS,
     max_bytes=12 * 1024 * 1024,
@@ -859,8 +869,23 @@ async def _handle_challenge(
             group_chat,
             variant,
             locale.version if locale is not None else "api-copy",
+            CARD_RENDER_VERSION,
+            _ASSET_GENERATION,
+            hashlib.sha256(json.dumps(
+                [raw, asdict(identity)], sort_keys=True, ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode()).hexdigest(),
         )
-        return await _CHALLENGE_RENDER_CACHE.get_or_create(key, factory)
+        async def render_complete():
+            with track_render_health() as health:
+                pages = tuple(await factory())
+                if not health.complete or locale is None:
+                    raise _IncompletePages(pages)
+                return pages
+        try:
+            return await _CHALLENGE_RENDER_CACHE.get_or_create(key, render_complete)
+        except _IncompletePages as exc:
+            return exc.pages
 
     if command.challenge_kind == "monument":
         raw, locale = await asyncio.gather(load_data("monument"), load_locale())
@@ -1276,7 +1301,8 @@ async def _render_account_detail(
         currency_balances=currency_balances,
         name_map=name_map,
     )
-    return await _finish_pngs(matcher, await draw_account_detail_cards(view))
+    pages = await _render_account_pages("detail", role, group, view, lambda: draw_account_detail_cards(view))
+    return await _finish_pngs(matcher, pages)
 
 
 async def _handle_account_investment(
@@ -1346,7 +1372,8 @@ async def _render_account_investment(
         catalog=catalog,
         name_map=name_map,
     )
-    return await _finish_pngs(matcher, await draw_account_investment_cards(view))
+    pages = await _render_account_pages("investment", role, group, view, lambda: draw_account_investment_cards(view))
+    return await _finish_pngs(matcher, pages)
 
 
 async def _handle_account_currency(
@@ -1551,11 +1578,67 @@ async def _render_account_base(
         store=account_store,
         name_map=name_map,
     )
-    return await _finish_pngs(matcher, (await draw_account_base_card(view),))
+    async def render():
+        return (await draw_account_base_card(view),)
+
+    return await _finish_pngs(matcher, await _render_account_pages("base", role, group, view, render))
+
+
+class _IncompletePages(Exception):
+    def __init__(self, pages: tuple[bytes, ...]):
+        self.pages = pages
+
+
+async def _render_account_pages(
+    kind: str, role, group: bool, view, render
+) -> tuple[bytes, ...]:
+    """Cache only rendering after current data and authorization were resolved."""
+    digest = hashlib.sha256(
+        json.dumps(
+            asdict(view),
+            sort_keys=True,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    key = (
+        CARD_RENDER_VERSION,
+        str(_ASSET_GENERATION),
+        kind,
+        str(role.role_id),
+        str(role.server_id),
+        "group" if group else "private",
+        digest,
+    )
+
+    async def create_pages():
+        with track_render_health() as health:
+            pages = tuple(await render())
+            if not health.complete:
+                raise _IncompletePages(pages)
+            return pages
+
+    started = perf_counter()
+    try:
+        pages, hit = await _ACCOUNT_PAGE_CACHE.get_or_create_with_status(
+            key, create_pages
+        )
+    except _IncompletePages as exc:
+        pages, hit = exc.pages, False
+    logger.info(
+        f"[endfield] account-render kind={kind} reuse={hit} "
+        f"seconds={perf_counter() - started:.3f} pages={len(pages)}"
+    )
+    return pages
 
 
 async def _handle_attendance(
-    matcher, qq_user_id: str, command: ParsedEndfieldCommand, cipher: CredentialCipher, *, group: bool
+    matcher,
+    qq_user_id: str,
+    command: ParsedEndfieldCommand,
+    cipher: CredentialCipher,
+    *,
+    group: bool,
 ) -> None:
     roles = account_store.resolve_roles(qq_user_id, command.account_selector)
     if not roles:
@@ -2367,28 +2450,29 @@ async def _render_candidate(
 
     async def render() -> tuple[bytes, ...]:
         nonlocal degraded
-        if candidate.kind == "stage":
-            output, degraded = await _render_stage(
-                candidate.key,
-                effective_source,
-                mode=candidate.mode or "detail",
-                selector=candidate.variant,
-            )
-        else:
-            output = await renderer(candidate.key, effective_source)
-        if output is None:
-            raise _CardNotFound
-        # Renderers that never overflow still return a single image; normalize here so the
-        # cache and the send path only ever deal with pages.
-        return (output,) if isinstance(output, bytes) else tuple(output)
+        with track_render_health() as health:
+            if candidate.kind == "stage":
+                output, degraded = await _render_stage(
+                    candidate.key,
+                    effective_source,
+                    mode=candidate.mode or "detail",
+                    selector=candidate.variant,
+                )
+            else:
+                output = await renderer(candidate.key, effective_source)
+            if output is None:
+                raise _CardNotFound
+            pages = (output,) if isinstance(output, bytes) else tuple(output)
+            if degraded or not health.complete:
+                raise _IncompletePages(pages)
+            return pages
 
     try:
         pages, cache_hit = await _CARD_CACHE.get_or_create_with_status(cache_key, render)
     except _CardNotFound:
         return None
-    if degraded:
-        # A card missing data only because a fetch failed must not be served for the full TTL.
-        await _CARD_CACHE.clear(lambda key: key == cache_key)
+    except _IncompletePages as exc:
+        return exc.pages
     logger.info(
         f"[endfield] card-cache kind={candidate.kind} source={cache_source} "
         f"hit={str(cache_hit).lower()} pages={len(pages)} "
@@ -2550,10 +2634,11 @@ async def _finish_png(matcher, png: bytes) -> None:
 
 
 async def _render_current_version_calendar() -> bytes:
+    generation = _ASSET_GENERATION
     try:
         official = await official_calendar_source.current()
         return await _CALENDAR_CACHE.get_or_create(
-            f"official:{official.revision}",
+            f"{generation}:official:{official.revision}",
             lambda: draw_official_version_calendar(official),
         )
     except Exception as exc:
@@ -2563,7 +2648,7 @@ async def _render_current_version_calendar() -> bytes:
         )
     calendar = await calendar_source.current()
     return await _CALENDAR_CACHE.get_or_create(
-        f"generated:{calendar.version}:{calendar.revision}",
+        f"{generation}:generated:{calendar.version}:{calendar.revision}",
         lambda: draw_version_calendar(calendar),
     )
 
@@ -2688,36 +2773,69 @@ def _normalize_cache_scope(value: str) -> str | None:
 
 
 async def _clear_endfield_caches(scope: str) -> int:
+    global _ASSET_GENERATION
     removed = 0
+    if scope in {"all", "icon", "operator", "weapon", "equipment", "stage"}:
+        _ASSET_GENERATION += 1
+        removed += await _ACCOUNT_PAGE_CACHE.clear()
     if scope == "all":
+        removed += clear_render_asset_caches()
+        removed += gacha_asset_cache.clear_caches()
         removed += await _CARD_CACHE.clear()
         removed += await _LOADOUT_CACHE.clear()
+        removed += await _CALENDAR_CACHE.clear()
+        removed += await _CHALLENGE_DATA_CACHE.clear()
+        removed += await _CHALLENGE_RENDER_CACHE.clear()
         removed += await service.clear_query_caches()
         removed += await clear_http_cache("endfield-")
+        removed += await clear_http_cache("akedata")
+        removed += stage_service.clear_caches()
+        removed += calendar_source.clear_caches()
+        removed += clear_account_detail_name_map()
+        removed += clear_account_investment_catalog()
+        removed += clear_challenge_locale()
     elif scope == "icon":
+        removed += clear_render_asset_caches()
+        removed += gacha_asset_cache.clear_caches()
+        removed += await _CARD_CACHE.clear()
         removed += await _LOADOUT_CACHE.clear()
+        removed += await _CALENDAR_CACHE.clear()
+        removed += await _CHALLENGE_RENDER_CACHE.clear()
         removed += await clear_http_cache("endfield-assets")
+        removed += await clear_http_cache("endfield-account")
+        removed += await clear_http_cache("endfield-gacha")
+        removed += await clear_http_cache("endfield-official-calendar")
     elif scope in {"operator", "weapon", "equipment", "stage"}:
         removed += await _LOADOUT_CACHE.clear()
         removed += await service.clear_query_caches()
         cache_kinds = (
-            {scope, "equipment_catalog", "equipment_attribute"} if scope == "equipment" else {scope}
+            {scope, "equipment_catalog", "equipment_attribute"}
+            if scope == "equipment" else {scope, f"{scope}_catalog"}
         )
         removed += await _CARD_CACHE.clear(lambda key: key[1] in cache_kinds)
         removed += await clear_http_cache("endfield-api")
+        removed += await clear_http_cache("akedata")
+        removed += clear_account_detail_name_map()
+        removed += clear_account_investment_catalog()
+        if scope == "stage":
+            removed += stage_service.clear_caches()
     return removed
 
 
 async def _cache_status_lines() -> list[str]:
     api_stats = await get_http_cache_stats("endfield-api")
     asset_stats = await get_http_cache_stats("endfield-assets")
+    table_stats = await get_http_cache_stats("akedata")
     card_stats = await _CARD_CACHE.stats()
     loadout_stats = await _LOADOUT_CACHE.stats()
+    account_stats = await _ACCOUNT_PAGE_CACHE.stats()
     return [
         _format_cache_stats("API", api_stats),
+        _format_cache_stats("AKEData", table_stats),
         _format_cache_stats("远程素材", asset_stats),
         _format_cache_stats("成品卡片", card_stats),
         _format_cache_stats("配装卡片", loadout_stats),
+        _format_cache_stats("账号卡片", account_stats),
         f"缓存策略: TTL {int(CARD_CACHE_TTL_SECONDS)}s / 下载并发 8",
     ]
 
@@ -2725,7 +2843,8 @@ async def _cache_status_lines() -> list[str]:
 def _format_cache_stats(label: str, stats: CacheStats) -> str:
     return (
         f"{label}: {stats.entries} 项 / {stats.bytes / 1024 / 1024:.1f} MiB / "
-        f"命中 {stats.hits} / 未命中 {stats.misses} / 合并 {stats.coalesced}"
+        f"直接命中 {stats.direct_hits} / 未命中 {stats.misses} / 等待合并 {stats.coalesced} / "
+        f"过期 {stats.expirations} / 容量淘汰 {stats.capacity_evictions}"
     )
 
 
@@ -2874,3 +2993,12 @@ async def _close_ownership_startup_task() -> None:
     if _ownership_startup_task is not None and not _ownership_startup_task.done():
         _ownership_startup_task.cancel()
         await asyncio.gather(_ownership_startup_task, return_exceptions=True)
+    await close_challenge_locale()
+    await asyncio.gather(*(
+        cache.close() for cache in (
+            _CARD_CACHE, _LOADOUT_CACHE, _CALENDAR_CACHE,
+            _CHALLENGE_DATA_CACHE, _CHALLENGE_RENDER_CACHE, service._weapon_relations,
+            _ACCOUNT_PAGE_CACHE,
+        )
+    ))
+    await official_client.close()

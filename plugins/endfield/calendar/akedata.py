@@ -189,6 +189,15 @@ class AkeDataVersionCalendarSource:
         self.client = client
         self._version: AkeDataVersion | None = None
         self._tables: dict[str, dict[str, Any]] = {}
+        self._generation = 0
+
+    def clear_caches(self) -> int:
+        self._generation += 1
+        removed = len(self._tables)
+        self._version = None
+        self._tables = {}
+        load_calendar_manifest.cache_clear()
+        return removed
 
     async def current(self) -> VersionCalendar:
         calendar = load_calendar_manifest()
@@ -202,21 +211,28 @@ class AkeDataVersionCalendarSource:
         return hydrated
 
     async def _latest_version(self) -> AkeDataVersion:
+        generation = self._generation
         version = parse_akedata_version(await self.client.akedata_manifest())
+        if generation != self._generation:
+            return version
         if self._version is None or self._version.id != version.id:
-            self._tables.clear()
+            self._tables = {}
         self._version = version
         return version
 
     async def _load_tables(self, *names: str) -> tuple[dict[str, Any], ...]:
+        generation = self._generation
         version = self._version or await self._latest_version()
+        if generation != self._generation:
+            return await self._load_tables(*names)
+        target = self._tables
 
         async def load(name: str) -> dict[str, Any]:
-            cached = self._tables.get(name)
+            cached = target.get(name)
             if cached is not None:
                 return cached
             value = await self.client.akedata_table(version.table_cfg_path, name)
-            self._tables[name] = value
+            target[name] = value
             return value
 
         return tuple(await asyncio.gather(*(load(name) for name in names)))

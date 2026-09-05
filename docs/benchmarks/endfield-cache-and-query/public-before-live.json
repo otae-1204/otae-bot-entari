@@ -1,0 +1,3224 @@
+{
+  "started_at_utc": "2026-09-05T04:38:42.338714+00:00",
+  "commit": "9d0b1bba8bc341e63b9d20038c4b6ea0fd6ada2d",
+  "dirty": false,
+  "mode": "record",
+  "network_delay_included": true,
+  "python": "3.12.3 (main, Jul 15 2026, 23:46:41) [GCC 13.3.0]",
+  "cold_runs": 3,
+  "warm_runs": 5,
+  "concurrent_runs": 2,
+  "cold_definition": "HTTP, domain, PNG and pinyin caches cleared; HTTP connections and browser may be reused.",
+  "concurrent_definition": "Four identical queries, HTTP/pinyin warm, domain/PNG cold; batch completion time.",
+  "cases": {
+    "equipment_search": {
+      "cold": [
+        {
+          "seconds": 1.024422740971204,
+          "http_calls": 1,
+          "response_bytes": 91504,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "json_sha256": "06c738f015dc6ef23da93833707ab05dd1121a19fc0bdea288a42df47af5bdf7"
+              },
+              {
+                "json_sha256": "cab5c9a7740013c1196f3572c31940e0f93b53308d45649df64db400b2c1fc0c"
+              },
+              {
+                "json_sha256": "0061e3c4bd5281d147a312c45f03356181a6375850f01e093de6d541443045b8"
+              },
+              {
+                "json_sha256": "a44e084fc968828865483e5993f528e68763df4b0a127c3451c63474f8c32a5e"
+              },
+              {
+                "json_sha256": "f98c3221670712d6bed18978ec51bd13b449a621e4f45722990d5ab34f512950"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.3069962189765647,
+          "http_calls": 1,
+          "response_bytes": 91504,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "json_sha256": "06c738f015dc6ef23da93833707ab05dd1121a19fc0bdea288a42df47af5bdf7"
+              },
+              {
+                "json_sha256": "cab5c9a7740013c1196f3572c31940e0f93b53308d45649df64db400b2c1fc0c"
+              },
+              {
+                "json_sha256": "0061e3c4bd5281d147a312c45f03356181a6375850f01e093de6d541443045b8"
+              },
+              {
+                "json_sha256": "a44e084fc968828865483e5993f528e68763df4b0a127c3451c63474f8c32a5e"
+              },
+              {
+                "json_sha256": "f98c3221670712d6bed18978ec51bd13b449a621e4f45722990d5ab34f512950"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.3105438079801388,
+          "http_calls": 1,
+          "response_bytes": 91504,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "json_sha256": "06c738f015dc6ef23da93833707ab05dd1121a19fc0bdea288a42df47af5bdf7"
+              },
+              {
+                "json_sha256": "cab5c9a7740013c1196f3572c31940e0f93b53308d45649df64db400b2c1fc0c"
+              },
+              {
+                "json_sha256": "0061e3c4bd5281d147a312c45f03356181a6375850f01e093de6d541443045b8"
+              },
+              {
+                "json_sha256": "a44e084fc968828865483e5993f528e68763df4b0a127c3451c63474f8c32a5e"
+              },
+              {
+                "json_sha256": "f98c3221670712d6bed18978ec51bd13b449a621e4f45722990d5ab34f512950"
+              }
+            ]
+          ]
+        }
+      ],
+      "warm": [
+        {
+          "seconds": 0.011865555017720908,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "json_sha256": "06c738f015dc6ef23da93833707ab05dd1121a19fc0bdea288a42df47af5bdf7"
+              },
+              {
+                "json_sha256": "cab5c9a7740013c1196f3572c31940e0f93b53308d45649df64db400b2c1fc0c"
+              },
+              {
+                "json_sha256": "0061e3c4bd5281d147a312c45f03356181a6375850f01e093de6d541443045b8"
+              },
+              {
+                "json_sha256": "a44e084fc968828865483e5993f528e68763df4b0a127c3451c63474f8c32a5e"
+              },
+              {
+                "json_sha256": "f98c3221670712d6bed18978ec51bd13b449a621e4f45722990d5ab34f512950"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.012012038030661643,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "json_sha256": "06c738f015dc6ef23da93833707ab05dd1121a19fc0bdea288a42df47af5bdf7"
+              },
+              {
+                "json_sha256": "cab5c9a7740013c1196f3572c31940e0f93b53308d45649df64db400b2c1fc0c"
+              },
+              {
+                "json_sha256": "0061e3c4bd5281d147a312c45f03356181a6375850f01e093de6d541443045b8"
+              },
+              {
+                "json_sha256": "a44e084fc968828865483e5993f528e68763df4b0a127c3451c63474f8c32a5e"
+              },
+              {
+                "json_sha256": "f98c3221670712d6bed18978ec51bd13b449a621e4f45722990d5ab34f512950"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.012049549957737327,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "json_sha256": "06c738f015dc6ef23da93833707ab05dd1121a19fc0bdea288a42df47af5bdf7"
+              },
+              {
+                "json_sha256": "cab5c9a7740013c1196f3572c31940e0f93b53308d45649df64db400b2c1fc0c"
+              },
+              {
+                "json_sha256": "0061e3c4bd5281d147a312c45f03356181a6375850f01e093de6d541443045b8"
+              },
+              {
+                "json_sha256": "a44e084fc968828865483e5993f528e68763df4b0a127c3451c63474f8c32a5e"
+              },
+              {
+                "json_sha256": "f98c3221670712d6bed18978ec51bd13b449a621e4f45722990d5ab34f512950"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.012010278005618602,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "json_sha256": "06c738f015dc6ef23da93833707ab05dd1121a19fc0bdea288a42df47af5bdf7"
+              },
+              {
+                "json_sha256": "cab5c9a7740013c1196f3572c31940e0f93b53308d45649df64db400b2c1fc0c"
+              },
+              {
+                "json_sha256": "0061e3c4bd5281d147a312c45f03356181a6375850f01e093de6d541443045b8"
+              },
+              {
+                "json_sha256": "a44e084fc968828865483e5993f528e68763df4b0a127c3451c63474f8c32a5e"
+              },
+              {
+                "json_sha256": "f98c3221670712d6bed18978ec51bd13b449a621e4f45722990d5ab34f512950"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.011824073968455195,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "json_sha256": "06c738f015dc6ef23da93833707ab05dd1121a19fc0bdea288a42df47af5bdf7"
+              },
+              {
+                "json_sha256": "cab5c9a7740013c1196f3572c31940e0f93b53308d45649df64db400b2c1fc0c"
+              },
+              {
+                "json_sha256": "0061e3c4bd5281d147a312c45f03356181a6375850f01e093de6d541443045b8"
+              },
+              {
+                "json_sha256": "a44e084fc968828865483e5993f528e68763df4b0a127c3451c63474f8c32a5e"
+              },
+              {
+                "json_sha256": "f98c3221670712d6bed18978ec51bd13b449a621e4f45722990d5ab34f512950"
+              }
+            ]
+          ]
+        }
+      ],
+      "concurrent": [
+        {
+          "seconds": 0.04654354299418628,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 4,
+          "outputs": [
+            [
+              {
+                "json_sha256": "06c738f015dc6ef23da93833707ab05dd1121a19fc0bdea288a42df47af5bdf7"
+              },
+              {
+                "json_sha256": "cab5c9a7740013c1196f3572c31940e0f93b53308d45649df64db400b2c1fc0c"
+              },
+              {
+                "json_sha256": "0061e3c4bd5281d147a312c45f03356181a6375850f01e093de6d541443045b8"
+              },
+              {
+                "json_sha256": "a44e084fc968828865483e5993f528e68763df4b0a127c3451c63474f8c32a5e"
+              },
+              {
+                "json_sha256": "f98c3221670712d6bed18978ec51bd13b449a621e4f45722990d5ab34f512950"
+              }
+            ],
+            [
+              {
+                "json_sha256": "06c738f015dc6ef23da93833707ab05dd1121a19fc0bdea288a42df47af5bdf7"
+              },
+              {
+                "json_sha256": "cab5c9a7740013c1196f3572c31940e0f93b53308d45649df64db400b2c1fc0c"
+              },
+              {
+                "json_sha256": "0061e3c4bd5281d147a312c45f03356181a6375850f01e093de6d541443045b8"
+              },
+              {
+                "json_sha256": "a44e084fc968828865483e5993f528e68763df4b0a127c3451c63474f8c32a5e"
+              },
+              {
+                "json_sha256": "f98c3221670712d6bed18978ec51bd13b449a621e4f45722990d5ab34f512950"
+              }
+            ],
+            [
+              {
+                "json_sha256": "06c738f015dc6ef23da93833707ab05dd1121a19fc0bdea288a42df47af5bdf7"
+              },
+              {
+                "json_sha256": "cab5c9a7740013c1196f3572c31940e0f93b53308d45649df64db400b2c1fc0c"
+              },
+              {
+                "json_sha256": "0061e3c4bd5281d147a312c45f03356181a6375850f01e093de6d541443045b8"
+              },
+              {
+                "json_sha256": "a44e084fc968828865483e5993f528e68763df4b0a127c3451c63474f8c32a5e"
+              },
+              {
+                "json_sha256": "f98c3221670712d6bed18978ec51bd13b449a621e4f45722990d5ab34f512950"
+              }
+            ],
+            [
+              {
+                "json_sha256": "06c738f015dc6ef23da93833707ab05dd1121a19fc0bdea288a42df47af5bdf7"
+              },
+              {
+                "json_sha256": "cab5c9a7740013c1196f3572c31940e0f93b53308d45649df64db400b2c1fc0c"
+              },
+              {
+                "json_sha256": "0061e3c4bd5281d147a312c45f03356181a6375850f01e093de6d541443045b8"
+              },
+              {
+                "json_sha256": "a44e084fc968828865483e5993f528e68763df4b0a127c3451c63474f8c32a5e"
+              },
+              {
+                "json_sha256": "f98c3221670712d6bed18978ec51bd13b449a621e4f45722990d5ab34f512950"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.04623524798080325,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 4,
+          "outputs": [
+            [
+              {
+                "json_sha256": "06c738f015dc6ef23da93833707ab05dd1121a19fc0bdea288a42df47af5bdf7"
+              },
+              {
+                "json_sha256": "cab5c9a7740013c1196f3572c31940e0f93b53308d45649df64db400b2c1fc0c"
+              },
+              {
+                "json_sha256": "0061e3c4bd5281d147a312c45f03356181a6375850f01e093de6d541443045b8"
+              },
+              {
+                "json_sha256": "a44e084fc968828865483e5993f528e68763df4b0a127c3451c63474f8c32a5e"
+              },
+              {
+                "json_sha256": "f98c3221670712d6bed18978ec51bd13b449a621e4f45722990d5ab34f512950"
+              }
+            ],
+            [
+              {
+                "json_sha256": "06c738f015dc6ef23da93833707ab05dd1121a19fc0bdea288a42df47af5bdf7"
+              },
+              {
+                "json_sha256": "cab5c9a7740013c1196f3572c31940e0f93b53308d45649df64db400b2c1fc0c"
+              },
+              {
+                "json_sha256": "0061e3c4bd5281d147a312c45f03356181a6375850f01e093de6d541443045b8"
+              },
+              {
+                "json_sha256": "a44e084fc968828865483e5993f528e68763df4b0a127c3451c63474f8c32a5e"
+              },
+              {
+                "json_sha256": "f98c3221670712d6bed18978ec51bd13b449a621e4f45722990d5ab34f512950"
+              }
+            ],
+            [
+              {
+                "json_sha256": "06c738f015dc6ef23da93833707ab05dd1121a19fc0bdea288a42df47af5bdf7"
+              },
+              {
+                "json_sha256": "cab5c9a7740013c1196f3572c31940e0f93b53308d45649df64db400b2c1fc0c"
+              },
+              {
+                "json_sha256": "0061e3c4bd5281d147a312c45f03356181a6375850f01e093de6d541443045b8"
+              },
+              {
+                "json_sha256": "a44e084fc968828865483e5993f528e68763df4b0a127c3451c63474f8c32a5e"
+              },
+              {
+                "json_sha256": "f98c3221670712d6bed18978ec51bd13b449a621e4f45722990d5ab34f512950"
+              }
+            ],
+            [
+              {
+                "json_sha256": "06c738f015dc6ef23da93833707ab05dd1121a19fc0bdea288a42df47af5bdf7"
+              },
+              {
+                "json_sha256": "cab5c9a7740013c1196f3572c31940e0f93b53308d45649df64db400b2c1fc0c"
+              },
+              {
+                "json_sha256": "0061e3c4bd5281d147a312c45f03356181a6375850f01e093de6d541443045b8"
+              },
+              {
+                "json_sha256": "a44e084fc968828865483e5993f528e68763df4b0a127c3451c63474f8c32a5e"
+              },
+              {
+                "json_sha256": "f98c3221670712d6bed18978ec51bd13b449a621e4f45722990d5ab34f512950"
+              }
+            ]
+          ]
+        }
+      ],
+      "cold_median_seconds": 0.3105438079801388,
+      "warm_median_seconds": 0.012010278005618602,
+      "concurrent_median_seconds": 0.04638939548749477
+    },
+    "weapon_relations": {
+      "cold": [
+        {
+          "seconds": 0.9530171539518051,
+          "http_calls": 8,
+          "response_bytes": 2216720,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.1241794369998388,
+          "http_calls": 8,
+          "response_bytes": 2216720,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.1183347610058263,
+          "http_calls": 8,
+          "response_bytes": 2216720,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+              }
+            ]
+          ]
+        }
+      ],
+      "warm": [
+        {
+          "seconds": 0.0008952670032158494,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.0008423970430158079,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.0008055859943851829,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.0008238760055974126,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.0007977350032888353,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+              }
+            ]
+          ]
+        }
+      ],
+      "concurrent": [
+        {
+          "seconds": 0.03180608298862353,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 4,
+          "outputs": [
+            [
+              {
+                "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+              }
+            ],
+            [
+              {
+                "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+              }
+            ],
+            [
+              {
+                "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+              }
+            ],
+            [
+              {
+                "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.028348444029688835,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 4,
+          "outputs": [
+            [
+              {
+                "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+              }
+            ],
+            [
+              {
+                "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+              }
+            ],
+            [
+              {
+                "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+              }
+            ],
+            [
+              {
+                "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+              }
+            ]
+          ]
+        }
+      ],
+      "cold_median_seconds": 0.1241794369998388,
+      "warm_median_seconds": 0.0008238760055974126,
+      "concurrent_median_seconds": 0.030077263509156182
+    },
+    "loadout": {
+      "cold": [
+        {
+          "seconds": 3.5124594569788314,
+          "http_calls": 15,
+          "response_bytes": 1561759,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            {
+              "png_bytes": 1043012,
+              "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+              "size": [
+                1875,
+                2766
+              ],
+              "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+            }
+          ]
+        },
+        {
+          "seconds": 2.5630920159746893,
+          "http_calls": 15,
+          "response_bytes": 1561759,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            {
+              "png_bytes": 1043012,
+              "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+              "size": [
+                1875,
+                2766
+              ],
+              "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+            }
+          ]
+        },
+        {
+          "seconds": 2.5095950219547376,
+          "http_calls": 15,
+          "response_bytes": 1561759,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            {
+              "png_bytes": 1043012,
+              "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+              "size": [
+                1875,
+                2766
+              ],
+              "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+            }
+          ]
+        }
+      ],
+      "warm": [
+        {
+          "seconds": 0.07580181601224467,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            {
+              "png_bytes": 1043012,
+              "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+              "size": [
+                1875,
+                2766
+              ],
+              "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+            }
+          ]
+        },
+        {
+          "seconds": 0.0757315349765122,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            {
+              "png_bytes": 1043012,
+              "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+              "size": [
+                1875,
+                2766
+              ],
+              "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+            }
+          ]
+        },
+        {
+          "seconds": 0.07583566597895697,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            {
+              "png_bytes": 1043012,
+              "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+              "size": [
+                1875,
+                2766
+              ],
+              "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+            }
+          ]
+        },
+        {
+          "seconds": 0.07587082701502368,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            {
+              "png_bytes": 1043012,
+              "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+              "size": [
+                1875,
+                2766
+              ],
+              "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+            }
+          ]
+        },
+        {
+          "seconds": 0.07633684697793797,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            {
+              "png_bytes": 1043012,
+              "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+              "size": [
+                1875,
+                2766
+              ],
+              "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+            }
+          ]
+        }
+      ],
+      "concurrent": [
+        {
+          "seconds": 0.9492867080261931,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 4,
+          "outputs": [
+            {
+              "png_bytes": 1043012,
+              "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+              "size": [
+                1875,
+                2766
+              ],
+              "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+            },
+            {
+              "png_bytes": 1043012,
+              "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+              "size": [
+                1875,
+                2766
+              ],
+              "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+            },
+            {
+              "png_bytes": 1043012,
+              "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+              "size": [
+                1875,
+                2766
+              ],
+              "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+            },
+            {
+              "png_bytes": 1043012,
+              "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+              "size": [
+                1875,
+                2766
+              ],
+              "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+            }
+          ]
+        },
+        {
+          "seconds": 0.9508407279499806,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 4,
+          "outputs": [
+            {
+              "png_bytes": 1043012,
+              "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+              "size": [
+                1875,
+                2766
+              ],
+              "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+            },
+            {
+              "png_bytes": 1043012,
+              "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+              "size": [
+                1875,
+                2766
+              ],
+              "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+            },
+            {
+              "png_bytes": 1043012,
+              "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+              "size": [
+                1875,
+                2766
+              ],
+              "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+            },
+            {
+              "png_bytes": 1043012,
+              "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+              "size": [
+                1875,
+                2766
+              ],
+              "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+            }
+          ]
+        }
+      ],
+      "cold_median_seconds": 2.5630920159746893,
+      "warm_median_seconds": 0.07583566597895697,
+      "concurrent_median_seconds": 0.9500637179880869
+    },
+    "operator_card": {
+      "cold": [
+        {
+          "seconds": 20.443191541999113,
+          "http_calls": 14,
+          "response_bytes": 19228617,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 4474536,
+                "png_sha256": "ace3fb6b87582d9e237e7085e9f9ef418f28ebac833f1bed6e343381d492a4ae",
+                "size": [
+                  3200,
+                  2622
+                ],
+                "rgba_sha256": "cdd324c0dfd6e685a76be0ddff26b16ff311dc8a12120b50815307f7829856b4"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 19.851301364018582,
+          "http_calls": 14,
+          "response_bytes": 19228617,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 4474536,
+                "png_sha256": "ace3fb6b87582d9e237e7085e9f9ef418f28ebac833f1bed6e343381d492a4ae",
+                "size": [
+                  3200,
+                  2622
+                ],
+                "rgba_sha256": "cdd324c0dfd6e685a76be0ddff26b16ff311dc8a12120b50815307f7829856b4"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 18.936482151970267,
+          "http_calls": 14,
+          "response_bytes": 19228617,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 4474536,
+                "png_sha256": "ace3fb6b87582d9e237e7085e9f9ef418f28ebac833f1bed6e343381d492a4ae",
+                "size": [
+                  3200,
+                  2622
+                ],
+                "rgba_sha256": "cdd324c0dfd6e685a76be0ddff26b16ff311dc8a12120b50815307f7829856b4"
+              }
+            ]
+          ]
+        }
+      ],
+      "warm": [
+        {
+          "seconds": 0.0003013170207850635,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 4474536,
+                "png_sha256": "ace3fb6b87582d9e237e7085e9f9ef418f28ebac833f1bed6e343381d492a4ae",
+                "size": [
+                  3200,
+                  2622
+                ],
+                "rgba_sha256": "cdd324c0dfd6e685a76be0ddff26b16ff311dc8a12120b50815307f7829856b4"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.00031754496740177274,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 4474536,
+                "png_sha256": "ace3fb6b87582d9e237e7085e9f9ef418f28ebac833f1bed6e343381d492a4ae",
+                "size": [
+                  3200,
+                  2622
+                ],
+                "rgba_sha256": "cdd324c0dfd6e685a76be0ddff26b16ff311dc8a12120b50815307f7829856b4"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.00030465598683804274,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 4474536,
+                "png_sha256": "ace3fb6b87582d9e237e7085e9f9ef418f28ebac833f1bed6e343381d492a4ae",
+                "size": [
+                  3200,
+                  2622
+                ],
+                "rgba_sha256": "cdd324c0dfd6e685a76be0ddff26b16ff311dc8a12120b50815307f7829856b4"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.00030038499971851707,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 4474536,
+                "png_sha256": "ace3fb6b87582d9e237e7085e9f9ef418f28ebac833f1bed6e343381d492a4ae",
+                "size": [
+                  3200,
+                  2622
+                ],
+                "rgba_sha256": "cdd324c0dfd6e685a76be0ddff26b16ff311dc8a12120b50815307f7829856b4"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.00029222603188827634,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 4474536,
+                "png_sha256": "ace3fb6b87582d9e237e7085e9f9ef418f28ebac833f1bed6e343381d492a4ae",
+                "size": [
+                  3200,
+                  2622
+                ],
+                "rgba_sha256": "cdd324c0dfd6e685a76be0ddff26b16ff311dc8a12120b50815307f7829856b4"
+              }
+            ]
+          ]
+        }
+      ],
+      "concurrent": [
+        {
+          "seconds": 3.843407684005797,
+          "http_calls": 1,
+          "response_bytes": 2512,
+          "http_failures": [],
+          "concurrency": 4,
+          "outputs": [
+            [
+              {
+                "png_bytes": 4474536,
+                "png_sha256": "ace3fb6b87582d9e237e7085e9f9ef418f28ebac833f1bed6e343381d492a4ae",
+                "size": [
+                  3200,
+                  2622
+                ],
+                "rgba_sha256": "cdd324c0dfd6e685a76be0ddff26b16ff311dc8a12120b50815307f7829856b4"
+              }
+            ],
+            [
+              {
+                "png_bytes": 4474536,
+                "png_sha256": "ace3fb6b87582d9e237e7085e9f9ef418f28ebac833f1bed6e343381d492a4ae",
+                "size": [
+                  3200,
+                  2622
+                ],
+                "rgba_sha256": "cdd324c0dfd6e685a76be0ddff26b16ff311dc8a12120b50815307f7829856b4"
+              }
+            ],
+            [
+              {
+                "png_bytes": 4474536,
+                "png_sha256": "ace3fb6b87582d9e237e7085e9f9ef418f28ebac833f1bed6e343381d492a4ae",
+                "size": [
+                  3200,
+                  2622
+                ],
+                "rgba_sha256": "cdd324c0dfd6e685a76be0ddff26b16ff311dc8a12120b50815307f7829856b4"
+              }
+            ],
+            [
+              {
+                "png_bytes": 4474536,
+                "png_sha256": "ace3fb6b87582d9e237e7085e9f9ef418f28ebac833f1bed6e343381d492a4ae",
+                "size": [
+                  3200,
+                  2622
+                ],
+                "rgba_sha256": "cdd324c0dfd6e685a76be0ddff26b16ff311dc8a12120b50815307f7829856b4"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 3.4356278339982964,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 4,
+          "outputs": [
+            [
+              {
+                "png_bytes": 4474536,
+                "png_sha256": "ace3fb6b87582d9e237e7085e9f9ef418f28ebac833f1bed6e343381d492a4ae",
+                "size": [
+                  3200,
+                  2622
+                ],
+                "rgba_sha256": "cdd324c0dfd6e685a76be0ddff26b16ff311dc8a12120b50815307f7829856b4"
+              }
+            ],
+            [
+              {
+                "png_bytes": 4474536,
+                "png_sha256": "ace3fb6b87582d9e237e7085e9f9ef418f28ebac833f1bed6e343381d492a4ae",
+                "size": [
+                  3200,
+                  2622
+                ],
+                "rgba_sha256": "cdd324c0dfd6e685a76be0ddff26b16ff311dc8a12120b50815307f7829856b4"
+              }
+            ],
+            [
+              {
+                "png_bytes": 4474536,
+                "png_sha256": "ace3fb6b87582d9e237e7085e9f9ef418f28ebac833f1bed6e343381d492a4ae",
+                "size": [
+                  3200,
+                  2622
+                ],
+                "rgba_sha256": "cdd324c0dfd6e685a76be0ddff26b16ff311dc8a12120b50815307f7829856b4"
+              }
+            ],
+            [
+              {
+                "png_bytes": 4474536,
+                "png_sha256": "ace3fb6b87582d9e237e7085e9f9ef418f28ebac833f1bed6e343381d492a4ae",
+                "size": [
+                  3200,
+                  2622
+                ],
+                "rgba_sha256": "cdd324c0dfd6e685a76be0ddff26b16ff311dc8a12120b50815307f7829856b4"
+              }
+            ]
+          ]
+        }
+      ],
+      "cold_median_seconds": 19.851301364018582,
+      "warm_median_seconds": 0.0003013170207850635,
+      "concurrent_median_seconds": 3.6395177590020467
+    },
+    "weapon_card": {
+      "cold": [
+        {
+          "seconds": 2.135088676994201,
+          "http_calls": 13,
+          "response_bytes": 3385051,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 1289483,
+                "png_sha256": "6b8d36abe6b501056e61058c3017d12fba3eaf994b27d2802512781d80ab627b",
+                "size": [
+                  2880,
+                  1654
+                ],
+                "rgba_sha256": "8f9c0771a1adc21d4cd72251fd07da84d6485d649e977051ce20d60e837d6c35"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 1.843291942961514,
+          "http_calls": 13,
+          "response_bytes": 3385051,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 1289483,
+                "png_sha256": "6b8d36abe6b501056e61058c3017d12fba3eaf994b27d2802512781d80ab627b",
+                "size": [
+                  2880,
+                  1654
+                ],
+                "rgba_sha256": "8f9c0771a1adc21d4cd72251fd07da84d6485d649e977051ce20d60e837d6c35"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 13.453956167038996,
+          "http_calls": 13,
+          "response_bytes": 3385051,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 1289483,
+                "png_sha256": "6b8d36abe6b501056e61058c3017d12fba3eaf994b27d2802512781d80ab627b",
+                "size": [
+                  2880,
+                  1654
+                ],
+                "rgba_sha256": "8f9c0771a1adc21d4cd72251fd07da84d6485d649e977051ce20d60e837d6c35"
+              }
+            ]
+          ]
+        }
+      ],
+      "warm": [
+        {
+          "seconds": 0.0002964260056614876,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 1289483,
+                "png_sha256": "6b8d36abe6b501056e61058c3017d12fba3eaf994b27d2802512781d80ab627b",
+                "size": [
+                  2880,
+                  1654
+                ],
+                "rgba_sha256": "8f9c0771a1adc21d4cd72251fd07da84d6485d649e977051ce20d60e837d6c35"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.0003276559873484075,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 1289483,
+                "png_sha256": "6b8d36abe6b501056e61058c3017d12fba3eaf994b27d2802512781d80ab627b",
+                "size": [
+                  2880,
+                  1654
+                ],
+                "rgba_sha256": "8f9c0771a1adc21d4cd72251fd07da84d6485d649e977051ce20d60e837d6c35"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.00031510600820183754,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 1289483,
+                "png_sha256": "6b8d36abe6b501056e61058c3017d12fba3eaf994b27d2802512781d80ab627b",
+                "size": [
+                  2880,
+                  1654
+                ],
+                "rgba_sha256": "8f9c0771a1adc21d4cd72251fd07da84d6485d649e977051ce20d60e837d6c35"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.00032933696638792753,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 1289483,
+                "png_sha256": "6b8d36abe6b501056e61058c3017d12fba3eaf994b27d2802512781d80ab627b",
+                "size": [
+                  2880,
+                  1654
+                ],
+                "rgba_sha256": "8f9c0771a1adc21d4cd72251fd07da84d6485d649e977051ce20d60e837d6c35"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.00031560700153931975,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 1289483,
+                "png_sha256": "6b8d36abe6b501056e61058c3017d12fba3eaf994b27d2802512781d80ab627b",
+                "size": [
+                  2880,
+                  1654
+                ],
+                "rgba_sha256": "8f9c0771a1adc21d4cd72251fd07da84d6485d649e977051ce20d60e837d6c35"
+              }
+            ]
+          ]
+        }
+      ],
+      "concurrent": [
+        {
+          "seconds": 0.7246204079710878,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 4,
+          "outputs": [
+            [
+              {
+                "png_bytes": 1289483,
+                "png_sha256": "6b8d36abe6b501056e61058c3017d12fba3eaf994b27d2802512781d80ab627b",
+                "size": [
+                  2880,
+                  1654
+                ],
+                "rgba_sha256": "8f9c0771a1adc21d4cd72251fd07da84d6485d649e977051ce20d60e837d6c35"
+              }
+            ],
+            [
+              {
+                "png_bytes": 1289483,
+                "png_sha256": "6b8d36abe6b501056e61058c3017d12fba3eaf994b27d2802512781d80ab627b",
+                "size": [
+                  2880,
+                  1654
+                ],
+                "rgba_sha256": "8f9c0771a1adc21d4cd72251fd07da84d6485d649e977051ce20d60e837d6c35"
+              }
+            ],
+            [
+              {
+                "png_bytes": 1289483,
+                "png_sha256": "6b8d36abe6b501056e61058c3017d12fba3eaf994b27d2802512781d80ab627b",
+                "size": [
+                  2880,
+                  1654
+                ],
+                "rgba_sha256": "8f9c0771a1adc21d4cd72251fd07da84d6485d649e977051ce20d60e837d6c35"
+              }
+            ],
+            [
+              {
+                "png_bytes": 1289483,
+                "png_sha256": "6b8d36abe6b501056e61058c3017d12fba3eaf994b27d2802512781d80ab627b",
+                "size": [
+                  2880,
+                  1654
+                ],
+                "rgba_sha256": "8f9c0771a1adc21d4cd72251fd07da84d6485d649e977051ce20d60e837d6c35"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.7092220520135015,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 4,
+          "outputs": [
+            [
+              {
+                "png_bytes": 1289483,
+                "png_sha256": "6b8d36abe6b501056e61058c3017d12fba3eaf994b27d2802512781d80ab627b",
+                "size": [
+                  2880,
+                  1654
+                ],
+                "rgba_sha256": "8f9c0771a1adc21d4cd72251fd07da84d6485d649e977051ce20d60e837d6c35"
+              }
+            ],
+            [
+              {
+                "png_bytes": 1289483,
+                "png_sha256": "6b8d36abe6b501056e61058c3017d12fba3eaf994b27d2802512781d80ab627b",
+                "size": [
+                  2880,
+                  1654
+                ],
+                "rgba_sha256": "8f9c0771a1adc21d4cd72251fd07da84d6485d649e977051ce20d60e837d6c35"
+              }
+            ],
+            [
+              {
+                "png_bytes": 1289483,
+                "png_sha256": "6b8d36abe6b501056e61058c3017d12fba3eaf994b27d2802512781d80ab627b",
+                "size": [
+                  2880,
+                  1654
+                ],
+                "rgba_sha256": "8f9c0771a1adc21d4cd72251fd07da84d6485d649e977051ce20d60e837d6c35"
+              }
+            ],
+            [
+              {
+                "png_bytes": 1289483,
+                "png_sha256": "6b8d36abe6b501056e61058c3017d12fba3eaf994b27d2802512781d80ab627b",
+                "size": [
+                  2880,
+                  1654
+                ],
+                "rgba_sha256": "8f9c0771a1adc21d4cd72251fd07da84d6485d649e977051ce20d60e837d6c35"
+              }
+            ]
+          ]
+        }
+      ],
+      "cold_median_seconds": 2.135088676994201,
+      "warm_median_seconds": 0.00031560700153931975,
+      "concurrent_median_seconds": 0.7169212299922947
+    },
+    "equipment_card": {
+      "cold": [
+        {
+          "seconds": 4.616761328012217,
+          "http_calls": 20,
+          "response_bytes": 3445789,
+          "http_failures": [
+            "HTTP 404",
+            "HTTP 404",
+            "HTTP 404",
+            "HTTP 404",
+            "HTTP 404",
+            "HTTP 404"
+          ],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 1411059,
+                "png_sha256": "662db00a78d61d903249fc96a4236b8f39c3c4764c53894c31299e0785f0d810",
+                "size": [
+                  3000,
+                  1840
+                ],
+                "rgba_sha256": "2c0a0ca00bb3389ca55e707bec58c1b3967df678f069590a4690bfccb2547942"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 3.5269623580388725,
+          "http_calls": 20,
+          "response_bytes": 3445789,
+          "http_failures": [
+            "HTTP 404",
+            "HTTP 404",
+            "HTTP 404",
+            "HTTP 404",
+            "HTTP 404",
+            "HTTP 404"
+          ],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 1411059,
+                "png_sha256": "662db00a78d61d903249fc96a4236b8f39c3c4764c53894c31299e0785f0d810",
+                "size": [
+                  3000,
+                  1840
+                ],
+                "rgba_sha256": "2c0a0ca00bb3389ca55e707bec58c1b3967df678f069590a4690bfccb2547942"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 3.723611380031798,
+          "http_calls": 20,
+          "response_bytes": 3445789,
+          "http_failures": [
+            "HTTP 404",
+            "HTTP 404",
+            "HTTP 404",
+            "HTTP 404",
+            "HTTP 404",
+            "HTTP 404"
+          ],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 1411059,
+                "png_sha256": "662db00a78d61d903249fc96a4236b8f39c3c4764c53894c31299e0785f0d810",
+                "size": [
+                  3000,
+                  1840
+                ],
+                "rgba_sha256": "2c0a0ca00bb3389ca55e707bec58c1b3967df678f069590a4690bfccb2547942"
+              }
+            ]
+          ]
+        }
+      ],
+      "warm": [
+        {
+          "seconds": 0.0003007749910466373,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 1411059,
+                "png_sha256": "662db00a78d61d903249fc96a4236b8f39c3c4764c53894c31299e0785f0d810",
+                "size": [
+                  3000,
+                  1840
+                ],
+                "rgba_sha256": "2c0a0ca00bb3389ca55e707bec58c1b3967df678f069590a4690bfccb2547942"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.0003282860270701349,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 1411059,
+                "png_sha256": "662db00a78d61d903249fc96a4236b8f39c3c4764c53894c31299e0785f0d810",
+                "size": [
+                  3000,
+                  1840
+                ],
+                "rgba_sha256": "2c0a0ca00bb3389ca55e707bec58c1b3967df678f069590a4690bfccb2547942"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.00033160700695589185,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 1411059,
+                "png_sha256": "662db00a78d61d903249fc96a4236b8f39c3c4764c53894c31299e0785f0d810",
+                "size": [
+                  3000,
+                  1840
+                ],
+                "rgba_sha256": "2c0a0ca00bb3389ca55e707bec58c1b3967df678f069590a4690bfccb2547942"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.0003289759624749422,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 1411059,
+                "png_sha256": "662db00a78d61d903249fc96a4236b8f39c3c4764c53894c31299e0785f0d810",
+                "size": [
+                  3000,
+                  1840
+                ],
+                "rgba_sha256": "2c0a0ca00bb3389ca55e707bec58c1b3967df678f069590a4690bfccb2547942"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.0003319969982840121,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 1411059,
+                "png_sha256": "662db00a78d61d903249fc96a4236b8f39c3c4764c53894c31299e0785f0d810",
+                "size": [
+                  3000,
+                  1840
+                ],
+                "rgba_sha256": "2c0a0ca00bb3389ca55e707bec58c1b3967df678f069590a4690bfccb2547942"
+              }
+            ]
+          ]
+        }
+      ],
+      "concurrent": [
+        {
+          "seconds": 2.7063073409954086,
+          "http_calls": 6,
+          "response_bytes": 162900,
+          "http_failures": [
+            "HTTP 404",
+            "HTTP 404",
+            "HTTP 404",
+            "HTTP 404",
+            "HTTP 404",
+            "HTTP 404"
+          ],
+          "concurrency": 4,
+          "outputs": [
+            [
+              {
+                "png_bytes": 1411059,
+                "png_sha256": "662db00a78d61d903249fc96a4236b8f39c3c4764c53894c31299e0785f0d810",
+                "size": [
+                  3000,
+                  1840
+                ],
+                "rgba_sha256": "2c0a0ca00bb3389ca55e707bec58c1b3967df678f069590a4690bfccb2547942"
+              }
+            ],
+            [
+              {
+                "png_bytes": 1411059,
+                "png_sha256": "662db00a78d61d903249fc96a4236b8f39c3c4764c53894c31299e0785f0d810",
+                "size": [
+                  3000,
+                  1840
+                ],
+                "rgba_sha256": "2c0a0ca00bb3389ca55e707bec58c1b3967df678f069590a4690bfccb2547942"
+              }
+            ],
+            [
+              {
+                "png_bytes": 1411059,
+                "png_sha256": "662db00a78d61d903249fc96a4236b8f39c3c4764c53894c31299e0785f0d810",
+                "size": [
+                  3000,
+                  1840
+                ],
+                "rgba_sha256": "2c0a0ca00bb3389ca55e707bec58c1b3967df678f069590a4690bfccb2547942"
+              }
+            ],
+            [
+              {
+                "png_bytes": 1411059,
+                "png_sha256": "662db00a78d61d903249fc96a4236b8f39c3c4764c53894c31299e0785f0d810",
+                "size": [
+                  3000,
+                  1840
+                ],
+                "rgba_sha256": "2c0a0ca00bb3389ca55e707bec58c1b3967df678f069590a4690bfccb2547942"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 2.6767092120135203,
+          "http_calls": 6,
+          "response_bytes": 162900,
+          "http_failures": [
+            "HTTP 404",
+            "HTTP 404",
+            "HTTP 404",
+            "HTTP 404",
+            "HTTP 404",
+            "HTTP 404"
+          ],
+          "concurrency": 4,
+          "outputs": [
+            [
+              {
+                "png_bytes": 1411059,
+                "png_sha256": "662db00a78d61d903249fc96a4236b8f39c3c4764c53894c31299e0785f0d810",
+                "size": [
+                  3000,
+                  1840
+                ],
+                "rgba_sha256": "2c0a0ca00bb3389ca55e707bec58c1b3967df678f069590a4690bfccb2547942"
+              }
+            ],
+            [
+              {
+                "png_bytes": 1411059,
+                "png_sha256": "662db00a78d61d903249fc96a4236b8f39c3c4764c53894c31299e0785f0d810",
+                "size": [
+                  3000,
+                  1840
+                ],
+                "rgba_sha256": "2c0a0ca00bb3389ca55e707bec58c1b3967df678f069590a4690bfccb2547942"
+              }
+            ],
+            [
+              {
+                "png_bytes": 1411059,
+                "png_sha256": "662db00a78d61d903249fc96a4236b8f39c3c4764c53894c31299e0785f0d810",
+                "size": [
+                  3000,
+                  1840
+                ],
+                "rgba_sha256": "2c0a0ca00bb3389ca55e707bec58c1b3967df678f069590a4690bfccb2547942"
+              }
+            ],
+            [
+              {
+                "png_bytes": 1411059,
+                "png_sha256": "662db00a78d61d903249fc96a4236b8f39c3c4764c53894c31299e0785f0d810",
+                "size": [
+                  3000,
+                  1840
+                ],
+                "rgba_sha256": "2c0a0ca00bb3389ca55e707bec58c1b3967df678f069590a4690bfccb2547942"
+              }
+            ]
+          ]
+        }
+      ],
+      "cold_median_seconds": 3.723611380031798,
+      "warm_median_seconds": 0.0003289759624749422,
+      "concurrent_median_seconds": 2.6915082765044644
+    },
+    "operator_catalog": {
+      "cold": [
+        {
+          "seconds": 3.9187222230248153,
+          "http_calls": 44,
+          "response_bytes": 5380406,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 6803603,
+                "png_sha256": "311d3fb5ee7ab8efe5789092c36ba324c3cf48c98c79b4e2fc5a332d678cdc91",
+                "size": [
+                  2375,
+                  4733
+                ],
+                "rgba_sha256": "4e1975ff38aa5f18d075108c0a971172e093f32f6564da916f207c1b41836784"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 2.909999102994334,
+          "http_calls": 44,
+          "response_bytes": 5380406,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 6803603,
+                "png_sha256": "311d3fb5ee7ab8efe5789092c36ba324c3cf48c98c79b4e2fc5a332d678cdc91",
+                "size": [
+                  2375,
+                  4733
+                ],
+                "rgba_sha256": "4e1975ff38aa5f18d075108c0a971172e093f32f6564da916f207c1b41836784"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 2.872160862025339,
+          "http_calls": 44,
+          "response_bytes": 5380406,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 6803603,
+                "png_sha256": "311d3fb5ee7ab8efe5789092c36ba324c3cf48c98c79b4e2fc5a332d678cdc91",
+                "size": [
+                  2375,
+                  4733
+                ],
+                "rgba_sha256": "4e1975ff38aa5f18d075108c0a971172e093f32f6564da916f207c1b41836784"
+              }
+            ]
+          ]
+        }
+      ],
+      "warm": [
+        {
+          "seconds": 0.00030198495369404554,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 6803603,
+                "png_sha256": "311d3fb5ee7ab8efe5789092c36ba324c3cf48c98c79b4e2fc5a332d678cdc91",
+                "size": [
+                  2375,
+                  4733
+                ],
+                "rgba_sha256": "4e1975ff38aa5f18d075108c0a971172e093f32f6564da916f207c1b41836784"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.00032264599576592445,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 6803603,
+                "png_sha256": "311d3fb5ee7ab8efe5789092c36ba324c3cf48c98c79b4e2fc5a332d678cdc91",
+                "size": [
+                  2375,
+                  4733
+                ],
+                "rgba_sha256": "4e1975ff38aa5f18d075108c0a971172e093f32f6564da916f207c1b41836784"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.00030385598074644804,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 6803603,
+                "png_sha256": "311d3fb5ee7ab8efe5789092c36ba324c3cf48c98c79b4e2fc5a332d678cdc91",
+                "size": [
+                  2375,
+                  4733
+                ],
+                "rgba_sha256": "4e1975ff38aa5f18d075108c0a971172e093f32f6564da916f207c1b41836784"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.0003456870326772332,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 6803603,
+                "png_sha256": "311d3fb5ee7ab8efe5789092c36ba324c3cf48c98c79b4e2fc5a332d678cdc91",
+                "size": [
+                  2375,
+                  4733
+                ],
+                "rgba_sha256": "4e1975ff38aa5f18d075108c0a971172e093f32f6564da916f207c1b41836784"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.00031128700356930494,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 6803603,
+                "png_sha256": "311d3fb5ee7ab8efe5789092c36ba324c3cf48c98c79b4e2fc5a332d678cdc91",
+                "size": [
+                  2375,
+                  4733
+                ],
+                "rgba_sha256": "4e1975ff38aa5f18d075108c0a971172e093f32f6564da916f207c1b41836784"
+              }
+            ]
+          ]
+        }
+      ],
+      "concurrent": [
+        {
+          "seconds": 2.1392276600236073,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 4,
+          "outputs": [
+            [
+              {
+                "png_bytes": 6803603,
+                "png_sha256": "311d3fb5ee7ab8efe5789092c36ba324c3cf48c98c79b4e2fc5a332d678cdc91",
+                "size": [
+                  2375,
+                  4733
+                ],
+                "rgba_sha256": "4e1975ff38aa5f18d075108c0a971172e093f32f6564da916f207c1b41836784"
+              }
+            ],
+            [
+              {
+                "png_bytes": 6803603,
+                "png_sha256": "311d3fb5ee7ab8efe5789092c36ba324c3cf48c98c79b4e2fc5a332d678cdc91",
+                "size": [
+                  2375,
+                  4733
+                ],
+                "rgba_sha256": "4e1975ff38aa5f18d075108c0a971172e093f32f6564da916f207c1b41836784"
+              }
+            ],
+            [
+              {
+                "png_bytes": 6803603,
+                "png_sha256": "311d3fb5ee7ab8efe5789092c36ba324c3cf48c98c79b4e2fc5a332d678cdc91",
+                "size": [
+                  2375,
+                  4733
+                ],
+                "rgba_sha256": "4e1975ff38aa5f18d075108c0a971172e093f32f6564da916f207c1b41836784"
+              }
+            ],
+            [
+              {
+                "png_bytes": 6803603,
+                "png_sha256": "311d3fb5ee7ab8efe5789092c36ba324c3cf48c98c79b4e2fc5a332d678cdc91",
+                "size": [
+                  2375,
+                  4733
+                ],
+                "rgba_sha256": "4e1975ff38aa5f18d075108c0a971172e093f32f6564da916f207c1b41836784"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 2.1368167609907687,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 4,
+          "outputs": [
+            [
+              {
+                "png_bytes": 6803603,
+                "png_sha256": "311d3fb5ee7ab8efe5789092c36ba324c3cf48c98c79b4e2fc5a332d678cdc91",
+                "size": [
+                  2375,
+                  4733
+                ],
+                "rgba_sha256": "4e1975ff38aa5f18d075108c0a971172e093f32f6564da916f207c1b41836784"
+              }
+            ],
+            [
+              {
+                "png_bytes": 6803603,
+                "png_sha256": "311d3fb5ee7ab8efe5789092c36ba324c3cf48c98c79b4e2fc5a332d678cdc91",
+                "size": [
+                  2375,
+                  4733
+                ],
+                "rgba_sha256": "4e1975ff38aa5f18d075108c0a971172e093f32f6564da916f207c1b41836784"
+              }
+            ],
+            [
+              {
+                "png_bytes": 6803603,
+                "png_sha256": "311d3fb5ee7ab8efe5789092c36ba324c3cf48c98c79b4e2fc5a332d678cdc91",
+                "size": [
+                  2375,
+                  4733
+                ],
+                "rgba_sha256": "4e1975ff38aa5f18d075108c0a971172e093f32f6564da916f207c1b41836784"
+              }
+            ],
+            [
+              {
+                "png_bytes": 6803603,
+                "png_sha256": "311d3fb5ee7ab8efe5789092c36ba324c3cf48c98c79b4e2fc5a332d678cdc91",
+                "size": [
+                  2375,
+                  4733
+                ],
+                "rgba_sha256": "4e1975ff38aa5f18d075108c0a971172e093f32f6564da916f207c1b41836784"
+              }
+            ]
+          ]
+        }
+      ],
+      "cold_median_seconds": 2.909999102994334,
+      "warm_median_seconds": 0.00031128700356930494,
+      "concurrent_median_seconds": 2.138022210507188
+    },
+    "weapon_catalog": {
+      "cold": [
+        {
+          "seconds": 7.163908269954845,
+          "http_calls": 80,
+          "response_bytes": 20812674,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 7774516,
+                "png_sha256": "9f742bb6c0aebc4837c12c4930b32002e7ec752f84ea656deb5571dfafec7b67",
+                "size": [
+                  2375,
+                  7919
+                ],
+                "rgba_sha256": "929d4edb1155ee219914949045c28c1b4e2af9054c1ea22cd18e6d3252a96fce"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 5.057108192006126,
+          "http_calls": 80,
+          "response_bytes": 20812674,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 7774516,
+                "png_sha256": "9f742bb6c0aebc4837c12c4930b32002e7ec752f84ea656deb5571dfafec7b67",
+                "size": [
+                  2375,
+                  7919
+                ],
+                "rgba_sha256": "929d4edb1155ee219914949045c28c1b4e2af9054c1ea22cd18e6d3252a96fce"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 5.000993865018245,
+          "http_calls": 80,
+          "response_bytes": 20812674,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 7774516,
+                "png_sha256": "9f742bb6c0aebc4837c12c4930b32002e7ec752f84ea656deb5571dfafec7b67",
+                "size": [
+                  2375,
+                  7919
+                ],
+                "rgba_sha256": "929d4edb1155ee219914949045c28c1b4e2af9054c1ea22cd18e6d3252a96fce"
+              }
+            ]
+          ]
+        }
+      ],
+      "warm": [
+        {
+          "seconds": 0.0003482970059849322,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 7774516,
+                "png_sha256": "9f742bb6c0aebc4837c12c4930b32002e7ec752f84ea656deb5571dfafec7b67",
+                "size": [
+                  2375,
+                  7919
+                ],
+                "rgba_sha256": "929d4edb1155ee219914949045c28c1b4e2af9054c1ea22cd18e6d3252a96fce"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.00035805697552859783,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 7774516,
+                "png_sha256": "9f742bb6c0aebc4837c12c4930b32002e7ec752f84ea656deb5571dfafec7b67",
+                "size": [
+                  2375,
+                  7919
+                ],
+                "rgba_sha256": "929d4edb1155ee219914949045c28c1b4e2af9054c1ea22cd18e6d3252a96fce"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.0003265150007791817,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 7774516,
+                "png_sha256": "9f742bb6c0aebc4837c12c4930b32002e7ec752f84ea656deb5571dfafec7b67",
+                "size": [
+                  2375,
+                  7919
+                ],
+                "rgba_sha256": "929d4edb1155ee219914949045c28c1b4e2af9054c1ea22cd18e6d3252a96fce"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.0005776420002803206,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 7774516,
+                "png_sha256": "9f742bb6c0aebc4837c12c4930b32002e7ec752f84ea656deb5571dfafec7b67",
+                "size": [
+                  2375,
+                  7919
+                ],
+                "rgba_sha256": "929d4edb1155ee219914949045c28c1b4e2af9054c1ea22cd18e6d3252a96fce"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.00034414598485454917,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 7774516,
+                "png_sha256": "9f742bb6c0aebc4837c12c4930b32002e7ec752f84ea656deb5571dfafec7b67",
+                "size": [
+                  2375,
+                  7919
+                ],
+                "rgba_sha256": "929d4edb1155ee219914949045c28c1b4e2af9054c1ea22cd18e6d3252a96fce"
+              }
+            ]
+          ]
+        }
+      ],
+      "concurrent": [
+        {
+          "seconds": 3.8425738569931127,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 4,
+          "outputs": [
+            [
+              {
+                "png_bytes": 7774516,
+                "png_sha256": "9f742bb6c0aebc4837c12c4930b32002e7ec752f84ea656deb5571dfafec7b67",
+                "size": [
+                  2375,
+                  7919
+                ],
+                "rgba_sha256": "929d4edb1155ee219914949045c28c1b4e2af9054c1ea22cd18e6d3252a96fce"
+              }
+            ],
+            [
+              {
+                "png_bytes": 7774516,
+                "png_sha256": "9f742bb6c0aebc4837c12c4930b32002e7ec752f84ea656deb5571dfafec7b67",
+                "size": [
+                  2375,
+                  7919
+                ],
+                "rgba_sha256": "929d4edb1155ee219914949045c28c1b4e2af9054c1ea22cd18e6d3252a96fce"
+              }
+            ],
+            [
+              {
+                "png_bytes": 7774516,
+                "png_sha256": "9f742bb6c0aebc4837c12c4930b32002e7ec752f84ea656deb5571dfafec7b67",
+                "size": [
+                  2375,
+                  7919
+                ],
+                "rgba_sha256": "929d4edb1155ee219914949045c28c1b4e2af9054c1ea22cd18e6d3252a96fce"
+              }
+            ],
+            [
+              {
+                "png_bytes": 7774516,
+                "png_sha256": "9f742bb6c0aebc4837c12c4930b32002e7ec752f84ea656deb5571dfafec7b67",
+                "size": [
+                  2375,
+                  7919
+                ],
+                "rgba_sha256": "929d4edb1155ee219914949045c28c1b4e2af9054c1ea22cd18e6d3252a96fce"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 3.6435887870029546,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 4,
+          "outputs": [
+            [
+              {
+                "png_bytes": 7774516,
+                "png_sha256": "9f742bb6c0aebc4837c12c4930b32002e7ec752f84ea656deb5571dfafec7b67",
+                "size": [
+                  2375,
+                  7919
+                ],
+                "rgba_sha256": "929d4edb1155ee219914949045c28c1b4e2af9054c1ea22cd18e6d3252a96fce"
+              }
+            ],
+            [
+              {
+                "png_bytes": 7774516,
+                "png_sha256": "9f742bb6c0aebc4837c12c4930b32002e7ec752f84ea656deb5571dfafec7b67",
+                "size": [
+                  2375,
+                  7919
+                ],
+                "rgba_sha256": "929d4edb1155ee219914949045c28c1b4e2af9054c1ea22cd18e6d3252a96fce"
+              }
+            ],
+            [
+              {
+                "png_bytes": 7774516,
+                "png_sha256": "9f742bb6c0aebc4837c12c4930b32002e7ec752f84ea656deb5571dfafec7b67",
+                "size": [
+                  2375,
+                  7919
+                ],
+                "rgba_sha256": "929d4edb1155ee219914949045c28c1b4e2af9054c1ea22cd18e6d3252a96fce"
+              }
+            ],
+            [
+              {
+                "png_bytes": 7774516,
+                "png_sha256": "9f742bb6c0aebc4837c12c4930b32002e7ec752f84ea656deb5571dfafec7b67",
+                "size": [
+                  2375,
+                  7919
+                ],
+                "rgba_sha256": "929d4edb1155ee219914949045c28c1b4e2af9054c1ea22cd18e6d3252a96fce"
+              }
+            ]
+          ]
+        }
+      ],
+      "cold_median_seconds": 5.057108192006126,
+      "warm_median_seconds": 0.0003482970059849322,
+      "concurrent_median_seconds": 3.7430813219980337
+    },
+    "equipment_catalog": {
+      "cold": [
+        {
+          "seconds": 11.827068068028893,
+          "http_calls": 189,
+          "response_bytes": 43958329,
+          "http_failures": [
+            "HTTP 404",
+            "HTTP 404",
+            "HTTP 404",
+            "HTTP 404",
+            "HTTP 404",
+            "HTTP 404"
+          ],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 4180597,
+                "png_sha256": "7ce09a1de426081a480f81d9e6e0829d4884751072048ee8af6d21f912c000dd",
+                "size": [
+                  2850,
+                  8273
+                ],
+                "rgba_sha256": "cfedbe933f53966d12c32d49dba87dca3a1a0b2982fee3c3d90d33c9707df31e"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 8.95596403197851,
+          "http_calls": 189,
+          "response_bytes": 43958329,
+          "http_failures": [
+            "HTTP 404",
+            "HTTP 404",
+            "HTTP 404",
+            "HTTP 404",
+            "HTTP 404",
+            "HTTP 404"
+          ],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 4180597,
+                "png_sha256": "7ce09a1de426081a480f81d9e6e0829d4884751072048ee8af6d21f912c000dd",
+                "size": [
+                  2850,
+                  8273
+                ],
+                "rgba_sha256": "cfedbe933f53966d12c32d49dba87dca3a1a0b2982fee3c3d90d33c9707df31e"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 7.861130618024617,
+          "http_calls": 189,
+          "response_bytes": 43958329,
+          "http_failures": [
+            "HTTP 404",
+            "HTTP 404",
+            "HTTP 404",
+            "HTTP 404",
+            "HTTP 404",
+            "HTTP 404"
+          ],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 4180597,
+                "png_sha256": "7ce09a1de426081a480f81d9e6e0829d4884751072048ee8af6d21f912c000dd",
+                "size": [
+                  2850,
+                  8273
+                ],
+                "rgba_sha256": "cfedbe933f53966d12c32d49dba87dca3a1a0b2982fee3c3d90d33c9707df31e"
+              }
+            ]
+          ]
+        }
+      ],
+      "warm": [
+        {
+          "seconds": 0.000288275012280792,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 4180597,
+                "png_sha256": "7ce09a1de426081a480f81d9e6e0829d4884751072048ee8af6d21f912c000dd",
+                "size": [
+                  2850,
+                  8273
+                ],
+                "rgba_sha256": "cfedbe933f53966d12c32d49dba87dca3a1a0b2982fee3c3d90d33c9707df31e"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.00031729601323604584,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 4180597,
+                "png_sha256": "7ce09a1de426081a480f81d9e6e0829d4884751072048ee8af6d21f912c000dd",
+                "size": [
+                  2850,
+                  8273
+                ],
+                "rgba_sha256": "cfedbe933f53966d12c32d49dba87dca3a1a0b2982fee3c3d90d33c9707df31e"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.0003096570144407451,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 4180597,
+                "png_sha256": "7ce09a1de426081a480f81d9e6e0829d4884751072048ee8af6d21f912c000dd",
+                "size": [
+                  2850,
+                  8273
+                ],
+                "rgba_sha256": "cfedbe933f53966d12c32d49dba87dca3a1a0b2982fee3c3d90d33c9707df31e"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.0003338680253364146,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 4180597,
+                "png_sha256": "7ce09a1de426081a480f81d9e6e0829d4884751072048ee8af6d21f912c000dd",
+                "size": [
+                  2850,
+                  8273
+                ],
+                "rgba_sha256": "cfedbe933f53966d12c32d49dba87dca3a1a0b2982fee3c3d90d33c9707df31e"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.00032113498309627175,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 4180597,
+                "png_sha256": "7ce09a1de426081a480f81d9e6e0829d4884751072048ee8af6d21f912c000dd",
+                "size": [
+                  2850,
+                  8273
+                ],
+                "rgba_sha256": "cfedbe933f53966d12c32d49dba87dca3a1a0b2982fee3c3d90d33c9707df31e"
+              }
+            ]
+          ]
+        }
+      ],
+      "concurrent": [
+        {
+          "seconds": 6.836219991033431,
+          "http_calls": 62,
+          "response_bytes": 10607621,
+          "http_failures": [
+            "HTTP 404",
+            "HTTP 404",
+            "HTTP 404",
+            "HTTP 404",
+            "HTTP 404",
+            "HTTP 404"
+          ],
+          "concurrency": 4,
+          "outputs": [
+            [
+              {
+                "png_bytes": 4180597,
+                "png_sha256": "7ce09a1de426081a480f81d9e6e0829d4884751072048ee8af6d21f912c000dd",
+                "size": [
+                  2850,
+                  8273
+                ],
+                "rgba_sha256": "cfedbe933f53966d12c32d49dba87dca3a1a0b2982fee3c3d90d33c9707df31e"
+              }
+            ],
+            [
+              {
+                "png_bytes": 4180597,
+                "png_sha256": "7ce09a1de426081a480f81d9e6e0829d4884751072048ee8af6d21f912c000dd",
+                "size": [
+                  2850,
+                  8273
+                ],
+                "rgba_sha256": "cfedbe933f53966d12c32d49dba87dca3a1a0b2982fee3c3d90d33c9707df31e"
+              }
+            ],
+            [
+              {
+                "png_bytes": 4180597,
+                "png_sha256": "7ce09a1de426081a480f81d9e6e0829d4884751072048ee8af6d21f912c000dd",
+                "size": [
+                  2850,
+                  8273
+                ],
+                "rgba_sha256": "cfedbe933f53966d12c32d49dba87dca3a1a0b2982fee3c3d90d33c9707df31e"
+              }
+            ],
+            [
+              {
+                "png_bytes": 4180597,
+                "png_sha256": "7ce09a1de426081a480f81d9e6e0829d4884751072048ee8af6d21f912c000dd",
+                "size": [
+                  2850,
+                  8273
+                ],
+                "rgba_sha256": "cfedbe933f53966d12c32d49dba87dca3a1a0b2982fee3c3d90d33c9707df31e"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 6.514004219963681,
+          "http_calls": 62,
+          "response_bytes": 10607621,
+          "http_failures": [
+            "HTTP 404",
+            "HTTP 404",
+            "HTTP 404",
+            "HTTP 404",
+            "HTTP 404",
+            "HTTP 404"
+          ],
+          "concurrency": 4,
+          "outputs": [
+            [
+              {
+                "png_bytes": 4180597,
+                "png_sha256": "7ce09a1de426081a480f81d9e6e0829d4884751072048ee8af6d21f912c000dd",
+                "size": [
+                  2850,
+                  8273
+                ],
+                "rgba_sha256": "cfedbe933f53966d12c32d49dba87dca3a1a0b2982fee3c3d90d33c9707df31e"
+              }
+            ],
+            [
+              {
+                "png_bytes": 4180597,
+                "png_sha256": "7ce09a1de426081a480f81d9e6e0829d4884751072048ee8af6d21f912c000dd",
+                "size": [
+                  2850,
+                  8273
+                ],
+                "rgba_sha256": "cfedbe933f53966d12c32d49dba87dca3a1a0b2982fee3c3d90d33c9707df31e"
+              }
+            ],
+            [
+              {
+                "png_bytes": 4180597,
+                "png_sha256": "7ce09a1de426081a480f81d9e6e0829d4884751072048ee8af6d21f912c000dd",
+                "size": [
+                  2850,
+                  8273
+                ],
+                "rgba_sha256": "cfedbe933f53966d12c32d49dba87dca3a1a0b2982fee3c3d90d33c9707df31e"
+              }
+            ],
+            [
+              {
+                "png_bytes": 4180597,
+                "png_sha256": "7ce09a1de426081a480f81d9e6e0829d4884751072048ee8af6d21f912c000dd",
+                "size": [
+                  2850,
+                  8273
+                ],
+                "rgba_sha256": "cfedbe933f53966d12c32d49dba87dca3a1a0b2982fee3c3d90d33c9707df31e"
+              }
+            ]
+          ]
+        }
+      ],
+      "cold_median_seconds": 8.95596403197851,
+      "warm_median_seconds": 0.00031729601323604584,
+      "concurrent_median_seconds": 6.675112105498556
+    },
+    "stage_catalog": {
+      "cold": [
+        {
+          "seconds": 2.3578053020173684,
+          "http_calls": 4,
+          "response_bytes": 12286936,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 917672,
+                "png_sha256": "89c3564fda535e8ae5dc78faba5d80a339ee305ceba25dc39178c71273c2bf49",
+                "size": [
+                  1875,
+                  4788
+                ],
+                "rgba_sha256": "486d5d985c89af6afcf96d821a29bea875b906b671cf09b666511aecbe9e5496"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 2.017306386027485,
+          "http_calls": 4,
+          "response_bytes": 12286936,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 917672,
+                "png_sha256": "89c3564fda535e8ae5dc78faba5d80a339ee305ceba25dc39178c71273c2bf49",
+                "size": [
+                  1875,
+                  4788
+                ],
+                "rgba_sha256": "486d5d985c89af6afcf96d821a29bea875b906b671cf09b666511aecbe9e5496"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 2.002347876026761,
+          "http_calls": 4,
+          "response_bytes": 12286936,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 917672,
+                "png_sha256": "89c3564fda535e8ae5dc78faba5d80a339ee305ceba25dc39178c71273c2bf49",
+                "size": [
+                  1875,
+                  4788
+                ],
+                "rgba_sha256": "486d5d985c89af6afcf96d821a29bea875b906b671cf09b666511aecbe9e5496"
+              }
+            ]
+          ]
+        }
+      ],
+      "warm": [
+        {
+          "seconds": 0.0003014759859070182,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 917672,
+                "png_sha256": "89c3564fda535e8ae5dc78faba5d80a339ee305ceba25dc39178c71273c2bf49",
+                "size": [
+                  1875,
+                  4788
+                ],
+                "rgba_sha256": "486d5d985c89af6afcf96d821a29bea875b906b671cf09b666511aecbe9e5496"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.0003139160107821226,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 917672,
+                "png_sha256": "89c3564fda535e8ae5dc78faba5d80a339ee305ceba25dc39178c71273c2bf49",
+                "size": [
+                  1875,
+                  4788
+                ],
+                "rgba_sha256": "486d5d985c89af6afcf96d821a29bea875b906b671cf09b666511aecbe9e5496"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.000342265993822366,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 917672,
+                "png_sha256": "89c3564fda535e8ae5dc78faba5d80a339ee305ceba25dc39178c71273c2bf49",
+                "size": [
+                  1875,
+                  4788
+                ],
+                "rgba_sha256": "486d5d985c89af6afcf96d821a29bea875b906b671cf09b666511aecbe9e5496"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.0003554070135578513,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 917672,
+                "png_sha256": "89c3564fda535e8ae5dc78faba5d80a339ee305ceba25dc39178c71273c2bf49",
+                "size": [
+                  1875,
+                  4788
+                ],
+                "rgba_sha256": "486d5d985c89af6afcf96d821a29bea875b906b671cf09b666511aecbe9e5496"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.0006200619973242283,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 917672,
+                "png_sha256": "89c3564fda535e8ae5dc78faba5d80a339ee305ceba25dc39178c71273c2bf49",
+                "size": [
+                  1875,
+                  4788
+                ],
+                "rgba_sha256": "486d5d985c89af6afcf96d821a29bea875b906b671cf09b666511aecbe9e5496"
+              }
+            ]
+          ]
+        }
+      ],
+      "concurrent": [
+        {
+          "seconds": 0.7623969610431232,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 4,
+          "outputs": [
+            [
+              {
+                "png_bytes": 917672,
+                "png_sha256": "89c3564fda535e8ae5dc78faba5d80a339ee305ceba25dc39178c71273c2bf49",
+                "size": [
+                  1875,
+                  4788
+                ],
+                "rgba_sha256": "486d5d985c89af6afcf96d821a29bea875b906b671cf09b666511aecbe9e5496"
+              }
+            ],
+            [
+              {
+                "png_bytes": 917672,
+                "png_sha256": "89c3564fda535e8ae5dc78faba5d80a339ee305ceba25dc39178c71273c2bf49",
+                "size": [
+                  1875,
+                  4788
+                ],
+                "rgba_sha256": "486d5d985c89af6afcf96d821a29bea875b906b671cf09b666511aecbe9e5496"
+              }
+            ],
+            [
+              {
+                "png_bytes": 917672,
+                "png_sha256": "89c3564fda535e8ae5dc78faba5d80a339ee305ceba25dc39178c71273c2bf49",
+                "size": [
+                  1875,
+                  4788
+                ],
+                "rgba_sha256": "486d5d985c89af6afcf96d821a29bea875b906b671cf09b666511aecbe9e5496"
+              }
+            ],
+            [
+              {
+                "png_bytes": 917672,
+                "png_sha256": "89c3564fda535e8ae5dc78faba5d80a339ee305ceba25dc39178c71273c2bf49",
+                "size": [
+                  1875,
+                  4788
+                ],
+                "rgba_sha256": "486d5d985c89af6afcf96d821a29bea875b906b671cf09b666511aecbe9e5496"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.7557665689964779,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 4,
+          "outputs": [
+            [
+              {
+                "png_bytes": 917672,
+                "png_sha256": "89c3564fda535e8ae5dc78faba5d80a339ee305ceba25dc39178c71273c2bf49",
+                "size": [
+                  1875,
+                  4788
+                ],
+                "rgba_sha256": "486d5d985c89af6afcf96d821a29bea875b906b671cf09b666511aecbe9e5496"
+              }
+            ],
+            [
+              {
+                "png_bytes": 917672,
+                "png_sha256": "89c3564fda535e8ae5dc78faba5d80a339ee305ceba25dc39178c71273c2bf49",
+                "size": [
+                  1875,
+                  4788
+                ],
+                "rgba_sha256": "486d5d985c89af6afcf96d821a29bea875b906b671cf09b666511aecbe9e5496"
+              }
+            ],
+            [
+              {
+                "png_bytes": 917672,
+                "png_sha256": "89c3564fda535e8ae5dc78faba5d80a339ee305ceba25dc39178c71273c2bf49",
+                "size": [
+                  1875,
+                  4788
+                ],
+                "rgba_sha256": "486d5d985c89af6afcf96d821a29bea875b906b671cf09b666511aecbe9e5496"
+              }
+            ],
+            [
+              {
+                "png_bytes": 917672,
+                "png_sha256": "89c3564fda535e8ae5dc78faba5d80a339ee305ceba25dc39178c71273c2bf49",
+                "size": [
+                  1875,
+                  4788
+                ],
+                "rgba_sha256": "486d5d985c89af6afcf96d821a29bea875b906b671cf09b666511aecbe9e5496"
+              }
+            ]
+          ]
+        }
+      ],
+      "cold_median_seconds": 2.017306386027485,
+      "warm_median_seconds": 0.000342265993822366,
+      "concurrent_median_seconds": 0.7590817650198005
+    },
+    "stage_card": {
+      "cold": [],
+      "warm": [],
+      "concurrent": [],
+      "error": "AttributeError: 'StageCatalogItem' object has no attribute 'key'"
+    },
+    "calendar": {
+      "cold": [
+        {
+          "seconds": 3.7437623370205984,
+          "http_calls": 8,
+          "response_bytes": 6875625,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            {
+              "png_bytes": 1863633,
+              "png_sha256": "13d096e1b1f444190ed5103880575af7cfc7d25678ea3542d08fd144ed1ecd9c",
+              "size": [
+                1080,
+                1642
+              ],
+              "rgba_sha256": "872492d9853c1a0efa295349dfe0fd505034c7e2e734621889d1aed746d4269b"
+            }
+          ]
+        },
+        {
+          "seconds": 5.257704588002525,
+          "http_calls": 8,
+          "response_bytes": 6875428,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            {
+              "png_bytes": 1863633,
+              "png_sha256": "13d096e1b1f444190ed5103880575af7cfc7d25678ea3542d08fd144ed1ecd9c",
+              "size": [
+                1080,
+                1642
+              ],
+              "rgba_sha256": "872492d9853c1a0efa295349dfe0fd505034c7e2e734621889d1aed746d4269b"
+            }
+          ]
+        },
+        {
+          "seconds": 3.4804610990104266,
+          "http_calls": 8,
+          "response_bytes": 6875625,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            {
+              "png_bytes": 1863633,
+              "png_sha256": "13d096e1b1f444190ed5103880575af7cfc7d25678ea3542d08fd144ed1ecd9c",
+              "size": [
+                1080,
+                1642
+              ],
+              "rgba_sha256": "872492d9853c1a0efa295349dfe0fd505034c7e2e734621889d1aed746d4269b"
+            }
+          ]
+        }
+      ],
+      "warm": [
+        {
+          "seconds": 1.0995595600106753,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            {
+              "png_bytes": 1863633,
+              "png_sha256": "13d096e1b1f444190ed5103880575af7cfc7d25678ea3542d08fd144ed1ecd9c",
+              "size": [
+                1080,
+                1642
+              ],
+              "rgba_sha256": "872492d9853c1a0efa295349dfe0fd505034c7e2e734621889d1aed746d4269b"
+            }
+          ]
+        },
+        {
+          "seconds": 1.136620106000919,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            {
+              "png_bytes": 1863633,
+              "png_sha256": "13d096e1b1f444190ed5103880575af7cfc7d25678ea3542d08fd144ed1ecd9c",
+              "size": [
+                1080,
+                1642
+              ],
+              "rgba_sha256": "872492d9853c1a0efa295349dfe0fd505034c7e2e734621889d1aed746d4269b"
+            }
+          ]
+        },
+        {
+          "seconds": 1.0786230340017937,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            {
+              "png_bytes": 1863633,
+              "png_sha256": "13d096e1b1f444190ed5103880575af7cfc7d25678ea3542d08fd144ed1ecd9c",
+              "size": [
+                1080,
+                1642
+              ],
+              "rgba_sha256": "872492d9853c1a0efa295349dfe0fd505034c7e2e734621889d1aed746d4269b"
+            }
+          ]
+        },
+        {
+          "seconds": 1.0904849999933504,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            {
+              "png_bytes": 1863633,
+              "png_sha256": "13d096e1b1f444190ed5103880575af7cfc7d25678ea3542d08fd144ed1ecd9c",
+              "size": [
+                1080,
+                1642
+              ],
+              "rgba_sha256": "872492d9853c1a0efa295349dfe0fd505034c7e2e734621889d1aed746d4269b"
+            }
+          ]
+        },
+        {
+          "seconds": 1.1231528969947249,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            {
+              "png_bytes": 1863633,
+              "png_sha256": "13d096e1b1f444190ed5103880575af7cfc7d25678ea3542d08fd144ed1ecd9c",
+              "size": [
+                1080,
+                1642
+              ],
+              "rgba_sha256": "872492d9853c1a0efa295349dfe0fd505034c7e2e734621889d1aed746d4269b"
+            }
+          ]
+        }
+      ],
+      "concurrent": [
+        {
+          "seconds": 5.121171964041423,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 4,
+          "outputs": [
+            {
+              "png_bytes": 1863633,
+              "png_sha256": "13d096e1b1f444190ed5103880575af7cfc7d25678ea3542d08fd144ed1ecd9c",
+              "size": [
+                1080,
+                1642
+              ],
+              "rgba_sha256": "872492d9853c1a0efa295349dfe0fd505034c7e2e734621889d1aed746d4269b"
+            },
+            {
+              "png_bytes": 1863633,
+              "png_sha256": "13d096e1b1f444190ed5103880575af7cfc7d25678ea3542d08fd144ed1ecd9c",
+              "size": [
+                1080,
+                1642
+              ],
+              "rgba_sha256": "872492d9853c1a0efa295349dfe0fd505034c7e2e734621889d1aed746d4269b"
+            },
+            {
+              "png_bytes": 1863633,
+              "png_sha256": "13d096e1b1f444190ed5103880575af7cfc7d25678ea3542d08fd144ed1ecd9c",
+              "size": [
+                1080,
+                1642
+              ],
+              "rgba_sha256": "872492d9853c1a0efa295349dfe0fd505034c7e2e734621889d1aed746d4269b"
+            },
+            {
+              "png_bytes": 1863633,
+              "png_sha256": "13d096e1b1f444190ed5103880575af7cfc7d25678ea3542d08fd144ed1ecd9c",
+              "size": [
+                1080,
+                1642
+              ],
+              "rgba_sha256": "872492d9853c1a0efa295349dfe0fd505034c7e2e734621889d1aed746d4269b"
+            }
+          ]
+        },
+        {
+          "seconds": 5.117058910022024,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 4,
+          "outputs": [
+            {
+              "png_bytes": 1863633,
+              "png_sha256": "13d096e1b1f444190ed5103880575af7cfc7d25678ea3542d08fd144ed1ecd9c",
+              "size": [
+                1080,
+                1642
+              ],
+              "rgba_sha256": "872492d9853c1a0efa295349dfe0fd505034c7e2e734621889d1aed746d4269b"
+            },
+            {
+              "png_bytes": 1863633,
+              "png_sha256": "13d096e1b1f444190ed5103880575af7cfc7d25678ea3542d08fd144ed1ecd9c",
+              "size": [
+                1080,
+                1642
+              ],
+              "rgba_sha256": "872492d9853c1a0efa295349dfe0fd505034c7e2e734621889d1aed746d4269b"
+            },
+            {
+              "png_bytes": 1863633,
+              "png_sha256": "13d096e1b1f444190ed5103880575af7cfc7d25678ea3542d08fd144ed1ecd9c",
+              "size": [
+                1080,
+                1642
+              ],
+              "rgba_sha256": "872492d9853c1a0efa295349dfe0fd505034c7e2e734621889d1aed746d4269b"
+            },
+            {
+              "png_bytes": 1863633,
+              "png_sha256": "13d096e1b1f444190ed5103880575af7cfc7d25678ea3542d08fd144ed1ecd9c",
+              "size": [
+                1080,
+                1642
+              ],
+              "rgba_sha256": "872492d9853c1a0efa295349dfe0fd505034c7e2e734621889d1aed746d4269b"
+            }
+          ]
+        }
+      ],
+      "cold_median_seconds": 3.7437623370205984,
+      "warm_median_seconds": 1.0995595600106753,
+      "concurrent_median_seconds": 5.119115437031724
+    },
+    "medals_data": {
+      "cold": [
+        {
+          "seconds": 1.9818392359884456,
+          "http_calls": 4,
+          "response_bytes": 11923695,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            {
+              "json_sha256": "ed26a5b30496464a61eb796d9e9b63e514aaba9a7332b90b60f37ccdc8d63836"
+            }
+          ]
+        },
+        {
+          "seconds": 1.3998442289885134,
+          "http_calls": 4,
+          "response_bytes": 11923695,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            {
+              "json_sha256": "2b8f4ffe72b2045299dafa28ab62fa3bc9def8d3515729ee847672c31a28eee4"
+            }
+          ]
+        },
+        {
+          "seconds": 1.4075142089859582,
+          "http_calls": 4,
+          "response_bytes": 11923695,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            {
+              "json_sha256": "0383d156480c14379a97ab5639b2e4213dd8ac0414534ed13789de7ddebcfaa8"
+            }
+          ]
+        }
+      ],
+      "warm": [
+        {
+          "seconds": 0.07000809896271676,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            {
+              "json_sha256": "0383d156480c14379a97ab5639b2e4213dd8ac0414534ed13789de7ddebcfaa8"
+            }
+          ]
+        },
+        {
+          "seconds": 0.07106270000804216,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            {
+              "json_sha256": "0383d156480c14379a97ab5639b2e4213dd8ac0414534ed13789de7ddebcfaa8"
+            }
+          ]
+        },
+        {
+          "seconds": 0.0730475900345482,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            {
+              "json_sha256": "0383d156480c14379a97ab5639b2e4213dd8ac0414534ed13789de7ddebcfaa8"
+            }
+          ]
+        },
+        {
+          "seconds": 0.07067403302062303,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            {
+              "json_sha256": "0383d156480c14379a97ab5639b2e4213dd8ac0414534ed13789de7ddebcfaa8"
+            }
+          ]
+        },
+        {
+          "seconds": 0.06972473399946466,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            {
+              "json_sha256": "0383d156480c14379a97ab5639b2e4213dd8ac0414534ed13789de7ddebcfaa8"
+            }
+          ]
+        }
+      ],
+      "concurrent": [
+        {
+          "seconds": 0.28203900600783527,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 4,
+          "outputs": [
+            {
+              "json_sha256": "0383d156480c14379a97ab5639b2e4213dd8ac0414534ed13789de7ddebcfaa8"
+            },
+            {
+              "json_sha256": "0383d156480c14379a97ab5639b2e4213dd8ac0414534ed13789de7ddebcfaa8"
+            },
+            {
+              "json_sha256": "0383d156480c14379a97ab5639b2e4213dd8ac0414534ed13789de7ddebcfaa8"
+            },
+            {
+              "json_sha256": "cbeedb371d72ec7c1ec1020899eda09f5e2785d700c6205399a50bd510b5d23d"
+            }
+          ]
+        },
+        {
+          "seconds": 0.289631667023059,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 4,
+          "outputs": [
+            {
+              "json_sha256": "cbeedb371d72ec7c1ec1020899eda09f5e2785d700c6205399a50bd510b5d23d"
+            },
+            {
+              "json_sha256": "cbeedb371d72ec7c1ec1020899eda09f5e2785d700c6205399a50bd510b5d23d"
+            },
+            {
+              "json_sha256": "cbeedb371d72ec7c1ec1020899eda09f5e2785d700c6205399a50bd510b5d23d"
+            },
+            {
+              "json_sha256": "cbeedb371d72ec7c1ec1020899eda09f5e2785d700c6205399a50bd510b5d23d"
+            }
+          ]
+        }
+      ],
+      "cold_median_seconds": 1.4075142089859582,
+      "warm_median_seconds": 0.07067403302062303,
+      "concurrent_median_seconds": 0.2858353365154471
+    }
+  },
+  "note": "No QQ/Satori transport, account API, or interactive user wait is included. Browser is prestarted."
+}

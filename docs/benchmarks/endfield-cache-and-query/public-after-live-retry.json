@@ -1,0 +1,879 @@
+{
+  "started_at_utc": "2026-09-05T05:01:20.092209+00:00",
+  "commit": "9d0b1bba8bc341e63b9d20038c4b6ea0fd6ada2d",
+  "dirty": true,
+  "mode": "live",
+  "network_delay_included": true,
+  "python": "3.12.3 (main, Jul 15 2026, 23:46:41) [GCC 13.3.0]",
+  "cold_runs": 3,
+  "warm_runs": 5,
+  "concurrent_runs": 2,
+  "cold_definition": "HTTP, domain, PNG and pinyin caches cleared; HTTP connections and browser may be reused.",
+  "concurrent_definition": "Four identical queries, HTTP/pinyin warm, domain/PNG cold; batch completion time.",
+  "cases": {
+    "mixed": {
+      "cold": [
+        {
+          "seconds": 4.880884974030778,
+          "http_calls": 30,
+          "response_bytes": 16283608,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 1043012,
+                "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+                "size": [
+                  1875,
+                  2766
+                ],
+                "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+              },
+              [
+                {
+                  "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+                }
+              ],
+              {
+                "json_sha256": "aba092d35fcaee6d45e752932e294188dd593ac785d4e19b2c8106d937e9252a"
+              },
+              [
+                {
+                  "png_bytes": 917672,
+                  "png_sha256": "89c3564fda535e8ae5dc78faba5d80a339ee305ceba25dc39178c71273c2bf49",
+                  "size": [
+                    1875,
+                    4788
+                  ],
+                  "rgba_sha256": "486d5d985c89af6afcf96d821a29bea875b906b671cf09b666511aecbe9e5496"
+                }
+              ]
+            ]
+          ]
+        },
+        {
+          "seconds": 3.30920109100407,
+          "http_calls": 29,
+          "response_bytes": 16252370,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 1043012,
+                "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+                "size": [
+                  1875,
+                  2766
+                ],
+                "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+              },
+              [
+                {
+                  "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+                }
+              ],
+              {
+                "json_sha256": "aba092d35fcaee6d45e752932e294188dd593ac785d4e19b2c8106d937e9252a"
+              },
+              [
+                {
+                  "png_bytes": 917672,
+                  "png_sha256": "89c3564fda535e8ae5dc78faba5d80a339ee305ceba25dc39178c71273c2bf49",
+                  "size": [
+                    1875,
+                    4788
+                  ],
+                  "rgba_sha256": "486d5d985c89af6afcf96d821a29bea875b906b671cf09b666511aecbe9e5496"
+                }
+              ]
+            ]
+          ]
+        },
+        {
+          "seconds": 3.106902463012375,
+          "http_calls": 29,
+          "response_bytes": 16252370,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 1043012,
+                "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+                "size": [
+                  1875,
+                  2766
+                ],
+                "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+              },
+              [
+                {
+                  "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+                }
+              ],
+              {
+                "json_sha256": "aba092d35fcaee6d45e752932e294188dd593ac785d4e19b2c8106d937e9252a"
+              },
+              [
+                {
+                  "png_bytes": 917672,
+                  "png_sha256": "89c3564fda535e8ae5dc78faba5d80a339ee305ceba25dc39178c71273c2bf49",
+                  "size": [
+                    1875,
+                    4788
+                  ],
+                  "rgba_sha256": "486d5d985c89af6afcf96d821a29bea875b906b671cf09b666511aecbe9e5496"
+                }
+              ]
+            ]
+          ]
+        }
+      ],
+      "warm": [
+        {
+          "seconds": 0.131510637991596,
+          "http_calls": 3,
+          "response_bytes": 73051,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 1043012,
+                "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+                "size": [
+                  1875,
+                  2766
+                ],
+                "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+              },
+              [
+                {
+                  "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+                }
+              ],
+              {
+                "json_sha256": "aba092d35fcaee6d45e752932e294188dd593ac785d4e19b2c8106d937e9252a"
+              },
+              [
+                {
+                  "png_bytes": 917672,
+                  "png_sha256": "89c3564fda535e8ae5dc78faba5d80a339ee305ceba25dc39178c71273c2bf49",
+                  "size": [
+                    1875,
+                    4788
+                  ],
+                  "rgba_sha256": "486d5d985c89af6afcf96d821a29bea875b906b671cf09b666511aecbe9e5496"
+                }
+              ]
+            ]
+          ]
+        },
+        {
+          "seconds": 0.07546636305050924,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 1043012,
+                "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+                "size": [
+                  1875,
+                  2766
+                ],
+                "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+              },
+              [
+                {
+                  "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+                }
+              ],
+              {
+                "json_sha256": "aba092d35fcaee6d45e752932e294188dd593ac785d4e19b2c8106d937e9252a"
+              },
+              [
+                {
+                  "png_bytes": 917672,
+                  "png_sha256": "89c3564fda535e8ae5dc78faba5d80a339ee305ceba25dc39178c71273c2bf49",
+                  "size": [
+                    1875,
+                    4788
+                  ],
+                  "rgba_sha256": "486d5d985c89af6afcf96d821a29bea875b906b671cf09b666511aecbe9e5496"
+                }
+              ]
+            ]
+          ]
+        },
+        {
+          "seconds": 0.07699015998514369,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 1043012,
+                "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+                "size": [
+                  1875,
+                  2766
+                ],
+                "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+              },
+              [
+                {
+                  "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+                }
+              ],
+              {
+                "json_sha256": "aba092d35fcaee6d45e752932e294188dd593ac785d4e19b2c8106d937e9252a"
+              },
+              [
+                {
+                  "png_bytes": 917672,
+                  "png_sha256": "89c3564fda535e8ae5dc78faba5d80a339ee305ceba25dc39178c71273c2bf49",
+                  "size": [
+                    1875,
+                    4788
+                  ],
+                  "rgba_sha256": "486d5d985c89af6afcf96d821a29bea875b906b671cf09b666511aecbe9e5496"
+                }
+              ]
+            ]
+          ]
+        },
+        {
+          "seconds": 0.07357523799873888,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 1043012,
+                "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+                "size": [
+                  1875,
+                  2766
+                ],
+                "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+              },
+              [
+                {
+                  "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+                }
+              ],
+              {
+                "json_sha256": "aba092d35fcaee6d45e752932e294188dd593ac785d4e19b2c8106d937e9252a"
+              },
+              [
+                {
+                  "png_bytes": 917672,
+                  "png_sha256": "89c3564fda535e8ae5dc78faba5d80a339ee305ceba25dc39178c71273c2bf49",
+                  "size": [
+                    1875,
+                    4788
+                  ],
+                  "rgba_sha256": "486d5d985c89af6afcf96d821a29bea875b906b671cf09b666511aecbe9e5496"
+                }
+              ]
+            ]
+          ]
+        },
+        {
+          "seconds": 0.07678535400191322,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 1043012,
+                "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+                "size": [
+                  1875,
+                  2766
+                ],
+                "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+              },
+              [
+                {
+                  "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+                }
+              ],
+              {
+                "json_sha256": "aba092d35fcaee6d45e752932e294188dd593ac785d4e19b2c8106d937e9252a"
+              },
+              [
+                {
+                  "png_bytes": 917672,
+                  "png_sha256": "89c3564fda535e8ae5dc78faba5d80a339ee305ceba25dc39178c71273c2bf49",
+                  "size": [
+                    1875,
+                    4788
+                  ],
+                  "rgba_sha256": "486d5d985c89af6afcf96d821a29bea875b906b671cf09b666511aecbe9e5496"
+                }
+              ]
+            ]
+          ]
+        }
+      ],
+      "concurrent": [
+        {
+          "seconds": 1.7057224630261771,
+          "http_calls": 4,
+          "response_bytes": 1414112,
+          "http_failures": [],
+          "concurrency": 4,
+          "outputs": [
+            [
+              {
+                "png_bytes": 1043012,
+                "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+                "size": [
+                  1875,
+                  2766
+                ],
+                "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+              },
+              [
+                {
+                  "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+                }
+              ],
+              {
+                "json_sha256": "aba092d35fcaee6d45e752932e294188dd593ac785d4e19b2c8106d937e9252a"
+              },
+              [
+                {
+                  "png_bytes": 917672,
+                  "png_sha256": "89c3564fda535e8ae5dc78faba5d80a339ee305ceba25dc39178c71273c2bf49",
+                  "size": [
+                    1875,
+                    4788
+                  ],
+                  "rgba_sha256": "486d5d985c89af6afcf96d821a29bea875b906b671cf09b666511aecbe9e5496"
+                }
+              ]
+            ],
+            [
+              {
+                "png_bytes": 1043012,
+                "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+                "size": [
+                  1875,
+                  2766
+                ],
+                "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+              },
+              [
+                {
+                  "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+                }
+              ],
+              {
+                "json_sha256": "aba092d35fcaee6d45e752932e294188dd593ac785d4e19b2c8106d937e9252a"
+              },
+              [
+                {
+                  "png_bytes": 917672,
+                  "png_sha256": "89c3564fda535e8ae5dc78faba5d80a339ee305ceba25dc39178c71273c2bf49",
+                  "size": [
+                    1875,
+                    4788
+                  ],
+                  "rgba_sha256": "486d5d985c89af6afcf96d821a29bea875b906b671cf09b666511aecbe9e5496"
+                }
+              ]
+            ],
+            [
+              {
+                "png_bytes": 1043012,
+                "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+                "size": [
+                  1875,
+                  2766
+                ],
+                "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+              },
+              [
+                {
+                  "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+                }
+              ],
+              {
+                "json_sha256": "aba092d35fcaee6d45e752932e294188dd593ac785d4e19b2c8106d937e9252a"
+              },
+              [
+                {
+                  "png_bytes": 917672,
+                  "png_sha256": "89c3564fda535e8ae5dc78faba5d80a339ee305ceba25dc39178c71273c2bf49",
+                  "size": [
+                    1875,
+                    4788
+                  ],
+                  "rgba_sha256": "486d5d985c89af6afcf96d821a29bea875b906b671cf09b666511aecbe9e5496"
+                }
+              ]
+            ],
+            [
+              {
+                "png_bytes": 1043012,
+                "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+                "size": [
+                  1875,
+                  2766
+                ],
+                "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+              },
+              [
+                {
+                  "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+                }
+              ],
+              {
+                "json_sha256": "aba092d35fcaee6d45e752932e294188dd593ac785d4e19b2c8106d937e9252a"
+              },
+              [
+                {
+                  "png_bytes": 917672,
+                  "png_sha256": "89c3564fda535e8ae5dc78faba5d80a339ee305ceba25dc39178c71273c2bf49",
+                  "size": [
+                    1875,
+                    4788
+                  ],
+                  "rgba_sha256": "486d5d985c89af6afcf96d821a29bea875b906b671cf09b666511aecbe9e5496"
+                }
+              ]
+            ]
+          ]
+        },
+        {
+          "seconds": 3.0948448900016956,
+          "http_calls": 17,
+          "response_bytes": 1681335,
+          "http_failures": [],
+          "concurrency": 4,
+          "outputs": [
+            [
+              {
+                "png_bytes": 1043012,
+                "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+                "size": [
+                  1875,
+                  2766
+                ],
+                "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+              },
+              [
+                {
+                  "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+                }
+              ],
+              {
+                "json_sha256": "aba092d35fcaee6d45e752932e294188dd593ac785d4e19b2c8106d937e9252a"
+              },
+              [
+                {
+                  "png_bytes": 917672,
+                  "png_sha256": "89c3564fda535e8ae5dc78faba5d80a339ee305ceba25dc39178c71273c2bf49",
+                  "size": [
+                    1875,
+                    4788
+                  ],
+                  "rgba_sha256": "486d5d985c89af6afcf96d821a29bea875b906b671cf09b666511aecbe9e5496"
+                }
+              ]
+            ],
+            [
+              {
+                "png_bytes": 1043012,
+                "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+                "size": [
+                  1875,
+                  2766
+                ],
+                "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+              },
+              [
+                {
+                  "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+                }
+              ],
+              {
+                "json_sha256": "aba092d35fcaee6d45e752932e294188dd593ac785d4e19b2c8106d937e9252a"
+              },
+              [
+                {
+                  "png_bytes": 917672,
+                  "png_sha256": "89c3564fda535e8ae5dc78faba5d80a339ee305ceba25dc39178c71273c2bf49",
+                  "size": [
+                    1875,
+                    4788
+                  ],
+                  "rgba_sha256": "486d5d985c89af6afcf96d821a29bea875b906b671cf09b666511aecbe9e5496"
+                }
+              ]
+            ],
+            [
+              {
+                "png_bytes": 1043012,
+                "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+                "size": [
+                  1875,
+                  2766
+                ],
+                "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+              },
+              [
+                {
+                  "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+                }
+              ],
+              {
+                "json_sha256": "aba092d35fcaee6d45e752932e294188dd593ac785d4e19b2c8106d937e9252a"
+              },
+              [
+                {
+                  "png_bytes": 917672,
+                  "png_sha256": "89c3564fda535e8ae5dc78faba5d80a339ee305ceba25dc39178c71273c2bf49",
+                  "size": [
+                    1875,
+                    4788
+                  ],
+                  "rgba_sha256": "486d5d985c89af6afcf96d821a29bea875b906b671cf09b666511aecbe9e5496"
+                }
+              ]
+            ],
+            [
+              {
+                "png_bytes": 1043012,
+                "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+                "size": [
+                  1875,
+                  2766
+                ],
+                "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+              },
+              [
+                {
+                  "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+                }
+              ],
+              {
+                "json_sha256": "aba092d35fcaee6d45e752932e294188dd593ac785d4e19b2c8106d937e9252a"
+              },
+              [
+                {
+                  "png_bytes": 917672,
+                  "png_sha256": "89c3564fda535e8ae5dc78faba5d80a339ee305ceba25dc39178c71273c2bf49",
+                  "size": [
+                    1875,
+                    4788
+                  ],
+                  "rgba_sha256": "486d5d985c89af6afcf96d821a29bea875b906b671cf09b666511aecbe9e5496"
+                }
+              ]
+            ]
+          ]
+        }
+      ],
+      "cold_median_seconds": 3.30920109100407,
+      "warm_median_seconds": 0.07678535400191322,
+      "concurrent_median_seconds": 2.4002836765139364
+    },
+    "operator_catalog": {
+      "cold": [
+        {
+          "seconds": 2.975615873001516,
+          "http_calls": 44,
+          "response_bytes": 5380406,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 6803603,
+                "png_sha256": "311d3fb5ee7ab8efe5789092c36ba324c3cf48c98c79b4e2fc5a332d678cdc91",
+                "size": [
+                  2375,
+                  4733
+                ],
+                "rgba_sha256": "4e1975ff38aa5f18d075108c0a971172e093f32f6564da916f207c1b41836784"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 2.9416297060088255,
+          "http_calls": 44,
+          "response_bytes": 5380406,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 6803603,
+                "png_sha256": "311d3fb5ee7ab8efe5789092c36ba324c3cf48c98c79b4e2fc5a332d678cdc91",
+                "size": [
+                  2375,
+                  4733
+                ],
+                "rgba_sha256": "4e1975ff38aa5f18d075108c0a971172e093f32f6564da916f207c1b41836784"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 2.9894672950031236,
+          "http_calls": 44,
+          "response_bytes": 5380406,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 6803603,
+                "png_sha256": "311d3fb5ee7ab8efe5789092c36ba324c3cf48c98c79b4e2fc5a332d678cdc91",
+                "size": [
+                  2375,
+                  4733
+                ],
+                "rgba_sha256": "4e1975ff38aa5f18d075108c0a971172e093f32f6564da916f207c1b41836784"
+              }
+            ]
+          ]
+        }
+      ],
+      "warm": [
+        {
+          "seconds": 0.0003362289862707257,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 6803603,
+                "png_sha256": "311d3fb5ee7ab8efe5789092c36ba324c3cf48c98c79b4e2fc5a332d678cdc91",
+                "size": [
+                  2375,
+                  4733
+                ],
+                "rgba_sha256": "4e1975ff38aa5f18d075108c0a971172e093f32f6564da916f207c1b41836784"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.0005088520119898021,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 6803603,
+                "png_sha256": "311d3fb5ee7ab8efe5789092c36ba324c3cf48c98c79b4e2fc5a332d678cdc91",
+                "size": [
+                  2375,
+                  4733
+                ],
+                "rgba_sha256": "4e1975ff38aa5f18d075108c0a971172e093f32f6564da916f207c1b41836784"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.0003141069901175797,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 6803603,
+                "png_sha256": "311d3fb5ee7ab8efe5789092c36ba324c3cf48c98c79b4e2fc5a332d678cdc91",
+                "size": [
+                  2375,
+                  4733
+                ],
+                "rgba_sha256": "4e1975ff38aa5f18d075108c0a971172e093f32f6564da916f207c1b41836784"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.0003543189959600568,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 6803603,
+                "png_sha256": "311d3fb5ee7ab8efe5789092c36ba324c3cf48c98c79b4e2fc5a332d678cdc91",
+                "size": [
+                  2375,
+                  4733
+                ],
+                "rgba_sha256": "4e1975ff38aa5f18d075108c0a971172e093f32f6564da916f207c1b41836784"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.00031940703047439456,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "png_bytes": 6803603,
+                "png_sha256": "311d3fb5ee7ab8efe5789092c36ba324c3cf48c98c79b4e2fc5a332d678cdc91",
+                "size": [
+                  2375,
+                  4733
+                ],
+                "rgba_sha256": "4e1975ff38aa5f18d075108c0a971172e093f32f6564da916f207c1b41836784"
+              }
+            ]
+          ]
+        }
+      ],
+      "concurrent": [
+        {
+          "seconds": 2.1291153830243275,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 4,
+          "outputs": [
+            [
+              {
+                "png_bytes": 6803603,
+                "png_sha256": "311d3fb5ee7ab8efe5789092c36ba324c3cf48c98c79b4e2fc5a332d678cdc91",
+                "size": [
+                  2375,
+                  4733
+                ],
+                "rgba_sha256": "4e1975ff38aa5f18d075108c0a971172e093f32f6564da916f207c1b41836784"
+              }
+            ],
+            [
+              {
+                "png_bytes": 6803603,
+                "png_sha256": "311d3fb5ee7ab8efe5789092c36ba324c3cf48c98c79b4e2fc5a332d678cdc91",
+                "size": [
+                  2375,
+                  4733
+                ],
+                "rgba_sha256": "4e1975ff38aa5f18d075108c0a971172e093f32f6564da916f207c1b41836784"
+              }
+            ],
+            [
+              {
+                "png_bytes": 6803603,
+                "png_sha256": "311d3fb5ee7ab8efe5789092c36ba324c3cf48c98c79b4e2fc5a332d678cdc91",
+                "size": [
+                  2375,
+                  4733
+                ],
+                "rgba_sha256": "4e1975ff38aa5f18d075108c0a971172e093f32f6564da916f207c1b41836784"
+              }
+            ],
+            [
+              {
+                "png_bytes": 6803603,
+                "png_sha256": "311d3fb5ee7ab8efe5789092c36ba324c3cf48c98c79b4e2fc5a332d678cdc91",
+                "size": [
+                  2375,
+                  4733
+                ],
+                "rgba_sha256": "4e1975ff38aa5f18d075108c0a971172e093f32f6564da916f207c1b41836784"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 2.13388528698124,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 4,
+          "outputs": [
+            [
+              {
+                "png_bytes": 6803603,
+                "png_sha256": "311d3fb5ee7ab8efe5789092c36ba324c3cf48c98c79b4e2fc5a332d678cdc91",
+                "size": [
+                  2375,
+                  4733
+                ],
+                "rgba_sha256": "4e1975ff38aa5f18d075108c0a971172e093f32f6564da916f207c1b41836784"
+              }
+            ],
+            [
+              {
+                "png_bytes": 6803603,
+                "png_sha256": "311d3fb5ee7ab8efe5789092c36ba324c3cf48c98c79b4e2fc5a332d678cdc91",
+                "size": [
+                  2375,
+                  4733
+                ],
+                "rgba_sha256": "4e1975ff38aa5f18d075108c0a971172e093f32f6564da916f207c1b41836784"
+              }
+            ],
+            [
+              {
+                "png_bytes": 6803603,
+                "png_sha256": "311d3fb5ee7ab8efe5789092c36ba324c3cf48c98c79b4e2fc5a332d678cdc91",
+                "size": [
+                  2375,
+                  4733
+                ],
+                "rgba_sha256": "4e1975ff38aa5f18d075108c0a971172e093f32f6564da916f207c1b41836784"
+              }
+            ],
+            [
+              {
+                "png_bytes": 6803603,
+                "png_sha256": "311d3fb5ee7ab8efe5789092c36ba324c3cf48c98c79b4e2fc5a332d678cdc91",
+                "size": [
+                  2375,
+                  4733
+                ],
+                "rgba_sha256": "4e1975ff38aa5f18d075108c0a971172e093f32f6564da916f207c1b41836784"
+              }
+            ]
+          ]
+        }
+      ],
+      "cold_median_seconds": 2.975615873001516,
+      "warm_median_seconds": 0.0003362289862707257,
+      "concurrent_median_seconds": 2.1315003350027837
+    }
+  },
+  "note": "No QQ/Satori transport, account API, or interactive user wait is included. Browser is prestarted.",
+  "volatile_fields_ignored": [
+    "medals_data.fetched_at"
+  ],
+  "mixed_definition": "loadout, weapon relations, medal tables and stage catalog started together",
+  "python_peak_rss_mib": 462.9140625
+}

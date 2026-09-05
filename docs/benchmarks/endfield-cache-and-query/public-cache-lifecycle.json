@@ -1,0 +1,29 @@
+{
+  "public_resource": "https://data.akedata.wiki/public/images/assets/beyond/dynamicassets/gameplay/ui/sprites/charremoteicon/icon_chr_0005_chen.png",
+  "cache_expiry_forced_in_temporary_database": true,
+  "results": {
+    "cold": {
+      "seconds": 0.4177358419983648,
+      "http_statuses": [
+        200
+      ],
+      "bytes": 160336,
+      "sha256": "1fc27651e5ce216be5354def410c8f723d0e747a85676e84b21c1bd139758aa5"
+    },
+    "new_process_fresh_disk": {
+      "seconds": 0.04546019999543205,
+      "http_statuses": [],
+      "bytes": 160336,
+      "sha256": "1fc27651e5ce216be5354def410c8f723d0e747a85676e84b21c1bd139758aa5"
+    },
+    "new_process_forced_expiry": {
+      "seconds": 0.23774475103709847,
+      "http_statuses": [
+        304
+      ],
+      "bytes": 160336,
+      "sha256": "1fc27651e5ce216be5354def410c8f723d0e747a85676e84b21c1bd139758aa5"
+    }
+  },
+  "identical_bodies": true
+}

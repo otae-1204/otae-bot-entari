@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import tempfile
 import unittest
+from datetime import datetime
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -541,7 +542,7 @@ class EndfieldChallengeTests(unittest.TestCase):
         normal, hard = group.stages[0]
         self.assertEqual(
             _best_cleared_html((normal, hard), ("hard", "normal"), _monument_difficulty_label),
-            ("01:05", "普通 · 2027-01-15 16:00"),
+            ("01:05", "普通 · " + datetime.fromtimestamp(normal.record.record_ts or normal.first_pass_ts).strftime("%Y-%m-%d %H:%M")),
         )
         # 全没过就明说没有，不用 0 或假数字填
         blank = replace(normal, passed=False, record=ChallengeRecord())
@@ -553,7 +554,7 @@ class EndfieldChallengeTests(unittest.TestCase):
         slow = replace(hard, passed=True, record=ChallengeRecord(record_ts=1800000000))
         self.assertEqual(
             _best_cleared_html((normal, slow), ("hard", "normal"), _monument_difficulty_label),
-            ("用时未返回", "苦难 · 2027-01-15 16:00"),
+            ("用时未返回", "苦难 · " + datetime.fromtimestamp(slow.record.record_ts).strftime("%Y-%m-%d %H:%M")),
         )
 
     def test_feature_items_split_official_bullets(self):

@@ -261,11 +261,11 @@ class EndfieldAccountUiTests(unittest.TestCase):
     def test_warfarin_semantic_icon_urls_match_endfield_keys(self):
         self.assertEqual(
             _profession_icon_url("profession_assault"),
-            "https://static.warfarin.wiki/v4/charprofessionicon/icon_profession_8_s.webp",
+            "https://data.akedata.wiki/public/images/assets/beyond/dynamicassets/gameplay/ui/sprites/charprofessionicon/icon_profession_8_s.png",
         )
         self.assertEqual(
             _property_icon_url("char_property_fire"),
-            "https://static.warfarin.wiki/v4/elementicon/icon_charattrtype_fire.webp",
+            "https://data.akedata.wiki/public/images/assets/beyond/dynamicassets/gameplay/ui/sprites/elementicon/icon_charattrtype_fire.png",
         )
 
 
@@ -273,6 +273,10 @@ class EndfieldAccountUiAsyncTests(unittest.IsolatedAsyncioTestCase):
     async def test_prepare_assets_registers_local_ui_fonts_and_icons(self):
         prepared = await _prepare_assets([], inline=False)
         for virtual_url, path, _weight in FONT_ASSETS.values():
+            if str(path).startswith("C:/Windows/") and not path.exists():
+                self.assertNotIn(virtual_url, prepared.urls)
+                self.assertNotIn(virtual_url, prepared.resources)
+                continue  # Optional Windows HUD fonts have CSS fallbacks on Linux.
             self.assertTrue(path.exists())
             self.assertIn(virtual_url, prepared.urls)
             self.assertIn(virtual_url, prepared.resources)
@@ -586,6 +590,12 @@ class EndfieldAccountDetailPaginationTests(unittest.IsolatedAsyncioTestCase):
 
 
 class EndfieldAccountDetailRoutingTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        await endfield._ACCOUNT_PAGE_CACHE.clear()
+
+    async def asyncTearDown(self):
+        await endfield._ACCOUNT_PAGE_CACHE.close()
+
     def setUp(self):
         self.roles = [
             EndfieldRole(1, 1, "qq", "b1", "1770431209", "1", "甲", "China", True),

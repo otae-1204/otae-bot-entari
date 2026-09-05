@@ -70,6 +70,33 @@ class EndfieldGachaAssetCache:
         self.catalog_path = self.cache_dir / "catalog.json"
         self.catalog_ttl_seconds = int(catalog_ttl_seconds)
         self._catalog_lock = asyncio.Lock()
+        self._generation = 0
+        self._invalidated_at = 0.0
+        self._catalog_memory: tuple[int, dict[str, GachaItemMetadata]] | None = None
+
+    def clear_caches(self) -> int:
+        """Invalidate disposable catalogs/images without touching account records."""
+        self._generation += 1
+        self._invalidated_at = time.time()
+        self._catalog_memory = None
+        self._catalog_lock = asyncio.Lock()
+        try:
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+            marker = self.cache_dir / "invalidated-at"
+            marker.write_text(str(self._invalidated_at), encoding="ascii")
+        except OSError:
+            pass  # Read-only/full cache disks must not prevent memory clearing.
+        return 1
+
+    def _fresh_file(self, path: Path) -> bool:
+        try:
+            modified = path.stat().st_mtime
+            marker = self.cache_dir / "invalidated-at"
+            invalidated = float(marker.read_text(encoding="ascii")) if marker.exists() else 0
+            invalidated = max(invalidated, self._invalidated_at)
+            return modified > invalidated and time.time() - modified < self.catalog_ttl_seconds
+        except (OSError, ValueError):
+            return False
 
     async def prepare(
         self,
@@ -277,6 +304,7 @@ class EndfieldGachaAssetCache:
         force: bool = False,
     ) -> dict[str, GachaItemMetadata]:
         wanted = {item_id for item_id in required_ids if item_id}
+        generation = self._generation
         async with self._catalog_lock:
             cached = self._read_catalog()
             missing = [item_id for item_id in wanted if item_id not in cached]
@@ -310,7 +338,7 @@ class EndfieldGachaAssetCache:
                                 weapon_type=item.weapon_type,
                                 icon_url=item.icon_url,
                             )
-                if items:
+                if items and generation == self._generation:
                     self._write_catalog(items)
                     return items
             except Exception:
@@ -319,13 +347,13 @@ class EndfieldGachaAssetCache:
             return cached
 
     def _catalog_is_fresh(self) -> bool:
-        try:
-            return time.time() - self.catalog_path.stat().st_mtime < self.catalog_ttl_seconds
-        except OSError:
-            return False
+        return self._fresh_file(self.catalog_path)
 
     def _read_catalog(self) -> dict[str, GachaItemMetadata]:
         try:
+            revision = self.catalog_path.stat().st_mtime_ns
+            if self._catalog_memory is not None and self._catalog_memory[0] == revision:
+                return dict(self._catalog_memory[1])
             raw = json.loads(self.catalog_path.read_text(encoding="utf-8"))
         except (OSError, ValueError, TypeError):
             return {}
@@ -348,7 +376,8 @@ class EndfieldGachaAssetCache:
             except (TypeError, ValueError):
                 continue
             result[metadata.item_id] = metadata
-        return result
+        self._catalog_memory = revision, result
+        return dict(result)
 
     def _write_catalog(self, items: dict[str, GachaItemMetadata]) -> None:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -367,6 +396,7 @@ class EndfieldGachaAssetCache:
         *,
         candidates: dict[str, tuple[str, ...]] | None = None,
     ) -> dict[str, str]:
+        generation = self._generation
         result = {
             item.item_id: path
             for item in items
@@ -384,6 +414,8 @@ class EndfieldGachaAssetCache:
             pending[item.item_id] = (item, urls)
             first_batch.append(urls[0])
         resources = await self._fetch_image_urls(first_batch)
+        if generation != self._generation:
+            return result
         retry_urls: list[str] = []
         retry_ids: list[str] = []
         for item_id, (item, urls) in pending.items():
@@ -398,6 +430,8 @@ class EndfieldGachaAssetCache:
                 retry_ids.append(item_id)
         if retry_urls:
             extra = await self._fetch_image_urls(retry_urls)
+            if generation != self._generation:
+                return result
             resources.update(extra)
             for item_id in retry_ids:
                 _item, urls = pending[item_id]
@@ -441,7 +475,7 @@ class EndfieldGachaAssetCache:
         stem = _safe_item_id(item_id)
         for suffix in (".png", ".webp", ".jpg", ".jpeg"):
             path = self.cache_dir / f"{stem}{suffix}"
-            if path.is_file() and path.stat().st_size > 0:
+            if path.is_file() and path.stat().st_size > 0 and self._fresh_file(path):
                 return str(path.resolve())
         return ""
 
@@ -449,7 +483,8 @@ class EndfieldGachaAssetCache:
         source = Path(source_path)
         target = self.cache_dir / f"keepsake_v1_{_safe_item_id(item_id)}.png"
         try:
-            if target.is_file() and target.stat().st_size > 0:
+            if (target.is_file() and target.stat().st_size > 0 and self._fresh_file(target)
+                    and target.stat().st_mtime_ns >= source.stat().st_mtime_ns):
                 return str(target.resolve())
             image = Image.open(source).convert("RGBA")
             bounds = image.getchannel("A").getbbox()
@@ -475,7 +510,8 @@ class EndfieldGachaAssetCache:
         source = Path(source_path)
         target = self.cache_dir / f"banner_bust_v1_{_safe_item_id(item_id)}.webp"
         try:
-            if target.is_file() and target.stat().st_size > 0:
+            if (target.is_file() and target.stat().st_size > 0 and self._fresh_file(target)
+                    and target.stat().st_mtime_ns >= source.stat().st_mtime_ns):
                 return str(target.resolve())
             with Image.open(source) as opened:
                 image = opened.convert("RGBA")

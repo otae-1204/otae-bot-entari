@@ -487,7 +487,7 @@ class InvestmentConcurrencyTests(unittest.IsolatedAsyncioTestCase):
                 side_effect=partial(loader, 2),
             ),
             patch.object(
-                endfield, "build_account_investment_view", return_value="view"
+                endfield, "build_account_investment_view", return_value=loadout_view()
             ) as build,
             patch.object(
                 endfield,

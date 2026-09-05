@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ..rendering.health import record_assets
+
 import hashlib
 import html
 import mimetypes
@@ -463,6 +465,7 @@ async def _prepare_assets(urls: Iterable[Any], *, inline: bool) -> _PreparedAsse
         else:
             output[virtual_url] = virtual_url
             browser_resources[virtual_url] = BrowserResource(content, mime)
+    record_assets(unique_urls, (url for url, mapped in output.items() if mapped))
     return _PreparedAssets(output, browser_resources)
 
 

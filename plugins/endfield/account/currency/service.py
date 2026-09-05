@@ -122,16 +122,15 @@ def aggregate_currency_logs(
         else:
             consumed += amount
         key = (kind, str(item.change_reason).strip())
-        row = by_reason.setdefault(
-            key,
-            {
+        row = by_reason.get(key)
+        if row is None:
+            row = by_reason[key] = {
                 "reason_code": key[1],
                 "label": reason_label(key[1]),
                 "kind": kind,
                 "count": 0,
                 "amount": 0,
-            },
-        )
+            }
         row["count"] = int(row["count"]) + 1
         row["amount"] = int(row["amount"]) + amount
 

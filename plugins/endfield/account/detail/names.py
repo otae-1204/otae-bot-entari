@@ -31,6 +31,16 @@ class AccountDetailNameMap:
 
 _name_map_cache: AccountDetailNameMap | None = None
 _name_map_lock = asyncio.Lock()
+_name_map_generation = 0
+
+
+def clear_account_detail_name_map() -> int:
+    global _name_map_cache, _name_map_generation, _name_map_lock
+    removed = int(_name_map_cache is not None)
+    _name_map_generation += 1
+    _name_map_cache = None
+    _name_map_lock = asyncio.Lock()
+    return removed
 
 
 async def fetch_account_detail_name_map() -> AccountDetailNameMap:
@@ -41,6 +51,8 @@ async def fetch_account_detail_name_map() -> AccountDetailNameMap:
     version; the shared HTTP cache also prevents duplicate downloads.
     """
     global _name_map_cache
+    generation = _name_map_generation
+    lock = _name_map_lock
 
     manifest = await fetch_akedata_manifest()
     latest = str(manifest.get("latest") or "")
@@ -49,7 +61,7 @@ async def fetch_account_detail_name_map() -> AccountDetailNameMap:
     if _name_map_cache is not None and _name_map_cache.version == latest:
         return _name_map_cache
 
-    async with _name_map_lock:
+    async with lock:
         if _name_map_cache is not None and _name_map_cache.version == latest:
             return _name_map_cache
         version = next(
@@ -102,7 +114,7 @@ async def fetch_account_detail_name_map() -> AccountDetailNameMap:
             settlement_table = {}
         if isinstance(spaceship_room_type_table, Exception):
             spaceship_room_type_table = {}
-        _name_map_cache = build_account_detail_name_map(
+        built = build_account_detail_name_map(
             character_table,
             growth_table,
             weapon_table,
@@ -115,7 +127,9 @@ async def fetch_account_detail_name_map() -> AccountDetailNameMap:
             spaceship_room_type_table=spaceship_room_type_table,
             version=latest,
         )
-        return _name_map_cache
+        if generation == _name_map_generation:
+            _name_map_cache = built
+        return built
 
 
 def build_account_detail_name_map(

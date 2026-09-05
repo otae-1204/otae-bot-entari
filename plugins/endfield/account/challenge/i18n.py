@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import logging
 import re
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -84,24 +85,48 @@ EMPTY_CHALLENGE_LOCALE = ChallengeLocale()
 _locale_cache: ChallengeLocale | None = None
 _locale_lock = asyncio.Lock()
 _locale_task: asyncio.Task[ChallengeLocale] | None = None
+_locale_generation = 0
+_locale_checked_at = 0.0
+_locale_tasks: set[asyncio.Task[ChallengeLocale]] = set()
 logger = logging.getLogger(__name__)
+
+
+def clear_challenge_locale() -> int:
+    global _locale_cache, _locale_task, _locale_generation, _locale_checked_at, _locale_lock
+    removed = int(_locale_cache is not None)
+    _locale_generation += 1
+    _locale_cache = None
+    _locale_task = None
+    _locale_checked_at = 0.0
+    _locale_lock = asyncio.Lock()
+    return removed
+
+
+async def close_challenge_locale() -> None:
+    clear_challenge_locale()
+    tasks = tuple(_locale_tasks)
+    for task in tasks:
+        task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 def start_challenge_locale_warmup() -> asyncio.Task[ChallengeLocale] | None:
     """Start one shared background refresh without delaying plugin readiness."""
     global _locale_task
 
-    if _locale_cache is not None:
+    if _locale_cache is not None and time.monotonic() - _locale_checked_at < 60:
         return None
     if _locale_task is None or _locale_task.done():
         _locale_task = asyncio.create_task(fetch_challenge_locale())
+        _locale_tasks.add(_locale_task)
         _locale_task.add_done_callback(_log_warmup_result)
     return _locale_task
 
 
 async def get_challenge_locale(*, max_wait_seconds: float = 0.75) -> ChallengeLocale | None:
     """Return the cached catalog while keeping cold network I/O off commands."""
-    if _locale_cache is not None:
+    if _locale_cache is not None and time.monotonic() - _locale_checked_at < 60:
         return _locale_cache
     task = start_challenge_locale_warmup()
     if task is None:
@@ -113,6 +138,7 @@ async def get_challenge_locale(*, max_wait_seconds: float = 0.75) -> ChallengeLo
 
 
 def _log_warmup_result(task: asyncio.Task[ChallengeLocale]) -> None:
+    _locale_tasks.discard(task)
     try:
         locale = task.result()
     except asyncio.CancelledError:
@@ -125,16 +151,20 @@ def _log_warmup_result(task: asyncio.Task[ChallengeLocale]) -> None:
 
 async def fetch_challenge_locale() -> ChallengeLocale:
     """Load and cache the current CN challenge localization catalog."""
-    global _locale_cache
+    global _locale_cache, _locale_checked_at
+    generation = _locale_generation
+    lock = _locale_lock
 
     manifest = await fetch_akedata_manifest()
     latest = str(manifest.get("latest") or "")
     if not latest:
         raise RuntimeError("AKEData manifest has no latest version")
+    if generation == _locale_generation:
+        _locale_checked_at = time.monotonic()
     if _locale_cache is not None and _locale_cache.version == latest:
         return _locale_cache
 
-    async with _locale_lock:
+    async with lock:
         if _locale_cache is not None and _locale_cache.version == latest:
             return _locale_cache
         version = next(
@@ -171,7 +201,7 @@ async def fetch_challenge_locale() -> ChallengeLocale:
             ),
             _get(f"/{table_cfg}/EnemyAbilityDescTable.json", max_bytes=_TABLE_MAX_BYTES),
         )
-        _locale_cache = build_challenge_locale(
+        built = build_challenge_locale(
             chinese,
             english,
             dungeon_table,
@@ -182,7 +212,9 @@ async def fetch_challenge_locale() -> ChallengeLocale:
             enemy_ability_desc_table=enemy_ability_desc_table,
             version=latest,
         )
-        return _locale_cache
+        if generation == _locale_generation:
+            _locale_cache = built
+        return built
 
 
 def build_challenge_locale(

@@ -48,6 +48,9 @@ class EndfieldStageService:
     def __init__(self, client: WarfarinClient):
         self.sources = {"akedata": AkeDataStageSource(client)}
 
+    def clear_caches(self) -> int:
+        return sum(source.clear_caches() for source in self.sources.values())
+
     async def get_catalog_view(self, source: str = "") -> StageCatalogView:
         if source:
             return await self._source(source).catalog()

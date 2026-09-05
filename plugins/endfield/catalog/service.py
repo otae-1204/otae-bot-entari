@@ -242,13 +242,18 @@ class EndfieldService:
         self.client = client
         self._char_growth_table: dict[str, Any] | None = None
         self._char_growth_version = ""
+        self._query_generation = 0
         self._weapon_relations: AsyncTTLCache[str, dict[str, tuple[str, ...]]] = AsyncTTLCache(
             ttl_seconds=60.0, max_bytes=1024 * 1024, max_entries=16,
             sizeof=lambda value: len(json.dumps(value, ensure_ascii=False).encode()),
         )
 
     async def clear_query_caches(self) -> int:
-        return await self._weapon_relations.clear()
+        self._query_generation += 1
+        removed = int(self._char_growth_table is not None)
+        self._char_growth_table = None
+        self._char_growth_version = ""
+        return removed + await self._weapon_relations.clear()
 
     async def get_operator_view(self, query: str) -> OperatorView | None:
         primary: OperatorView | None = None
@@ -933,6 +938,7 @@ class EndfieldService:
         return row if isinstance(row, dict) else {}
 
     async def _load_char_growth_table(self) -> dict[str, Any]:
+        generation = self._query_generation
         try:
             manifest = await self.client.akedata_manifest()
             latest = str(manifest.get("latest") or "")
@@ -957,8 +963,9 @@ class EndfieldService:
                     table = loaded
         except (WarfarinAPIError, ValueError, TypeError, KeyError):
             return self._char_growth_table or {}
-        self._char_growth_table = table
-        self._char_growth_version = latest
+        if generation == self._query_generation:
+            self._char_growth_table = table
+            self._char_growth_version = latest
         return table
 
     async def _supplement_weapon_assets(self, view: WeaponView, query: str) -> None:

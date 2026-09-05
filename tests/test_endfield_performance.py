@@ -141,7 +141,7 @@ class EndfieldPerformanceBehaviorTests(unittest.IsolatedAsyncioTestCase):
                 for url in urls
             }
 
-        with patch.object(draw, "fetch_many", fake_fetch_many):
+        with patch.object(draw, "fetch_many_resilient", fake_fetch_many):
             results = await draw._image_data_urls(["https://asset/a.png", "https://asset/a.png"])
         self.assertEqual(seen, ["https://asset/a.png"])
         self.assertTrue(results["https://asset/a.png"].startswith("data:image/png;base64,"))
@@ -177,7 +177,7 @@ class EndfieldPerformanceBehaviorTests(unittest.IsolatedAsyncioTestCase):
             operator_id="test",
             portrait_url="https://asset/portrait.png",
         )
-        with patch.object(draw, "fetch_many", fake_fetch_many):
+        with patch.object(draw, "fetch_many_resilient", fake_fetch_many):
             prepared = await draw.prepare_operator_card_html(view)
         virtual_url = next(iter(prepared.resources))
         self.assertIn(f'src="{virtual_url}" alt="测试"', prepared.html)
@@ -204,7 +204,7 @@ class EndfieldPerformanceBehaviorTests(unittest.IsolatedAsyncioTestCase):
             portrait_url=portrait_url,
             icon_url=icon_url,
         )
-        with patch.object(draw, "fetch_many", fake_fetch_many):
+        with patch.object(draw, "fetch_many_resilient", fake_fetch_many):
             prepared = await draw.prepare_operator_card_html(view)
 
         virtual_url = next(iter(prepared.resources))
@@ -227,7 +227,7 @@ class EndfieldPerformanceBehaviorTests(unittest.IsolatedAsyncioTestCase):
                 for index in range(1, 6)
             ],
         )
-        with patch.object(draw, "fetch_many", AsyncMock(return_value={})):
+        with patch.object(draw, "fetch_many_resilient", AsyncMock(return_value={})):
             output = await draw.draw_operator_card(view)
 
         self.assertTrue(output.startswith(b"\x89PNG"))

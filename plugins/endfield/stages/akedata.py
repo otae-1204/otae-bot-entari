@@ -112,6 +112,18 @@ class AkeDataStageSource:
         self._tables: dict[str, dict[str, Any]] = {}
         self._resources: dict[str, dict[str, Any] | list[Any]] = {}
         self._asset_index: dict[str, Any] | None = None
+        self._generation = 0
+
+    def clear_caches(self) -> int:
+        self._generation += 1
+        removed = len(self._tables) + len(self._resources) + int(self._asset_index is not None)
+        self._version = None
+        # Replace containers: already running loaders may finish in the old
+        # generation without repopulating the new one.
+        self._tables = {}
+        self._resources = {}
+        self._asset_index = None
+        return removed
 
     async def catalog(self) -> StageCatalogView:
         version = await self._latest_version()
@@ -149,35 +161,43 @@ class AkeDataStageSource:
         return stage, ()
 
     async def _latest_version(self) -> AkeDataVersion:
+        generation = self._generation
         manifest = await self.client.akedata_manifest()
         version = parse_akedata_version(manifest)
+        if generation != self._generation:
+            return version
         if self._version is None or self._version.id != version.id:
-            self._tables.clear()
-            self._resources.clear()
+            self._tables = {}
+            self._resources = {}
             self._asset_index = None
         self._version = version
         return version
 
     async def _load_tables(self, *names: str) -> tuple[dict[str, Any], ...]:
+        generation = self._generation
         version = self._version or await self._latest_version()
+        if generation != self._generation:
+            return await self._load_tables(*names)
+        target = self._tables
 
         async def load(name: str) -> dict[str, Any]:
-            cached = self._tables.get(name)
+            cached = target.get(name)
             if cached is not None:
                 return cached
             table = await self.client.akedata_table(version.table_cfg_path, name)
-            self._tables[name] = table
+            target[name] = table
             return table
 
         return tuple(await asyncio.gather(*(load(name) for name in names)))
 
     async def _load_resource(self, path: str) -> dict[str, Any] | list[Any]:
+        target = self._resources
         normalized = str(path or "").strip().lstrip("/")
-        cached = self._resources.get(normalized)
+        cached = target.get(normalized)
         if cached is not None:
             return cached
         resource = await self.client.akedata_public_json(normalized)
-        self._resources[normalized] = resource
+        target[normalized] = resource
         return resource
 
     async def _load_stage_spawners(
@@ -224,9 +244,13 @@ class AkeDataStageSource:
         )
 
     async def _asset_json_paths(self, prefix: str) -> tuple[str, ...]:
-        if self._asset_index is None:
-            self._asset_index = await self.client.akedata_asset_index()
-        datasets = self._asset_index.get("datasets") or {}
+        generation = self._generation
+        index = self._asset_index
+        if index is None:
+            index = await self.client.akedata_asset_index()
+            if generation == self._generation:
+                self._asset_index = index
+        datasets = index.get("datasets") or {}
         json_dataset = datasets.get("json") if isinstance(datasets, dict) else {}
         files = json_dataset.get("files") if isinstance(json_dataset, dict) else {}
         normalized = str(prefix or "").strip("/")

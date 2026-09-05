@@ -33,6 +33,8 @@ PUBLIC_HOSTS = {
     "assets.fz.wiki",
     "static.warfarin.wiki",
     "bbs.hycdn.cn",
+    "endfield.hypergryph.com",
+    "web.hycdn.cn",
 }
 
 
@@ -171,6 +173,7 @@ async def benchmark(args):
     from plugins.endfield.catalog import commands
     from plugins.endfield.catalog.commands import ParsedEndfieldCommand
     from plugins.endfield.catalog.models import WeaponView
+    from plugins.endfield.catalog.commands import EndfieldCandidate
     from plugins.endfield.catalog.service import EndfieldService
 
     http = PublicHTTP(args.mode, args.cassette)
@@ -216,15 +219,55 @@ async def benchmark(args):
             ),
         )
 
+    async def card(kind, key, source="fz"):
+        pages = await endfield._render_candidate(
+            EndfieldCandidate(kind, key, key, 100, source)
+        )
+        if not pages:
+            raise RuntimeError("Card not found")
+        return pages
+
+    async def stage_card():
+        catalog = await endfield.stage_service.get_catalog_view("akedata")
+        item = next(
+            item for group in catalog.groups for item in group.items if item.queryable
+        )
+        return await card("stage", item.stage_key, "akedata")
+
+    async def medals():
+        from dataclasses import asdict
+        value = asdict(await endfield.service.fetch_medal_snapshot_akedata())
+        value.pop("fetched_at", None)  # Local capture time is not source content.
+        return value
+
+    async def mixed():
+        return await asyncio.gather(
+            loadout(), weapon_relations(), medals(),
+            card("stage_catalog", "", "akedata"),
+        )
+
     cases = {
         "equipment_search": equipment_search,
         "weapon_relations": weapon_relations,
         "loadout": loadout,
+        "operator_card": lambda: card("operator", "干员/莱万汀"),
+        "weapon_card": lambda: card("weapon", "武器/熔铸火焰"),
+        "equipment_card": lambda: card("equipment", "装备/长息轻护甲"),
+        "operator_catalog": lambda: card("operator_catalog", ""),
+        "weapon_catalog": lambda: card("weapon_catalog", ""),
+        "equipment_catalog": lambda: card("equipment_catalog", ""),
+        "stage_catalog": lambda: card("stage_catalog", "", "akedata"),
+        "stage_card": stage_card,
+        "calendar": endfield._render_current_version_calendar,
+        "medals_data": medals,
+        "mixed": mixed,
     }
 
     async def clear_derived():
         endfield.service = EndfieldService(endfield.client)
-        for name in ("_CARD_CACHE", "_LOADOUT_CACHE"):
+        endfield.stage_service = type(endfield.stage_service)(endfield.client)
+        endfield.calendar_source = type(endfield.calendar_source)(endfield.client)
+        for name in ("_CARD_CACHE", "_LOADOUT_CACHE", "_CALENDAR_CACHE"):
             cache = getattr(endfield, name, None)
             if cache is not None:
                 await cache.clear()
@@ -264,6 +307,8 @@ async def benchmark(args):
         "concurrent_definition": "Four identical queries, HTTP/pinyin warm, domain/PNG cold; batch completion time.",
         "cases": {},
         "note": "No QQ/Satori transport, account API, or interactive user wait is included. Browser is prestarted.",
+        "volatile_fields_ignored": ["medals_data.fetched_at"],
+        "mixed_definition": "loadout, weapon relations, medal tables and stage catalog started together",
     }
     try:
         with (
@@ -271,7 +316,11 @@ async def benchmark(args):
             patch.object(endfield, "_finish_png", finish_png),
             patch.object(endfield, "prompt", no_prompt),
         ):
-            if "loadout" in args.cases:
+            if set(args.cases) - {
+                "equipment_search",
+                "weapon_relations",
+                "medals_data",
+            }:
                 await screenshot_web_element(
                     "data:text/html,<body>benchmark warmup</body>", settle_ms=0
                 )
@@ -340,6 +389,12 @@ async def benchmark(args):
         await close_image_executor()
         await shared_http.close_http_client()
         await endfield.official_client.close()
+    try:
+        import resource
+        report["python_peak_rss_mib"] = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+    except ImportError:
+        pass
+    args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2))
     return report
 
 
@@ -365,7 +420,22 @@ def main():
         args.cassette.resolve(),
     )
     args.cases = args.cases.split(",")
-    if set(args.cases) - {"equipment_search", "weapon_relations", "loadout"}:
+    if set(args.cases) - {
+        "equipment_search",
+        "weapon_relations",
+        "loadout",
+        "operator_card",
+        "weapon_card",
+        "equipment_card",
+        "operator_catalog",
+        "weapon_catalog",
+        "equipment_catalog",
+        "stage_catalog",
+        "stage_card",
+        "calendar",
+        "medals_data",
+        "mixed",
+    }:
         parser.error("Unknown benchmark case")
     if min(args.cold_runs, args.warm_runs, args.concurrent_runs, args.timeout) <= 0:
         parser.error("Run counts and timeout must be positive")

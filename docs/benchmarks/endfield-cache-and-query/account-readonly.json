@@ -1,0 +1,2640 @@
+{
+  "live_readonly_apis": {
+    "detail": {
+      "seconds": [
+        0.44815335201565176,
+        0.34573540097335353,
+        0.29266263998579234
+      ],
+      "median_seconds": 0.34573540097335353,
+      "ok": true
+    },
+    "balances": {
+      "seconds": [
+        2.588088039017748,
+        0.18371752998791635,
+        0.15068426699144766
+      ],
+      "median_seconds": 0.18371752998791635,
+      "ok": true
+    },
+    "monument": {
+      "seconds": [
+        0.2130175590282306,
+        0.28360072104260325,
+        0.21541209297720343
+      ],
+      "median_seconds": 0.21541209297720343,
+      "ok": true
+    },
+    "war_echoes": {
+      "seconds": [
+        0.34353048901539296,
+        0.18609807000029832,
+        0.2368350179749541
+      ],
+      "median_seconds": 0.2368350179749541,
+      "ok": true
+    },
+    "gacha_full_sync": {
+      "seconds": 4.761605714971665,
+      "records": 452,
+      "failed_streams": 0
+    },
+    "currency_full_query": {
+      "seconds": 5.582753083028365,
+      "records": 737
+    }
+  },
+  "comparison": "Identical own-account snapshot in RAM; render pipeline only, excludes private API latency and QQ transport.",
+  "runs": 3,
+  "before": {
+    "mode": "record",
+    "cases": {
+      "detail": {
+        "cold": [
+          {
+            "seconds": 4.600106333964504,
+            "http_calls": 221,
+            "response_bytes": 35183044,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 1
+            },
+            "outputs": [
+              {
+                "png_bytes": 3335894,
+                "png_sha256": "27125ba0fdf48cb4a0b118311724c14061aad55f9183721c9fb0e22c79e697a5",
+                "size": [
+                  1938,
+                  5056
+                ],
+                "rgba_sha256": "dabb1f15cc290808bbea158091674e029cbd660a922013dfa04ae83c30c03aa1"
+              }
+            ]
+          },
+          {
+            "seconds": 3.885975829034578,
+            "http_calls": 221,
+            "response_bytes": 35183044,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 1
+            },
+            "outputs": [
+              {
+                "png_bytes": 3335894,
+                "png_sha256": "27125ba0fdf48cb4a0b118311724c14061aad55f9183721c9fb0e22c79e697a5",
+                "size": [
+                  1938,
+                  5056
+                ],
+                "rgba_sha256": "dabb1f15cc290808bbea158091674e029cbd660a922013dfa04ae83c30c03aa1"
+              }
+            ]
+          },
+          {
+            "seconds": 3.6875004449975677,
+            "http_calls": 221,
+            "response_bytes": 35183044,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 1
+            },
+            "outputs": [
+              {
+                "png_bytes": 3335894,
+                "png_sha256": "27125ba0fdf48cb4a0b118311724c14061aad55f9183721c9fb0e22c79e697a5",
+                "size": [
+                  1938,
+                  5056
+                ],
+                "rgba_sha256": "dabb1f15cc290808bbea158091674e029cbd660a922013dfa04ae83c30c03aa1"
+              }
+            ]
+          }
+        ],
+        "warm": [
+          {
+            "seconds": 1.7788879940053448,
+            "http_calls": 1,
+            "response_bytes": 2512,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 1
+            },
+            "outputs": [
+              {
+                "png_bytes": 3335894,
+                "png_sha256": "27125ba0fdf48cb4a0b118311724c14061aad55f9183721c9fb0e22c79e697a5",
+                "size": [
+                  1938,
+                  5056
+                ],
+                "rgba_sha256": "dabb1f15cc290808bbea158091674e029cbd660a922013dfa04ae83c30c03aa1"
+              }
+            ]
+          },
+          {
+            "seconds": 1.4852142730378546,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 1
+            },
+            "outputs": [
+              {
+                "png_bytes": 3335894,
+                "png_sha256": "27125ba0fdf48cb4a0b118311724c14061aad55f9183721c9fb0e22c79e697a5",
+                "size": [
+                  1938,
+                  5056
+                ],
+                "rgba_sha256": "dabb1f15cc290808bbea158091674e029cbd660a922013dfa04ae83c30c03aa1"
+              }
+            ]
+          },
+          {
+            "seconds": 1.560479824023787,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 1
+            },
+            "outputs": [
+              {
+                "png_bytes": 3335894,
+                "png_sha256": "27125ba0fdf48cb4a0b118311724c14061aad55f9183721c9fb0e22c79e697a5",
+                "size": [
+                  1938,
+                  5056
+                ],
+                "rgba_sha256": "dabb1f15cc290808bbea158091674e029cbd660a922013dfa04ae83c30c03aa1"
+              }
+            ]
+          }
+        ],
+        "cold_median_seconds": 3.885975829034578,
+        "warm_median_seconds": 1.560479824023787
+      },
+      "base": {
+        "cold": [
+          {
+            "seconds": 2.492291629954707,
+            "http_calls": 36,
+            "response_bytes": 27587046,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 1360665,
+                "png_sha256": "2a6b5e83bd58ccb1de57757edb10252e8f3fa7ee9d87f071e9c100af3552ba55",
+                "size": [
+                  1938,
+                  3268
+                ],
+                "rgba_sha256": "fa94cfd409c613d73ee4a709abb7aa8cce58dcc41574b71f053699c680ed0c2c"
+              }
+            ]
+          },
+          {
+            "seconds": 2.5005877369549125,
+            "http_calls": 36,
+            "response_bytes": 27587046,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 1360665,
+                "png_sha256": "2a6b5e83bd58ccb1de57757edb10252e8f3fa7ee9d87f071e9c100af3552ba55",
+                "size": [
+                  1938,
+                  3268
+                ],
+                "rgba_sha256": "fa94cfd409c613d73ee4a709abb7aa8cce58dcc41574b71f053699c680ed0c2c"
+              }
+            ]
+          },
+          {
+            "seconds": 2.495889479003381,
+            "http_calls": 36,
+            "response_bytes": 27587046,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 1360665,
+                "png_sha256": "2a6b5e83bd58ccb1de57757edb10252e8f3fa7ee9d87f071e9c100af3552ba55",
+                "size": [
+                  1938,
+                  3268
+                ],
+                "rgba_sha256": "fa94cfd409c613d73ee4a709abb7aa8cce58dcc41574b71f053699c680ed0c2c"
+              }
+            ]
+          }
+        ],
+        "warm": [
+          {
+            "seconds": 0.6737286190036684,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 1360665,
+                "png_sha256": "2a6b5e83bd58ccb1de57757edb10252e8f3fa7ee9d87f071e9c100af3552ba55",
+                "size": [
+                  1938,
+                  3268
+                ],
+                "rgba_sha256": "fa94cfd409c613d73ee4a709abb7aa8cce58dcc41574b71f053699c680ed0c2c"
+              }
+            ]
+          },
+          {
+            "seconds": 0.6784345179912634,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 1360665,
+                "png_sha256": "2a6b5e83bd58ccb1de57757edb10252e8f3fa7ee9d87f071e9c100af3552ba55",
+                "size": [
+                  1938,
+                  3268
+                ],
+                "rgba_sha256": "fa94cfd409c613d73ee4a709abb7aa8cce58dcc41574b71f053699c680ed0c2c"
+              }
+            ]
+          },
+          {
+            "seconds": 0.6861845279927365,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 1360665,
+                "png_sha256": "2a6b5e83bd58ccb1de57757edb10252e8f3fa7ee9d87f071e9c100af3552ba55",
+                "size": [
+                  1938,
+                  3268
+                ],
+                "rgba_sha256": "fa94cfd409c613d73ee4a709abb7aa8cce58dcc41574b71f053699c680ed0c2c"
+              }
+            ]
+          }
+        ],
+        "cold_median_seconds": 2.495889479003381,
+        "warm_median_seconds": 0.6784345179912634
+      },
+      "investment": {
+        "cold": [
+          {
+            "seconds": 3.4996772939921357,
+            "http_calls": 62,
+            "response_bytes": 39842258,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 387736,
+                "png_sha256": "bfd809ddf8fef370a7f99d47ed4da02fbccf8ea8e702e9549b54c1adb06bc1e7",
+                "size": [
+                  1938,
+                  1088
+                ],
+                "rgba_sha256": "5399d280ad7ba36b3cb5fb4b8ff2db4430bdf2f5d65a685e318052c6ceedcf95"
+              },
+              {
+                "png_bytes": 880486,
+                "png_sha256": "9fabcdd1e7a63163213b600514be1818e4b843866baeab000fab456c1173d3b7",
+                "size": [
+                  1938,
+                  2518
+                ],
+                "rgba_sha256": "bae22e2029afae44bbfee09b852020470d9854275b1b288544987d5f13572aab"
+              }
+            ]
+          },
+          {
+            "seconds": 3.1590860199648887,
+            "http_calls": 62,
+            "response_bytes": 39842258,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 387736,
+                "png_sha256": "bfd809ddf8fef370a7f99d47ed4da02fbccf8ea8e702e9549b54c1adb06bc1e7",
+                "size": [
+                  1938,
+                  1088
+                ],
+                "rgba_sha256": "5399d280ad7ba36b3cb5fb4b8ff2db4430bdf2f5d65a685e318052c6ceedcf95"
+              },
+              {
+                "png_bytes": 880486,
+                "png_sha256": "9fabcdd1e7a63163213b600514be1818e4b843866baeab000fab456c1173d3b7",
+                "size": [
+                  1938,
+                  2518
+                ],
+                "rgba_sha256": "bae22e2029afae44bbfee09b852020470d9854275b1b288544987d5f13572aab"
+              }
+            ]
+          },
+          {
+            "seconds": 3.3451771049876697,
+            "http_calls": 62,
+            "response_bytes": 39842258,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 387736,
+                "png_sha256": "bfd809ddf8fef370a7f99d47ed4da02fbccf8ea8e702e9549b54c1adb06bc1e7",
+                "size": [
+                  1938,
+                  1088
+                ],
+                "rgba_sha256": "5399d280ad7ba36b3cb5fb4b8ff2db4430bdf2f5d65a685e318052c6ceedcf95"
+              },
+              {
+                "png_bytes": 880486,
+                "png_sha256": "9fabcdd1e7a63163213b600514be1818e4b843866baeab000fab456c1173d3b7",
+                "size": [
+                  1938,
+                  2518
+                ],
+                "rgba_sha256": "bae22e2029afae44bbfee09b852020470d9854275b1b288544987d5f13572aab"
+              }
+            ]
+          }
+        ],
+        "warm": [
+          {
+            "seconds": 1.2116636339924298,
+            "http_calls": 1,
+            "response_bytes": 2512,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 387736,
+                "png_sha256": "bfd809ddf8fef370a7f99d47ed4da02fbccf8ea8e702e9549b54c1adb06bc1e7",
+                "size": [
+                  1938,
+                  1088
+                ],
+                "rgba_sha256": "5399d280ad7ba36b3cb5fb4b8ff2db4430bdf2f5d65a685e318052c6ceedcf95"
+              },
+              {
+                "png_bytes": 880486,
+                "png_sha256": "9fabcdd1e7a63163213b600514be1818e4b843866baeab000fab456c1173d3b7",
+                "size": [
+                  1938,
+                  2518
+                ],
+                "rgba_sha256": "bae22e2029afae44bbfee09b852020470d9854275b1b288544987d5f13572aab"
+              }
+            ]
+          },
+          {
+            "seconds": 1.0303393069771118,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 387736,
+                "png_sha256": "bfd809ddf8fef370a7f99d47ed4da02fbccf8ea8e702e9549b54c1adb06bc1e7",
+                "size": [
+                  1938,
+                  1088
+                ],
+                "rgba_sha256": "5399d280ad7ba36b3cb5fb4b8ff2db4430bdf2f5d65a685e318052c6ceedcf95"
+              },
+              {
+                "png_bytes": 880486,
+                "png_sha256": "9fabcdd1e7a63163213b600514be1818e4b843866baeab000fab456c1173d3b7",
+                "size": [
+                  1938,
+                  2518
+                ],
+                "rgba_sha256": "bae22e2029afae44bbfee09b852020470d9854275b1b288544987d5f13572aab"
+              }
+            ]
+          },
+          {
+            "seconds": 1.0005908489692956,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 387736,
+                "png_sha256": "bfd809ddf8fef370a7f99d47ed4da02fbccf8ea8e702e9549b54c1adb06bc1e7",
+                "size": [
+                  1938,
+                  1088
+                ],
+                "rgba_sha256": "5399d280ad7ba36b3cb5fb4b8ff2db4430bdf2f5d65a685e318052c6ceedcf95"
+              },
+              {
+                "png_bytes": 880486,
+                "png_sha256": "9fabcdd1e7a63163213b600514be1818e4b843866baeab000fab456c1173d3b7",
+                "size": [
+                  1938,
+                  2518
+                ],
+                "rgba_sha256": "bae22e2029afae44bbfee09b852020470d9854275b1b288544987d5f13572aab"
+              }
+            ]
+          }
+        ],
+        "cold_median_seconds": 3.3451771049876697,
+        "warm_median_seconds": 1.0303393069771118
+      }
+    },
+    "private_data_on_disk": false,
+    "history_cpu": {
+      "gacha_records": 452,
+      "currency_records": 737,
+      "gacha_insert": {
+        "seconds": [
+          0.0035853240406140685,
+          0.0033192780101671815,
+          0.00330658903112635
+        ],
+        "median_seconds": 0.0033192780101671815,
+        "output": {
+          "json_sha256": "549a2fac47d713cc00f2db498ad6b5574fb03c9293aef6c7ad50a11b394c197d"
+        }
+      },
+      "gacha_repeat_upsert": {
+        "seconds": [
+          0.00398856500396505,
+          0.00395633396692574,
+          0.00395358499372378
+        ],
+        "median_seconds": 0.00395633396692574,
+        "output": {
+          "json_sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+        }
+      },
+      "currency_aggregate": {
+        "seconds": [
+          0.0008805029792711139,
+          0.0007943410309962928,
+          0.0007929499843157828
+        ],
+        "median_seconds": 0.0007943410309962928,
+        "output": [
+          {
+            "json_sha256": "7cfb103397a33b68d6bd545855c2963e1cc247b0b5dcc4685219f869ee9a43a8"
+          },
+          {
+            "json_sha256": "8df8489c3fc8971fda9536666fa2c824bc4df4f969d885de7f33d4f75cf86fb9"
+          },
+          {
+            "json_sha256": "dee4d4e6507f38d1d8b3db305548018fc4d76a387ca1d645c28ea5f02849f383"
+          }
+        ]
+      }
+    },
+    "commit": "9d0b1bba8bc341e63b9d20038c4b6ea0fd6ada2d"
+  },
+  "after": {
+    "mode": "replay",
+    "cases": {
+      "detail": {
+        "cold": [
+          {
+            "seconds": 2.729560531966854,
+            "http_calls": 221,
+            "response_bytes": 35183044,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 1
+            },
+            "outputs": [
+              {
+                "png_bytes": 3335894,
+                "png_sha256": "27125ba0fdf48cb4a0b118311724c14061aad55f9183721c9fb0e22c79e697a5",
+                "size": [
+                  1938,
+                  5056
+                ],
+                "rgba_sha256": "dabb1f15cc290808bbea158091674e029cbd660a922013dfa04ae83c30c03aa1"
+              }
+            ]
+          },
+          {
+            "seconds": 2.615677552006673,
+            "http_calls": 221,
+            "response_bytes": 35183044,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 1
+            },
+            "outputs": [
+              {
+                "png_bytes": 3335894,
+                "png_sha256": "27125ba0fdf48cb4a0b118311724c14061aad55f9183721c9fb0e22c79e697a5",
+                "size": [
+                  1938,
+                  5056
+                ],
+                "rgba_sha256": "dabb1f15cc290808bbea158091674e029cbd660a922013dfa04ae83c30c03aa1"
+              }
+            ]
+          },
+          {
+            "seconds": 2.7019747649901547,
+            "http_calls": 221,
+            "response_bytes": 35183044,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 1
+            },
+            "outputs": [
+              {
+                "png_bytes": 3335894,
+                "png_sha256": "27125ba0fdf48cb4a0b118311724c14061aad55f9183721c9fb0e22c79e697a5",
+                "size": [
+                  1938,
+                  5056
+                ],
+                "rgba_sha256": "dabb1f15cc290808bbea158091674e029cbd660a922013dfa04ae83c30c03aa1"
+              }
+            ]
+          }
+        ],
+        "warm": [
+          {
+            "seconds": 0.006669814989436418,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 1
+            },
+            "outputs": [
+              {
+                "png_bytes": 3335894,
+                "png_sha256": "27125ba0fdf48cb4a0b118311724c14061aad55f9183721c9fb0e22c79e697a5",
+                "size": [
+                  1938,
+                  5056
+                ],
+                "rgba_sha256": "dabb1f15cc290808bbea158091674e029cbd660a922013dfa04ae83c30c03aa1"
+              }
+            ]
+          },
+          {
+            "seconds": 0.0062865050276741385,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 1
+            },
+            "outputs": [
+              {
+                "png_bytes": 3335894,
+                "png_sha256": "27125ba0fdf48cb4a0b118311724c14061aad55f9183721c9fb0e22c79e697a5",
+                "size": [
+                  1938,
+                  5056
+                ],
+                "rgba_sha256": "dabb1f15cc290808bbea158091674e029cbd660a922013dfa04ae83c30c03aa1"
+              }
+            ]
+          },
+          {
+            "seconds": 0.006116901000496,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 1
+            },
+            "outputs": [
+              {
+                "png_bytes": 3335894,
+                "png_sha256": "27125ba0fdf48cb4a0b118311724c14061aad55f9183721c9fb0e22c79e697a5",
+                "size": [
+                  1938,
+                  5056
+                ],
+                "rgba_sha256": "dabb1f15cc290808bbea158091674e029cbd660a922013dfa04ae83c30c03aa1"
+              }
+            ]
+          }
+        ],
+        "cold_median_seconds": 2.7019747649901547,
+        "warm_median_seconds": 0.0062865050276741385
+      },
+      "base": {
+        "cold": [
+          {
+            "seconds": 1.4849286660319194,
+            "http_calls": 36,
+            "response_bytes": 27587046,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 1360665,
+                "png_sha256": "2a6b5e83bd58ccb1de57757edb10252e8f3fa7ee9d87f071e9c100af3552ba55",
+                "size": [
+                  1938,
+                  3268
+                ],
+                "rgba_sha256": "fa94cfd409c613d73ee4a709abb7aa8cce58dcc41574b71f053699c680ed0c2c"
+              }
+            ]
+          },
+          {
+            "seconds": 1.5939130610204302,
+            "http_calls": 36,
+            "response_bytes": 27587046,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 1360665,
+                "png_sha256": "2a6b5e83bd58ccb1de57757edb10252e8f3fa7ee9d87f071e9c100af3552ba55",
+                "size": [
+                  1938,
+                  3268
+                ],
+                "rgba_sha256": "fa94cfd409c613d73ee4a709abb7aa8cce58dcc41574b71f053699c680ed0c2c"
+              }
+            ]
+          },
+          {
+            "seconds": 1.4575010600383393,
+            "http_calls": 36,
+            "response_bytes": 27587046,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 1360665,
+                "png_sha256": "2a6b5e83bd58ccb1de57757edb10252e8f3fa7ee9d87f071e9c100af3552ba55",
+                "size": [
+                  1938,
+                  3268
+                ],
+                "rgba_sha256": "fa94cfd409c613d73ee4a709abb7aa8cce58dcc41574b71f053699c680ed0c2c"
+              }
+            ]
+          }
+        ],
+        "warm": [
+          {
+            "seconds": 0.0063865670235827565,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 1360665,
+                "png_sha256": "2a6b5e83bd58ccb1de57757edb10252e8f3fa7ee9d87f071e9c100af3552ba55",
+                "size": [
+                  1938,
+                  3268
+                ],
+                "rgba_sha256": "fa94cfd409c613d73ee4a709abb7aa8cce58dcc41574b71f053699c680ed0c2c"
+              }
+            ]
+          },
+          {
+            "seconds": 0.002104395010974258,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 1360665,
+                "png_sha256": "2a6b5e83bd58ccb1de57757edb10252e8f3fa7ee9d87f071e9c100af3552ba55",
+                "size": [
+                  1938,
+                  3268
+                ],
+                "rgba_sha256": "fa94cfd409c613d73ee4a709abb7aa8cce58dcc41574b71f053699c680ed0c2c"
+              }
+            ]
+          },
+          {
+            "seconds": 0.002190766972489655,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 1360665,
+                "png_sha256": "2a6b5e83bd58ccb1de57757edb10252e8f3fa7ee9d87f071e9c100af3552ba55",
+                "size": [
+                  1938,
+                  3268
+                ],
+                "rgba_sha256": "fa94cfd409c613d73ee4a709abb7aa8cce58dcc41574b71f053699c680ed0c2c"
+              }
+            ]
+          }
+        ],
+        "cold_median_seconds": 1.4849286660319194,
+        "warm_median_seconds": 0.002190766972489655
+      },
+      "investment": {
+        "cold": [
+          {
+            "seconds": 2.396345113986172,
+            "http_calls": 62,
+            "response_bytes": 39842258,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 387736,
+                "png_sha256": "bfd809ddf8fef370a7f99d47ed4da02fbccf8ea8e702e9549b54c1adb06bc1e7",
+                "size": [
+                  1938,
+                  1088
+                ],
+                "rgba_sha256": "5399d280ad7ba36b3cb5fb4b8ff2db4430bdf2f5d65a685e318052c6ceedcf95"
+              },
+              {
+                "png_bytes": 880486,
+                "png_sha256": "9fabcdd1e7a63163213b600514be1818e4b843866baeab000fab456c1173d3b7",
+                "size": [
+                  1938,
+                  2518
+                ],
+                "rgba_sha256": "bae22e2029afae44bbfee09b852020470d9854275b1b288544987d5f13572aab"
+              }
+            ]
+          },
+          {
+            "seconds": 2.323342355026398,
+            "http_calls": 62,
+            "response_bytes": 39842258,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 387736,
+                "png_sha256": "bfd809ddf8fef370a7f99d47ed4da02fbccf8ea8e702e9549b54c1adb06bc1e7",
+                "size": [
+                  1938,
+                  1088
+                ],
+                "rgba_sha256": "5399d280ad7ba36b3cb5fb4b8ff2db4430bdf2f5d65a685e318052c6ceedcf95"
+              },
+              {
+                "png_bytes": 880486,
+                "png_sha256": "9fabcdd1e7a63163213b600514be1818e4b843866baeab000fab456c1173d3b7",
+                "size": [
+                  1938,
+                  2518
+                ],
+                "rgba_sha256": "bae22e2029afae44bbfee09b852020470d9854275b1b288544987d5f13572aab"
+              }
+            ]
+          },
+          {
+            "seconds": 2.302481345948763,
+            "http_calls": 62,
+            "response_bytes": 39842258,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 387736,
+                "png_sha256": "bfd809ddf8fef370a7f99d47ed4da02fbccf8ea8e702e9549b54c1adb06bc1e7",
+                "size": [
+                  1938,
+                  1088
+                ],
+                "rgba_sha256": "5399d280ad7ba36b3cb5fb4b8ff2db4430bdf2f5d65a685e318052c6ceedcf95"
+              },
+              {
+                "png_bytes": 880486,
+                "png_sha256": "9fabcdd1e7a63163213b600514be1818e4b843866baeab000fab456c1173d3b7",
+                "size": [
+                  1938,
+                  2518
+                ],
+                "rgba_sha256": "bae22e2029afae44bbfee09b852020470d9854275b1b288544987d5f13572aab"
+              }
+            ]
+          }
+        ],
+        "warm": [
+          {
+            "seconds": 0.011940663040149957,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 387736,
+                "png_sha256": "bfd809ddf8fef370a7f99d47ed4da02fbccf8ea8e702e9549b54c1adb06bc1e7",
+                "size": [
+                  1938,
+                  1088
+                ],
+                "rgba_sha256": "5399d280ad7ba36b3cb5fb4b8ff2db4430bdf2f5d65a685e318052c6ceedcf95"
+              },
+              {
+                "png_bytes": 880486,
+                "png_sha256": "9fabcdd1e7a63163213b600514be1818e4b843866baeab000fab456c1173d3b7",
+                "size": [
+                  1938,
+                  2518
+                ],
+                "rgba_sha256": "bae22e2029afae44bbfee09b852020470d9854275b1b288544987d5f13572aab"
+              }
+            ]
+          },
+          {
+            "seconds": 0.0118514210334979,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 387736,
+                "png_sha256": "bfd809ddf8fef370a7f99d47ed4da02fbccf8ea8e702e9549b54c1adb06bc1e7",
+                "size": [
+                  1938,
+                  1088
+                ],
+                "rgba_sha256": "5399d280ad7ba36b3cb5fb4b8ff2db4430bdf2f5d65a685e318052c6ceedcf95"
+              },
+              {
+                "png_bytes": 880486,
+                "png_sha256": "9fabcdd1e7a63163213b600514be1818e4b843866baeab000fab456c1173d3b7",
+                "size": [
+                  1938,
+                  2518
+                ],
+                "rgba_sha256": "bae22e2029afae44bbfee09b852020470d9854275b1b288544987d5f13572aab"
+              }
+            ]
+          },
+          {
+            "seconds": 0.011702035961207002,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 387736,
+                "png_sha256": "bfd809ddf8fef370a7f99d47ed4da02fbccf8ea8e702e9549b54c1adb06bc1e7",
+                "size": [
+                  1938,
+                  1088
+                ],
+                "rgba_sha256": "5399d280ad7ba36b3cb5fb4b8ff2db4430bdf2f5d65a685e318052c6ceedcf95"
+              },
+              {
+                "png_bytes": 880486,
+                "png_sha256": "9fabcdd1e7a63163213b600514be1818e4b843866baeab000fab456c1173d3b7",
+                "size": [
+                  1938,
+                  2518
+                ],
+                "rgba_sha256": "bae22e2029afae44bbfee09b852020470d9854275b1b288544987d5f13572aab"
+              }
+            ]
+          }
+        ],
+        "cold_median_seconds": 2.323342355026398,
+        "warm_median_seconds": 0.0118514210334979
+      }
+    },
+    "private_data_on_disk": false,
+    "history_cpu": {
+      "gacha_records": 452,
+      "currency_records": 737,
+      "gacha_insert": {
+        "seconds": [
+          0.002919945982284844,
+          0.0022985590039752424,
+          0.00227355002425611
+        ],
+        "median_seconds": 0.0022985590039752424,
+        "output": {
+          "json_sha256": "549a2fac47d713cc00f2db498ad6b5574fb03c9293aef6c7ad50a11b394c197d"
+        }
+      },
+      "gacha_repeat_upsert": {
+        "seconds": [
+          0.0029137470410205424,
+          0.002878154977224767,
+          0.0028980160132050514
+        ],
+        "median_seconds": 0.0028980160132050514,
+        "output": {
+          "json_sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+        }
+      },
+      "currency_aggregate": {
+        "seconds": [
+          0.0006697680219076574,
+          0.0005883749690838158,
+          0.0005805050022900105
+        ],
+        "median_seconds": 0.0005883749690838158,
+        "output": [
+          {
+            "json_sha256": "7cfb103397a33b68d6bd545855c2963e1cc247b0b5dcc4685219f869ee9a43a8"
+          },
+          {
+            "json_sha256": "8df8489c3fc8971fda9536666fa2c824bc4df4f969d885de7f33d4f75cf86fb9"
+          },
+          {
+            "json_sha256": "dee4d4e6507f38d1d8b3db305548018fc4d76a387ca1d645c28ea5f02849f383"
+          }
+        ]
+      }
+    },
+    "commit": "9d0b1bba8bc341e63b9d20038c4b6ea0fd6ada2d"
+  },
+  "before_replay": {
+    "mode": "replay",
+    "cases": {
+      "detail": {
+        "cold": [
+          {
+            "seconds": 2.1098433660226874,
+            "http_calls": 221,
+            "response_bytes": 35183044,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 1
+            },
+            "outputs": [
+              {
+                "png_bytes": 3335894,
+                "png_sha256": "27125ba0fdf48cb4a0b118311724c14061aad55f9183721c9fb0e22c79e697a5",
+                "size": [
+                  1938,
+                  5056
+                ],
+                "rgba_sha256": "dabb1f15cc290808bbea158091674e029cbd660a922013dfa04ae83c30c03aa1"
+              }
+            ]
+          },
+          {
+            "seconds": 1.8968707050080411,
+            "http_calls": 221,
+            "response_bytes": 35183044,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 1
+            },
+            "outputs": [
+              {
+                "png_bytes": 3335894,
+                "png_sha256": "27125ba0fdf48cb4a0b118311724c14061aad55f9183721c9fb0e22c79e697a5",
+                "size": [
+                  1938,
+                  5056
+                ],
+                "rgba_sha256": "dabb1f15cc290808bbea158091674e029cbd660a922013dfa04ae83c30c03aa1"
+              }
+            ]
+          },
+          {
+            "seconds": 2.027016439009458,
+            "http_calls": 221,
+            "response_bytes": 35183044,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 1
+            },
+            "outputs": [
+              {
+                "png_bytes": 3335894,
+                "png_sha256": "27125ba0fdf48cb4a0b118311724c14061aad55f9183721c9fb0e22c79e697a5",
+                "size": [
+                  1938,
+                  5056
+                ],
+                "rgba_sha256": "dabb1f15cc290808bbea158091674e029cbd660a922013dfa04ae83c30c03aa1"
+              }
+            ]
+          }
+        ],
+        "warm": [
+          {
+            "seconds": 1.5802600560127757,
+            "http_calls": 1,
+            "response_bytes": 2512,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 1
+            },
+            "outputs": [
+              {
+                "png_bytes": 3335894,
+                "png_sha256": "27125ba0fdf48cb4a0b118311724c14061aad55f9183721c9fb0e22c79e697a5",
+                "size": [
+                  1938,
+                  5056
+                ],
+                "rgba_sha256": "dabb1f15cc290808bbea158091674e029cbd660a922013dfa04ae83c30c03aa1"
+              }
+            ]
+          },
+          {
+            "seconds": 1.4727880590362474,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 1
+            },
+            "outputs": [
+              {
+                "png_bytes": 3335894,
+                "png_sha256": "27125ba0fdf48cb4a0b118311724c14061aad55f9183721c9fb0e22c79e697a5",
+                "size": [
+                  1938,
+                  5056
+                ],
+                "rgba_sha256": "dabb1f15cc290808bbea158091674e029cbd660a922013dfa04ae83c30c03aa1"
+              }
+            ]
+          },
+          {
+            "seconds": 1.4963051590020768,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 1
+            },
+            "outputs": [
+              {
+                "png_bytes": 3335894,
+                "png_sha256": "27125ba0fdf48cb4a0b118311724c14061aad55f9183721c9fb0e22c79e697a5",
+                "size": [
+                  1938,
+                  5056
+                ],
+                "rgba_sha256": "dabb1f15cc290808bbea158091674e029cbd660a922013dfa04ae83c30c03aa1"
+              }
+            ]
+          }
+        ],
+        "cold_median_seconds": 2.027016439009458,
+        "warm_median_seconds": 1.4963051590020768
+      },
+      "base": {
+        "cold": [
+          {
+            "seconds": 1.1274269439745694,
+            "http_calls": 36,
+            "response_bytes": 27587046,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 1360665,
+                "png_sha256": "2a6b5e83bd58ccb1de57757edb10252e8f3fa7ee9d87f071e9c100af3552ba55",
+                "size": [
+                  1938,
+                  3268
+                ],
+                "rgba_sha256": "fa94cfd409c613d73ee4a709abb7aa8cce58dcc41574b71f053699c680ed0c2c"
+              }
+            ]
+          },
+          {
+            "seconds": 1.25896956800716,
+            "http_calls": 36,
+            "response_bytes": 27587046,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 1360665,
+                "png_sha256": "2a6b5e83bd58ccb1de57757edb10252e8f3fa7ee9d87f071e9c100af3552ba55",
+                "size": [
+                  1938,
+                  3268
+                ],
+                "rgba_sha256": "fa94cfd409c613d73ee4a709abb7aa8cce58dcc41574b71f053699c680ed0c2c"
+              }
+            ]
+          },
+          {
+            "seconds": 1.107117919018492,
+            "http_calls": 36,
+            "response_bytes": 27587046,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 1360665,
+                "png_sha256": "2a6b5e83bd58ccb1de57757edb10252e8f3fa7ee9d87f071e9c100af3552ba55",
+                "size": [
+                  1938,
+                  3268
+                ],
+                "rgba_sha256": "fa94cfd409c613d73ee4a709abb7aa8cce58dcc41574b71f053699c680ed0c2c"
+              }
+            ]
+          }
+        ],
+        "warm": [
+          {
+            "seconds": 0.6855501649552025,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 1360665,
+                "png_sha256": "2a6b5e83bd58ccb1de57757edb10252e8f3fa7ee9d87f071e9c100af3552ba55",
+                "size": [
+                  1938,
+                  3268
+                ],
+                "rgba_sha256": "fa94cfd409c613d73ee4a709abb7aa8cce58dcc41574b71f053699c680ed0c2c"
+              }
+            ]
+          },
+          {
+            "seconds": 0.6746545570204034,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 1360665,
+                "png_sha256": "2a6b5e83bd58ccb1de57757edb10252e8f3fa7ee9d87f071e9c100af3552ba55",
+                "size": [
+                  1938,
+                  3268
+                ],
+                "rgba_sha256": "fa94cfd409c613d73ee4a709abb7aa8cce58dcc41574b71f053699c680ed0c2c"
+              }
+            ]
+          },
+          {
+            "seconds": 0.6868294480373152,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 1360665,
+                "png_sha256": "2a6b5e83bd58ccb1de57757edb10252e8f3fa7ee9d87f071e9c100af3552ba55",
+                "size": [
+                  1938,
+                  3268
+                ],
+                "rgba_sha256": "fa94cfd409c613d73ee4a709abb7aa8cce58dcc41574b71f053699c680ed0c2c"
+              }
+            ]
+          }
+        ],
+        "cold_median_seconds": 1.1274269439745694,
+        "warm_median_seconds": 0.6855501649552025
+      },
+      "investment": {
+        "cold": [
+          {
+            "seconds": 1.7038527270196937,
+            "http_calls": 62,
+            "response_bytes": 39842258,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 387736,
+                "png_sha256": "bfd809ddf8fef370a7f99d47ed4da02fbccf8ea8e702e9549b54c1adb06bc1e7",
+                "size": [
+                  1938,
+                  1088
+                ],
+                "rgba_sha256": "5399d280ad7ba36b3cb5fb4b8ff2db4430bdf2f5d65a685e318052c6ceedcf95"
+              },
+              {
+                "png_bytes": 880486,
+                "png_sha256": "9fabcdd1e7a63163213b600514be1818e4b843866baeab000fab456c1173d3b7",
+                "size": [
+                  1938,
+                  2518
+                ],
+                "rgba_sha256": "bae22e2029afae44bbfee09b852020470d9854275b1b288544987d5f13572aab"
+              }
+            ]
+          },
+          {
+            "seconds": 1.7689720639609732,
+            "http_calls": 62,
+            "response_bytes": 39842258,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 387736,
+                "png_sha256": "bfd809ddf8fef370a7f99d47ed4da02fbccf8ea8e702e9549b54c1adb06bc1e7",
+                "size": [
+                  1938,
+                  1088
+                ],
+                "rgba_sha256": "5399d280ad7ba36b3cb5fb4b8ff2db4430bdf2f5d65a685e318052c6ceedcf95"
+              },
+              {
+                "png_bytes": 880486,
+                "png_sha256": "9fabcdd1e7a63163213b600514be1818e4b843866baeab000fab456c1173d3b7",
+                "size": [
+                  1938,
+                  2518
+                ],
+                "rgba_sha256": "bae22e2029afae44bbfee09b852020470d9854275b1b288544987d5f13572aab"
+              }
+            ]
+          },
+          {
+            "seconds": 1.742979036993347,
+            "http_calls": 62,
+            "response_bytes": 39842258,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 387736,
+                "png_sha256": "bfd809ddf8fef370a7f99d47ed4da02fbccf8ea8e702e9549b54c1adb06bc1e7",
+                "size": [
+                  1938,
+                  1088
+                ],
+                "rgba_sha256": "5399d280ad7ba36b3cb5fb4b8ff2db4430bdf2f5d65a685e318052c6ceedcf95"
+              },
+              {
+                "png_bytes": 880486,
+                "png_sha256": "9fabcdd1e7a63163213b600514be1818e4b843866baeab000fab456c1173d3b7",
+                "size": [
+                  1938,
+                  2518
+                ],
+                "rgba_sha256": "bae22e2029afae44bbfee09b852020470d9854275b1b288544987d5f13572aab"
+              }
+            ]
+          }
+        ],
+        "warm": [
+          {
+            "seconds": 0.991651241958607,
+            "http_calls": 1,
+            "response_bytes": 2512,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 387736,
+                "png_sha256": "bfd809ddf8fef370a7f99d47ed4da02fbccf8ea8e702e9549b54c1adb06bc1e7",
+                "size": [
+                  1938,
+                  1088
+                ],
+                "rgba_sha256": "5399d280ad7ba36b3cb5fb4b8ff2db4430bdf2f5d65a685e318052c6ceedcf95"
+              },
+              {
+                "png_bytes": 880486,
+                "png_sha256": "9fabcdd1e7a63163213b600514be1818e4b843866baeab000fab456c1173d3b7",
+                "size": [
+                  1938,
+                  2518
+                ],
+                "rgba_sha256": "bae22e2029afae44bbfee09b852020470d9854275b1b288544987d5f13572aab"
+              }
+            ]
+          },
+          {
+            "seconds": 1.0206205950235017,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 387736,
+                "png_sha256": "bfd809ddf8fef370a7f99d47ed4da02fbccf8ea8e702e9549b54c1adb06bc1e7",
+                "size": [
+                  1938,
+                  1088
+                ],
+                "rgba_sha256": "5399d280ad7ba36b3cb5fb4b8ff2db4430bdf2f5d65a685e318052c6ceedcf95"
+              },
+              {
+                "png_bytes": 880486,
+                "png_sha256": "9fabcdd1e7a63163213b600514be1818e4b843866baeab000fab456c1173d3b7",
+                "size": [
+                  1938,
+                  2518
+                ],
+                "rgba_sha256": "bae22e2029afae44bbfee09b852020470d9854275b1b288544987d5f13572aab"
+              }
+            ]
+          },
+          {
+            "seconds": 1.02466794999782,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 387736,
+                "png_sha256": "bfd809ddf8fef370a7f99d47ed4da02fbccf8ea8e702e9549b54c1adb06bc1e7",
+                "size": [
+                  1938,
+                  1088
+                ],
+                "rgba_sha256": "5399d280ad7ba36b3cb5fb4b8ff2db4430bdf2f5d65a685e318052c6ceedcf95"
+              },
+              {
+                "png_bytes": 880486,
+                "png_sha256": "9fabcdd1e7a63163213b600514be1818e4b843866baeab000fab456c1173d3b7",
+                "size": [
+                  1938,
+                  2518
+                ],
+                "rgba_sha256": "bae22e2029afae44bbfee09b852020470d9854275b1b288544987d5f13572aab"
+              }
+            ]
+          }
+        ],
+        "cold_median_seconds": 1.742979036993347,
+        "warm_median_seconds": 1.0206205950235017
+      }
+    },
+    "private_data_on_disk": false,
+    "history_cpu": {
+      "gacha_records": 452,
+      "currency_records": 737,
+      "gacha_insert": {
+        "seconds": [
+          0.003527770983055234,
+          0.003302205994259566,
+          0.003236963995732367
+        ],
+        "median_seconds": 0.003302205994259566,
+        "output": {
+          "json_sha256": "549a2fac47d713cc00f2db498ad6b5574fb03c9293aef6c7ad50a11b394c197d"
+        }
+      },
+      "gacha_repeat_upsert": {
+        "seconds": [
+          0.003965512034483254,
+          0.0038952319882810116,
+          0.003898740978911519
+        ],
+        "median_seconds": 0.003898740978911519,
+        "output": {
+          "json_sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+        }
+      },
+      "currency_aggregate": {
+        "seconds": [
+          0.0009507740032859147,
+          0.0008056900114752352,
+          0.0007855499861761928
+        ],
+        "median_seconds": 0.0008056900114752352,
+        "output": [
+          {
+            "json_sha256": "7cfb103397a33b68d6bd545855c2963e1cc247b0b5dcc4685219f869ee9a43a8"
+          },
+          {
+            "json_sha256": "8df8489c3fc8971fda9536666fa2c824bc4df4f969d885de7f33d4f75cf86fb9"
+          },
+          {
+            "json_sha256": "dee4d4e6507f38d1d8b3db305548018fc4d76a387ca1d645c28ea5f02849f383"
+          }
+        ]
+      }
+    }
+  },
+  "before_live": {
+    "mode": "live",
+    "cases": {
+      "detail": {
+        "cold": [
+          {
+            "seconds": 5.078590970020741,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 1
+            },
+            "outputs": [
+              {
+                "png_bytes": 3335894,
+                "png_sha256": "27125ba0fdf48cb4a0b118311724c14061aad55f9183721c9fb0e22c79e697a5",
+                "size": [
+                  1938,
+                  5056
+                ],
+                "rgba_sha256": "dabb1f15cc290808bbea158091674e029cbd660a922013dfa04ae83c30c03aa1"
+              }
+            ]
+          },
+          {
+            "seconds": 3.794250081991777,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 1
+            },
+            "outputs": [
+              {
+                "png_bytes": 3335894,
+                "png_sha256": "27125ba0fdf48cb4a0b118311724c14061aad55f9183721c9fb0e22c79e697a5",
+                "size": [
+                  1938,
+                  5056
+                ],
+                "rgba_sha256": "dabb1f15cc290808bbea158091674e029cbd660a922013dfa04ae83c30c03aa1"
+              }
+            ]
+          },
+          {
+            "seconds": 3.599435597017873,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 1
+            },
+            "outputs": [
+              {
+                "png_bytes": 3335894,
+                "png_sha256": "27125ba0fdf48cb4a0b118311724c14061aad55f9183721c9fb0e22c79e697a5",
+                "size": [
+                  1938,
+                  5056
+                ],
+                "rgba_sha256": "dabb1f15cc290808bbea158091674e029cbd660a922013dfa04ae83c30c03aa1"
+              }
+            ]
+          }
+        ],
+        "warm": [
+          {
+            "seconds": 2.1015136530040763,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 1
+            },
+            "outputs": [
+              {
+                "png_bytes": 3335894,
+                "png_sha256": "27125ba0fdf48cb4a0b118311724c14061aad55f9183721c9fb0e22c79e697a5",
+                "size": [
+                  1938,
+                  5056
+                ],
+                "rgba_sha256": "dabb1f15cc290808bbea158091674e029cbd660a922013dfa04ae83c30c03aa1"
+              }
+            ]
+          },
+          {
+            "seconds": 1.7609388180426322,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 1
+            },
+            "outputs": [
+              {
+                "png_bytes": 3335894,
+                "png_sha256": "27125ba0fdf48cb4a0b118311724c14061aad55f9183721c9fb0e22c79e697a5",
+                "size": [
+                  1938,
+                  5056
+                ],
+                "rgba_sha256": "dabb1f15cc290808bbea158091674e029cbd660a922013dfa04ae83c30c03aa1"
+              }
+            ]
+          },
+          {
+            "seconds": 2.093579986016266,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 1
+            },
+            "outputs": [
+              {
+                "png_bytes": 3335894,
+                "png_sha256": "27125ba0fdf48cb4a0b118311724c14061aad55f9183721c9fb0e22c79e697a5",
+                "size": [
+                  1938,
+                  5056
+                ],
+                "rgba_sha256": "dabb1f15cc290808bbea158091674e029cbd660a922013dfa04ae83c30c03aa1"
+              }
+            ]
+          }
+        ],
+        "cold_median_seconds": 3.794250081991777,
+        "warm_median_seconds": 2.093579986016266
+      },
+      "base": {
+        "cold": [
+          {
+            "seconds": 2.4311176129849628,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 1362082,
+                "png_sha256": "09bf9a2ab32562e88f67251a4176483255fe68da47c0bc3704f36ff278df8892",
+                "size": [
+                  1938,
+                  3268
+                ],
+                "rgba_sha256": "5f03722af88022ec4f2c4f68e86f485a665b15e9f8c73c50648b582cef1918e7"
+              }
+            ]
+          },
+          {
+            "seconds": 2.3985752440057695,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 1362082,
+                "png_sha256": "09bf9a2ab32562e88f67251a4176483255fe68da47c0bc3704f36ff278df8892",
+                "size": [
+                  1938,
+                  3268
+                ],
+                "rgba_sha256": "5f03722af88022ec4f2c4f68e86f485a665b15e9f8c73c50648b582cef1918e7"
+              }
+            ]
+          },
+          {
+            "seconds": 2.4568091120454483,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 1362138,
+                "png_sha256": "2f120e4ce7504491843bd21d016ca810a8912eb873a540e59b295fb92d6cf447",
+                "size": [
+                  1938,
+                  3268
+                ],
+                "rgba_sha256": "80ee5f65b269c0134870bf11634b5a349ab8561ce4d8db6107bca4af93264ff5"
+              }
+            ]
+          }
+        ],
+        "warm": [
+          {
+            "seconds": 1.1434051469550468,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 1362138,
+                "png_sha256": "2f120e4ce7504491843bd21d016ca810a8912eb873a540e59b295fb92d6cf447",
+                "size": [
+                  1938,
+                  3268
+                ],
+                "rgba_sha256": "80ee5f65b269c0134870bf11634b5a349ab8561ce4d8db6107bca4af93264ff5"
+              }
+            ]
+          },
+          {
+            "seconds": 0.9560962189571001,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 1362138,
+                "png_sha256": "2f120e4ce7504491843bd21d016ca810a8912eb873a540e59b295fb92d6cf447",
+                "size": [
+                  1938,
+                  3268
+                ],
+                "rgba_sha256": "80ee5f65b269c0134870bf11634b5a349ab8561ce4d8db6107bca4af93264ff5"
+              }
+            ]
+          },
+          {
+            "seconds": 1.0009507020004094,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 1362138,
+                "png_sha256": "2f120e4ce7504491843bd21d016ca810a8912eb873a540e59b295fb92d6cf447",
+                "size": [
+                  1938,
+                  3268
+                ],
+                "rgba_sha256": "80ee5f65b269c0134870bf11634b5a349ab8561ce4d8db6107bca4af93264ff5"
+              }
+            ]
+          }
+        ],
+        "cold_median_seconds": 2.4311176129849628,
+        "warm_median_seconds": 1.0009507020004094
+      },
+      "investment": {
+        "cold": [
+          {
+            "seconds": 3.581996666966006,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 387736,
+                "png_sha256": "bfd809ddf8fef370a7f99d47ed4da02fbccf8ea8e702e9549b54c1adb06bc1e7",
+                "size": [
+                  1938,
+                  1088
+                ],
+                "rgba_sha256": "5399d280ad7ba36b3cb5fb4b8ff2db4430bdf2f5d65a685e318052c6ceedcf95"
+              },
+              {
+                "png_bytes": 880486,
+                "png_sha256": "9fabcdd1e7a63163213b600514be1818e4b843866baeab000fab456c1173d3b7",
+                "size": [
+                  1938,
+                  2518
+                ],
+                "rgba_sha256": "bae22e2029afae44bbfee09b852020470d9854275b1b288544987d5f13572aab"
+              }
+            ]
+          },
+          {
+            "seconds": 3.2446038339985535,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 387736,
+                "png_sha256": "bfd809ddf8fef370a7f99d47ed4da02fbccf8ea8e702e9549b54c1adb06bc1e7",
+                "size": [
+                  1938,
+                  1088
+                ],
+                "rgba_sha256": "5399d280ad7ba36b3cb5fb4b8ff2db4430bdf2f5d65a685e318052c6ceedcf95"
+              },
+              {
+                "png_bytes": 880486,
+                "png_sha256": "9fabcdd1e7a63163213b600514be1818e4b843866baeab000fab456c1173d3b7",
+                "size": [
+                  1938,
+                  2518
+                ],
+                "rgba_sha256": "bae22e2029afae44bbfee09b852020470d9854275b1b288544987d5f13572aab"
+              }
+            ]
+          },
+          {
+            "seconds": 3.3801396950148046,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 387736,
+                "png_sha256": "bfd809ddf8fef370a7f99d47ed4da02fbccf8ea8e702e9549b54c1adb06bc1e7",
+                "size": [
+                  1938,
+                  1088
+                ],
+                "rgba_sha256": "5399d280ad7ba36b3cb5fb4b8ff2db4430bdf2f5d65a685e318052c6ceedcf95"
+              },
+              {
+                "png_bytes": 880486,
+                "png_sha256": "9fabcdd1e7a63163213b600514be1818e4b843866baeab000fab456c1173d3b7",
+                "size": [
+                  1938,
+                  2518
+                ],
+                "rgba_sha256": "bae22e2029afae44bbfee09b852020470d9854275b1b288544987d5f13572aab"
+              }
+            ]
+          }
+        ],
+        "warm": [
+          {
+            "seconds": 1.4531638510525227,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 387736,
+                "png_sha256": "bfd809ddf8fef370a7f99d47ed4da02fbccf8ea8e702e9549b54c1adb06bc1e7",
+                "size": [
+                  1938,
+                  1088
+                ],
+                "rgba_sha256": "5399d280ad7ba36b3cb5fb4b8ff2db4430bdf2f5d65a685e318052c6ceedcf95"
+              },
+              {
+                "png_bytes": 880486,
+                "png_sha256": "9fabcdd1e7a63163213b600514be1818e4b843866baeab000fab456c1173d3b7",
+                "size": [
+                  1938,
+                  2518
+                ],
+                "rgba_sha256": "bae22e2029afae44bbfee09b852020470d9854275b1b288544987d5f13572aab"
+              }
+            ]
+          },
+          {
+            "seconds": 1.3217178240302019,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 387736,
+                "png_sha256": "bfd809ddf8fef370a7f99d47ed4da02fbccf8ea8e702e9549b54c1adb06bc1e7",
+                "size": [
+                  1938,
+                  1088
+                ],
+                "rgba_sha256": "5399d280ad7ba36b3cb5fb4b8ff2db4430bdf2f5d65a685e318052c6ceedcf95"
+              },
+              {
+                "png_bytes": 880486,
+                "png_sha256": "9fabcdd1e7a63163213b600514be1818e4b843866baeab000fab456c1173d3b7",
+                "size": [
+                  1938,
+                  2518
+                ],
+                "rgba_sha256": "bae22e2029afae44bbfee09b852020470d9854275b1b288544987d5f13572aab"
+              }
+            ]
+          },
+          {
+            "seconds": 1.3352504749782383,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 387736,
+                "png_sha256": "bfd809ddf8fef370a7f99d47ed4da02fbccf8ea8e702e9549b54c1adb06bc1e7",
+                "size": [
+                  1938,
+                  1088
+                ],
+                "rgba_sha256": "5399d280ad7ba36b3cb5fb4b8ff2db4430bdf2f5d65a685e318052c6ceedcf95"
+              },
+              {
+                "png_bytes": 880486,
+                "png_sha256": "9fabcdd1e7a63163213b600514be1818e4b843866baeab000fab456c1173d3b7",
+                "size": [
+                  1938,
+                  2518
+                ],
+                "rgba_sha256": "bae22e2029afae44bbfee09b852020470d9854275b1b288544987d5f13572aab"
+              }
+            ]
+          }
+        ],
+        "cold_median_seconds": 3.3801396950148046,
+        "warm_median_seconds": 1.3352504749782383
+      }
+    },
+    "private_data_on_disk": false,
+    "history_cpu": {
+      "gacha_records": 452,
+      "currency_records": 737,
+      "gacha_insert": {
+        "seconds": [
+          0.003540582023561001,
+          0.0032519439700990915,
+          0.003258152981288731
+        ],
+        "median_seconds": 0.003258152981288731,
+        "output": {
+          "json_sha256": "549a2fac47d713cc00f2db498ad6b5574fb03c9293aef6c7ad50a11b394c197d"
+        }
+      },
+      "gacha_repeat_upsert": {
+        "seconds": [
+          0.00406044302508235,
+          0.003921350988093764,
+          0.0039163799956440926
+        ],
+        "median_seconds": 0.003921350988093764,
+        "output": {
+          "json_sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+        }
+      },
+      "currency_aggregate": {
+        "seconds": [
+          0.0008712020353414118,
+          0.0007986800046637654,
+          0.000796151056420058
+        ],
+        "median_seconds": 0.0007986800046637654,
+        "output": [
+          {
+            "json_sha256": "7cfb103397a33b68d6bd545855c2963e1cc247b0b5dcc4685219f869ee9a43a8"
+          },
+          {
+            "json_sha256": "8df8489c3fc8971fda9536666fa2c824bc4df4f969d885de7f33d4f75cf86fb9"
+          },
+          {
+            "json_sha256": "dee4d4e6507f38d1d8b3db305548018fc4d76a387ca1d645c28ea5f02849f383"
+          }
+        ]
+      }
+    },
+    "live_personal_queries": {
+      "indie_hard": {
+        "seconds": [
+          0.7146437520277686,
+          1.9681073760148138,
+          1.8009539829799905
+        ],
+        "median_seconds": 1.8009539829799905
+      },
+      "war_echoes": {
+        "seconds": [
+          1.990217512997333,
+          2.024852805014234,
+          2.041816167999059
+        ],
+        "median_seconds": 2.024852805014234
+      },
+      "endfield_card_detail": {
+        "seconds": [
+          2.163633444986772,
+          1.861166996997781,
+          2.127124486025423
+        ],
+        "median_seconds": 2.127124486025423
+      }
+    }
+  },
+  "after_live": {
+    "mode": "live",
+    "cases": {
+      "detail": {
+        "cold": [
+          {
+            "seconds": 4.6910595769877546,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 1
+            },
+            "outputs": [
+              {
+                "png_bytes": 3335894,
+                "png_sha256": "27125ba0fdf48cb4a0b118311724c14061aad55f9183721c9fb0e22c79e697a5",
+                "size": [
+                  1938,
+                  5056
+                ],
+                "rgba_sha256": "dabb1f15cc290808bbea158091674e029cbd660a922013dfa04ae83c30c03aa1"
+              }
+            ]
+          },
+          {
+            "seconds": 4.271708881016821,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 1
+            },
+            "outputs": [
+              {
+                "png_bytes": 3335894,
+                "png_sha256": "27125ba0fdf48cb4a0b118311724c14061aad55f9183721c9fb0e22c79e697a5",
+                "size": [
+                  1938,
+                  5056
+                ],
+                "rgba_sha256": "dabb1f15cc290808bbea158091674e029cbd660a922013dfa04ae83c30c03aa1"
+              }
+            ]
+          },
+          {
+            "seconds": 3.9979853329714388,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 1
+            },
+            "outputs": [
+              {
+                "png_bytes": 3335894,
+                "png_sha256": "27125ba0fdf48cb4a0b118311724c14061aad55f9183721c9fb0e22c79e697a5",
+                "size": [
+                  1938,
+                  5056
+                ],
+                "rgba_sha256": "dabb1f15cc290808bbea158091674e029cbd660a922013dfa04ae83c30c03aa1"
+              }
+            ]
+          }
+        ],
+        "warm": [
+          {
+            "seconds": 0.47693514701677486,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 1
+            },
+            "outputs": [
+              {
+                "png_bytes": 3335894,
+                "png_sha256": "27125ba0fdf48cb4a0b118311724c14061aad55f9183721c9fb0e22c79e697a5",
+                "size": [
+                  1938,
+                  5056
+                ],
+                "rgba_sha256": "dabb1f15cc290808bbea158091674e029cbd660a922013dfa04ae83c30c03aa1"
+              }
+            ]
+          },
+          {
+            "seconds": 0.5145203449646942,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 1
+            },
+            "outputs": [
+              {
+                "png_bytes": 3335894,
+                "png_sha256": "27125ba0fdf48cb4a0b118311724c14061aad55f9183721c9fb0e22c79e697a5",
+                "size": [
+                  1938,
+                  5056
+                ],
+                "rgba_sha256": "dabb1f15cc290808bbea158091674e029cbd660a922013dfa04ae83c30c03aa1"
+              }
+            ]
+          },
+          {
+            "seconds": 0.47949492797488347,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 1
+            },
+            "outputs": [
+              {
+                "png_bytes": 3335894,
+                "png_sha256": "27125ba0fdf48cb4a0b118311724c14061aad55f9183721c9fb0e22c79e697a5",
+                "size": [
+                  1938,
+                  5056
+                ],
+                "rgba_sha256": "dabb1f15cc290808bbea158091674e029cbd660a922013dfa04ae83c30c03aa1"
+              }
+            ]
+          }
+        ],
+        "cold_median_seconds": 4.271708881016821,
+        "warm_median_seconds": 0.47949492797488347
+      },
+      "base": {
+        "cold": [
+          {
+            "seconds": 2.7173189040040597,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 1362241,
+                "png_sha256": "f79f5e80cd54fb3aacc3b550b6c1a4f587c8c3d678735553a455cd9ec2826fad",
+                "size": [
+                  1938,
+                  3268
+                ],
+                "rgba_sha256": "40d28e43af3fed9f88976167f1759dac0ae8b0009c07d22323d908bf31506ca8"
+              }
+            ]
+          },
+          {
+            "seconds": 2.5840806940104812,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 1362300,
+                "png_sha256": "c3a64bec2eb56b4cef844dbc72f433ee0fd9e53520fe780f126f14ad9fee808a",
+                "size": [
+                  1938,
+                  3268
+                ],
+                "rgba_sha256": "7e01b39bf3b8fcf0850b2bdacb2d99af7532ad8ab8c132dfc413951d70e2b8f8"
+              }
+            ]
+          },
+          {
+            "seconds": 2.6802152990130708,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 1362300,
+                "png_sha256": "c3a64bec2eb56b4cef844dbc72f433ee0fd9e53520fe780f126f14ad9fee808a",
+                "size": [
+                  1938,
+                  3268
+                ],
+                "rgba_sha256": "7e01b39bf3b8fcf0850b2bdacb2d99af7532ad8ab8c132dfc413951d70e2b8f8"
+              }
+            ]
+          }
+        ],
+        "warm": [
+          {
+            "seconds": 0.31872427999041975,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 1362300,
+                "png_sha256": "c3a64bec2eb56b4cef844dbc72f433ee0fd9e53520fe780f126f14ad9fee808a",
+                "size": [
+                  1938,
+                  3268
+                ],
+                "rgba_sha256": "7e01b39bf3b8fcf0850b2bdacb2d99af7532ad8ab8c132dfc413951d70e2b8f8"
+              }
+            ]
+          },
+          {
+            "seconds": 0.32991426199441776,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 1362300,
+                "png_sha256": "c3a64bec2eb56b4cef844dbc72f433ee0fd9e53520fe780f126f14ad9fee808a",
+                "size": [
+                  1938,
+                  3268
+                ],
+                "rgba_sha256": "7e01b39bf3b8fcf0850b2bdacb2d99af7532ad8ab8c132dfc413951d70e2b8f8"
+              }
+            ]
+          },
+          {
+            "seconds": 0.3109078119741753,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 1362300,
+                "png_sha256": "c3a64bec2eb56b4cef844dbc72f433ee0fd9e53520fe780f126f14ad9fee808a",
+                "size": [
+                  1938,
+                  3268
+                ],
+                "rgba_sha256": "7e01b39bf3b8fcf0850b2bdacb2d99af7532ad8ab8c132dfc413951d70e2b8f8"
+              }
+            ]
+          }
+        ],
+        "cold_median_seconds": 2.6802152990130708,
+        "warm_median_seconds": 0.31872427999041975
+      },
+      "investment": {
+        "cold": [
+          {
+            "seconds": 3.696941844013054,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 387736,
+                "png_sha256": "bfd809ddf8fef370a7f99d47ed4da02fbccf8ea8e702e9549b54c1adb06bc1e7",
+                "size": [
+                  1938,
+                  1088
+                ],
+                "rgba_sha256": "5399d280ad7ba36b3cb5fb4b8ff2db4430bdf2f5d65a685e318052c6ceedcf95"
+              },
+              {
+                "png_bytes": 880486,
+                "png_sha256": "9fabcdd1e7a63163213b600514be1818e4b843866baeab000fab456c1173d3b7",
+                "size": [
+                  1938,
+                  2518
+                ],
+                "rgba_sha256": "bae22e2029afae44bbfee09b852020470d9854275b1b288544987d5f13572aab"
+              }
+            ]
+          },
+          {
+            "seconds": 3.1906081220367923,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 387736,
+                "png_sha256": "bfd809ddf8fef370a7f99d47ed4da02fbccf8ea8e702e9549b54c1adb06bc1e7",
+                "size": [
+                  1938,
+                  1088
+                ],
+                "rgba_sha256": "5399d280ad7ba36b3cb5fb4b8ff2db4430bdf2f5d65a685e318052c6ceedcf95"
+              },
+              {
+                "png_bytes": 880486,
+                "png_sha256": "9fabcdd1e7a63163213b600514be1818e4b843866baeab000fab456c1173d3b7",
+                "size": [
+                  1938,
+                  2518
+                ],
+                "rgba_sha256": "bae22e2029afae44bbfee09b852020470d9854275b1b288544987d5f13572aab"
+              }
+            ]
+          },
+          {
+            "seconds": 3.7939619950484484,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 387736,
+                "png_sha256": "bfd809ddf8fef370a7f99d47ed4da02fbccf8ea8e702e9549b54c1adb06bc1e7",
+                "size": [
+                  1938,
+                  1088
+                ],
+                "rgba_sha256": "5399d280ad7ba36b3cb5fb4b8ff2db4430bdf2f5d65a685e318052c6ceedcf95"
+              },
+              {
+                "png_bytes": 880486,
+                "png_sha256": "9fabcdd1e7a63163213b600514be1818e4b843866baeab000fab456c1173d3b7",
+                "size": [
+                  1938,
+                  2518
+                ],
+                "rgba_sha256": "bae22e2029afae44bbfee09b852020470d9854275b1b288544987d5f13572aab"
+              }
+            ]
+          }
+        ],
+        "warm": [
+          {
+            "seconds": 0.3312922769691795,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 387736,
+                "png_sha256": "bfd809ddf8fef370a7f99d47ed4da02fbccf8ea8e702e9549b54c1adb06bc1e7",
+                "size": [
+                  1938,
+                  1088
+                ],
+                "rgba_sha256": "5399d280ad7ba36b3cb5fb4b8ff2db4430bdf2f5d65a685e318052c6ceedcf95"
+              },
+              {
+                "png_bytes": 880486,
+                "png_sha256": "9fabcdd1e7a63163213b600514be1818e4b843866baeab000fab456c1173d3b7",
+                "size": [
+                  1938,
+                  2518
+                ],
+                "rgba_sha256": "bae22e2029afae44bbfee09b852020470d9854275b1b288544987d5f13572aab"
+              }
+            ]
+          },
+          {
+            "seconds": 0.48428041097940877,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 387736,
+                "png_sha256": "bfd809ddf8fef370a7f99d47ed4da02fbccf8ea8e702e9549b54c1adb06bc1e7",
+                "size": [
+                  1938,
+                  1088
+                ],
+                "rgba_sha256": "5399d280ad7ba36b3cb5fb4b8ff2db4430bdf2f5d65a685e318052c6ceedcf95"
+              },
+              {
+                "png_bytes": 880486,
+                "png_sha256": "9fabcdd1e7a63163213b600514be1818e4b843866baeab000fab456c1173d3b7",
+                "size": [
+                  1938,
+                  2518
+                ],
+                "rgba_sha256": "bae22e2029afae44bbfee09b852020470d9854275b1b288544987d5f13572aab"
+              }
+            ]
+          },
+          {
+            "seconds": 0.4689149939804338,
+            "http_calls": 0,
+            "response_bytes": 0,
+            "http_failures": [],
+            "account_data_reads": {
+              "detail": 1,
+              "balances": 0
+            },
+            "outputs": [
+              {
+                "png_bytes": 387736,
+                "png_sha256": "bfd809ddf8fef370a7f99d47ed4da02fbccf8ea8e702e9549b54c1adb06bc1e7",
+                "size": [
+                  1938,
+                  1088
+                ],
+                "rgba_sha256": "5399d280ad7ba36b3cb5fb4b8ff2db4430bdf2f5d65a685e318052c6ceedcf95"
+              },
+              {
+                "png_bytes": 880486,
+                "png_sha256": "9fabcdd1e7a63163213b600514be1818e4b843866baeab000fab456c1173d3b7",
+                "size": [
+                  1938,
+                  2518
+                ],
+                "rgba_sha256": "bae22e2029afae44bbfee09b852020470d9854275b1b288544987d5f13572aab"
+              }
+            ]
+          }
+        ],
+        "cold_median_seconds": 3.696941844013054,
+        "warm_median_seconds": 0.4689149939804338
+      }
+    },
+    "private_data_on_disk": false,
+    "history_cpu": {
+      "gacha_records": 452,
+      "currency_records": 737,
+      "gacha_insert": {
+        "seconds": [
+          0.002978765987791121,
+          0.0023668590001761913,
+          0.002498464018572122
+        ],
+        "median_seconds": 0.002498464018572122,
+        "output": {
+          "json_sha256": "549a2fac47d713cc00f2db498ad6b5574fb03c9293aef6c7ad50a11b394c197d"
+        }
+      },
+      "gacha_repeat_upsert": {
+        "seconds": [
+          0.002942383987829089,
+          0.0029077730141580105,
+          0.0029117329977452755
+        ],
+        "median_seconds": 0.0029117329977452755,
+        "output": {
+          "json_sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+        }
+      },
+      "currency_aggregate": {
+        "seconds": [
+          0.0006798270042054355,
+          0.0005661349860019982,
+          0.0005353129818104208
+        ],
+        "median_seconds": 0.0005661349860019982,
+        "output": [
+          {
+            "json_sha256": "7cfb103397a33b68d6bd545855c2963e1cc247b0b5dcc4685219f869ee9a43a8"
+          },
+          {
+            "json_sha256": "8df8489c3fc8971fda9536666fa2c824bc4df4f969d885de7f33d4f75cf86fb9"
+          },
+          {
+            "json_sha256": "dee4d4e6507f38d1d8b3db305548018fc4d76a387ca1d645c28ea5f02849f383"
+          }
+        ]
+      }
+    },
+    "live_personal_queries": {
+      "indie_hard": {
+        "seconds": [
+          0.23625333496602252,
+          0.22763340000528842,
+          0.21925426897360012
+        ],
+        "median_seconds": 0.22763340000528842
+      },
+      "war_echoes": {
+        "seconds": [
+          0.3444741819985211,
+          0.39494819997344166,
+          0.2080701679806225
+        ],
+        "median_seconds": 0.3444741819985211
+      },
+      "endfield_card_detail": {
+        "seconds": [
+          0.46598079201066867,
+          0.3456368480110541,
+          0.31878203502856195
+        ],
+        "median_seconds": 0.3456368480110541
+      }
+    }
+  }
+}
