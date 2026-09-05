@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from difflib import SequenceMatcher
+from functools import lru_cache
 import re
 from typing import Iterable, Sequence
 
@@ -1218,6 +1219,17 @@ def _normalize(text: str) -> str:
 
 
 def _search_keys(text: str) -> tuple[str, str]:
+    text = str(text or "")
+    # Do not retain arbitrarily large user messages in the process-wide cache.
+    return _cached_search_keys(text) if len(text) <= 256 else _build_search_keys(text)
+
+
+@lru_cache(maxsize=4096)
+def _cached_search_keys(text: str) -> tuple[str, str]:
+    return _build_search_keys(text)
+
+
+def _build_search_keys(text: str) -> tuple[str, str]:
     normalized = _normalize(text)
     if not normalized:
         return "", ""
@@ -1227,6 +1239,16 @@ def _search_keys(text: str) -> tuple[str, str]:
 
 
 def _pinyin_syllables(text: str) -> tuple[str, ...]:
+    text = str(text or "")
+    return _cached_pinyin_syllables(text) if len(text) <= 256 else _build_pinyin_syllables(text)
+
+
+@lru_cache(maxsize=4096)
+def _cached_pinyin_syllables(text: str) -> tuple[str, ...]:
+    return _build_pinyin_syllables(text)
+
+
+def _build_pinyin_syllables(text: str) -> tuple[str, ...]:
     return tuple(
         normalized
         for part in lazy_pinyin(str(text or ""), errors="default")

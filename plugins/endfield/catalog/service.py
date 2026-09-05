@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import math
 import re
 import time
@@ -17,6 +18,7 @@ from typing import (
 from loguru import (
     logger,
 )
+from otae_bot.infrastructure.cache import AsyncTTLCache
 from ..providers.warfarin import (
     WarfarinAPIError,
     WarfarinClient,
@@ -230,11 +232,23 @@ from .views.weapons import (
 )
 
 
+class _IncompleteWeaponRelations(Exception):
+    def __init__(self, index: dict[str, tuple[str, ...]]):
+        self.index = index
+
+
 class EndfieldService:
     def __init__(self, client: WarfarinClient):
         self.client = client
         self._char_growth_table: dict[str, Any] | None = None
         self._char_growth_version = ""
+        self._weapon_relations: AsyncTTLCache[str, dict[str, tuple[str, ...]]] = AsyncTTLCache(
+            ttl_seconds=60.0, max_bytes=1024 * 1024, max_entries=16,
+            sizeof=lambda value: len(json.dumps(value, ensure_ascii=False).encode()),
+        )
+
+    async def clear_query_caches(self) -> int:
+        return await self._weapon_relations.clear()
 
     async def get_operator_view(self, query: str) -> OperatorView | None:
         primary: OperatorView | None = None
@@ -412,9 +426,15 @@ class EndfieldService:
         self,
         group_name: str = "",
         rarity_filter: str = "gold",
+        *,
+        include_details: bool = True,
     ) -> EquipmentCatalogView:
         raw = await self.client.fz_article_by_title("装备")
         view = build_fz_equipment_catalog_view(raw, group_name, rarity_filter)
+        # Name matching needs only the directory, not the suit effects from
+        # one extra article per group. Full catalogue rendering is unchanged.
+        if not include_details:
+            return view
         if group_name:
             titles = [item.title for group in view.groups for item in group.items]
             detail_raws = await self._fz_equipment_details(titles)
@@ -721,36 +741,61 @@ class EndfieldService:
                 for item in operators_data.get("data") or []
                 if str(item.get("weaponType") or "").strip() == weapon_type and item.get("slug")
             ]
-            details = await asyncio.gather(
-                *(self.client.operator_detail(str(item["slug"])) for item in candidates),
-                return_exceptions=True,
-            )
         except Exception:
             return []
+        key = hashlib.sha256(json.dumps(
+            [weapon_type, candidates], sort_keys=True, ensure_ascii=False,
+        ).encode()).hexdigest()
+        try:
+            index = await self._weapon_relations.get_or_create(
+                key, lambda: self._build_weapon_relation_index(candidates),
+            )
+        except _IncompleteWeaponRelations as exc:
+            # Preserve the original partial-result behavior, but do not
+            # cache a transiently incomplete index as authoritative.
+            index = exc.index
+        return list(index.get(weapon_id, ()))
 
-        default_names: list[str] = []
-        recommended_names: list[str] = []
+    async def _build_weapon_relation_index(
+        self, candidates: list[dict[str, Any]],
+    ) -> dict[str, tuple[str, ...]]:
+        details = await asyncio.gather(
+            *(self.client.operator_detail(str(item["slug"])) for item in candidates),
+            return_exceptions=True,
+        )
+        defaults: dict[str, list[str]] = {}
+        recommendations_by_weapon: dict[str, list[str]] = {}
+        incomplete = False
         for item, detail in zip(candidates, details):
             if isinstance(detail, Exception) or not isinstance(detail, dict):
+                incomplete = True
                 continue
             data = detail.get("data") or {}
             character = data.get("characterTable") or {}
             recommendations = data.get("charWpnRecommendTable") or {}
             name = _first_text(detail.get("meta") or {}, "name") or _first_text(item, "name")
             if not name:
+                incomplete = True
                 continue
-            if str(character.get("defaultWeaponId") or "").strip() == weapon_id:
-                default_names.append(name)
-                continue
+            default_id = str(character.get("defaultWeaponId") or "").strip()
+            if default_id:
+                defaults.setdefault(default_id, []).append(name)
             recommended_ids = {
                 str(candidate_id).strip()
                 for key, values in recommendations.items()
                 if str(key).startswith("weaponIds") and isinstance(values, list)
                 for candidate_id in values
             }
-            if weapon_id in recommended_ids:
-                recommended_names.append(name)
-        return _unique_names(default_names or recommended_names)
+            for identifier in recommended_ids:
+                if identifier != default_id:
+                    recommendations_by_weapon.setdefault(identifier, []).append(name)
+        index = {
+            identifier: tuple(_unique_names(defaults.get(identifier) or recommendations_by_weapon.get(identifier, [])))
+            for identifier in defaults.keys() | recommendations_by_weapon.keys()
+        }
+        if incomplete:
+            raise _IncompleteWeaponRelations(index)
+        return index
 
     async def find_weapon_title(self, query: str) -> str | None:
         query = query.strip()

@@ -117,6 +117,7 @@ class PreparedCardHtml:
     html: str
     resources: dict[str, BrowserResource]
     width: int
+    complete: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -1206,12 +1207,19 @@ async def draw_weapon_catalog_card(view: WeaponCatalogView) -> bytes:
 
 
 async def draw_loadout_card(view: LoadoutView) -> bytes:
-    return await _draw_gallery_catalog(
-        await prepare_loadout_card_html(view),
+    png, _complete = await draw_loadout_card_with_status(view)
+    return png
+
+
+async def draw_loadout_card_with_status(view: LoadoutView) -> tuple[bytes, bool]:
+    prepared = await prepare_loadout_card_html(view)
+    png = await _draw_gallery_catalog(
+        prepared,
         ".loadout-card",
         (".loadout-panel", ".loadout-stat", ".loadout-effect", ".loadout-item"),
         "loadout",
     )
+    return png, prepared.complete
 
 
 async def _draw_gallery_catalog(
@@ -1271,6 +1279,7 @@ async def _prepare_loadout_card_html(view: LoadoutView, *, inline: bool) -> Prep
         _render_loadout_html(view, mapped),
         assets.resources,
         1500,
+        complete=all(mapped.get(key) or not unique_urls(*urls) for key, urls in groups.items()),
     )
 
 

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import re
 import tempfile
 from collections.abc import Awaitable, Callable
+from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
@@ -94,7 +96,7 @@ from .catalog.commands import (
 from .rendering.cards import (
     draw_equipment_card,
     draw_equipment_catalog_card,
-    draw_loadout_card,
+    draw_loadout_card_with_status,
     draw_medal_stats_card,
     draw_medal_missing_card,
     draw_operator_card,
@@ -156,6 +158,7 @@ from .catalog.models import (
     AttendanceRoleView,
     GachaHistoryItemView,
     GachaHistoryView,
+    LoadoutView,
 )
 from .catalog.service import (
     EndfieldService,
@@ -203,6 +206,9 @@ _CARD_CACHE: AsyncTTLCache[CardCacheKey, tuple[bytes, ...]] = AsyncTTLCache(
     max_entries=64,
     # A card can render as several images, so bound the cache on total bytes, not page count.
     sizeof=lambda pages: sum(len(page) for page in pages),
+)
+_LOADOUT_CACHE: AsyncTTLCache[tuple[str, str], bytes] = AsyncTTLCache(
+    ttl_seconds=60.0, max_bytes=24 * 1024 * 1024, max_entries=32, sizeof=len,
 )
 _CALENDAR_CACHE: AsyncTTLCache[str, bytes] = AsyncTTLCache(
     ttl_seconds=600.0,
@@ -1327,11 +1333,11 @@ async def _render_account_investment(
             logger.warning(f"[endfield] investment AKE name map unavailable: {exc}")
             return None
 
-    detail, catalog = await asyncio.gather(
+    detail, catalog, name_map = await asyncio.gather(
         _card_detail_with_snapshot(token, role),
         fetch_account_investment_catalog(),
+        load_name_map(),
     )
-    name_map = await load_name_map()
     view = build_account_investment_view(
         detail,
         uid=role.masked_uid if group else role.role_id,
@@ -1779,7 +1785,7 @@ async def _handle_loadout(matcher, command: ParsedEndfieldCommand) -> None:
             weapon_skill_levels=command.weapon_skill_levels,
         )
         data_seconds = perf_counter() - started
-        png = await draw_loadout_card(view)
+        png = await _render_loadout_view(view)
         logger.info(
             f"[endfield] perf action=loadout data={data_seconds:.3f}s "
             f"draw={perf_counter() - started - data_seconds:.3f}s"
@@ -1793,6 +1799,32 @@ async def _handle_loadout(matcher, command: ParsedEndfieldCommand) -> None:
     except Exception as exc:
         logger.exception(f"[endfield] loadout failed: {exc}")
         return await matcher.finish("配装图片生成失败")
+
+
+class _IncompleteLoadoutImage(Exception):
+    def __init__(self, png: bytes):
+        self.png = png
+
+
+async def _render_loadout_view(view: LoadoutView) -> bytes:
+    # Fetch/build the current view as before. Cache its exact contents, not
+    # just the command: a recovered data source or changed stat invalidates it.
+    digest = hashlib.sha256(
+        json.dumps(asdict(view), sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()
+    ).hexdigest()
+
+    async def render() -> bytes:
+        png, complete = await draw_loadout_card_with_status(view)
+        if not complete:
+            raise _IncompleteLoadoutImage(png)
+        return png
+
+    try:
+        png, hit = await _LOADOUT_CACHE.get_or_create_with_status((CARD_RENDER_VERSION, digest), render)
+    except _IncompleteLoadoutImage as exc:
+        return exc.png
+    logger.info(f"[endfield] loadout-cache hit={str(hit).lower()} bytes={len(png)}")
+    return png
 
 
 async def _prompt_loadout_spec(default_enhance: int) -> tuple[ParsedLoadoutSpec | None, str]:
@@ -2280,7 +2312,7 @@ async def _resolve_equipment_candidates_fz(
             )
         ]
 
-    catalog = await service.get_equipment_catalog_view(rarity_filter=rarity_filter)
+    catalog = await service.get_equipment_catalog_view(rarity_filter=rarity_filter, include_details=False)
     candidates: list[EndfieldCandidate] = []
     for group in catalog.groups:
         group_base = _equipment_group_base(group.name)
@@ -2659,10 +2691,15 @@ async def _clear_endfield_caches(scope: str) -> int:
     removed = 0
     if scope == "all":
         removed += await _CARD_CACHE.clear()
+        removed += await _LOADOUT_CACHE.clear()
+        removed += await service.clear_query_caches()
         removed += await clear_http_cache("endfield-")
     elif scope == "icon":
+        removed += await _LOADOUT_CACHE.clear()
         removed += await clear_http_cache("endfield-assets")
     elif scope in {"operator", "weapon", "equipment", "stage"}:
+        removed += await _LOADOUT_CACHE.clear()
+        removed += await service.clear_query_caches()
         cache_kinds = (
             {scope, "equipment_catalog", "equipment_attribute"} if scope == "equipment" else {scope}
         )
@@ -2675,10 +2712,12 @@ async def _cache_status_lines() -> list[str]:
     api_stats = await get_http_cache_stats("endfield-api")
     asset_stats = await get_http_cache_stats("endfield-assets")
     card_stats = await _CARD_CACHE.stats()
+    loadout_stats = await _LOADOUT_CACHE.stats()
     return [
         _format_cache_stats("API", api_stats),
         _format_cache_stats("远程素材", asset_stats),
         _format_cache_stats("成品卡片", card_stats),
+        _format_cache_stats("配装卡片", loadout_stats),
         f"缓存策略: TTL {int(CARD_CACHE_TTL_SECONDS)}s / 下载并发 8",
     ]
 
