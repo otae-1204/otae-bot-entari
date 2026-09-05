@@ -1,0 +1,966 @@
+{
+  "started_at_utc": "2026-09-05T03:32:41.918363+00:00",
+  "commit": "aad06cfd9313c198083b24b6f9612dba80e649c1",
+  "dirty": false,
+  "mode": "replay",
+  "network_delay_included": false,
+  "python": "3.12.3 (main, Jul 15 2026, 23:46:41) [GCC 13.3.0]",
+  "cold_runs": 3,
+  "warm_runs": 5,
+  "concurrent_runs": 3,
+  "cold_definition": "HTTP, domain, PNG and pinyin caches cleared; HTTP connections and browser may be reused.",
+  "concurrent_definition": "Four identical queries, HTTP/pinyin warm, domain/PNG cold; batch completion time.",
+  "cases": {
+    "equipment_search": {
+      "cold": [
+        {
+          "seconds": 0.14657289104070514,
+          "http_calls": 1,
+          "response_bytes": 91504,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "json_sha256": "06c738f015dc6ef23da93833707ab05dd1121a19fc0bdea288a42df47af5bdf7"
+              },
+              {
+                "json_sha256": "cab5c9a7740013c1196f3572c31940e0f93b53308d45649df64db400b2c1fc0c"
+              },
+              {
+                "json_sha256": "0061e3c4bd5281d147a312c45f03356181a6375850f01e093de6d541443045b8"
+              },
+              {
+                "json_sha256": "a44e084fc968828865483e5993f528e68763df4b0a127c3451c63474f8c32a5e"
+              },
+              {
+                "json_sha256": "f98c3221670712d6bed18978ec51bd13b449a621e4f45722990d5ab34f512950"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.12245588097721338,
+          "http_calls": 1,
+          "response_bytes": 91504,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "json_sha256": "06c738f015dc6ef23da93833707ab05dd1121a19fc0bdea288a42df47af5bdf7"
+              },
+              {
+                "json_sha256": "cab5c9a7740013c1196f3572c31940e0f93b53308d45649df64db400b2c1fc0c"
+              },
+              {
+                "json_sha256": "0061e3c4bd5281d147a312c45f03356181a6375850f01e093de6d541443045b8"
+              },
+              {
+                "json_sha256": "a44e084fc968828865483e5993f528e68763df4b0a127c3451c63474f8c32a5e"
+              },
+              {
+                "json_sha256": "f98c3221670712d6bed18978ec51bd13b449a621e4f45722990d5ab34f512950"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.12112434697337449,
+          "http_calls": 1,
+          "response_bytes": 91504,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "json_sha256": "06c738f015dc6ef23da93833707ab05dd1121a19fc0bdea288a42df47af5bdf7"
+              },
+              {
+                "json_sha256": "cab5c9a7740013c1196f3572c31940e0f93b53308d45649df64db400b2c1fc0c"
+              },
+              {
+                "json_sha256": "0061e3c4bd5281d147a312c45f03356181a6375850f01e093de6d541443045b8"
+              },
+              {
+                "json_sha256": "a44e084fc968828865483e5993f528e68763df4b0a127c3451c63474f8c32a5e"
+              },
+              {
+                "json_sha256": "f98c3221670712d6bed18978ec51bd13b449a621e4f45722990d5ab34f512950"
+              }
+            ]
+          ]
+        }
+      ],
+      "warm": [
+        {
+          "seconds": 0.012097411963623017,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "json_sha256": "06c738f015dc6ef23da93833707ab05dd1121a19fc0bdea288a42df47af5bdf7"
+              },
+              {
+                "json_sha256": "cab5c9a7740013c1196f3572c31940e0f93b53308d45649df64db400b2c1fc0c"
+              },
+              {
+                "json_sha256": "0061e3c4bd5281d147a312c45f03356181a6375850f01e093de6d541443045b8"
+              },
+              {
+                "json_sha256": "a44e084fc968828865483e5993f528e68763df4b0a127c3451c63474f8c32a5e"
+              },
+              {
+                "json_sha256": "f98c3221670712d6bed18978ec51bd13b449a621e4f45722990d5ab34f512950"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.011911288020201027,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "json_sha256": "06c738f015dc6ef23da93833707ab05dd1121a19fc0bdea288a42df47af5bdf7"
+              },
+              {
+                "json_sha256": "cab5c9a7740013c1196f3572c31940e0f93b53308d45649df64db400b2c1fc0c"
+              },
+              {
+                "json_sha256": "0061e3c4bd5281d147a312c45f03356181a6375850f01e093de6d541443045b8"
+              },
+              {
+                "json_sha256": "a44e084fc968828865483e5993f528e68763df4b0a127c3451c63474f8c32a5e"
+              },
+              {
+                "json_sha256": "f98c3221670712d6bed18978ec51bd13b449a621e4f45722990d5ab34f512950"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.011888596985954791,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "json_sha256": "06c738f015dc6ef23da93833707ab05dd1121a19fc0bdea288a42df47af5bdf7"
+              },
+              {
+                "json_sha256": "cab5c9a7740013c1196f3572c31940e0f93b53308d45649df64db400b2c1fc0c"
+              },
+              {
+                "json_sha256": "0061e3c4bd5281d147a312c45f03356181a6375850f01e093de6d541443045b8"
+              },
+              {
+                "json_sha256": "a44e084fc968828865483e5993f528e68763df4b0a127c3451c63474f8c32a5e"
+              },
+              {
+                "json_sha256": "f98c3221670712d6bed18978ec51bd13b449a621e4f45722990d5ab34f512950"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.011855566990561783,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "json_sha256": "06c738f015dc6ef23da93833707ab05dd1121a19fc0bdea288a42df47af5bdf7"
+              },
+              {
+                "json_sha256": "cab5c9a7740013c1196f3572c31940e0f93b53308d45649df64db400b2c1fc0c"
+              },
+              {
+                "json_sha256": "0061e3c4bd5281d147a312c45f03356181a6375850f01e093de6d541443045b8"
+              },
+              {
+                "json_sha256": "a44e084fc968828865483e5993f528e68763df4b0a127c3451c63474f8c32a5e"
+              },
+              {
+                "json_sha256": "f98c3221670712d6bed18978ec51bd13b449a621e4f45722990d5ab34f512950"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.011797136976383626,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "json_sha256": "06c738f015dc6ef23da93833707ab05dd1121a19fc0bdea288a42df47af5bdf7"
+              },
+              {
+                "json_sha256": "cab5c9a7740013c1196f3572c31940e0f93b53308d45649df64db400b2c1fc0c"
+              },
+              {
+                "json_sha256": "0061e3c4bd5281d147a312c45f03356181a6375850f01e093de6d541443045b8"
+              },
+              {
+                "json_sha256": "a44e084fc968828865483e5993f528e68763df4b0a127c3451c63474f8c32a5e"
+              },
+              {
+                "json_sha256": "f98c3221670712d6bed18978ec51bd13b449a621e4f45722990d5ab34f512950"
+              }
+            ]
+          ]
+        }
+      ],
+      "concurrent": [
+        {
+          "seconds": 0.04676599497906864,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 4,
+          "outputs": [
+            [
+              {
+                "json_sha256": "06c738f015dc6ef23da93833707ab05dd1121a19fc0bdea288a42df47af5bdf7"
+              },
+              {
+                "json_sha256": "cab5c9a7740013c1196f3572c31940e0f93b53308d45649df64db400b2c1fc0c"
+              },
+              {
+                "json_sha256": "0061e3c4bd5281d147a312c45f03356181a6375850f01e093de6d541443045b8"
+              },
+              {
+                "json_sha256": "a44e084fc968828865483e5993f528e68763df4b0a127c3451c63474f8c32a5e"
+              },
+              {
+                "json_sha256": "f98c3221670712d6bed18978ec51bd13b449a621e4f45722990d5ab34f512950"
+              }
+            ],
+            [
+              {
+                "json_sha256": "06c738f015dc6ef23da93833707ab05dd1121a19fc0bdea288a42df47af5bdf7"
+              },
+              {
+                "json_sha256": "cab5c9a7740013c1196f3572c31940e0f93b53308d45649df64db400b2c1fc0c"
+              },
+              {
+                "json_sha256": "0061e3c4bd5281d147a312c45f03356181a6375850f01e093de6d541443045b8"
+              },
+              {
+                "json_sha256": "a44e084fc968828865483e5993f528e68763df4b0a127c3451c63474f8c32a5e"
+              },
+              {
+                "json_sha256": "f98c3221670712d6bed18978ec51bd13b449a621e4f45722990d5ab34f512950"
+              }
+            ],
+            [
+              {
+                "json_sha256": "06c738f015dc6ef23da93833707ab05dd1121a19fc0bdea288a42df47af5bdf7"
+              },
+              {
+                "json_sha256": "cab5c9a7740013c1196f3572c31940e0f93b53308d45649df64db400b2c1fc0c"
+              },
+              {
+                "json_sha256": "0061e3c4bd5281d147a312c45f03356181a6375850f01e093de6d541443045b8"
+              },
+              {
+                "json_sha256": "a44e084fc968828865483e5993f528e68763df4b0a127c3451c63474f8c32a5e"
+              },
+              {
+                "json_sha256": "f98c3221670712d6bed18978ec51bd13b449a621e4f45722990d5ab34f512950"
+              }
+            ],
+            [
+              {
+                "json_sha256": "06c738f015dc6ef23da93833707ab05dd1121a19fc0bdea288a42df47af5bdf7"
+              },
+              {
+                "json_sha256": "cab5c9a7740013c1196f3572c31940e0f93b53308d45649df64db400b2c1fc0c"
+              },
+              {
+                "json_sha256": "0061e3c4bd5281d147a312c45f03356181a6375850f01e093de6d541443045b8"
+              },
+              {
+                "json_sha256": "a44e084fc968828865483e5993f528e68763df4b0a127c3451c63474f8c32a5e"
+              },
+              {
+                "json_sha256": "f98c3221670712d6bed18978ec51bd13b449a621e4f45722990d5ab34f512950"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.046704043983481824,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 4,
+          "outputs": [
+            [
+              {
+                "json_sha256": "06c738f015dc6ef23da93833707ab05dd1121a19fc0bdea288a42df47af5bdf7"
+              },
+              {
+                "json_sha256": "cab5c9a7740013c1196f3572c31940e0f93b53308d45649df64db400b2c1fc0c"
+              },
+              {
+                "json_sha256": "0061e3c4bd5281d147a312c45f03356181a6375850f01e093de6d541443045b8"
+              },
+              {
+                "json_sha256": "a44e084fc968828865483e5993f528e68763df4b0a127c3451c63474f8c32a5e"
+              },
+              {
+                "json_sha256": "f98c3221670712d6bed18978ec51bd13b449a621e4f45722990d5ab34f512950"
+              }
+            ],
+            [
+              {
+                "json_sha256": "06c738f015dc6ef23da93833707ab05dd1121a19fc0bdea288a42df47af5bdf7"
+              },
+              {
+                "json_sha256": "cab5c9a7740013c1196f3572c31940e0f93b53308d45649df64db400b2c1fc0c"
+              },
+              {
+                "json_sha256": "0061e3c4bd5281d147a312c45f03356181a6375850f01e093de6d541443045b8"
+              },
+              {
+                "json_sha256": "a44e084fc968828865483e5993f528e68763df4b0a127c3451c63474f8c32a5e"
+              },
+              {
+                "json_sha256": "f98c3221670712d6bed18978ec51bd13b449a621e4f45722990d5ab34f512950"
+              }
+            ],
+            [
+              {
+                "json_sha256": "06c738f015dc6ef23da93833707ab05dd1121a19fc0bdea288a42df47af5bdf7"
+              },
+              {
+                "json_sha256": "cab5c9a7740013c1196f3572c31940e0f93b53308d45649df64db400b2c1fc0c"
+              },
+              {
+                "json_sha256": "0061e3c4bd5281d147a312c45f03356181a6375850f01e093de6d541443045b8"
+              },
+              {
+                "json_sha256": "a44e084fc968828865483e5993f528e68763df4b0a127c3451c63474f8c32a5e"
+              },
+              {
+                "json_sha256": "f98c3221670712d6bed18978ec51bd13b449a621e4f45722990d5ab34f512950"
+              }
+            ],
+            [
+              {
+                "json_sha256": "06c738f015dc6ef23da93833707ab05dd1121a19fc0bdea288a42df47af5bdf7"
+              },
+              {
+                "json_sha256": "cab5c9a7740013c1196f3572c31940e0f93b53308d45649df64db400b2c1fc0c"
+              },
+              {
+                "json_sha256": "0061e3c4bd5281d147a312c45f03356181a6375850f01e093de6d541443045b8"
+              },
+              {
+                "json_sha256": "a44e084fc968828865483e5993f528e68763df4b0a127c3451c63474f8c32a5e"
+              },
+              {
+                "json_sha256": "f98c3221670712d6bed18978ec51bd13b449a621e4f45722990d5ab34f512950"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.04635421698912978,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 4,
+          "outputs": [
+            [
+              {
+                "json_sha256": "06c738f015dc6ef23da93833707ab05dd1121a19fc0bdea288a42df47af5bdf7"
+              },
+              {
+                "json_sha256": "cab5c9a7740013c1196f3572c31940e0f93b53308d45649df64db400b2c1fc0c"
+              },
+              {
+                "json_sha256": "0061e3c4bd5281d147a312c45f03356181a6375850f01e093de6d541443045b8"
+              },
+              {
+                "json_sha256": "a44e084fc968828865483e5993f528e68763df4b0a127c3451c63474f8c32a5e"
+              },
+              {
+                "json_sha256": "f98c3221670712d6bed18978ec51bd13b449a621e4f45722990d5ab34f512950"
+              }
+            ],
+            [
+              {
+                "json_sha256": "06c738f015dc6ef23da93833707ab05dd1121a19fc0bdea288a42df47af5bdf7"
+              },
+              {
+                "json_sha256": "cab5c9a7740013c1196f3572c31940e0f93b53308d45649df64db400b2c1fc0c"
+              },
+              {
+                "json_sha256": "0061e3c4bd5281d147a312c45f03356181a6375850f01e093de6d541443045b8"
+              },
+              {
+                "json_sha256": "a44e084fc968828865483e5993f528e68763df4b0a127c3451c63474f8c32a5e"
+              },
+              {
+                "json_sha256": "f98c3221670712d6bed18978ec51bd13b449a621e4f45722990d5ab34f512950"
+              }
+            ],
+            [
+              {
+                "json_sha256": "06c738f015dc6ef23da93833707ab05dd1121a19fc0bdea288a42df47af5bdf7"
+              },
+              {
+                "json_sha256": "cab5c9a7740013c1196f3572c31940e0f93b53308d45649df64db400b2c1fc0c"
+              },
+              {
+                "json_sha256": "0061e3c4bd5281d147a312c45f03356181a6375850f01e093de6d541443045b8"
+              },
+              {
+                "json_sha256": "a44e084fc968828865483e5993f528e68763df4b0a127c3451c63474f8c32a5e"
+              },
+              {
+                "json_sha256": "f98c3221670712d6bed18978ec51bd13b449a621e4f45722990d5ab34f512950"
+              }
+            ],
+            [
+              {
+                "json_sha256": "06c738f015dc6ef23da93833707ab05dd1121a19fc0bdea288a42df47af5bdf7"
+              },
+              {
+                "json_sha256": "cab5c9a7740013c1196f3572c31940e0f93b53308d45649df64db400b2c1fc0c"
+              },
+              {
+                "json_sha256": "0061e3c4bd5281d147a312c45f03356181a6375850f01e093de6d541443045b8"
+              },
+              {
+                "json_sha256": "a44e084fc968828865483e5993f528e68763df4b0a127c3451c63474f8c32a5e"
+              },
+              {
+                "json_sha256": "f98c3221670712d6bed18978ec51bd13b449a621e4f45722990d5ab34f512950"
+              }
+            ]
+          ]
+        }
+      ],
+      "cold_median_seconds": 0.12245588097721338,
+      "warm_median_seconds": 0.011888596985954791,
+      "concurrent_median_seconds": 0.046704043983481824
+    },
+    "weapon_relations": {
+      "cold": [
+        {
+          "seconds": 0.05746287095826119,
+          "http_calls": 8,
+          "response_bytes": 2216720,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.1271210460108705,
+          "http_calls": 8,
+          "response_bytes": 2216720,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.05203498195623979,
+          "http_calls": 8,
+          "response_bytes": 2216720,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+              }
+            ]
+          ]
+        }
+      ],
+      "warm": [
+        {
+          "seconds": 0.0008987759938463569,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.0008402669918723404,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.0008222259930334985,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.0008512350032106042,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.0008217849535867572,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            [
+              {
+                "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+              }
+            ]
+          ]
+        }
+      ],
+      "concurrent": [
+        {
+          "seconds": 0.027115106000564992,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 4,
+          "outputs": [
+            [
+              {
+                "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+              }
+            ],
+            [
+              {
+                "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+              }
+            ],
+            [
+              {
+                "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+              }
+            ],
+            [
+              {
+                "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.027387510985136032,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 4,
+          "outputs": [
+            [
+              {
+                "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+              }
+            ],
+            [
+              {
+                "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+              }
+            ],
+            [
+              {
+                "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+              }
+            ],
+            [
+              {
+                "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+              }
+            ]
+          ]
+        },
+        {
+          "seconds": 0.027686645044013858,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 4,
+          "outputs": [
+            [
+              {
+                "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+              }
+            ],
+            [
+              {
+                "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+              }
+            ],
+            [
+              {
+                "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+              }
+            ],
+            [
+              {
+                "json_sha256": "28d0bc7c58a48459dfd4747ecbd4a2c5225fd07e8184cd3b1c20ec04b7576859"
+              }
+            ]
+          ]
+        }
+      ],
+      "cold_median_seconds": 0.05746287095826119,
+      "warm_median_seconds": 0.0008402669918723404,
+      "concurrent_median_seconds": 0.027387510985136032
+    },
+    "loadout": {
+      "cold": [
+        {
+          "seconds": 1.0141955459839664,
+          "http_calls": 15,
+          "response_bytes": 1561759,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            {
+              "png_bytes": 1043012,
+              "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+              "size": [
+                1875,
+                2766
+              ],
+              "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+            }
+          ]
+        },
+        {
+          "seconds": 0.9866808939841576,
+          "http_calls": 15,
+          "response_bytes": 1561759,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            {
+              "png_bytes": 1043012,
+              "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+              "size": [
+                1875,
+                2766
+              ],
+              "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+            }
+          ]
+        },
+        {
+          "seconds": 0.9926110139931552,
+          "http_calls": 15,
+          "response_bytes": 1561759,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            {
+              "png_bytes": 1043012,
+              "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+              "size": [
+                1875,
+                2766
+              ],
+              "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+            }
+          ]
+        }
+      ],
+      "warm": [
+        {
+          "seconds": 0.07782099401811138,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            {
+              "png_bytes": 1043012,
+              "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+              "size": [
+                1875,
+                2766
+              ],
+              "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+            }
+          ]
+        },
+        {
+          "seconds": 0.07691238803090528,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            {
+              "png_bytes": 1043012,
+              "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+              "size": [
+                1875,
+                2766
+              ],
+              "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+            }
+          ]
+        },
+        {
+          "seconds": 0.07797285803826526,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            {
+              "png_bytes": 1043012,
+              "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+              "size": [
+                1875,
+                2766
+              ],
+              "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+            }
+          ]
+        },
+        {
+          "seconds": 0.07728466298431158,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            {
+              "png_bytes": 1043012,
+              "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+              "size": [
+                1875,
+                2766
+              ],
+              "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+            }
+          ]
+        },
+        {
+          "seconds": 0.07632344600278884,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 1,
+          "outputs": [
+            {
+              "png_bytes": 1043012,
+              "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+              "size": [
+                1875,
+                2766
+              ],
+              "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+            }
+          ]
+        }
+      ],
+      "concurrent": [
+        {
+          "seconds": 0.9539621589938179,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 4,
+          "outputs": [
+            {
+              "png_bytes": 1043012,
+              "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+              "size": [
+                1875,
+                2766
+              ],
+              "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+            },
+            {
+              "png_bytes": 1043012,
+              "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+              "size": [
+                1875,
+                2766
+              ],
+              "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+            },
+            {
+              "png_bytes": 1043012,
+              "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+              "size": [
+                1875,
+                2766
+              ],
+              "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+            },
+            {
+              "png_bytes": 1043012,
+              "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+              "size": [
+                1875,
+                2766
+              ],
+              "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+            }
+          ]
+        },
+        {
+          "seconds": 0.9581015959847718,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 4,
+          "outputs": [
+            {
+              "png_bytes": 1043012,
+              "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+              "size": [
+                1875,
+                2766
+              ],
+              "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+            },
+            {
+              "png_bytes": 1043012,
+              "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+              "size": [
+                1875,
+                2766
+              ],
+              "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+            },
+            {
+              "png_bytes": 1043012,
+              "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+              "size": [
+                1875,
+                2766
+              ],
+              "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+            },
+            {
+              "png_bytes": 1043012,
+              "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+              "size": [
+                1875,
+                2766
+              ],
+              "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+            }
+          ]
+        },
+        {
+          "seconds": 0.9449265770381317,
+          "http_calls": 0,
+          "response_bytes": 0,
+          "http_failures": [],
+          "concurrency": 4,
+          "outputs": [
+            {
+              "png_bytes": 1043012,
+              "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+              "size": [
+                1875,
+                2766
+              ],
+              "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+            },
+            {
+              "png_bytes": 1043012,
+              "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+              "size": [
+                1875,
+                2766
+              ],
+              "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+            },
+            {
+              "png_bytes": 1043012,
+              "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+              "size": [
+                1875,
+                2766
+              ],
+              "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+            },
+            {
+              "png_bytes": 1043012,
+              "png_sha256": "5b222d49d1f4339440f18c42a8393be1f397af37d512a815bfc209eeff6b3925",
+              "size": [
+                1875,
+                2766
+              ],
+              "rgba_sha256": "6b4803f50a4cab291cdb2f59994875ef37f0f425b777cf59f289cc2c03e79c71"
+            }
+          ]
+        }
+      ],
+      "cold_median_seconds": 0.9926110139931552,
+      "warm_median_seconds": 0.07728466298431158,
+      "concurrent_median_seconds": 0.9539621589938179
+    }
+  },
+  "note": "No QQ/Satori transport, account API, or interactive user wait is included. Browser is prestarted."
+}
