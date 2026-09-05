@@ -2,6 +2,8 @@
 
 日期：2026-09-05。发布分支统一为 `refactor/project-architecture`，包含原 UI 代码预览、架构重构、上一轮查询优化和本轮缓存修复。没有推送新的修复分支，没有修改 `main`，没有将独立 UI 预览接入正式插件或重启生产 Bot。
 
+后续分支整理：上述实现已合入 `main`，原开发分支已清理；独立 UI 预览已从主分支移除并以标签归档。本文保留当时的执行记录，当前分支说明见 [README](../README.md#分支)。
+
 本轮对照基线：`9d0b1bba8bc341e63b9d20038c4b6ea0fd6ada2d`。联网测速在实施工作区进行，原始报告保留当时的基线 HEAD 和 `dirty: true`；这些字段不表示实施代码等于基线。报告随实现一起提交，不能将本轮结果与上一轮不同基线的百分比直接相加。
 
 ## 结论与代价
@@ -177,12 +179,12 @@
 
 公开回放文件只含指标/摘要，不随仓库提交完整第三方文章和素材；私人响应、身份标识、凭据或私人图片也不提交。再次测量应当重新录制公开数据，而非期待上游哈希永远不变。
 
-在安装依赖与 Playwright Chromium 的环境中运行：
+在安装依赖与 Playwright Chromium 的环境中运行。以下命令比较当前 `main` 与历史基线，不用于复现本文缓存修复版本的原始耗时：
 
 ```bash
 git fetch origin
-git switch refactor/project-architecture
-git pull --ff-only origin refactor/project-architecture
+git switch main
+git pull --ff-only origin main
 git worktree add --detach ../otae-endfield-cache-before 9d0b1bba8bc341e63b9d20038c4b6ea0fd6ada2d
 
 python -m pytest -q

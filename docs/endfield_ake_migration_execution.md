@@ -99,6 +99,6 @@
 .venv/bin/python scripts/check_endfield_public_cache.py --table --output output/endfield-ake-migration/table-process-retest.json
 ```
 
-发布后从 `refactor/project-architecture` 拉取，按原方式由管理员重启自己的实例才能生效。个别资料可以继续显式指定 FZ/Warfarin；若需要整体回滚，应对本次迁移提交执行 `git revert`，保留架构和上一轮缓存优化，不使用破坏性 reset。没有更改账号数据库 schema，新增的公共缓存可丢弃，不影响账号数据。
+迁移及后续修复现已合入 `main`，原 `refactor/project-architecture` 分支已清理。后续从 `main` 拉取，按原方式由管理员重启自己的实例才能生效。个别资料可以继续显式指定 FZ/Warfarin；若需要整体回滚，应对本次迁移提交执行 `git revert`，保留架构和上一轮缓存优化，不使用破坏性 reset。没有更改账号数据库 schema，新增的公共缓存可丢弃，不影响账号数据。
 
 字段定义核对使用 AKE 的 [公开 manifest](https://data.akedata.wiki/manifest.json) 与 [原生前端表适配实现](https://www.akedata.wiki/plugin/js/v3-table-data.js)。实现和 fixture 固定记录当时版本，运行时跟随 manifest。

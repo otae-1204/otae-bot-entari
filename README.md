@@ -8,24 +8,17 @@
 End 插件的公共资料默认优先 AKEData；账号接口仍用官方，缺失资料保留兼容回退。
 覆盖范围、缓存变化与实测见 [AKE 迁移记录](docs/endfield_ake_migration_execution.md)。
 
-## 分支与独立 UI 预览
+## 分支
 
 `main` 已于 2026-09-05 同步 `refactor/project-architecture` 的重构版本，
 包含新的程序架构、End 插件的缓存优化和 AKE 数据源迁移。
-切换前的旧主分支保存在 `backup/main-before-refactor-2026-09-05`，
-原重构分支也继续保留。
+切换前的旧主分支保存在 `backup/main-before-refactor-2026-09-05`。
+已完成的重构、性能优化、缓存修复及独立预览分支已清理，后续更新使用 `main`。
 
-主分支同时保留 `design/endfield-ui-code-preview` 的独立前端预览，
-方便在同一个检出目录中评审。预览没有接入正式插件。
-
-只查看 UI 时，不需要安装机器人依赖。在仓库根目录执行：
-
-```bash
-python3 design/endfield-preview/tools/serve.py --port 8765
-```
-
-Windows 使用 `py -3` 替代 `python3`，随后打开 <http://127.0.0.1:8765/>。
-页面覆盖、示例截图与测试方法见 [预览说明](design/endfield-preview/README.md)。
+独立 UI 预览目录 `design/endfield-preview/` 已从主分支移除，未接入正式插件。
+预览源码及分支历史保存在归档标签
+[`archive/endfield-ui-code-preview-2026-09-05`](https://github.com/otae-1204/otae-bot-entari/tree/archive/endfield-ui-code-preview-2026-09-05/design/endfield-preview)，
+需要时可从该标签找回。
 
 ## Development and checks
 

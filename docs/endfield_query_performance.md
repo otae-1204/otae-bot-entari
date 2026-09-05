@@ -1,7 +1,7 @@
 # End 查询性能优化与实测
 
 后续更新：本文保留第一轮历史数据；缓存修复、账号实测及原 29 项失败的处理结果见
-[第二轮实施报告](endfield_cache_execution.md)。全部工作现统一发布到 `refactor/project-architecture`。
+[第二轮实施报告](endfield_cache_execution.md)。全部工作现已合入 `main`，原性能优化和重构分支已清理。
 
 测试日期：2026-09-05。分支：`perf/endfield-query-latency`。
 
@@ -157,11 +157,13 @@ Pillow 11.3.0。各版本按顺序运行，未同时运行 pytest 或其他基�
 - [优化前回放](benchmarks/endfield-query-latency/before-replay.json)
 - [优化后回放](benchmarks/endfield-query-latency/after-replay.json)
 
-在已安装项目依赖和 Playwright Chromium 的 Python 环境中，从仓库根目录执行：
+在已安装项目依赖和 Playwright Chromium 的 Python 环境中，从仓库根目录执行。
+以下命令比较当前 `main` 与历史基线，不用于复现本文第一轮版本的原始耗时：
 
 ```bash
 git fetch origin
-git switch perf/endfield-query-latency
+git switch main
+git pull --ff-only origin main
 git worktree add --detach ../otae-endfield-before 877a3165021858f6d834ff5a5c984b4999d854d6
 
 python scripts/benchmark_endfield_queries.py --repo ../otae-endfield-before --mode record --output output/endfield-performance/before-live.json
