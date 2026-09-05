@@ -1,0 +1,215 @@
+{
+  "offline": true,
+  "production_integrated": false,
+  "pages": [
+    {
+      "slug": "01-overview",
+      "title": "信号总览",
+      "command": "/tibo",
+      "width": 1080,
+      "height": 1689,
+      "overflow": false,
+      "fonts": true,
+      "element_overflows": 0,
+      "bytes": 225626
+    },
+    {
+      "slug": "02-feed",
+      "title": "最新公开动态",
+      "command": "/tibo 动态 3",
+      "width": 1080,
+      "height": 1663,
+      "overflow": false,
+      "fonts": true,
+      "element_overflows": 0,
+      "bytes": 191006
+    },
+    {
+      "slug": "03-status",
+      "title": "重置状态",
+      "command": "/tibo 状态",
+      "width": 1080,
+      "height": 1361,
+      "overflow": false,
+      "fonts": true,
+      "element_overflows": 0,
+      "bytes": 162500
+    },
+    {
+      "slug": "04-recent",
+      "title": "最近确认",
+      "command": "/tibo 最近",
+      "width": 1080,
+      "height": 1323,
+      "overflow": false,
+      "fonts": true,
+      "element_overflows": 0,
+      "bytes": 119816
+    },
+    {
+      "slug": "05-history",
+      "title": "重置事件档案",
+      "command": "/tibo 历史",
+      "width": 1080,
+      "height": 1559,
+      "overflow": false,
+      "fonts": true,
+      "element_overflows": 0,
+      "bytes": 155223
+    },
+    {
+      "slug": "06-subscription",
+      "title": "群订阅管理",
+      "command": "/tibo 订阅状态",
+      "width": 1080,
+      "height": 1289,
+      "overflow": false,
+      "fonts": true,
+      "element_overflows": 0,
+      "bytes": 141202
+    },
+    {
+      "slug": "07-notification",
+      "title": "你有新的公开信号",
+      "command": "自动订阅通知",
+      "width": 1080,
+      "height": 1361,
+      "overflow": false,
+      "fonts": true,
+      "element_overflows": 0,
+      "bytes": 163941
+    },
+    {
+      "slug": "08-help",
+      "title": "雷达使用手册",
+      "command": "/tibo 帮助",
+      "width": 1080,
+      "height": 1159,
+      "overflow": false,
+      "fonts": true,
+      "element_overflows": 0,
+      "bytes": 160558
+    },
+    {
+      "slug": "09-empty",
+      "title": "最新相关动态",
+      "command": "/tibo 动态",
+      "width": 1080,
+      "height": 1079,
+      "overflow": false,
+      "fonts": true,
+      "element_overflows": 0,
+      "bytes": 101786
+    },
+    {
+      "slug": "10-error",
+      "title": "来源与发送状态",
+      "command": "异常状态样例",
+      "width": 1080,
+      "height": 1402,
+      "overflow": false,
+      "fonts": true,
+      "element_overflows": 0,
+      "bytes": 164298
+    },
+    {
+      "slug": "11-subscribed",
+      "title": "订阅成功",
+      "command": "结果状态样例",
+      "width": 1080,
+      "height": 938,
+      "overflow": false,
+      "fonts": true,
+      "element_overflows": 0,
+      "bytes": 88025
+    },
+    {
+      "slug": "12-unsubscribed",
+      "title": "取消订阅",
+      "command": "结果状态样例",
+      "width": 1080,
+      "height": 938,
+      "overflow": false,
+      "fonts": true,
+      "element_overflows": 0,
+      "bytes": 85499
+    },
+    {
+      "slug": "13-permission",
+      "title": "权限提示",
+      "command": "结果状态样例",
+      "width": 1080,
+      "height": 938,
+      "overflow": false,
+      "fonts": true,
+      "element_overflows": 0,
+      "bytes": 87815
+    },
+    {
+      "slug": "14-invalid",
+      "title": "参数提示",
+      "command": "结果状态样例",
+      "width": 1080,
+      "height": 938,
+      "overflow": false,
+      "fonts": true,
+      "element_overflows": 0,
+      "bytes": 90511
+    },
+    {
+      "slug": "15-state-official_announcement",
+      "title": "官方预告",
+      "command": "/tibo 状态",
+      "width": 1080,
+      "height": 1361,
+      "overflow": false,
+      "fonts": true,
+      "element_overflows": 0,
+      "bytes": 162920
+    },
+    {
+      "slug": "16-state-suspected",
+      "title": "疑似信号",
+      "command": "/tibo 状态",
+      "width": 1080,
+      "height": 1361,
+      "overflow": false,
+      "fonts": true,
+      "element_overflows": 0,
+      "bytes": 163893
+    },
+    {
+      "slug": "17-state-confirmed",
+      "title": "已确认完成",
+      "command": "/tibo 状态",
+      "width": 1080,
+      "height": 1361,
+      "overflow": false,
+      "fonts": true,
+      "element_overflows": 0,
+      "bytes": 156909
+    },
+    {
+      "slug": "18-state-unconfirmed",
+      "title": "暂无确认信号",
+      "command": "/tibo 状态",
+      "width": 1080,
+      "height": 1325,
+      "overflow": false,
+      "fonts": true,
+      "element_overflows": 0,
+      "bytes": 162298
+    },
+    {
+      "slug": "19-state-rejected",
+      "title": "预告未获核验",
+      "command": "/tibo 状态",
+      "width": 1080,
+      "height": 1361,
+      "overflow": false,
+      "fonts": true,
+      "element_overflows": 0,
+      "bytes": 160998
+    }
+  ]
+}
