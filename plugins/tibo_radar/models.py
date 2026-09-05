@@ -98,6 +98,7 @@ class TiboSubscription:
     retry_after: datetime | None = None
     last_delivery_error: str = ""
     last_delivery_mode: str = ""
+    account_key: str = ""
 
     def __post_init__(self) -> None:
         self.group_id = str(self.group_id).strip()

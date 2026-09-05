@@ -180,6 +180,7 @@ class TiboStore:
             "retry_after": "TEXT NOT NULL DEFAULT ''",
             "last_delivery_error": "TEXT NOT NULL DEFAULT ''",
             "last_delivery_mode": "TEXT NOT NULL DEFAULT ''",
+            "account_key": "TEXT NOT NULL DEFAULT ''",
         }.items():
             if name not in subscription_columns:
                 self.conn.execute(f"ALTER TABLE tibo_subscriptions ADD COLUMN {name} {definition}")
@@ -378,7 +379,7 @@ class TiboStore:
         ).fetchall()
         return [self._post_from_row(row) for row in rows]
 
-    def subscribe(self, group_id: str | int, channel_id: str | int = "") -> tuple[bool, TiboSubscription]:
+    def subscribe(self, group_id: str | int, channel_id: str | int = "", *, account_key: str = "") -> tuple[bool, TiboSubscription]:
         """Enable a group subscription and start at the current newest post."""
 
         gid = str(group_id).strip()
@@ -389,13 +390,18 @@ class TiboStore:
         cursor_at, cursor_post_id = self.latest_post_cursor()
         baseline_pending = not bool(cursor_post_id)
         existing = self.conn.execute(
-            "SELECT enabled FROM tibo_subscriptions WHERE group_id = ?", (gid,)
+            "SELECT enabled,account_key FROM tibo_subscriptions WHERE group_id = ?", (gid,)
         ).fetchone()
         if existing and existing["enabled"]:
             self.conn.execute(
-                "UPDATE tibo_subscriptions SET channel_id=?, updated_at=? WHERE group_id=?",
-                (target, _ts(now), gid),
+                "UPDATE tibo_subscriptions SET channel_id=?, updated_at=?,account_key=COALESCE(NULLIF(?,''),account_key) WHERE group_id=?",
+                (target, _ts(now), account_key, gid),
             )
+            if account_key and account_key != existing["account_key"]:
+                self.conn.execute(
+                    "UPDATE tibo_subscriptions SET delivery_failures=0,retry_after='',last_delivery_error='' WHERE group_id=?",
+                    (gid,),
+                )
             self.conn.commit()
             subscription = self.subscription(gid)
             if subscription is None:  # pragma: no cover - guarded by the row above
@@ -404,8 +410,8 @@ class TiboStore:
         self.conn.execute(
             """
             INSERT INTO tibo_subscriptions(
-                group_id,channel_id,enabled,last_notified_at,last_notified_post_id,subscribed_at,baseline_pending,updated_at
-            ) VALUES(?,?,?,?,?,?,?,?)
+                group_id,channel_id,enabled,last_notified_at,last_notified_post_id,subscribed_at,baseline_pending,updated_at,account_key
+            ) VALUES(?,?,?,?,?,?,?,?,?)
             ON CONFLICT(group_id) DO UPDATE SET
                 channel_id=excluded.channel_id,
                 enabled=1,
@@ -414,9 +420,10 @@ class TiboStore:
                 subscribed_at=excluded.subscribed_at,
                 baseline_pending=excluded.baseline_pending,
                 delivery_failures=0,retry_after='',last_delivery_error='',last_delivery_mode='',
+                account_key=excluded.account_key,
                 updated_at=excluded.updated_at
             """,
-            (gid, target, 1, cursor_at, cursor_post_id, _ts(now), int(baseline_pending), _ts(now)),
+            (gid, target, 1, cursor_at, cursor_post_id, _ts(now), int(baseline_pending), _ts(now), account_key),
         )
         self.conn.commit()
         subscription = self.subscription(gid)
@@ -447,16 +454,17 @@ class TiboStore:
         ).fetchall()
         return [self._subscription_from_row(row) for row in rows]
 
-    def mark_subscription_delivered(self, group_id: str | int, cursor_at: str, post_id: str, *, mode: str = "image") -> None:
+    def mark_subscription_delivered(self, group_id: str | int, cursor_at: str, post_id: str, *, mode: str = "image", account_key: str = "") -> None:
         self.conn.execute(
             """
             UPDATE tibo_subscriptions
             SET last_notified_at=?, last_notified_post_id=?, baseline_pending=0, updated_at=?,
-                delivery_failures=0,retry_after='',last_delivery_error='',last_delivery_mode=?
+                delivery_failures=0,retry_after='',last_delivery_error='',last_delivery_mode=?,
+                account_key=COALESCE(NULLIF(account_key,''),?)
             WHERE group_id=? AND enabled=1
                 AND (last_notified_at < ? OR (last_notified_at = ? AND last_notified_post_id <= ?))
             """,
-            (str(cursor_at or ""), str(post_id or ""), _ts(_now()), mode, str(group_id).strip(),
+            (str(cursor_at or ""), str(post_id or ""), _ts(_now()), mode, account_key, str(group_id).strip(),
              str(cursor_at or ""), str(cursor_at or ""), str(post_id or "")),
         )
         self.conn.commit()
@@ -556,6 +564,7 @@ class TiboStore:
             retry_after=_dt(row["retry_after"]),
             last_delivery_error=str(row["last_delivery_error"] or ""),
             last_delivery_mode=str(row["last_delivery_mode"] or ""),
+            account_key=str(row["account_key"] or ""),
         )
 
     @staticmethod

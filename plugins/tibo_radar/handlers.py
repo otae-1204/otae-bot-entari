@@ -191,9 +191,29 @@ def _post_cursor(post: TiboPost) -> tuple[str, str]:
 
 _notification_lock = asyncio.Lock()
 _refresh_notify_lock = asyncio.Lock()
+_delivery_accounts: dict[str, Bot] = {}
+
+
+def _account_key(bot: Bot) -> str:
+    identity = str(getattr(bot, "self_id", "") or "")
+    return f"{getattr(bot, 'platform', '')}:{identity}" if identity else ""
+
+
+def _remember_account(bot: Bot) -> None:
+    key = _account_key(bot)
+    if key:
+        _delivery_accounts[key] = bot
+
+
+def _account_connected(bot: Bot | None) -> bool:
+    if bot is None:
+        return False
+    connected = getattr(bot, "connected", None)
+    return connected is None or connected.is_set()
 
 
 async def _notify_subscriptions(bot: Bot, *, initialize_baselines: bool = True) -> None:
+    _remember_account(bot)
     if _notification_lock.locked():
         logger.debug("[tibo_radar] notification skipped: previous delivery still running")
         return
@@ -207,8 +227,12 @@ async def _deliver_subscriptions(bot: Bot, *, initialize_baselines: bool) -> Non
     subscriptions = store.subscriptions()
     if not subscriptions:
         return
-    adapter = account_adapter_name(bot)
     for subscription in subscriptions:
+        delivery_bot = _delivery_accounts.get(subscription.account_key) if subscription.account_key else bot
+        if not _account_connected(delivery_bot):
+            logger.debug("[tibo_radar] subscription deferred group={}: bound account unavailable", subscription.group_id)
+            continue
+        adapter = account_adapter_name(delivery_bot)
         if subscription.baseline_pending:
             if initialize_baselines:
                 store.mark_subscription_initialized(subscription.group_id)
@@ -249,7 +273,7 @@ async def _deliver_subscriptions(bot: Bot, *, initialize_baselines: bool) -> Non
                     "",
                     adapter,
                 )
-                mode = await deliver_page(bot, target, page_posts, render, links, service.relevance_label)
+                mode = await deliver_page(delivery_bot, target, page_posts, render, links, service.relevance_label)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -261,7 +285,7 @@ async def _deliver_subscriptions(bot: Bot, *, initialize_baselines: bool) -> Non
                 break
 
             cursor_at, post_id = _post_cursor(page_posts[-1])
-            store.mark_subscription_delivered(subscription.group_id, cursor_at, post_id, mode=mode)
+            store.mark_subscription_delivered(subscription.group_id, cursor_at, post_id, mode=mode, account_key=_account_key(delivery_bot))
             logger.info("[tibo_radar] subscription delivered group={} mode={} posts={} cursor={}",
                         subscription.group_id, mode, len(page_posts), post_id)
 
@@ -415,7 +439,8 @@ async def handle_tibo(rest: ArgVal[str], event: Event, bot: Bot):
         if not await _is_subscription_manager(bot, event, group_id, event_user_id(event)):
             await tibo_cmd.finish(_subscription_permission_text())
             return
-        already_enabled, _subscription = store.subscribe(group_id, get_channel_id(event) or group_id)
+        _remember_account(bot)
+        already_enabled, _subscription = store.subscribe(group_id, get_channel_id(event) or group_id, account_key=_account_key(bot))
         if already_enabled:
             await tibo_cmd.finish("本群已经订阅 Tibo 新帖；新帖子会按采集周期推送。")
         else:
@@ -529,6 +554,8 @@ async def _refresh_and_notify(bot: Bot | None = None):
         logger.debug("[tibo_radar] cycle skipped: refresh/delivery still running")
         return False
     async with _refresh_notify_lock:
+        if bot is not None:
+            _remember_account(bot)
         try:
             success = await service.refresh()
         except asyncio.CancelledError:
@@ -536,13 +563,18 @@ async def _refresh_and_notify(bot: Bot | None = None):
         except Exception as exc:
             logger.warning("[tibo_radar] collection failed error_type={}", type(exc).__name__)
             success = False
-        # Resolve after collection: it can take long enough for a reconnect.
-        # The account supplied by startup is only a fallback before registration.
+        # Resolve after collection, but do not replace startup's account with
+        # an unrelated account that happened to become globally ready later.
         try:
-            bot = get_bot()
+            ready_bot = get_bot()
         except Exception:
-            if bot is not None and hasattr(bot, "connected") and not bot.connected.is_set():
-                bot = None
+            ready_bot = None
+        if ready_bot is not None:
+            _remember_account(ready_bot)
+        if bot is None:
+            bot = ready_bot or next((account for account in _delivery_accounts.values() if _account_connected(account)), None)
+        elif _account_key(bot):
+            bot = _delivery_accounts.get(_account_key(bot), bot)
         if bot is not None:
             # A source outage must not block retries of already persisted posts.
             await _notify_subscriptions(bot, initialize_baselines=success)
@@ -554,6 +586,8 @@ async def _refresh_and_notify(bot: Bot | None = None):
 @on_ready
 async def _warmup(_bot: Bot | None = None):
     global _startup_started, _startup_task
+    if _bot is not None:
+        _remember_account(_bot)
     if _startup_started:
         return
     _startup_started = True

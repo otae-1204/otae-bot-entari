@@ -45,6 +45,7 @@ def radar(tmp_path, monkeypatch):
     monkeypatch.setattr(handlers, "render_xfeed", AsyncMock(return_value=PNG))
     monkeypatch.setattr(handlers, "_notification_lock", asyncio.Lock())
     monkeypatch.setattr(handlers, "_refresh_notify_lock", asyncio.Lock())
+    monkeypatch.setattr(handlers, "_delivery_accounts", {})
     monkeypatch.setattr(handlers, "SUBSCRIPTION_BATCH", 20)
     monkeypatch.setattr(handlers, "SUBSCRIPTION_MAX_PAGES", 1)
     yield store
@@ -285,6 +286,8 @@ def test_cycle_lock_covers_startup_and_scheduler(radar, monkeypatch):
 
 def test_account_is_resolved_after_collection(radar, monkeypatch):
     old_bot, new_bot = account(), account()
+    old_bot.self_id = new_bot.self_id = "same-account"
+    old_bot.platform = new_bot.platform = "qq"
     active = [old_bot]
 
     async def refresh():
@@ -297,6 +300,71 @@ def test_account_is_resolved_after_collection(radar, monkeypatch):
     asyncio.run(handlers._refresh_and_notify(old_bot))
     assert old_bot.protocol.send_message.await_count == 0
     assert new_bot.protocol.send_message.await_count == 1
+
+
+def test_startup_then_other_account_online_keeps_original_sender(radar, monkeypatch):
+    owner, other = account(), account()
+    owner.self_id, other.self_id = "owner", "other"
+    owner.platform = other.platform = "qq"
+    monkeypatch.setattr(handlers.service, "refresh", AsyncMock(return_value=True))
+    monkeypatch.setattr(handlers, "get_bot", lambda: other)
+    radar.upsert_post(post(1))
+    asyncio.run(handlers._refresh_and_notify(owner))
+    assert radar.subscription("group").account_key == "qq:owner"
+    radar.upsert_post(post(2))
+    asyncio.run(handlers._refresh_and_notify())
+    assert owner.protocol.send_message.await_count == 2
+    assert other.protocol.send_message.await_count == 0
+
+
+def test_bound_account_missing_never_sends_as_another_bot(radar):
+    radar.subscribe("group", "channel", account_key="qq:missing")
+    radar.upsert_post(post(1))
+    other = account()
+    other.self_id, other.platform = "other", "qq"
+    notify(other)
+    assert other.protocol.send_message.await_count == 0
+    assert radar.subscription("group").last_notified_post_id == post(0).post_id
+
+
+def test_account_binding_survives_restart(radar, monkeypatch):
+    radar.subscribe("group", "channel", account_key="qq:owner")
+    reopened = TiboStore(radar.db_path)
+    monkeypatch.setattr(handlers, "store", reopened)
+    owner, other = account(), account()
+    owner.self_id, other.self_id = "owner", "other"
+    owner.platform = other.platform = "qq"
+    handlers._remember_account(owner)
+    try:
+        reopened.upsert_post(post(1))
+        notify(other)
+        assert owner.protocol.send_message.await_count == 1
+        assert other.protocol.send_message.await_count == 0
+    finally:
+        reopened.close()
+
+
+def test_disconnected_owner_is_deferred_without_wrong_account_fallback(radar):
+    radar.subscribe("group", "channel", account_key="qq:owner")
+    owner, other = account(), account()
+    owner.self_id, other.self_id = "owner", "other"
+    owner.platform = other.platform = "qq"
+    owner.connected = asyncio.Event()
+    handlers._remember_account(owner)
+    radar.upsert_post(post(1))
+    notify(other)
+    assert owner.protocol.send_message.await_count == 0
+    assert other.protocol.send_message.await_count == 0
+    assert radar.subscription("group").delivery_failures == 0
+
+
+def test_explicit_account_rebinding_clears_backoff_but_preserves_cursor(radar):
+    radar.subscribe("group", "channel", account_key="qq:old")
+    radar.mark_subscription_failed("group", "PermissionError")
+    _, saved = radar.subscribe("group", "channel", account_key="qq:new")
+    assert saved.account_key == "qq:new"
+    assert saved.retry_after is None and saved.delivery_failures == 0
+    assert saved.last_notified_post_id == post(0).post_id
 
 
 def test_failed_group_does_not_block_other_groups(radar):
