@@ -44,7 +44,7 @@ from .providers.warfarin import WarfarinAPIError, WarfarinClient
 from .rendering.health import track_render_health
 from .account.detail.names import clear_account_detail_name_map
 from .account.investment.service import clear_account_investment_catalog
-from .account.challenge.i18n import clear_challenge_locale, close_challenge_locale
+from .account.challenge.i18n import clear_challenge_locale, close_challenge_locale, fetch_challenge_locale
 from .account.client import (
     ACCOUNT_PROVIDER_CN,
     ACCOUNT_PROVIDER_SKPORT,
@@ -203,7 +203,7 @@ _MEDAL_LOCK = asyncio.Lock()
 _FORWARD_SENDER_NAME = "Endfield"
 CARD_CACHE_TTL_SECONDS = 600.0
 CARD_CACHE_MAX_BYTES = 48 * 1024 * 1024
-CARD_RENDER_VERSION = "endfield-card-v42"
+CARD_RENDER_VERSION = "endfield-card-v43"
 CardCacheKey = tuple[str, str, str, str, str, str, str]
 _CARD_CACHE: AsyncTTLCache[CardCacheKey, tuple[bytes, ...]] = AsyncTTLCache(
     ttl_seconds=CARD_CACHE_TTL_SECONDS,
@@ -1304,6 +1304,15 @@ async def _render_account_detail(
         currency_balances=currency_balances,
         name_map=name_map,
     )
+    if re.search(r"[A-Za-z]", view.main_mission) and not re.search(r"[\u3400-\u9fff]", view.main_mission):
+        # Some official profiles omit the mission ID and ignore the CN locale.
+        # Reuse the existing versioned CN/EN reverse map; never guess a title
+        # from similar English wording or write it into the account payload.
+        try:
+            locale = await fetch_challenge_locale()
+            view = replace(view, main_mission=locale.text(view.main_mission))
+        except Exception as exc:
+            logger.warning("[endfield] account mission localization unavailable ({})", type(exc).__name__)
     pages = await _render_account_pages("detail", role, group, view, lambda: draw_account_detail_cards(view))
     return await _finish_pngs(matcher, pages)
 

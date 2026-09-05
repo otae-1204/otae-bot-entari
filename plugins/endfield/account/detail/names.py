@@ -27,6 +27,9 @@ class AccountDetailNameMap:
     settlement_names: Mapping[str, str] = field(default_factory=dict)
     spaceship_room_names: Mapping[str, str] = field(default_factory=dict)
     version: str = ""
+    character_ids: Mapping[str, str] = field(default_factory=dict)
+    main_mission_names: Mapping[str, str] = field(default_factory=dict)
+    text_names: Mapping[str, str] = field(default_factory=dict)
 
 
 _name_map_cache: AccountDetailNameMap | None = None
@@ -86,6 +89,7 @@ async def fetch_account_detail_name_map() -> AccountDetailNameMap:
             _get(f"/{table_cfg}/DomainDataTable.json", max_bytes=_TABLE_MAX_BYTES),
             _get(f"/{table_cfg}/SettlementBasicDataTable.json", max_bytes=_TABLE_MAX_BYTES),
             _get(f"/{table_cfg}/SpaceshipRoomTypeTable.json", max_bytes=_TABLE_MAX_BYTES),
+            _get(f"/{table_cfg}/TextTable.json", max_bytes=_TABLE_MAX_BYTES),
             _get(f"/{table_cfg}/I18nTextTable_CN.json", max_bytes=64 * 1024 * 1024),
             return_exceptions=True,
         )
@@ -99,6 +103,7 @@ async def fetch_account_detail_name_map() -> AccountDetailNameMap:
             domain_table,
             settlement_table,
             spaceship_room_type_table,
+            text_table,
             i18n,
         ) = values
         for value in (character_table, growth_table, weapon_table, item_table, suit_table, i18n):
@@ -114,6 +119,8 @@ async def fetch_account_detail_name_map() -> AccountDetailNameMap:
             settlement_table = {}
         if isinstance(spaceship_room_type_table, Exception):
             spaceship_room_type_table = {}
+        if isinstance(text_table, Exception):
+            text_table = {}
         built = build_account_detail_name_map(
             character_table,
             growth_table,
@@ -125,6 +132,7 @@ async def fetch_account_detail_name_map() -> AccountDetailNameMap:
             domain_table=domain_table,
             settlement_table=settlement_table,
             spaceship_room_type_table=spaceship_room_type_table,
+            text_table=text_table,
             version=latest,
         )
         if generation == _name_map_generation:
@@ -144,11 +152,15 @@ def build_account_detail_name_map(
     domain_table: Any = None,
     settlement_table: Any = None,
     spaceship_room_type_table: Any = None,
+    text_table: Any = None,
     version: str = "",
 ) -> AccountDetailNameMap:
     """Build an account-detail name map from AKEData table payloads."""
     translations = i18n if isinstance(i18n, Mapping) else {}
     character_names: dict[str, str] = {}
+    character_ids: dict[str, str] = {}
+    main_mission_names: dict[str, str] = {}
+    text_names: dict[str, str] = {}
     weapon_names: dict[str, str] = {}
     skill_names: dict[str, str] = {}
     item_names: dict[str, str] = {}
@@ -166,7 +178,20 @@ def build_account_detail_name_map(
 
     for key, row in _rows(character_table):
         char_id = _field_text(row.get("charId")) or key
+        _put(character_ids, char_id, char_id)
         _put(character_names, char_id, _i18n_text(translations, row.get("name")))
+
+    for key, row in _rows(text_table):
+        # MissionRuntimeAsset/e11m8.json, for example, references e11m8_name.
+        # Retain title references only, not the entire UI/dialog text table.
+        if not key.endswith("_name"):
+            continue
+        name = _i18n_text(translations, row)
+        if name:
+            _put(main_mission_names, key.removesuffix("_name"), name)
+            text_names[key] = name
+            if row.get("id") is not None:
+                text_names[str(row["id"])] = name
 
     for key, row in _rows(weapon_table):
         weapon_id = _field_text(row.get("weaponId")) or key
@@ -240,6 +265,9 @@ def build_account_detail_name_map(
         settlement_names=settlement_names,
         spaceship_room_names=spaceship_room_names,
         version=version,
+        character_ids=character_ids,
+        main_mission_names=main_mission_names,
+        text_names=text_names,
     )
 
 

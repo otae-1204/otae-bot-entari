@@ -101,7 +101,10 @@ def localized_text(
     if value is None or isinstance(value, (list, tuple, set)):
         return default
     if not isinstance(value, Mapping):
-        return str(value).strip() or default
+        text = str(value).strip()
+        if translations and text in translations:
+            return localized_text(translations[text], default=default) or text
+        return text or default
 
     for key in _LOCALE_KEYS:
         candidate = value.get(key)
@@ -113,6 +116,12 @@ def localized_text(
     if text_id is not None and translations:
         candidate = translations.get(str(text_id))
         text = localized_text(candidate, None, "")
+        if text:
+            return text
+
+    text_key = value.get("key")
+    if text_key is not None and translations:
+        text = localized_text(translations.get(str(text_key)), default="")
         if text:
             return text
 

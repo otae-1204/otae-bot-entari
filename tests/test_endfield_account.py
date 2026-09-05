@@ -357,7 +357,7 @@ class EndfieldAccountDetailViewTests(unittest.TestCase):
         self.assertEqual(stats["源石"], "297")
         self.assertEqual(stats["武库配额"], "7500")
 
-    def test_sorts_operators_by_rarity_then_level(self):
+    def test_sorts_operators_by_level_then_rarity(self):
         view = self.build()
         self.assertEqual([operator.name for operator in view.operators], ["测试老兵", "测试新兵"])
         self.assertEqual(view.operators[0].rarity, 6)
@@ -383,7 +383,17 @@ class EndfieldAccountDetailViewTests(unittest.TestCase):
 
         view = account_detail_module.build_account_detail_view(detail, uid="x")
 
-        self.assertEqual([operator.name for operator in view.operators], ["编号五", "编号三十二"])
+        self.assertEqual([operator.name for operator in view.operators], ["编号三十二", "编号五"])
+
+    def test_level_precedes_rarity_and_all_sort_keys_are_descending(self):
+        def character(name, level, rarity, number):
+            return {"level": level, "charData": {"id": f"chr_{number:04d}_test", "name": name,
+                    "rarity": {"value": str(rarity)}}}
+        detail = {"chars": [character("低等级六星", 80, 6, 99), character("高等级四星", 90, 4, 1),
+                            character("高等级六星小编号", 90, 6, 2), character("高等级六星大编号", 90, 6, 10)]}
+        view = account_detail_module.build_account_detail_view(detail, uid="x")
+        self.assertEqual([operator.name for operator in view.operators],
+                         ["高等级六星大编号", "高等级六星小编号", "高等级四星", "低等级六星"])
 
     def test_reads_string_typed_numerics_and_progression(self):
         veteran = self.build().operators[0]

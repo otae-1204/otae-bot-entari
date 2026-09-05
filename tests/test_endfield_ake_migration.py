@@ -354,7 +354,12 @@ class NativeAkeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 json.loads(cache.catalog_path.read_text())["revision"], "second"
             )
-            cache._catalog_schema = 0  # A pre-migration file must be refreshed.
+            # Exercise an actual old-format file. Mutating only the in-memory
+            # schema races with the previous write's mtime-based disk reload.
+            legacy = json.loads(cache.catalog_path.read_text())
+            legacy.pop("schema")
+            cache.catalog_path.write_text(json.dumps(legacy))
+            cache._catalog_memory = None
             await cache._load_catalog()
             self.assertEqual(service.get_gacha_catalog_views.await_count, 3)
             service.get_public_data_revision.side_effect = RuntimeError("outage")

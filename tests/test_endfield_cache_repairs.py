@@ -290,6 +290,7 @@ class DiskCacheTests(unittest.TestCase):
 class PageView:
     nickname: str = "test"
     balance: int = 1
+    main_mission: str = ""
 
 
 class AccountPageCacheTests(unittest.IsolatedAsyncioTestCase):

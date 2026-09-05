@@ -89,6 +89,12 @@ GACHA_PAGE_ROW_BUDGETS = (55, 45, 35)
 OPERATOR_RAIL_HEIGHT = 880
 OPERATOR_ACCENT_LEFT = 440
 REMOTE_ASSET_NAMESPACE = "endfield-assets"
+# AKE TermIcon sprites include transparent padding (normally 44 x 36).
+# Scale their canvas with the surrounding text and retain its aspect ratio;
+# a fixed square made the visible symbol much smaller on weapon/equipment cards.
+TERM_ICON_CSS = """
+.term-icon { display:inline-block; width:auto; height:1.25em; max-width:1.75em; object-fit:contain; vertical-align:-.25em; margin:0 .04em; filter:none; }
+"""
 FALLBACK_TERM_STYLES = {
     "物理伤害": TermStyleView("物理伤害", "#e3c19a", ""),
     "击飞": TermStyleView("击飞", "#e3c19a", sprite_png("termicon", "icon_term_ba_airborne")),
@@ -1723,7 +1729,7 @@ html, body {{
 .potential-desc strong, .effect-desc strong {{ color: #11161a; background: #ffd000; padding: 0 3px; }}
 .term {{ color: var(--term-color, #e3c19a); font-weight: 900; white-space: nowrap; }}
 .term-plain {{ color: inherit; font-weight: 900; text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 2px; white-space: nowrap; }}
-.term-icon {{ width: 15px; height: 15px; object-fit: contain; vertical-align: -2px; margin: 0 2px 0 1px; }}
+{TERM_ICON_CSS}
 .rich-style, .vup, .info-note {{ font-weight: 900; }}
 .info-note {{ color: #59636a; }}
 .visual {{
@@ -1881,7 +1887,7 @@ html, body {{ margin:0; width:{card_width}px; min-height:{card_min_height}px; ba
 .weapon-img {{ position:absolute; left:0; top:0; width:100%; height:100%; object-fit:contain; object-position:center center; filter:drop-shadow(0 32px 20px rgba(23,27,31,.30)); transform:rotate(-7deg); }}
 .weapon-img-fallback {{ position:absolute; left:0; right:0; top:42%; text-align:center; color:#9aa2a8; font-size:20px; font-weight:900; }}
 .panel {{ position:absolute; z-index:3; left:{panel_left}px; top:28px; width:{panel_width}px; height:auto; display:flex; flex-direction:column; overflow:visible; background:rgba(247,248,246,.95); border:1px solid rgba(23,27,31,.32); padding:14px 18px 14px; box-shadow:-12px 18px 44px rgba(23,27,31,.14); }} .panel-title {{ display:block; border-bottom:4px solid #171b1f; padding-bottom:10px; margin-bottom:10px; }} .panel-title h1 {{ margin:0; font-size:32px; line-height:1; font-weight:950; }}
-.skill-stack {{ min-height:0; display:grid; grid-template-columns:minmax(300px,.76fr) minmax(470px,1.24fr); grid-template-rows:auto auto; gap:10px; align-items:start; }} .skill-card {{ --row-font:13px; --label-font:12px; --row-line:1.20; position:relative; display:flex; flex-direction:column; align-self:start; padding:12px 16px 10px 18px; border:1px solid rgba(23,27,31,.18); background:#f4f5f7; overflow:visible; }} .skill-card.s1 {{ grid-column:1; grid-row:1; }} .skill-card.s2 {{ grid-column:1; grid-row:2; }} .skill-card.s3 {{ grid-column:2; grid-row:1 / 3; }} .skill-head {{ display:block; flex:0 0 auto; padding-bottom:5px; }} .skill-name {{ font-size:23px; line-height:1.08; font-weight:950; white-space:normal; overflow-wrap:anywhere; }} .skill-card.s1 .skill-name,.skill-card.s2 .skill-name {{ font-size:24px; }} strong {{ color:#f2b900; background:transparent; padding:0 1px; }} .term {{ color:#8f5928; font-weight:950; border-bottom:1px dotted rgba(143,89,40,.55); }} .term-icon {{ display:inline-block; object-fit:contain; margin:0 1px 0 2px; vertical-align:-2px; filter:none; }} .rich-style,.vup,.info-note {{ display:inline; }} .info-note {{ color:#59636a; font-weight:900; }}
+.skill-stack {{ min-height:0; display:grid; grid-template-columns:minmax(300px,.76fr) minmax(470px,1.24fr); grid-template-rows:auto auto; gap:10px; align-items:start; }} .skill-card {{ --row-font:13px; --label-font:12px; --row-line:1.20; position:relative; display:flex; flex-direction:column; align-self:start; padding:12px 16px 10px 18px; border:1px solid rgba(23,27,31,.18); background:#f4f5f7; overflow:visible; }} .skill-card.s1 {{ grid-column:1; grid-row:1; }} .skill-card.s2 {{ grid-column:1; grid-row:2; }} .skill-card.s3 {{ grid-column:2; grid-row:1 / 3; }} .skill-head {{ display:block; flex:0 0 auto; padding-bottom:5px; }} .skill-name {{ font-size:23px; line-height:1.08; font-weight:950; white-space:normal; overflow-wrap:anywhere; }} .skill-card.s1 .skill-name,.skill-card.s2 .skill-name {{ font-size:24px; }} strong {{ color:#f2b900; background:transparent; padding:0 1px; }} .term {{ color:#8f5928; font-weight:950; border-bottom:1px dotted rgba(143,89,40,.55); }} {TERM_ICON_CSS} .rich-style,.vup,.info-note {{ display:inline; }} .info-note {{ color:#59636a; font-weight:900; }}
 .frontend-level-list {{ clear:both; display:grid; grid-template-rows:repeat(9,auto); flex:0 0 auto; min-height:0; border-top:1px solid rgba(23,27,31,.10); }} .level-row {{ display:grid; grid-template-columns:45px minmax(0,1fr); gap:10px; align-items:center; min-height:30px; padding:3px 0; overflow:visible; border-bottom:1px solid rgba(23,27,31,.08); }} .level-row:last-child {{ border-bottom:0; }} .level-label {{ padding:0; color:#536071; font-size:var(--label-font); line-height:1; font-weight:900; align-self:center; }} .level-desc {{ padding:0; align-self:center; color:#17202a; font-size:max(12px,var(--row-font)); line-height:max(1.20,var(--row-line)); font-weight:850; overflow-wrap:anywhere; }} .frontend-level-list.short .level-row {{ min-height:30px; }} .skill-card.s1 .level-label,.skill-card.s2 .level-label {{ font-size:var(--label-font); }} .skill-card.s1 .level-desc,.skill-card.s2 .level-desc {{ font-size:max(12px,var(--row-font)); line-height:max(1.20,var(--row-line)); }} .frontend-level-list.long .level-row {{ grid-template-columns:42px minmax(0,1fr); min-height:52px; }} .frontend-level-list.long .level-label {{ font-size:var(--label-font); }} .frontend-level-list.long .level-desc {{ font-size:max(12px,var(--row-font)); line-height:max(1.20,var(--row-line)); letter-spacing:-.012em; }}
 .footer-line {{ margin-top:8px; padding-top:0; display:flex; justify-content:space-between; align-items:end; color:#697279; font-size:12px; font-weight:900; }}
 """
@@ -1999,7 +2005,7 @@ html,body {{ margin:0; width:{card_width}px; min-height:{card_min_height}px; bac
 .suit-description strong {{ color:#286cd6; background:transparent; padding:0 1px; }}
 .term {{ color:var(--term-color,#286cd6); font-weight:950; white-space:nowrap; }}
 .term-plain {{ color:inherit; font-weight:950; text-decoration:underline; text-underline-offset:2px; }}
-.term-icon {{ width:17px; height:17px; object-fit:contain; vertical-align:-3px; margin:0 2px 0 1px; }}
+{TERM_ICON_CSS}
 .rich-style,.vup,.info-note {{ font-weight:950; }}
     .equipment-pieces {{ display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:7px; margin-top:12px; }}
     .equipment-piece {{ min-height:76px; display:grid; grid-template-columns:52px minmax(0,1fr); align-items:center; gap:7px; padding:7px; border:1px solid rgba(23,27,31,.18); background:rgba(255,255,255,.72); }}
@@ -3077,7 +3083,7 @@ def weapon_term_icon(url: str, rich_icons: dict[str, str]) -> str:
     src = rich_icons.get(url, "")
     if not src:
         return ""
-    return f'<img class="term-icon" src="{esc_attr(src)}" style="width:11px;height:11px" alt="">'
+    return term_image(src, "")
 
 
 def skill_card(skill: SkillView, index: int, icon_url: str, term_styles: dict[str, TermStyleView], term_icons: dict[str, str]) -> str:

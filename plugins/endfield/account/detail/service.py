@@ -59,17 +59,22 @@ def build_account_detail_view(
     """
     detail = detail or {}
     base = _mapping(detail.get("base"))
+    name_map = name_map or AccountDetailNameMap()
+    main_mission = _mapping(base.get("mainMission"))
     return AccountDetailView(
         nickname=_text(base.get("name")) or nickname or "未知管理员",
         uid=uid,
         server_name=server_label(server_name or _text(base.get("serverName"))),
         level=_int_or_none(base.get("level")),
         world_level=_int_or_none(base.get("worldLevel")),
-        main_mission=_text(_mapping(base.get("mainMission")).get("description")),
+        main_mission=(
+            name_map.main_mission_names.get(_text(main_mission.get("id")))
+            or localized_text(main_mission.get("description"), name_map.text_names)
+        ),
         avatar_url=_text(base.get("avatarUrl")),
         saved_at=format_timestamp(_int_or_none(base.get("saveTime")) or 0),
         stats=_build_stats(detail, base, currency_balances or {}),
-        operators=_build_operators(detail, name_map or AccountDetailNameMap()),
+        operators=_build_operators(detail, name_map),
     )
 
 
@@ -93,8 +98,14 @@ def _build_stats(
             _ratio(daily.get("dailyActivation"), daily.get("maxDailyActivation")),
             "活跃度",
         ),
-        AccountStatView("周常", _ratio(weekly.get("score"), weekly.get("total")), "分数"),
-        AccountStatView("通行证", _ratio(bp_system.get("curLevel"), bp_system.get("maxLevel")), "等级"),
+        AccountStatView(
+            "周常", _ratio(weekly.get("score"), weekly.get("total")), "分数"
+        ),
+        AccountStatView(
+            "通行证",
+            _ratio(bp_system.get("curLevel"), bp_system.get("maxLevel")),
+            "等级",
+        ),
         AccountStatView("嵌晶玉", _count(currency_balances.get(2)), "当前持有"),
         AccountStatView("源石", _count(currency_balances.get(1)), "当前持有"),
         AccountStatView("武库配额", _count(currency_balances.get(3)), "当前持有"),
@@ -109,13 +120,20 @@ def _build_operators(
         if not isinstance(character, Mapping):
             continue
         raw = _mapping(character)
-        operators.append((_character_id(raw), _build_operator(raw, name_map)))
+        character_id = _character_id(raw)
+        operators.append(
+            (
+                name_map.character_ids.get(character_id, character_id),
+                _build_operator(raw, name_map),
+            )
+        )
     operators.sort(
         key=lambda item: (
-            -item[1].rarity,
-            -(item[1].level or 0),
+            item[1].level or 0,
+            item[1].rarity,
             _character_id_sort_key(item[0]),
-        )
+        ),
+        reverse=True,
     )
     return tuple(operator for _, operator in operators)
 
@@ -128,8 +146,8 @@ def _character_id(character: Mapping[str, Any]) -> str:
 def _character_id_sort_key(character_id: str) -> tuple[int, int, str]:
     match = re.search(r"(?:^|_)(\d+)(?:_|$)", character_id)
     if match:
-        return (0, int(match.group(1)), character_id.casefold())
-    return (1, 0, character_id.casefold())
+        return (1, int(match.group(1)), character_id.casefold())
+    return (0, 0, character_id.casefold())
 
 
 def _build_operator(
