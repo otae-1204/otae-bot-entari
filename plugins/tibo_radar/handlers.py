@@ -33,6 +33,7 @@ from otae_bot.adapters.entari import (
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
 
 from plugins.tibo_radar.client import TiboRadarClient
+from plugins.tibo_radar.delivery import deliver_page
 from plugins.tibo_radar.draw_scope import AMBER, CYAN, GREEN, CardSection, event_sections, render_card
 from plugins.tibo_radar.draw_xfeed import render_xfeed
 from plugins.tibo_radar.models import EVENT_CONFIRMED, ResetEvent, TiboPost
@@ -59,6 +60,7 @@ REFRESH_MINUTES = _env_int("TIBO_RADAR_REFRESH_MINUTES", 10, 2, 1440)
 TIMEOUT_SECONDS = _env_int("TIBO_RADAR_TIMEOUT_SECONDS", 15, 3, 60)
 CODEXRADAR_ENABLED = _env_bool("TIBO_RADAR_CODEXRADAR_ENABLED", True)
 SUBSCRIPTION_BATCH = _env_int("TIBO_RADAR_SUBSCRIPTION_BATCH", 20, 1, 100)
+SUBSCRIPTION_MAX_PAGES = _env_int("TIBO_RADAR_SUBSCRIPTION_MAX_PAGES", 1, 1, 10)
 
 store = TiboStore()
 client = TiboRadarClient(
@@ -187,7 +189,19 @@ def _post_cursor(post: TiboPost) -> tuple[str, str]:
     return value.astimezone(timezone.utc).isoformat(), post.post_id
 
 
-async def _notify_subscriptions(bot: Bot) -> None:
+_notification_lock = asyncio.Lock()
+_refresh_notify_lock = asyncio.Lock()
+
+
+async def _notify_subscriptions(bot: Bot, *, initialize_baselines: bool = True) -> None:
+    if _notification_lock.locked():
+        logger.debug("[tibo_radar] notification skipped: previous delivery still running")
+        return
+    async with _notification_lock:
+        await _deliver_subscriptions(bot, initialize_baselines=initialize_baselines)
+
+
+async def _deliver_subscriptions(bot: Bot, *, initialize_baselines: bool) -> None:
     """Deliver posts after each group's persisted cursor in X-style cards."""
 
     subscriptions = store.subscriptions()
@@ -196,31 +210,37 @@ async def _notify_subscriptions(bot: Bot) -> None:
     adapter = account_adapter_name(bot)
     for subscription in subscriptions:
         if subscription.baseline_pending:
-            store.mark_subscription_initialized(subscription.group_id)
-            logger.info("[tibo_radar] subscription baseline initialized group={}", subscription.group_id)
+            if initialize_baselines:
+                store.mark_subscription_initialized(subscription.group_id)
+                logger.info("[tibo_radar] subscription baseline initialized group={}", subscription.group_id)
+            continue
+        if subscription.retry_after and subscription.retry_after > datetime.now(timezone.utc):
             continue
         cursor_at = subscription.last_notified_at.astimezone(timezone.utc).isoformat() if subscription.last_notified_at else ""
         pending = store.posts_after(
             cursor_at,
             subscription.last_notified_post_id,
-            limit=SUBSCRIPTION_BATCH,
+            limit=min(SUBSCRIPTION_BATCH, 3 * SUBSCRIPTION_MAX_PAGES),
         )
         if not pending:
             continue
         pages = _chunk(pending)
         for page_index, page_posts in enumerate(pages, 1):
+            # A group may unsubscribe while an earlier group's network I/O runs.
+            current = store.subscription(subscription.group_id)
+            if current is None or not current.enabled:
+                break
             try:
-                png = await render_xfeed(
-                    page_posts,
-                    service.relevance_label,
-                    title="Tibo 新帖订阅",
-                    subtitle=f"群订阅 · 新发现 {len(page_posts)} 条 · 每 {REFRESH_MINUTES} 分钟检测",
-                    page=f"{page_index}/{len(pages)}" if len(pages) > 1 else "",
-                )
+                async def render():
+                    return await render_xfeed(
+                        page_posts,
+                        service.relevance_label,
+                        title="Tibo 新帖订阅",
+                        subtitle=f"群订阅 · 待推送 {len(page_posts)} 条 · 每 {REFRESH_MINUTES} 分钟检测",
+                        page=f"{page_index}/{len(pages)}" if len(pages) > 1 else "",
+                    )
+
                 links = list(dict.fromkeys([*_post_links(page_posts), *_source_links()]))
-                segments = [_subscription_image_segment(png)]
-                if links:
-                    segments.append(Text("源帖链接：\n" + "\n".join(links)))
                 target = SendDest(
                     subscription.channel_id or subscription.group_id,
                     subscription.group_id,
@@ -229,15 +249,21 @@ async def _notify_subscriptions(bot: Bot) -> None:
                     "",
                     adapter,
                 )
-                await ChainMsg(segments).send(target, bot)
+                mode = await deliver_page(bot, target, page_posts, render, links, service.relevance_label)
             except asyncio.CancelledError:
                 raise
-            except Exception:
-                logger.exception("[tibo_radar] subscription delivery failed group={}", subscription.group_id)
+            except Exception as exc:
+                store.mark_subscription_failed(subscription.group_id, type(exc).__name__)
+                logger.warning(
+                    "[tibo_radar] subscription delivery failed group={} error_type={} cursor=retained retry=deferred",
+                    subscription.group_id, type(exc).__name__,
+                )
                 break
 
             cursor_at, post_id = _post_cursor(page_posts[-1])
-            store.mark_subscription_delivered(subscription.group_id, cursor_at, post_id)
+            store.mark_subscription_delivered(subscription.group_id, cursor_at, post_id, mode=mode)
+            logger.info("[tibo_radar] subscription delivered group={} mode={} posts={} cursor={}",
+                        subscription.group_id, mode, len(page_posts), post_id)
 
 
 def _format_pt_time() -> str:
@@ -416,7 +442,9 @@ async def handle_tibo(rest: ArgVal[str], event: Event, bot: Bot):
         subscription = store.subscription(group_id)
         if subscription and subscription.enabled:
             cursor = subscription.last_notified_at.astimezone().strftime("%Y-%m-%d %H:%M:%S") if subscription.last_notified_at else "尚未推送"
-            await tibo_cmd.finish(f"本群已订阅 Tibo 新帖。\n最近推送游标：{cursor}")
+            mode = {"image": "图片", "text": "文字兜底"}.get(subscription.last_delivery_mode, "暂无")
+            retry = f"\n连续失败：{subscription.delivery_failures} 次（{subscription.last_delivery_error}）；退避后继续重试" if subscription.delivery_failures else ""
+            await tibo_cmd.finish(f"本群已订阅 Tibo 新帖。\n最近推送游标：{cursor}\n最近发送：{mode}{retry}")
         else:
             await tibo_cmd.finish("本群未启用 Tibo 新帖订阅。使用 /tibo 订阅 开启。")
         return
@@ -497,15 +525,30 @@ _startup_task: asyncio.Task | None = None
 
 
 async def _refresh_and_notify(bot: Bot | None = None):
-    if bot is None:
+    if _refresh_notify_lock.locked():
+        logger.debug("[tibo_radar] cycle skipped: refresh/delivery still running")
+        return False
+    async with _refresh_notify_lock:
+        try:
+            success = await service.refresh()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("[tibo_radar] collection failed error_type={}", type(exc).__name__)
+            success = False
+        # Resolve after collection: it can take long enough for a reconnect.
+        # The account supplied by startup is only a fallback before registration.
         try:
             bot = get_bot()
         except Exception:
-            bot = None
-    success = await service.refresh()
-    if bot is not None and success:
-        await _notify_subscriptions(bot)
-    return success
+            if bot is not None and hasattr(bot, "connected") and not bot.connected.is_set():
+                bot = None
+        if bot is not None:
+            # A source outage must not block retries of already persisted posts.
+            await _notify_subscriptions(bot, initialize_baselines=success)
+        else:
+            logger.debug("[tibo_radar] delivery deferred: no connected account")
+        return success
 
 
 @on_ready

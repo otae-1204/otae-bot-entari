@@ -94,6 +94,10 @@ class TiboSubscription:
     last_notified_post_id: str = ""
     subscribed_at: datetime | None = None
     baseline_pending: bool = False
+    delivery_failures: int = 0
+    retry_after: datetime | None = None
+    last_delivery_error: str = ""
+    last_delivery_mode: str = ""
 
     def __post_init__(self) -> None:
         self.group_id = str(self.group_id).strip()

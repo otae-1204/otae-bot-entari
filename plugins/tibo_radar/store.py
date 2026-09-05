@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable
 from zoneinfo import ZoneInfo
@@ -175,6 +175,14 @@ class TiboStore:
             self.conn.execute(
                 "ALTER TABLE tibo_subscriptions ADD COLUMN baseline_pending INTEGER NOT NULL DEFAULT 0"
             )
+        for name, definition in {
+            "delivery_failures": "INTEGER NOT NULL DEFAULT 0",
+            "retry_after": "TEXT NOT NULL DEFAULT ''",
+            "last_delivery_error": "TEXT NOT NULL DEFAULT ''",
+            "last_delivery_mode": "TEXT NOT NULL DEFAULT ''",
+        }.items():
+            if name not in subscription_columns:
+                self.conn.execute(f"ALTER TABLE tibo_subscriptions ADD COLUMN {name} {definition}")
         self.conn.commit()
 
     def upsert_post(self, post: TiboPost) -> bool:
@@ -405,6 +413,7 @@ class TiboStore:
                 last_notified_post_id=excluded.last_notified_post_id,
                 subscribed_at=excluded.subscribed_at,
                 baseline_pending=excluded.baseline_pending,
+                delivery_failures=0,retry_after='',last_delivery_error='',last_delivery_mode='',
                 updated_at=excluded.updated_at
             """,
             (gid, target, 1, cursor_at, cursor_post_id, _ts(now), int(baseline_pending), _ts(now)),
@@ -438,14 +447,32 @@ class TiboStore:
         ).fetchall()
         return [self._subscription_from_row(row) for row in rows]
 
-    def mark_subscription_delivered(self, group_id: str | int, cursor_at: str, post_id: str) -> None:
+    def mark_subscription_delivered(self, group_id: str | int, cursor_at: str, post_id: str, *, mode: str = "image") -> None:
         self.conn.execute(
             """
             UPDATE tibo_subscriptions
-            SET last_notified_at=?, last_notified_post_id=?, baseline_pending=0, updated_at=?
+            SET last_notified_at=?, last_notified_post_id=?, baseline_pending=0, updated_at=?,
+                delivery_failures=0,retry_after='',last_delivery_error='',last_delivery_mode=?
             WHERE group_id=? AND enabled=1
+                AND (last_notified_at < ? OR (last_notified_at = ? AND last_notified_post_id <= ?))
             """,
-            (str(cursor_at or ""), str(post_id or ""), _ts(_now()), str(group_id).strip()),
+            (str(cursor_at or ""), str(post_id or ""), _ts(_now()), mode, str(group_id).strip(),
+             str(cursor_at or ""), str(cursor_at or ""), str(post_id or "")),
+        )
+        self.conn.commit()
+
+    def mark_subscription_failed(self, group_id: str | int, error_type: str, *, now: datetime | None = None) -> None:
+        """Keep the delivery cursor and persist backoff, including across restarts."""
+        current = self.subscription(group_id)
+        if current is None or not current.enabled:
+            return
+        now = now or _now()
+        failures = current.delivery_failures + 1
+        delay = min(3600, 60 * (2 ** min(failures - 1, 6)))
+        self.conn.execute(
+            "UPDATE tibo_subscriptions SET delivery_failures=?,retry_after=?,last_delivery_error=?,updated_at=? "
+            "WHERE group_id=? AND enabled=1",
+            (failures, _ts(now + timedelta(seconds=delay)), str(error_type)[:80], _ts(now), current.group_id),
         )
         self.conn.commit()
 
@@ -525,6 +552,10 @@ class TiboStore:
             last_notified_post_id=str(row["last_notified_post_id"] or ""),
             subscribed_at=_dt(row["subscribed_at"]),
             baseline_pending=bool(row["baseline_pending"]),
+            delivery_failures=int(row["delivery_failures"]),
+            retry_after=_dt(row["retry_after"]),
+            last_delivery_error=str(row["last_delivery_error"] or ""),
+            last_delivery_mode=str(row["last_delivery_mode"] or ""),
         )
 
     @staticmethod
