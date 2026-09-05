@@ -466,7 +466,7 @@ def build_gacha_analysis(
             small_progress = _weapon_ten_batch_progress(paid) if is_current else 0
             small_limit = 4 if is_current else 0
             large_limit = (pool_rule.hard_guarantee if pool_rule else 80) if is_current else 0
-            large_known = bool(is_current and pool_rule and pool_rule.up_item_ids)
+            large_known = bool(is_current and pool_rule and pool_rule.up_item_ids and large_limit)
             large_consumed = False
             large_consumed_at = 0
             large_up_name = ""

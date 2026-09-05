@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Iterable
 
 from PIL import Image
+from loguru import logger
 
 from otae_bot.infrastructure.http.client import fetch_many_resilient
 
@@ -73,6 +74,9 @@ class EndfieldGachaAssetCache:
         self._generation = 0
         self._invalidated_at = 0.0
         self._catalog_memory: tuple[int, dict[str, GachaItemMetadata]] | None = None
+        self._catalog_source = "AKEData (fallback permitted)"
+        self._catalog_revision = ""
+        self._catalog_schema = 0
 
     def clear_caches(self) -> int:
         """Invalidate disposable catalogs/images without touching account records."""
@@ -163,6 +167,11 @@ class EndfieldGachaAssetCache:
         ))
         result: dict[str, GachaItemMetadata] = {}
         requests: list[tuple[str, str, GachaItemMetadata]] = []
+        try:
+            ake_items = await self.service.get_ake_items(f"item_charpotentialup_{key}" for key in operator_ids)
+        except Exception as exc:
+            logger.warning("[endfield] AKE keepsake metadata unavailable; FZ fallback ({})", type(exc).__name__)
+            ake_items = {}
         for operator_id in operator_ids:
             operator = catalog.get(operator_id)
             keepsake_id = f"item_charpotentialup_{operator_id}"
@@ -174,7 +183,11 @@ class EndfieldGachaAssetCache:
                 icon_path=self._existing_icon_path(keepsake_id),
             )
             result[operator_id] = fallback
-            if not fallback.icon_path and operator:
+            native = ake_items.get(keepsake_id)
+            if native and native.get("name") and native.get("iconId"):
+                result[operator_id] = replace(fallback, name=native["name"], rarity=int(native.get("rarity") or 6),
+                    icon_url=(item_icon_urls(native["iconId"]) or ("",))[0])
+            elif not fallback.icon_path and operator:
                 requests.append((operator_id, f"{KEEPSAKE_ARTICLE_PREFIX}{fallback.name}", fallback))
         payloads = await asyncio.gather(
             *(self.service.client.fz_article_by_title(title) for _, title, _ in requests),
@@ -262,6 +275,24 @@ class EndfieldGachaAssetCache:
         }
 
     async def prepare_pool_rules(self, records: Iterable[GachaRecord]) -> dict[str, GachaPoolRule]:
+        records = list(records)
+        try:
+            native = await self.service.get_ake_pool_metadata()
+        except Exception as exc:
+            logger.warning("[endfield] AKE pool metadata unavailable; FZ fallback ({})", type(exc).__name__)
+            native = {}
+        # Client pool tables do not contain server-side hard-guarantee counts.
+        # Keep that explicitly scoped fallback; never infer counts from names.
+        rules = await self._prepare_pool_rules_fz(records)
+        for key, row in native.items():
+            previous = rules.get(key)
+            rules[key] = GachaPoolRule(key, tuple(row["up_item_ids"]),
+                previous.hard_guarantee if previous else 0, row["pool_name"], row["pool_kind"])
+        if native:
+            logger.info("[endfield] gacha pool metadata source=AKEData guarantee source=FZ-or-unknown")
+        return rules
+
+    async def _prepare_pool_rules_fz(self, records: Iterable[GachaRecord]) -> dict[str, GachaPoolRule]:
         current_by_type: dict[str, GachaRecord] = {}
         for item in records:
             if "standard" in item.pool_type.casefold():
@@ -304,17 +335,26 @@ class EndfieldGachaAssetCache:
         force: bool = False,
     ) -> dict[str, GachaItemMetadata]:
         wanted = {item_id for item_id in required_ids if item_id}
+        latest_revision = ""
+        if hasattr(self.service, "get_public_data_revision"):
+            try:
+                latest_revision = await self.service.get_public_data_revision()
+            except Exception:
+                pass  # AKE outage must not invalidate a usable local catalog.
         generation = self._generation
         async with self._catalog_lock:
             cached = self._read_catalog()
             missing = [item_id for item_id in wanted if item_id not in cached]
-            if cached and self._catalog_is_fresh() and not missing and not force:
+            current_version = not latest_revision or latest_revision == self._catalog_revision
+            if cached and self._catalog_is_fresh() and current_version and not missing and not force:
                 return cached
             try:
-                operators, weapons = await asyncio.gather(
-                    self.service.get_operator_catalog_view(),
-                    self.service.get_weapon_catalog_view(),
-                )
+                if hasattr(self.service, "get_gacha_catalog_views"):
+                    operators, weapons = await self.service.get_gacha_catalog_views()
+                else:
+                    operators, weapons = await asyncio.gather(
+                        self.service.get_operator_catalog_view(), self.service.get_weapon_catalog_view())
+                self._catalog_source = " + ".join(dict.fromkeys(getattr(view, "source_name", "") or "legacy" for view in (operators, weapons)))
                 items: dict[str, GachaItemMetadata] = {}
                 for element in operators.elements:
                     for profession in element.professions:
@@ -339,6 +379,8 @@ class EndfieldGachaAssetCache:
                                 icon_url=item.icon_url,
                             )
                 if items and generation == self._generation:
+                    self._catalog_revision = latest_revision
+                    self._catalog_schema = 2
                     self._write_catalog(items)
                     return items
             except Exception:
@@ -347,7 +389,7 @@ class EndfieldGachaAssetCache:
             return cached
 
     def _catalog_is_fresh(self) -> bool:
-        return self._fresh_file(self.catalog_path)
+        return self._catalog_schema == 2 and self._fresh_file(self.catalog_path)
 
     def _read_catalog(self) -> dict[str, GachaItemMetadata]:
         try:
@@ -360,6 +402,9 @@ class EndfieldGachaAssetCache:
         items = raw.get("items") if isinstance(raw, dict) else None
         if not isinstance(items, list):
             return {}
+        self._catalog_schema = 2 if raw.get("schema") == 2 else 0
+        self._catalog_revision = str(raw.get("revision") or "")
+        self._catalog_source = str(raw.get("source") or "legacy")
         result: dict[str, GachaItemMetadata] = {}
         for item in items:
             if not isinstance(item, dict) or not item.get("item_id"):
@@ -382,8 +427,10 @@ class EndfieldGachaAssetCache:
     def _write_catalog(self, items: dict[str, GachaItemMetadata]) -> None:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         payload = {
+            "schema": 2,
+            "revision": self._catalog_revision,
             "updated_at": int(time.time()),
-            "source": "api.fz.wiki",
+            "source": self._catalog_source,
             "items": [asdict(items[key]) for key in sorted(items)],
         }
         temporary = self.catalog_path.with_suffix(".json.tmp")

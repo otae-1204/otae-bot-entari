@@ -6,7 +6,7 @@ import json
 import re
 import tempfile
 from collections.abc import Awaitable, Callable
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
@@ -203,7 +203,7 @@ _MEDAL_LOCK = asyncio.Lock()
 _FORWARD_SENDER_NAME = "Endfield"
 CARD_CACHE_TTL_SECONDS = 600.0
 CARD_CACHE_MAX_BYTES = 48 * 1024 * 1024
-CARD_RENDER_VERSION = "endfield-card-v41"
+CARD_RENDER_VERSION = "endfield-card-v42"
 CardCacheKey = tuple[str, str, str, str, str, str, str]
 _CARD_CACHE: AsyncTTLCache[CardCacheKey, tuple[bytes, ...]] = AsyncTTLCache(
     ttl_seconds=CARD_CACHE_TTL_SECONDS,
@@ -266,14 +266,17 @@ CONTENT_RENDERERS: dict[str, Renderer] = {
 
 SOURCE_CANDIDATE_RESOLVERS: dict[str, dict[str, Resolver]] = {
     "operator": {
+        "akedata": lambda query: _resolve_candidates_akedata("operator", query),
         "fz": lambda query: _resolve_operator_candidates_fz(query),
         "warfarin": lambda query: _resolve_operator_candidates_warfarin(query),
     },
     "weapon": {
+        "akedata": lambda query: _resolve_candidates_akedata("weapon", query),
         "fz": lambda query: _resolve_weapon_candidates_fz(query),
         "warfarin": lambda query: _resolve_weapon_candidates_warfarin(query),
     },
     "equipment": {
+        "akedata": lambda query, rarity: _resolve_candidates_akedata("equipment", query, rarity),
         "fz": lambda query, rarity: _resolve_equipment_candidates_fz(query, rarity),
     },
     "stage": {
@@ -1926,10 +1929,15 @@ async def _prompt_loadout_spec(default_enhance: int) -> tuple[ParsedLoadoutSpec 
 
 
 async def _resolve_loadout_candidate(kind: str, query: str) -> EndfieldCandidate | None:
+    def title_candidate(item):
+        if item is not None and item.source == "akedata":
+            prefix = {"operator": "干员", "weapon": "武器", "equipment": "装备"}[item.kind]
+            return replace(item, key=f"{prefix}/{item.display_name}")
+        return item
     raw_candidates = (
-        await _collect_candidates("all", query, "fz", "all")
+        await _collect_candidates("all", query, "", "all")
         if kind in {"all", "gear"}
-        else await _resolve_candidates_from_sources(kind, query, "fz", "all")
+        else await _resolve_candidates_from_sources(kind, query, "", "all")
     )
     if kind == "all":
         allowed_kinds = {"operator", "weapon", "equipment"}
@@ -1937,10 +1945,10 @@ async def _resolve_loadout_candidate(kind: str, query: str) -> EndfieldCandidate
         allowed_kinds = {"weapon", "equipment"}
     else:
         allowed_kinds = {kind}
-    candidates = [item for item in raw_candidates if item.kind in allowed_kinds and item.source == "fz"]
+    candidates = [item for item in raw_candidates if item.kind in allowed_kinds and item.source in {"akedata", "fz"}]
     selected, ambiguous = choose_candidate(candidates)
     if selected is not None:
-        return selected
+        return title_candidate(selected)
     options = ambiguous or sorted(candidates, key=lambda item: item.score, reverse=True)
     if not options:
         return None
@@ -1955,7 +1963,7 @@ async def _resolve_loadout_candidate(kind: str, query: str) -> EndfieldCandidate
         index = int(text.strip()) - 1
     except ValueError:
         return None
-    return options[index] if 0 <= index < len(options) else None
+    return title_candidate(options[index]) if 0 <= index < len(options) else None
 
 
 async def _collect_candidates(
@@ -2056,6 +2064,167 @@ async def _resolve_stage_candidates(query: str, source: str = "") -> list[Endfie
             )
         )
     return candidates
+
+
+async def _resolve_candidates_akedata(
+    kind: str, query: str, rarity: str = ""
+) -> list[EndfieldCandidate]:
+    """Resolve stable IDs, aliases and all existing catalog/filter commands."""
+    from .providers.repository import query_snapshot
+
+    query = query.strip()
+    if not query:
+        return []
+    rarity = rarity or "gold"
+    async with query_snapshot() as data:
+        candidates = []
+
+        def add(content, key, name, score=100, reason="catalog"):
+            if score >= CANDIDATE_SCORE_THRESHOLD:
+                candidates.append(
+                    EndfieldCandidate(
+                        kind=content,
+                        key=key,
+                        display_name=name,
+                        score=score,
+                        source="akedata",
+                        reason=reason,
+                        revision=data.revision,
+                    )
+                )
+
+        if query == "__all__":
+            key = {
+                "operator": _operator_catalog_key("", ""),
+                "weapon": "",
+                "equipment": _equipment_catalog_key("", rarity),
+            }[kind]
+            add(
+                kind + "_catalog",
+                key,
+                {
+                    "operator": "全部干员",
+                    "weapon": "全部武器",
+                    "equipment": "全部装备套组",
+                }[kind],
+            )
+            return candidates
+        if query.startswith(
+            {"operator": "chr_", "weapon": "wpn_", "equipment": "item_equip_"}[kind]
+        ):
+            from .providers.repository import localize
+
+            table = {
+                "operator": "CharGrowthTable",
+                "weapon": "WeaponBasicTable",
+                "equipment": "EquipTable",
+            }[kind]
+            entities, items, texts = await data.tables(
+                table, "ItemTable", "I18nTextTable_CN"
+            )
+            if query in entities and query in items:
+                add(
+                    kind,
+                    query,
+                    localize(items[query]["name"], texts),
+                    reason="stable-id",
+                )
+                return candidates
+        if kind == "equipment":
+            filters = parse_equipment_attribute_filters(query)
+            if filters:
+                add(
+                    "equipment_attribute",
+                    _equipment_attribute_key(filters, rarity),
+                    format_equipment_attribute_filters(filters),
+                    reason="attribute",
+                )
+                return candidates
+        if kind == "operator":
+            view = await service.get_operator_catalog_view(source="akedata")
+            professions = set()
+            for element in view.elements:
+                add(
+                    "operator_catalog",
+                    _operator_catalog_key(element.name, ""),
+                    f"{element.name}干员",
+                    score_candidate(query, element.name, f"{element.name}干员"),
+                    "element",
+                )
+                for profession in element.professions:
+                    professions.add(profession.name)
+                    for item in profession.items:
+                        add(
+                            kind,
+                            item.operator_id,
+                            item.name,
+                            score_entity_candidate(
+                                kind,
+                                query,
+                                item.name,
+                                item.english_name,
+                                item.title,
+                                item.operator_id,
+                            ),
+                            "catalog-item",
+                        )
+            for name in professions:
+                add(
+                    "operator_catalog",
+                    _operator_catalog_key("", name),
+                    f"{name}干员",
+                    score_candidate(query, name, f"{name}干员"),
+                    "profession",
+                )
+        elif kind == "weapon":
+            view = await service.get_weapon_catalog_view(source="akedata")
+            for group in view.groups:
+                add(
+                    "weapon_catalog",
+                    group.name,
+                    f"{group.name}武器",
+                    score_candidate(query, group.name, f"{group.name}武器"),
+                    "weapon-type",
+                )
+                for item in group.items:
+                    add(
+                        kind,
+                        item.weapon_id,
+                        item.name,
+                        score_entity_candidate(
+                            kind,
+                            query,
+                            item.name,
+                            item.english_name,
+                            item.title,
+                            item.weapon_id,
+                        ),
+                        "catalog-item",
+                    )
+        else:
+            view = await service.get_equipment_catalog_view(
+                rarity_filter=rarity, include_details=False, source="akedata"
+            )
+            for group in view.groups:
+                base = _equipment_group_base(group.name)
+                add(
+                    "equipment_catalog",
+                    _equipment_catalog_key(group.name, rarity),
+                    group.name,
+                    score_candidate(query, group.name, base, f"{base}套装"),
+                    "group",
+                )
+                for item in group.items:
+                    add(
+                        kind,
+                        item.equipment_id,
+                        item.name,
+                        score_entity_candidate(
+                            kind, query, item.name, item.title, item.equipment_id
+                        ),
+                        "catalog-item",
+                    )
+        return candidates
 
 
 async def _resolve_operator_candidates_fz(query: str) -> list[EndfieldCandidate]:
@@ -2395,7 +2564,7 @@ async def _resolve_equipment_candidates_fz(
             )
         ]
 
-    catalog = await service.get_equipment_catalog_view(rarity_filter=rarity_filter, include_details=False)
+    catalog = await service.get_equipment_catalog_view_from_fz(rarity_filter=rarity_filter, include_details=False)
     candidates: list[EndfieldCandidate] = []
     for group in catalog.groups:
         group_base = _equipment_group_base(group.name)
@@ -2458,6 +2627,19 @@ async def _render_candidate(
                     mode=candidate.mode or "detail",
                     selector=candidate.variant,
                 )
+            elif effective_source == "akedata" and candidate.kind in {"operator", "weapon", "equipment", "operator_catalog", "weapon_catalog", "equipment_catalog", "equipment_attribute"}:
+                from .providers.repository import query_snapshot
+                try:
+                    async with query_snapshot(candidate.revision):
+                        output = await renderer(candidate.key, effective_source)
+                except (WarfarinAPIError, RuntimeError, ValueError, KeyError, TypeError) as exc:
+                    if requested_source or candidate.kind not in {"operator", "weapon", "equipment", "operator_catalog", "weapon_catalog", "equipment_catalog", "equipment_attribute"}:
+                        raise
+                    logger.warning("[endfield] AKE render input incomplete; whole-view FZ fallback ({})", type(exc).__name__)
+                    prefix = {"operator": "干员", "weapon": "武器", "equipment": "装备"}.get(candidate.kind)
+                    key = f"{prefix}/{candidate.display_name}" if prefix else candidate.key
+                    output = await _render_candidate(replace(candidate, source="fz", key=key, revision=""), "fz")
+                    degraded = True  # Never label/cache a fallback result as AKE-complete.
             else:
                 output = await renderer(candidate.key, effective_source)
             if output is None:
@@ -2485,6 +2667,8 @@ async def _render_operator(key: str, source: str = "") -> bytes | None:
     started = perf_counter()
     if source == "fz":
         view = await service.get_operator_view_from_fz(key)
+    elif source == "akedata":
+        view = await service.get_operator_view_from_akedata(key)
     elif source == "warfarin":
         view = await service.get_operator_view_from_warfarin(key)
     else:
@@ -2505,6 +2689,8 @@ async def _render_weapon(key: str, source: str = "") -> bytes | None:
     started = perf_counter()
     if source == "fz":
         view = await service.get_weapon_view_from_fz(key)
+    elif source == "akedata":
+        view = await service.get_weapon_view_from_akedata(key)
     elif source == "warfarin":
         view = await service.get_weapon_view_from_warfarin(key)
     else:
@@ -2522,11 +2708,13 @@ async def _render_weapon(key: str, source: str = "") -> bytes | None:
 
 
 async def _render_equipment(key: str, source: str = "") -> bytes | None:
-    if source and source != "fz":
+    if source and source not in {"fz", "akedata"}:
         return None
     started = perf_counter()
     if source == "fz":
         view = await service.get_equipment_view_from_fz(key)
+    elif source == "akedata":
+        view = await service.get_equipment_view_from_akedata(key)
     else:
         view = await service.get_equipment_view(key)
     if view is None:
@@ -2542,26 +2730,26 @@ async def _render_equipment(key: str, source: str = "") -> bytes | None:
 
 
 async def _render_operator_catalog(key: str, source: str = "") -> bytes | None:
-    if source and source != "fz":
+    if source and source not in {"fz", "akedata"}:
         return None
     element, profession = _parse_operator_catalog_key(key)
-    view = await service.get_operator_catalog_view(element, profession)
+    view = await service.get_operator_catalog_view(element, profession, source=source)
     return await draw_operator_catalog_card(view)
 
 
 async def _render_weapon_catalog(key: str, source: str = "") -> bytes | None:
-    if source and source != "fz":
+    if source and source not in {"fz", "akedata"}:
         return None
-    view = await service.get_weapon_catalog_view(key)
+    view = await service.get_weapon_catalog_view(key, source=source)
     return await draw_weapon_catalog_card(view)
 
 
 async def _render_equipment_catalog(key: str, source: str = "") -> bytes | None:
-    if source and source != "fz":
+    if source and source not in {"fz", "akedata"}:
         return None
     started = perf_counter()
     group_name, rarity_filter = _parse_equipment_catalog_key(key)
-    view = await service.get_equipment_catalog_view(group_name, rarity_filter)
+    view = await service.get_equipment_catalog_view(group_name, rarity_filter, source=source)
     data_seconds = perf_counter() - started
     draw_started = perf_counter()
     output = await draw_equipment_catalog_card(view)
@@ -2573,14 +2761,14 @@ async def _render_equipment_catalog(key: str, source: str = "") -> bytes | None:
 
 
 async def _render_equipment_attribute(key: str, source: str = "") -> bytes | None:
-    if source and source != "fz":
+    if source and source not in {"fz", "akedata"}:
         return None
     filters, rarity_filter = _parse_equipment_attribute_key(key)
     if not filters:
         return None
     started = perf_counter()
     try:
-        view = await service.get_equipment_attribute_catalog_view(filters, rarity_filter)
+        view = await service.get_equipment_attribute_catalog_view(filters, rarity_filter, source=source)
     except ValueError:
         return None
     data_seconds = perf_counter() - started
@@ -2635,6 +2823,14 @@ async def _finish_png(matcher, png: bytes) -> None:
 
 async def _render_current_version_calendar() -> bytes:
     generation = _ASSET_GENERATION
+    try:
+        calendar = await calendar_source.current_ake_primary()
+        return await _CALENDAR_CACHE.get_or_create(
+            f"{generation}:akedata:{calendar.version}:{calendar.revision}",
+            lambda: draw_version_calendar(calendar),
+        )
+    except Exception as exc:
+        logger.warning("[endfield] AKE calendar coverage unavailable; official fallback ({})", type(exc).__name__)
     try:
         official = await official_calendar_source.current()
         return await _CALENDAR_CACHE.get_or_create(
@@ -2997,7 +3193,7 @@ async def _close_ownership_startup_task() -> None:
     await asyncio.gather(*(
         cache.close() for cache in (
             _CARD_CACHE, _LOADOUT_CACHE, _CALENDAR_CACHE,
-            _CHALLENGE_DATA_CACHE, _CHALLENGE_RENDER_CACHE, service._weapon_relations,
+            _CHALLENGE_DATA_CACHE, _CHALLENGE_RENDER_CACHE, service._weapon_relations, service._ake_views,
             _ACCOUNT_PAGE_CACHE,
         )
     ))

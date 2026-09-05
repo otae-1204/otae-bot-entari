@@ -1,0 +1,1255 @@
+{
+  "baseline_commit": "e0492d185cab4d28c4b24c7b91aad610be254fa8",
+  "public_table_process_probe": {
+    "public_resource": "https://data.akedata.wiki/public/1.5.3/9913107-5/TableCfg/CharProfessionTable.json",
+    "body_format": "normalized JSON",
+    "cache_expiry_forced_in_temporary_database": true,
+    "results": {
+      "cold": {
+        "seconds": 0.39322122698649764,
+        "http_statuses": [
+          200
+        ],
+        "bytes": 1003,
+        "sha256": "0f5354f70b125e296eb8d565c365e63c9cc18baf4a242609669cca188c534082"
+      },
+      "new_process_fresh_disk": {
+        "seconds": 0.04436702997190878,
+        "http_statuses": [],
+        "bytes": 1003,
+        "sha256": "0f5354f70b125e296eb8d565c365e63c9cc18baf4a242609669cca188c534082"
+      },
+      "new_process_forced_expiry": {
+        "seconds": 0.23288360703736544,
+        "http_statuses": [
+          304
+        ],
+        "bytes": 1003,
+        "sha256": "0f5354f70b125e296eb8d565c365e63c9cc18baf4a242609669cca188c534082"
+      }
+    },
+    "identical_bodies": true
+  },
+  "tests": {
+    "passed": 927,
+    "skipped": 3,
+    "subtests_passed": 46
+  },
+  "live": {
+    "utc": "2026-09-05T07:24:56.639044+00:00",
+    "mode": "live public HTTP",
+    "note": "No account credentials, bot startup/restart, QQ transport or human interaction. Browser prestarted. Each source/case uses isolated cold caches; disk_restart clears all RAM/domain/PNG state but retains SQLite (not OS page cache).",
+    "cases": {
+      "operator:提弗洛斯:fz": {
+        "cold": {
+          "seconds": 22.717478537000716,
+          "http_calls": 14,
+          "http_bytes": 19261513,
+          "result": {
+            "lookup_seconds": 0.6617129269870929,
+            "source": "fz",
+            "revision": "",
+            "pages": [
+              {
+                "png_bytes": 4165570,
+                "png_sha256": "f1c6246e69aef90e85e86e46d3eef8670937b0722bd74758e37db3512b483b57",
+                "size": [
+                  3200,
+                  2272
+                ],
+                "rgba_sha256": "5aa418de7df0d0f045a596002c4462f448f68924e6a931555d26b12f4fae1f29"
+              }
+            ]
+          }
+        },
+        "png_hit": {
+          "seconds": 0.004317179031204432,
+          "http_calls": 0,
+          "http_bytes": 0,
+          "result": {
+            "lookup_seconds": 0.004249607038218528,
+            "source": "fz",
+            "revision": "",
+            "pages": [
+              {
+                "png_bytes": 4165570,
+                "png_sha256": "f1c6246e69aef90e85e86e46d3eef8670937b0722bd74758e37db3512b483b57",
+                "size": [
+                  3200,
+                  2272
+                ],
+                "rgba_sha256": "5aa418de7df0d0f045a596002c4462f448f68924e6a931555d26b12f4fae1f29"
+              }
+            ]
+          }
+        },
+        "data_warm_png_cold": {
+          "seconds": 3.70787519402802,
+          "http_calls": 1,
+          "http_bytes": 2512,
+          "result": {
+            "lookup_seconds": 0.004126834042835981,
+            "source": "fz",
+            "revision": "",
+            "pages": [
+              {
+                "png_bytes": 4165570,
+                "png_sha256": "f1c6246e69aef90e85e86e46d3eef8670937b0722bd74758e37db3512b483b57",
+                "size": [
+                  3200,
+                  2272
+                ],
+                "rgba_sha256": "5aa418de7df0d0f045a596002c4462f448f68924e6a931555d26b12f4fae1f29"
+              }
+            ]
+          }
+        },
+        "disk_restart": {
+          "seconds": 5.482830353954341,
+          "http_calls": 6,
+          "http_bytes": 716822,
+          "result": {
+            "lookup_seconds": 0.6614051770302467,
+            "source": "fz",
+            "revision": "",
+            "pages": [
+              {
+                "png_bytes": 4165570,
+                "png_sha256": "f1c6246e69aef90e85e86e46d3eef8670937b0722bd74758e37db3512b483b57",
+                "size": [
+                  3200,
+                  2272
+                ],
+                "rgba_sha256": "5aa418de7df0d0f045a596002c4462f448f68924e6a931555d26b12f4fae1f29"
+              }
+            ]
+          }
+        }
+      },
+      "operator:提弗洛斯:akedata": {
+        "cold": {
+          "seconds": 20.243409129965585,
+          "http_calls": 22,
+          "http_bytes": 50678500,
+          "result": {
+            "lookup_seconds": 1.7350940229953267,
+            "source": "akedata",
+            "revision": "1.5.3@9913107-5|2026-09-02T12:36:22.209625+00:00",
+            "pages": [
+              {
+                "png_bytes": 4152348,
+                "png_sha256": "e2b14b9503a2d64ed14172de828d5291f25b9aa13902e54cb1fb20eda6486744",
+                "size": [
+                  3200,
+                  2246
+                ],
+                "rgba_sha256": "2c18e1bebc82c156c27c1f0716b97050fd5e5eaf2e6c4b1e849c29896efc8358"
+              }
+            ]
+          }
+        },
+        "png_hit": {
+          "seconds": 0.004617624974343926,
+          "http_calls": 0,
+          "http_bytes": 0,
+          "result": {
+            "lookup_seconds": 0.004562962974887341,
+            "source": "akedata",
+            "revision": "1.5.3@9913107-5|2026-09-02T12:36:22.209625+00:00",
+            "pages": [
+              {
+                "png_bytes": 4152348,
+                "png_sha256": "e2b14b9503a2d64ed14172de828d5291f25b9aa13902e54cb1fb20eda6486744",
+                "size": [
+                  3200,
+                  2246
+                ],
+                "rgba_sha256": "2c18e1bebc82c156c27c1f0716b97050fd5e5eaf2e6c4b1e849c29896efc8358"
+              }
+            ]
+          }
+        },
+        "data_warm_png_cold": {
+          "seconds": 3.4129462350392714,
+          "http_calls": 0,
+          "http_bytes": 0,
+          "result": {
+            "lookup_seconds": 0.004507581994403154,
+            "source": "akedata",
+            "revision": "1.5.3@9913107-5|2026-09-02T12:36:22.209625+00:00",
+            "pages": [
+              {
+                "png_bytes": 4152348,
+                "png_sha256": "e2b14b9503a2d64ed14172de828d5291f25b9aa13902e54cb1fb20eda6486744",
+                "size": [
+                  3200,
+                  2246
+                ],
+                "rgba_sha256": "2c18e1bebc82c156c27c1f0716b97050fd5e5eaf2e6c4b1e849c29896efc8358"
+              }
+            ]
+          }
+        },
+        "disk_restart": {
+          "seconds": 4.88368285697652,
+          "http_calls": 1,
+          "http_bytes": 2512,
+          "result": {
+            "lookup_seconds": 0.7360214059590362,
+            "source": "akedata",
+            "revision": "1.5.3@9913107-5|2026-09-02T12:36:22.209625+00:00",
+            "pages": [
+              {
+                "png_bytes": 4152348,
+                "png_sha256": "e2b14b9503a2d64ed14172de828d5291f25b9aa13902e54cb1fb20eda6486744",
+                "size": [
+                  3200,
+                  2246
+                ],
+                "rgba_sha256": "2c18e1bebc82c156c27c1f0716b97050fd5e5eaf2e6c4b1e849c29896efc8358"
+              }
+            ]
+          }
+        }
+      },
+      "operator:莱万汀:fz": {
+        "cold": {
+          "seconds": 20.52801054000156,
+          "http_calls": 14,
+          "http_bytes": 19228617,
+          "result": {
+            "lookup_seconds": 0.3136114100343548,
+            "source": "fz",
+            "revision": "",
+            "pages": [
+              {
+                "png_bytes": 4474536,
+                "png_sha256": "ace3fb6b87582d9e237e7085e9f9ef418f28ebac833f1bed6e343381d492a4ae",
+                "size": [
+                  3200,
+                  2622
+                ],
+                "rgba_sha256": "cdd324c0dfd6e685a76be0ddff26b16ff311dc8a12120b50815307f7829856b4"
+              }
+            ]
+          }
+        },
+        "png_hit": {
+          "seconds": 0.03287009202176705,
+          "http_calls": 0,
+          "http_bytes": 0,
+          "result": {
+            "lookup_seconds": 0.03279550897423178,
+            "source": "fz",
+            "revision": "",
+            "pages": [
+              {
+                "png_bytes": 4474536,
+                "png_sha256": "ace3fb6b87582d9e237e7085e9f9ef418f28ebac833f1bed6e343381d492a4ae",
+                "size": [
+                  3200,
+                  2622
+                ],
+                "rgba_sha256": "cdd324c0dfd6e685a76be0ddff26b16ff311dc8a12120b50815307f7829856b4"
+              }
+            ]
+          }
+        },
+        "data_warm_png_cold": {
+          "seconds": 3.3584081760491244,
+          "http_calls": 0,
+          "http_bytes": 0,
+          "result": {
+            "lookup_seconds": 0.0040862030000425875,
+            "source": "fz",
+            "revision": "",
+            "pages": [
+              {
+                "png_bytes": 4474536,
+                "png_sha256": "ace3fb6b87582d9e237e7085e9f9ef418f28ebac833f1bed6e343381d492a4ae",
+                "size": [
+                  3200,
+                  2622
+                ],
+                "rgba_sha256": "cdd324c0dfd6e685a76be0ddff26b16ff311dc8a12120b50815307f7829856b4"
+              }
+            ]
+          }
+        },
+        "disk_restart": {
+          "seconds": 5.5359923299984075,
+          "http_calls": 6,
+          "http_bytes": 683926,
+          "result": {
+            "lookup_seconds": 0.28796241601230577,
+            "source": "fz",
+            "revision": "",
+            "pages": [
+              {
+                "png_bytes": 4474536,
+                "png_sha256": "ace3fb6b87582d9e237e7085e9f9ef418f28ebac833f1bed6e343381d492a4ae",
+                "size": [
+                  3200,
+                  2622
+                ],
+                "rgba_sha256": "cdd324c0dfd6e685a76be0ddff26b16ff311dc8a12120b50815307f7829856b4"
+              }
+            ]
+          }
+        }
+      },
+      "operator:莱万汀:akedata": {
+        "cold": {
+          "seconds": 20.401226480025798,
+          "http_calls": 24,
+          "http_bytes": 50691380,
+          "result": {
+            "lookup_seconds": 1.6218931180192158,
+            "source": "akedata",
+            "revision": "1.5.3@9913107-5|2026-09-02T12:36:22.209625+00:00",
+            "pages": [
+              {
+                "png_bytes": 4464467,
+                "png_sha256": "2bec695f9475041852ae5b73ca002ed2c38788ecec294e4b1fb1a4b05eefe864",
+                "size": [
+                  3200,
+                  2584
+                ],
+                "rgba_sha256": "ae6e98e15211310301a55e3d04b3df92e6bad3b4d5b6adfa9e02699095df202d"
+              }
+            ]
+          }
+        },
+        "png_hit": {
+          "seconds": 0.004550223995465785,
+          "http_calls": 0,
+          "http_bytes": 0,
+          "result": {
+            "lookup_seconds": 0.00449167302576825,
+            "source": "akedata",
+            "revision": "1.5.3@9913107-5|2026-09-02T12:36:22.209625+00:00",
+            "pages": [
+              {
+                "png_bytes": 4464467,
+                "png_sha256": "2bec695f9475041852ae5b73ca002ed2c38788ecec294e4b1fb1a4b05eefe864",
+                "size": [
+                  3200,
+                  2584
+                ],
+                "rgba_sha256": "ae6e98e15211310301a55e3d04b3df92e6bad3b4d5b6adfa9e02699095df202d"
+              }
+            ]
+          }
+        },
+        "data_warm_png_cold": {
+          "seconds": 3.605577914044261,
+          "http_calls": 0,
+          "http_bytes": 0,
+          "result": {
+            "lookup_seconds": 0.004603653971571475,
+            "source": "akedata",
+            "revision": "1.5.3@9913107-5|2026-09-02T12:36:22.209625+00:00",
+            "pages": [
+              {
+                "png_bytes": 4464467,
+                "png_sha256": "2bec695f9475041852ae5b73ca002ed2c38788ecec294e4b1fb1a4b05eefe864",
+                "size": [
+                  3200,
+                  2584
+                ],
+                "rgba_sha256": "ae6e98e15211310301a55e3d04b3df92e6bad3b4d5b6adfa9e02699095df202d"
+              }
+            ]
+          }
+        },
+        "disk_restart": {
+          "seconds": 4.827544464031234,
+          "http_calls": 1,
+          "http_bytes": 2512,
+          "result": {
+            "lookup_seconds": 0.5540722139994614,
+            "source": "akedata",
+            "revision": "1.5.3@9913107-5|2026-09-02T12:36:22.209625+00:00",
+            "pages": [
+              {
+                "png_bytes": 4464467,
+                "png_sha256": "2bec695f9475041852ae5b73ca002ed2c38788ecec294e4b1fb1a4b05eefe864",
+                "size": [
+                  3200,
+                  2584
+                ],
+                "rgba_sha256": "ae6e98e15211310301a55e3d04b3df92e6bad3b4d5b6adfa9e02699095df202d"
+              }
+            ]
+          }
+        }
+      },
+      "weapon:熔铸火焰:fz": {
+        "cold": {
+          "seconds": 3.330856325046625,
+          "http_calls": 14,
+          "http_bytes": 3452009,
+          "result": {
+            "lookup_seconds": 1.0224314799997956,
+            "source": "fz",
+            "revision": "",
+            "pages": [
+              {
+                "png_bytes": 1289483,
+                "png_sha256": "6b8d36abe6b501056e61058c3017d12fba3eaf994b27d2802512781d80ab627b",
+                "size": [
+                  2880,
+                  1654
+                ],
+                "rgba_sha256": "8f9c0771a1adc21d4cd72251fd07da84d6485d649e977051ce20d60e837d6c35"
+              }
+            ]
+          }
+        },
+        "png_hit": {
+          "seconds": 1.113425699993968,
+          "http_calls": 1,
+          "http_bytes": 66958,
+          "result": {
+            "lookup_seconds": 1.1133648489485495,
+            "source": "fz",
+            "revision": "",
+            "pages": [
+              {
+                "png_bytes": 1289483,
+                "png_sha256": "6b8d36abe6b501056e61058c3017d12fba3eaf994b27d2802512781d80ab627b",
+                "size": [
+                  2880,
+                  1654
+                ],
+                "rgba_sha256": "8f9c0771a1adc21d4cd72251fd07da84d6485d649e977051ce20d60e837d6c35"
+              }
+            ]
+          }
+        },
+        "data_warm_png_cold": {
+          "seconds": 1.876571436994709,
+          "http_calls": 4,
+          "http_bytes": 215592,
+          "result": {
+            "lookup_seconds": 0.00665665598353371,
+            "source": "fz",
+            "revision": "",
+            "pages": [
+              {
+                "png_bytes": 1289483,
+                "png_sha256": "6b8d36abe6b501056e61058c3017d12fba3eaf994b27d2802512781d80ab627b",
+                "size": [
+                  2880,
+                  1654
+                ],
+                "rgba_sha256": "8f9c0771a1adc21d4cd72251fd07da84d6485d649e977051ce20d60e837d6c35"
+              }
+            ]
+          }
+        },
+        "disk_restart": {
+          "seconds": 2.214252855977975,
+          "http_calls": 13,
+          "http_bytes": 3189405,
+          "result": {
+            "lookup_seconds": 0.7177041589748114,
+            "source": "fz",
+            "revision": "",
+            "pages": [
+              {
+                "png_bytes": 1289483,
+                "png_sha256": "6b8d36abe6b501056e61058c3017d12fba3eaf994b27d2802512781d80ab627b",
+                "size": [
+                  2880,
+                  1654
+                ],
+                "rgba_sha256": "8f9c0771a1adc21d4cd72251fd07da84d6485d649e977051ce20d60e837d6c35"
+              }
+            ]
+          }
+        }
+      },
+      "weapon:熔铸火焰:akedata": {
+        "cold": {
+          "seconds": 3.423686957976315,
+          "http_calls": 11,
+          "http_bytes": 23217821,
+          "result": {
+            "lookup_seconds": 2.1171536530018784,
+            "source": "akedata",
+            "revision": "1.5.3@9913107-5|2026-09-02T12:36:22.209625+00:00",
+            "pages": [
+              {
+                "png_bytes": 1290895,
+                "png_sha256": "6be6e27c49af266254c1825c15a3561c448ee05155bb96fae1cbb028ca709e1c",
+                "size": [
+                  2880,
+                  1654
+                ],
+                "rgba_sha256": "4a6d1f4ebd3a7969dc0526f6579bd19568fab9c669c48638792ffff9d64fca79"
+              }
+            ]
+          }
+        },
+        "png_hit": {
+          "seconds": 0.01777018199209124,
+          "http_calls": 0,
+          "http_bytes": 0,
+          "result": {
+            "lookup_seconds": 0.017708152008708566,
+            "source": "akedata",
+            "revision": "1.5.3@9913107-5|2026-09-02T12:36:22.209625+00:00",
+            "pages": [
+              {
+                "png_bytes": 1290895,
+                "png_sha256": "6be6e27c49af266254c1825c15a3561c448ee05155bb96fae1cbb028ca709e1c",
+                "size": [
+                  2880,
+                  1654
+                ],
+                "rgba_sha256": "4a6d1f4ebd3a7969dc0526f6579bd19568fab9c669c48638792ffff9d64fca79"
+              }
+            ]
+          }
+        },
+        "data_warm_png_cold": {
+          "seconds": 0.6794252879917622,
+          "http_calls": 0,
+          "http_bytes": 0,
+          "result": {
+            "lookup_seconds": 0.006174287002068013,
+            "source": "akedata",
+            "revision": "1.5.3@9913107-5|2026-09-02T12:36:22.209625+00:00",
+            "pages": [
+              {
+                "png_bytes": 1290895,
+                "png_sha256": "6be6e27c49af266254c1825c15a3561c448ee05155bb96fae1cbb028ca709e1c",
+                "size": [
+                  2880,
+                  1654
+                ],
+                "rgba_sha256": "4a6d1f4ebd3a7969dc0526f6579bd19568fab9c669c48638792ffff9d64fca79"
+              }
+            ]
+          }
+        },
+        "disk_restart": {
+          "seconds": 2.0442213059868664,
+          "http_calls": 1,
+          "http_bytes": 2512,
+          "result": {
+            "lookup_seconds": 1.0057894449564628,
+            "source": "akedata",
+            "revision": "1.5.3@9913107-5|2026-09-02T12:36:22.209625+00:00",
+            "pages": [
+              {
+                "png_bytes": 1290895,
+                "png_sha256": "6be6e27c49af266254c1825c15a3561c448ee05155bb96fae1cbb028ca709e1c",
+                "size": [
+                  2880,
+                  1654
+                ],
+                "rgba_sha256": "4a6d1f4ebd3a7969dc0526f6579bd19568fab9c669c48638792ffff9d64fca79"
+              }
+            ]
+          }
+        }
+      },
+      "equipment:长息轻护甲:fz": {
+        "cold": {
+          "seconds": 4.984733744990081,
+          "http_calls": 21,
+          "http_bytes": 3537293,
+          "result": {
+            "lookup_seconds": 0.6374346499796957,
+            "source": "fz",
+            "revision": "",
+            "pages": [
+              {
+                "png_bytes": 1411059,
+                "png_sha256": "662db00a78d61d903249fc96a4236b8f39c3c4764c53894c31299e0785f0d810",
+                "size": [
+                  3000,
+                  1840
+                ],
+                "rgba_sha256": "2c0a0ca00bb3389ca55e707bec58c1b3967df678f069590a4690bfccb2547942"
+              }
+            ]
+          }
+        },
+        "png_hit": {
+          "seconds": 2.6980026669916697,
+          "http_calls": 6,
+          "http_bytes": 162900,
+          "result": {
+            "lookup_seconds": 0.011448553996160626,
+            "source": "fz",
+            "revision": "",
+            "pages": [
+              {
+                "png_bytes": 1411059,
+                "png_sha256": "662db00a78d61d903249fc96a4236b8f39c3c4764c53894c31299e0785f0d810",
+                "size": [
+                  3000,
+                  1840
+                ],
+                "rgba_sha256": "2c0a0ca00bb3389ca55e707bec58c1b3967df678f069590a4690bfccb2547942"
+              }
+            ]
+          }
+        },
+        "data_warm_png_cold": {
+          "seconds": 2.718871074030176,
+          "http_calls": 6,
+          "http_bytes": 162900,
+          "result": {
+            "lookup_seconds": 0.012463063991162926,
+            "source": "fz",
+            "revision": "",
+            "pages": [
+              {
+                "png_bytes": 1411059,
+                "png_sha256": "662db00a78d61d903249fc96a4236b8f39c3c4764c53894c31299e0785f0d810",
+                "size": [
+                  3000,
+                  1840
+                ],
+                "rgba_sha256": "2c0a0ca00bb3389ca55e707bec58c1b3967df678f069590a4690bfccb2547942"
+              }
+            ]
+          }
+        },
+        "disk_restart": {
+          "seconds": 4.261043333972339,
+          "http_calls": 9,
+          "http_bytes": 386045,
+          "result": {
+            "lookup_seconds": 0.7350682379910722,
+            "source": "fz",
+            "revision": "",
+            "pages": [
+              {
+                "png_bytes": 1411059,
+                "png_sha256": "662db00a78d61d903249fc96a4236b8f39c3c4764c53894c31299e0785f0d810",
+                "size": [
+                  3000,
+                  1840
+                ],
+                "rgba_sha256": "2c0a0ca00bb3389ca55e707bec58c1b3967df678f069590a4690bfccb2547942"
+              }
+            ]
+          }
+        }
+      },
+      "equipment:长息轻护甲:akedata": {
+        "cold": {
+          "seconds": 3.935039287956897,
+          "http_calls": 28,
+          "http_bytes": 25343850,
+          "result": {
+            "lookup_seconds": 1.7537587110418826,
+            "source": "akedata",
+            "revision": "1.5.3@9913107-5|2026-09-02T12:36:22.209625+00:00",
+            "pages": [
+              {
+                "png_bytes": 1415812,
+                "png_sha256": "65a336ef898b75b8719281a95fcc8c73176f67b7ad177719c968aed38c7c9506",
+                "size": [
+                  3000,
+                  1840
+                ],
+                "rgba_sha256": "2dd5da465f6ea8bb87a9e9ff7c9d95b73acfff44d126ba583e15f2b2c5982ea5"
+              }
+            ]
+          }
+        },
+        "png_hit": {
+          "seconds": 0.01370914001017809,
+          "http_calls": 0,
+          "http_bytes": 0,
+          "result": {
+            "lookup_seconds": 0.013649168016854674,
+            "source": "akedata",
+            "revision": "1.5.3@9913107-5|2026-09-02T12:36:22.209625+00:00",
+            "pages": [
+              {
+                "png_bytes": 1415812,
+                "png_sha256": "65a336ef898b75b8719281a95fcc8c73176f67b7ad177719c968aed38c7c9506",
+                "size": [
+                  3000,
+                  1840
+                ],
+                "rgba_sha256": "2dd5da465f6ea8bb87a9e9ff7c9d95b73acfff44d126ba583e15f2b2c5982ea5"
+              }
+            ]
+          }
+        },
+        "data_warm_png_cold": {
+          "seconds": 0.8466242090216838,
+          "http_calls": 0,
+          "http_bytes": 0,
+          "result": {
+            "lookup_seconds": 0.013306272041518241,
+            "source": "akedata",
+            "revision": "1.5.3@9913107-5|2026-09-02T12:36:22.209625+00:00",
+            "pages": [
+              {
+                "png_bytes": 1415812,
+                "png_sha256": "65a336ef898b75b8719281a95fcc8c73176f67b7ad177719c968aed38c7c9506",
+                "size": [
+                  3000,
+                  1840
+                ],
+                "rgba_sha256": "2dd5da465f6ea8bb87a9e9ff7c9d95b73acfff44d126ba583e15f2b2c5982ea5"
+              }
+            ]
+          }
+        },
+        "disk_restart": {
+          "seconds": 1.8527788060018793,
+          "http_calls": 1,
+          "http_bytes": 2512,
+          "result": {
+            "lookup_seconds": 0.5347932259901427,
+            "source": "akedata",
+            "revision": "1.5.3@9913107-5|2026-09-02T12:36:22.209625+00:00",
+            "pages": [
+              {
+                "png_bytes": 1415812,
+                "png_sha256": "65a336ef898b75b8719281a95fcc8c73176f67b7ad177719c968aed38c7c9506",
+                "size": [
+                  3000,
+                  1840
+                ],
+                "rgba_sha256": "2dd5da465f6ea8bb87a9e9ff7c9d95b73acfff44d126ba583e15f2b2c5982ea5"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "peak_python_rss_mib": 1148.0234375,
+    "loadout_comparison": {
+      "fz": {
+        "seconds": 1.376952495018486,
+        "view": {
+          "source_name": "api.fz.wiki",
+          "source_version": "2026-09-02",
+          "primary_stats": [
+            {
+              "key": "Atk",
+              "label": "攻击力",
+              "value": "3811",
+              "detail": "318 + 510，攻击加成 39.0%，能力加成 231.2%"
+            },
+            {
+              "key": "MaxHp",
+              "label": "生命值",
+              "value": "6100",
+              "detail": "基础 5495，力量额外 +605"
+            },
+            {
+              "key": "Def",
+              "label": "防御力",
+              "value": "56",
+              "detail": ""
+            }
+          ],
+          "ability_stats": [
+            {
+              "key": "Str",
+              "label": "力量",
+              "value": "121",
+              "detail": ""
+            },
+            {
+              "key": "Agi",
+              "label": "敏捷",
+              "value": "100",
+              "detail": ""
+            },
+            {
+              "key": "Wisd",
+              "label": "智识",
+              "value": "414",
+              "detail": ""
+            },
+            {
+              "key": "Will",
+              "label": "意志",
+              "value": "232",
+              "detail": ""
+            }
+          ],
+          "advanced_stats": [
+            {
+              "key": "CriticalRate",
+              "label": "暴击率",
+              "value": "5.0%",
+              "detail": ""
+            },
+            {
+              "key": "CriticalDamageIncrease",
+              "label": "暴击伤害",
+              "value": "50.0%",
+              "detail": ""
+            },
+            {
+              "key": "PhysicalAndSpellInflictionEnhance",
+              "label": "源石技艺强度",
+              "value": "0",
+              "detail": "导电 / 腐蚀 / 碎甲附带效果 +0.0%"
+            },
+            {
+              "key": "PhysicalResistance",
+              "label": "物理抗性",
+              "value": "9.1%",
+              "detail": ""
+            },
+            {
+              "key": "FireResistance",
+              "label": "灼热抗性",
+              "value": "29.3%",
+              "detail": ""
+            },
+            {
+              "key": "PulseResistance",
+              "label": "电磁抗性",
+              "value": "29.3%",
+              "detail": ""
+            },
+            {
+              "key": "CrystResistance",
+              "label": "寒冷抗性",
+              "value": "29.3%",
+              "detail": ""
+            },
+            {
+              "key": "NaturalResistance",
+              "label": "自然抗性",
+              "value": "29.3%",
+              "detail": ""
+            },
+            {
+              "key": "EtherResistance",
+              "label": "超域抗性",
+              "value": "29.3%",
+              "detail": ""
+            },
+            {
+              "key": "HealTakenIncrease",
+              "label": "受治疗效率加成",
+              "value": "23.2%",
+              "detail": ""
+            },
+            {
+              "key": "UltimateSpGainScalar",
+              "label": "终结技充能效率",
+              "value": "116.0%",
+              "detail": ""
+            },
+            {
+              "key": "FireDamageIncrease",
+              "label": "灼热伤害加成",
+              "value": "44.8%",
+              "detail": ""
+            }
+          ]
+        }
+      },
+      "akedata": {
+        "seconds": 1.4631529469625093,
+        "view": {
+          "source_name": "AKEData",
+          "source_version": "1.5.3@9913107-5",
+          "primary_stats": [
+            {
+              "key": "Atk",
+              "label": "攻击力",
+              "value": "3811",
+              "detail": "318 + 510，攻击加成 39.0%，能力加成 231.2%"
+            },
+            {
+              "key": "MaxHp",
+              "label": "生命值",
+              "value": "6100",
+              "detail": "基础 5495，力量额外 +605"
+            },
+            {
+              "key": "Def",
+              "label": "防御力",
+              "value": "56",
+              "detail": ""
+            }
+          ],
+          "ability_stats": [
+            {
+              "key": "Str",
+              "label": "力量",
+              "value": "121",
+              "detail": ""
+            },
+            {
+              "key": "Agi",
+              "label": "敏捷",
+              "value": "100",
+              "detail": ""
+            },
+            {
+              "key": "Wisd",
+              "label": "智识",
+              "value": "414",
+              "detail": ""
+            },
+            {
+              "key": "Will",
+              "label": "意志",
+              "value": "232",
+              "detail": ""
+            }
+          ],
+          "advanced_stats": [
+            {
+              "key": "CriticalRate",
+              "label": "暴击率",
+              "value": "5.0%",
+              "detail": ""
+            },
+            {
+              "key": "CriticalDamageIncrease",
+              "label": "暴击伤害",
+              "value": "50.0%",
+              "detail": ""
+            },
+            {
+              "key": "PhysicalAndSpellInflictionEnhance",
+              "label": "源石技艺强度",
+              "value": "0",
+              "detail": "导电 / 腐蚀 / 碎甲附带效果 +0.0%"
+            },
+            {
+              "key": "PhysicalResistance",
+              "label": "物理抗性",
+              "value": "9.1%",
+              "detail": ""
+            },
+            {
+              "key": "FireResistance",
+              "label": "灼热抗性",
+              "value": "29.3%",
+              "detail": ""
+            },
+            {
+              "key": "PulseResistance",
+              "label": "电磁抗性",
+              "value": "29.3%",
+              "detail": ""
+            },
+            {
+              "key": "CrystResistance",
+              "label": "寒冷抗性",
+              "value": "29.3%",
+              "detail": ""
+            },
+            {
+              "key": "NaturalResistance",
+              "label": "自然抗性",
+              "value": "29.3%",
+              "detail": ""
+            },
+            {
+              "key": "EtherResistance",
+              "label": "超域抗性",
+              "value": "29.3%",
+              "detail": ""
+            },
+            {
+              "key": "HealTakenIncrease",
+              "label": "受治疗效率加成",
+              "value": "23.2%",
+              "detail": ""
+            },
+            {
+              "key": "UltimateSpGainScalar",
+              "label": "终结技充能效率",
+              "value": "116.0%",
+              "detail": ""
+            },
+            {
+              "key": "FireDamageIncrease",
+              "label": "灼热伤害加成",
+              "value": "44.8%",
+              "detail": ""
+            }
+          ]
+        }
+      }
+    }
+  },
+  "public_replay": {
+    "version": "1.5.3@9885010-4",
+    "mode": "offline public replay (not live latency)",
+    "counts": {
+      "operator": 30,
+      "weapon": 79,
+      "equipment": 258
+    },
+    "errors": [],
+    "known_incomplete_requires_whole_view_fallback": [
+      {
+        "kind": "operator",
+        "key": "chr_0002_endminm",
+        "error": "AKE talent/potential parameters unavailable"
+      },
+      {
+        "kind": "operator",
+        "key": "chr_0003_endminf",
+        "error": "AKE talent/potential parameters unavailable"
+      }
+    ]
+  },
+  "mixed_metadata": {
+    "utc": "2026-09-05T07:29:29.150592+00:00",
+    "mode": "live public HTTP",
+    "note": "Public data-only mixed workload: ten concurrent operations, no browser or images, no account APIs. disk_restart clears Python caches/connections, not the process or OS page cache.",
+    "cases": {
+      "cold": {
+        "seconds": 2.897908432991244,
+        "http_calls": 24,
+        "http_bytes": 35026075,
+        "result": {
+          "revision": "1.5.3@9913107-5|2026-09-02T12:36:22.209625+00:00",
+          "operations": 10,
+          "sources": [
+            "AKEData"
+          ],
+          "operator_catalog": 31,
+          "weapon_catalog": 79,
+          "equipment_catalog": 167,
+          "pools": 34,
+          "keepsakes": 1
+        },
+        "dto_cache": {
+          "entries": 8,
+          "bytes": 785654,
+          "hits": 0,
+          "misses": 8,
+          "coalesced": 0,
+          "evictions": 0,
+          "inflight": 0,
+          "expirations": 0,
+          "capacity_evictions": 0,
+          "oversized": 0,
+          "failures": 0,
+          "fill_seconds": 17.34848631999921,
+          "wait_seconds": 0
+        },
+        "http_cache": {
+          "entries": 12,
+          "bytes": 38777782,
+          "hits": 33,
+          "misses": 24,
+          "coalesced": 33,
+          "evictions": 12,
+          "inflight": 0,
+          "expirations": 0,
+          "capacity_evictions": 12,
+          "oversized": 0,
+          "failures": 0,
+          "fill_seconds": 10.249836270872038,
+          "wait_seconds": 26.269587533024605
+        }
+      },
+      "warm1": {
+        "seconds": 0.3541677370085381,
+        "http_calls": 0,
+        "http_bytes": 0,
+        "result": {
+          "revision": "1.5.3@9913107-5|2026-09-02T12:36:22.209625+00:00",
+          "operations": 10,
+          "sources": [
+            "AKEData"
+          ],
+          "operator_catalog": 31,
+          "weapon_catalog": 79,
+          "equipment_catalog": 167,
+          "pools": 34,
+          "keepsakes": 1
+        },
+        "dto_cache": {
+          "entries": 8,
+          "bytes": 785654,
+          "hits": 8,
+          "misses": 8,
+          "coalesced": 0,
+          "evictions": 0,
+          "inflight": 0,
+          "expirations": 0,
+          "capacity_evictions": 0,
+          "oversized": 0,
+          "failures": 0,
+          "fill_seconds": 17.34848631999921,
+          "wait_seconds": 0
+        },
+        "http_cache": {
+          "entries": 7,
+          "bytes": 48456801,
+          "hits": 35,
+          "misses": 28,
+          "coalesced": 34,
+          "evictions": 21,
+          "inflight": 0,
+          "expirations": 0,
+          "capacity_evictions": 21,
+          "oversized": 0,
+          "failures": 0,
+          "fill_seconds": 10.850643061916344,
+          "wait_seconds": 26.610088581044693
+        }
+      },
+      "warm2": {
+        "seconds": 0.012725800042971969,
+        "http_calls": 0,
+        "http_bytes": 0,
+        "result": {
+          "revision": "1.5.3@9913107-5|2026-09-02T12:36:22.209625+00:00",
+          "operations": 10,
+          "sources": [
+            "AKEData"
+          ],
+          "operator_catalog": 31,
+          "weapon_catalog": 79,
+          "equipment_catalog": 167,
+          "pools": 34,
+          "keepsakes": 1
+        },
+        "dto_cache": {
+          "entries": 8,
+          "bytes": 785654,
+          "hits": 16,
+          "misses": 8,
+          "coalesced": 0,
+          "evictions": 0,
+          "inflight": 0,
+          "expirations": 0,
+          "capacity_evictions": 0,
+          "oversized": 0,
+          "failures": 0,
+          "fill_seconds": 17.34848631999921,
+          "wait_seconds": 0
+        },
+        "http_cache": {
+          "entries": 7,
+          "bytes": 48456801,
+          "hits": 40,
+          "misses": 28,
+          "coalesced": 34,
+          "evictions": 21,
+          "inflight": 0,
+          "expirations": 0,
+          "capacity_evictions": 21,
+          "oversized": 0,
+          "failures": 0,
+          "fill_seconds": 10.850643061916344,
+          "wait_seconds": 26.610088581044693
+        }
+      },
+      "warm3": {
+        "seconds": 0.012372882978525013,
+        "http_calls": 0,
+        "http_bytes": 0,
+        "result": {
+          "revision": "1.5.3@9913107-5|2026-09-02T12:36:22.209625+00:00",
+          "operations": 10,
+          "sources": [
+            "AKEData"
+          ],
+          "operator_catalog": 31,
+          "weapon_catalog": 79,
+          "equipment_catalog": 167,
+          "pools": 34,
+          "keepsakes": 1
+        },
+        "dto_cache": {
+          "entries": 8,
+          "bytes": 785654,
+          "hits": 24,
+          "misses": 8,
+          "coalesced": 0,
+          "evictions": 0,
+          "inflight": 0,
+          "expirations": 0,
+          "capacity_evictions": 0,
+          "oversized": 0,
+          "failures": 0,
+          "fill_seconds": 17.34848631999921,
+          "wait_seconds": 0
+        },
+        "http_cache": {
+          "entries": 7,
+          "bytes": 48456801,
+          "hits": 45,
+          "misses": 28,
+          "coalesced": 34,
+          "evictions": 21,
+          "inflight": 0,
+          "expirations": 0,
+          "capacity_evictions": 21,
+          "oversized": 0,
+          "failures": 0,
+          "fill_seconds": 10.850643061916344,
+          "wait_seconds": 26.610088581044693
+        }
+      },
+      "disk_restart": {
+        "seconds": 1.4736911719664931,
+        "http_calls": 1,
+        "http_bytes": 2512,
+        "result": {
+          "revision": "1.5.3@9913107-5|2026-09-02T12:36:22.209625+00:00",
+          "operations": 10,
+          "sources": [
+            "AKEData"
+          ],
+          "operator_catalog": 31,
+          "weapon_catalog": 79,
+          "equipment_catalog": 167,
+          "pools": 34,
+          "keepsakes": 1
+        },
+        "dto_cache": {
+          "entries": 8,
+          "bytes": 785654,
+          "hits": 24,
+          "misses": 16,
+          "coalesced": 0,
+          "evictions": 0,
+          "inflight": 0,
+          "expirations": 0,
+          "capacity_evictions": 0,
+          "oversized": 0,
+          "failures": 0,
+          "fill_seconds": 25.885402318905108,
+          "wait_seconds": 0
+        },
+        "http_cache": {
+          "entries": 18,
+          "bytes": 63231160,
+          "hits": 31,
+          "misses": 24,
+          "coalesced": 31,
+          "evictions": 6,
+          "inflight": 0,
+          "expirations": 0,
+          "capacity_evictions": 6,
+          "oversized": 0,
+          "failures": 0,
+          "fill_seconds": 9.553517305175774,
+          "wait_seconds": 15.089260752836708
+        }
+      }
+    },
+    "peak_python_rss_mib": 429.328125
+  }
+}

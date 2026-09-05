@@ -72,6 +72,6 @@ def json_memory_size(value: Any) -> int:
         if isinstance(item, dict):
             pending.extend(item.keys())
             pending.extend(item.values())
-        elif isinstance(item, list):
+        elif isinstance(item, (list, tuple)):
             pending.extend(item)
     return size

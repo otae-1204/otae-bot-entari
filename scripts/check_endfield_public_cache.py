@@ -1,4 +1,4 @@
-"""Read-only public-image restart/revalidation probe; no account credentials.
+"""Read-only public image/table restart/revalidation probe; no credentials.
 
 Each phase runs in a new process against a disposable cache directory. The last
 phase ages only that temporary cache to exercise actual upstream validators.
@@ -22,16 +22,22 @@ PUBLIC_IMAGE = (
     "https://data.akedata.wiki/public/images/assets/beyond/dynamicassets/"
     "gameplay/ui/sprites/charremoteicon/icon_chr_0005_chen.png"
 )
+PUBLIC_TABLE = (
+    "https://data.akedata.wiki/public/1.5.3/9913107-5/TableCfg/CharProfessionTable.json"
+)
 
 
-async def probe(path):
+async def probe(path, *, table=False):
     import httpx
     from loguru import logger
     from otae_bot.infrastructure.http import client
     from otae_bot.infrastructure.http.disk import PublicImageDiskCache
 
     logger.remove()
-    client.public_images = PublicImageDiskCache(path, 4 * 1024 * 1024)
+    if table:
+        client.public_tables = PublicImageDiskCache(path, 4 * 1024 * 1024)
+    else:
+        client.public_images = PublicImageDiskCache(path, 4 * 1024 * 1024)
     statuses = []
     original = httpx.AsyncClient.send
 
@@ -43,15 +49,20 @@ async def probe(path):
     try:
         with patch.object(httpx.AsyncClient, "send", send):
             started = perf_counter()
-            resource = await client.fetch_bytes(
-                PUBLIC_IMAGE, namespace="endfield-assets"
-            )
+            if table:
+                value = await client.fetch_json(PUBLIC_TABLE, namespace="akedata")
+                content = json.dumps(value, ensure_ascii=False, sort_keys=True).encode()
+            else:
+                resource = await client.fetch_bytes(
+                    PUBLIC_IMAGE, namespace="endfield-assets"
+                )
+                content = resource.content
             elapsed = perf_counter() - started
         return {
             "seconds": elapsed,
             "http_statuses": statuses,
-            "bytes": len(resource.content),
-            "sha256": hashlib.sha256(resource.content).hexdigest(),
+            "bytes": len(content),
+            "sha256": hashlib.sha256(content).hexdigest(),
         }
     finally:
         await client.close_http_client()
@@ -61,10 +72,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--child-cache", type=Path)
+    parser.add_argument("--table", action="store_true")
     args = parser.parse_args()
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     if args.child_cache:
-        print(json.dumps(asyncio.run(probe(args.child_cache))))
+        print(json.dumps(asyncio.run(probe(args.child_cache, table=args.table))))
         return
     if args.output is None:
         parser.error("--output is required")
@@ -83,6 +95,7 @@ def main():
                     str(Path(__file__).resolve()),
                     "--child-cache",
                     str(path),
+                    *(["--table"] if args.table else []),
                 ],
                 capture_output=True,
                 text=True,
@@ -91,7 +104,8 @@ def main():
             )
             results[phase] = json.loads(result.stdout.splitlines()[-1])
     report = {
-        "public_resource": PUBLIC_IMAGE,
+        "public_resource": PUBLIC_TABLE if args.table else PUBLIC_IMAGE,
+        "body_format": "normalized JSON" if args.table else "original image bytes",
         "cache_expiry_forced_in_temporary_database": True,
         "results": results,
         "identical_bodies": len({item["sha256"] for item in results.values()}) == 1,

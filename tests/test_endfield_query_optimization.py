@@ -150,13 +150,13 @@ class EquipmentDirectoryTests(unittest.IsolatedAsyncioTestCase):
         for rarity in ("gold", "all"):
             with self.subTest(rarity=rarity):
                 client.fz_article_by_title.reset_mock()
-                light = await service.get_equipment_catalog_view(
+                light = await service.get_equipment_catalog_view_from_fz(
                     rarity_filter=rarity, include_details=False
                 )
                 client.fz_article_by_title.assert_awaited_once_with("装备")
                 self.assertGreater(light.total_count, 0)
                 client.fz_article_by_title.reset_mock()
-                full = await service.get_equipment_catalog_view(rarity_filter=rarity)
+                full = await service.get_equipment_catalog_view_from_fz(rarity_filter=rarity)
                 self.assertEqual(
                     client.fz_article_by_title.await_count, 1 + len(full.groups)
                 )
@@ -166,7 +166,7 @@ class EquipmentDirectoryTests(unittest.IsolatedAsyncioTestCase):
         from plugins.endfield.catalog.models import EquipmentCatalogView
 
         loader = AsyncMock(return_value=EquipmentCatalogView("装备"))
-        with patch.object(endfield.service, "get_equipment_catalog_view", loader):
+        with patch.object(endfield.service, "get_equipment_catalog_view_from_fz", loader):
             self.assertEqual(
                 await endfield._resolve_equipment_candidates_fz("不存在装备"), []
             )

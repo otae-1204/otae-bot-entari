@@ -1,18 +1,17 @@
 from __future__ import annotations
 
-import time
 from typing import Any
 
 import httpx
 
 from otae_bot.infrastructure.http.client import fetch_json
-from .akedata import AKEDATA_HEADERS
+from .akedata import AKEDATA_HEADERS, _get, fetch_akedata_manifest
 
 
 API_CACHE_NAMESPACE = "endfield-api"
 AKEDATA_MAX_TABLE_BYTES = 24 * 1024 * 1024
 AKEDATA_MAX_RESOURCE_BYTES = 6 * 1024 * 1024
-AKEDATA_MAX_ASSET_INDEX_BYTES = 8 * 1024 * 1024
+AKEDATA_MAX_ASSET_INDEX_BYTES = 16 * 1024 * 1024
 
 
 class WarfarinAPIError(Exception):
@@ -70,10 +69,10 @@ class WarfarinClient:
         return await self._get_json(f"{self.FZ_BASE_URL}/game-richtext")
 
     async def akedata_manifest(self) -> dict[str, Any]:
-        return await self._get_json(
-            f"{self.AKEDATA_BASE_URL}/manifest.json?t={int(time.time() // 60)}",
-            ttl_seconds=60.0,
-        )
+        try:
+            return await fetch_akedata_manifest()
+        except (httpx.HTTPError, RuntimeError, ValueError) as exc:
+            raise WarfarinAPIError(f"AkeData manifest unavailable ({type(exc).__name__})") from exc
 
     async def akedata_asset_index(self) -> dict[str, Any]:
         data = await self._get_json(
@@ -91,10 +90,13 @@ class WarfarinClient:
         name = str(table_name or "").strip()
         if not path or not name or not name.replace("_", "").isalnum():
             raise WarfarinAPIError("AkeData 表路径无效")
-        return await self._get_json(
-            f"{self.AKEDATA_BASE_URL}/{path}/{name}.json",
-            max_bytes=AKEDATA_MAX_TABLE_BYTES,
-        )
+        import re
+        if not re.fullmatch(r"public/[0-9.]+/[0-9-]+/TableCfg", path):
+            raise WarfarinAPIError("AkeData 表路径无效")
+        try:
+            return await _get(f"/{path}/{name}.json", max_bytes=AKEDATA_MAX_TABLE_BYTES)
+        except (httpx.HTTPError, ValueError) as exc:
+            raise WarfarinAPIError(f"AkeData table unavailable ({type(exc).__name__})") from exc
 
     async def akedata_public_json(self, resource_path: str) -> dict[str, Any] | list[Any]:
         path = str(resource_path or "").strip().lstrip("/")

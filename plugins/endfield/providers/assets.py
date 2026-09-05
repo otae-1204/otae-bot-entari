@@ -54,7 +54,9 @@ def static_sprite_url(path: str) -> str:
     folder, _, name = text.partition("/")
     stem = (name or folder).rsplit(".", 1)[0]
     if name:
-        return sprite_png(folder, stem)
+        # Client paths use e.g. TermIcon; AKE's extracted sprite directories
+        # are lowercase on a case-sensitive CDN.
+        return sprite_png(folder.lower(), stem)
     return ""
 
 
@@ -140,7 +142,9 @@ def item_icon_urls(item_id: str, primary: str = "") -> tuple[str, ...]:
         )
     rewritten = static_sprite_url(primary)
     if rewritten and "akedata.wiki" in rewritten:
-        extras.append(rewritten)
+        # ItemTable.iconId can differ from the item ID (equipment variants
+        # share art). Prefer that explicit AKE mapping over guessed filenames.
+        extras.insert(0, rewritten)
     return unique_urls(*extras)
 
 

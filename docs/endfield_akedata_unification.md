@@ -1,8 +1,8 @@
 # 终末地资料图：AkeData 统一方案
 
-图片和正文现在是两套源。FZ 出技能描述和图鉴条目，取图却在 AkeData / Warfarin / FZ 之间跳。下面两版方案分开：**只统一图**（本期执行），以及 **连正文也改成 AkeData 表**（暂不执行）。
+本文件保留两阶段方案的历史背景。2026-09-05 已执行方案 B：公共资料默认 AKE，完整覆盖路径不再请求 FZ/Warfarin 正文；个人接口仍用官方，缺失数据保留明确回退。当前实现、例外与实测以 [迁移实施记录](endfield_ake_migration_execution.md) 为准。
 
-## 方案 A：只统一图（本期）
+## 方案 A：只统一图（历史阶段，已完成）
 
 ### 目标
 
@@ -22,7 +22,7 @@ Warfarin、FZ 不再进入候选 URL。正文、技能数值、图鉴名单仍�
 | 圆头 | `charroundicon` | `icon_round_{charId}` |
 | 立绘 / 卡池头图 | `characterportrait` | `{charId}` |
 | 技能 / 天赋 | `skillicon` | `CharGrowthTable` 的 `icon` / `iconId` |
-| 武器 / 装备 / 信物 | `itemiconbig`，不行再 `itemicon` | 物品 id |
+| 武器 / 装备 / 信物 | `itemiconbig`，不行再 `itemicon` | 优先 `ItemTable.iconId`，无映射才用物品 id |
 | 术语小图标 | `termicon` | `icon_term_*` |
 | 账号页 / 图鉴职业、属性 | `charprofessionicon` / `elementicon` | 中文职业、属性名对到表里的 `iconId` |
 | 图鉴武器类型角标 | — | 目前没有稳定 sprite id，不打 FZ 哈希链 |
@@ -51,7 +51,7 @@ Warfarin、FZ 不再进入候选 URL。正文、技能数值、图鉴名单仍�
 
 ---
 
-## 方案 B：连正文也统一到 AkeData（暂不执行）
+## 方案 B：连正文也统一到 AkeData（现已执行）
 
 ### 目标
 
@@ -66,11 +66,11 @@ Warfarin、FZ 不再进入候选 URL。正文、技能数值、图鉴名单仍�
 
 账号养成、奖章、关卡已经在用 AkeData 表，可以复用 `akedata_client` 和 manifest。
 
-### 工作量
+### 当时的工作量评估
 
 按周计。FZ 现在提供的技能多形态描述、paramTable、富文本术语，都要在表结构上重新对齐；`build_fz_operator_view` / `build_weapon_view` 等于重写。收益是图和字同一源、新干员不再等 FZ 文章。风险是 Ake 表更新节奏、i18n 体积、以及卡片排版对 FZ 富文本的既有假设。
 
-### 建议顺序
+### 当时建议的顺序
 
 1. 先做方案 A，把 CDN 收成一家。
 2. 技能/天赋 id 已改读 `CharGrowthTable`；表缺行时仍可能打一次 Warfarin。

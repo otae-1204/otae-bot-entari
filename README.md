@@ -5,6 +5,9 @@
 
 代码结构、模块职责及扩展方式见 [代码结构说明](docs/code_structure.md)。
 
+End 插件的公共资料默认优先 AKEData；账号接口仍用官方，缺失资料保留兼容回退。
+覆盖范围、缓存变化与实测见 [AKE 迁移记录](docs/endfield_ake_migration_execution.md)。
+
 ## 分支与独立 UI 预览
 
 `refactor/project-architecture` 提供新的程序架构，并保留

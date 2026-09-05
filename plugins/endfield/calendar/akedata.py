@@ -210,6 +210,20 @@ class AkeDataVersionCalendarSource:
         hydrated = hydrate_calendar_from_akedata(calendar, version, *tables)
         return hydrated
 
+    async def current_ake_primary(self) -> VersionCalendar:
+        """Do not relabel a bundled old calendar as the latest game version.
+
+        TableCfg supplies event times but not all official-only regional/story
+        milestones. A current complete coverage manifest remains mandatory.
+        """
+        from ..providers.akedata import game_version_label
+        calendar = load_calendar_manifest()
+        version = await self._latest_version()
+        if calendar.version != game_version_label(version.id):
+            raise VersionCalendarError("AKE 日历缺少当前版本的完整事件覆盖清单")
+        tables = await self._load_tables(*self.TABLES)
+        return hydrate_calendar_from_akedata(calendar, version, *tables)
+
     async def _latest_version(self) -> AkeDataVersion:
         generation = self._generation
         version = parse_akedata_version(await self.client.akedata_manifest())

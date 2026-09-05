@@ -69,7 +69,7 @@ class EndfieldPerformanceBehaviorTests(unittest.IsolatedAsyncioTestCase):
         )
         with patch.object(
             endfield.service,
-            "get_equipment_catalog_view",
+            "get_equipment_catalog_view_from_fz",
             AsyncMock(return_value=catalog),
         ) as loader:
             group_candidates = await endfield._resolve_equipment_candidates_fz("长息")
@@ -315,7 +315,7 @@ class EndfieldPerformanceBehaviorTests(unittest.IsolatedAsyncioTestCase):
             output = await endfield._render_equipment_catalog("purple::长息装备组", "fz")
 
         self.assertEqual(output, b"png-data")
-        selected.assert_awaited_once_with("长息装备组", "purple")
+        selected.assert_awaited_once_with("长息装备组", "purple", source="fz")
 
 
 class BilibiliSharedAssetTests(unittest.IsolatedAsyncioTestCase):

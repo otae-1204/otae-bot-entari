@@ -33,6 +33,7 @@ class SkillView:
     levels: list[SkillLevelView] = field(default_factory=list)
     extra_levels: dict[str, list[SkillLevelView]] = field(default_factory=dict)
     icon_fallbacks: tuple[str, ...] = ()
+    preserve_metric_rows: bool = False
 
 
 @dataclass(slots=True)
@@ -73,6 +74,7 @@ class OperatorView:
     potentials: list[EffectView] = field(default_factory=list)
     term_styles: dict[str, TermStyleView] = field(default_factory=dict)
     source_version: str = ""
+    source_name: str = ""
 
 
 @dataclass(slots=True)
@@ -148,6 +150,7 @@ class OperatorCatalogView:
     element_filter: str = ""
     profession_filter: str = ""
     source_version: str = ""
+    source_name: str = "api.fz.wiki"
 
 
 @dataclass(slots=True)
@@ -182,6 +185,7 @@ class WeaponCatalogView:
     total_count: int = 0
     weapon_type_filter: str = ""
     source_version: str = ""
+    source_name: str = "api.fz.wiki"
 
 
 @dataclass(slots=True)
@@ -221,6 +225,7 @@ class EquipmentView:
     acquisition: str = "未知方式"
     term_styles: dict[str, TermStyleView] = field(default_factory=dict)
     source_version: str = ""
+    source_name: str = "api.fz.wiki"
 
 
 @dataclass(slots=True)
@@ -262,6 +267,7 @@ class EquipmentCatalogView:
     rarity_filter: str = "gold"
     attribute_filter: str = ""
     source_version: str = ""
+    source_name: str = "api.fz.wiki"
 
 
 @dataclass(slots=True)
@@ -331,6 +337,7 @@ class LoadoutView:
     effects: list[LoadoutEffectView] = field(default_factory=list)
     source_version: str = ""
     term_styles: dict[str, TermStyleView] = field(default_factory=dict)
+    source_name: str = "api.fz.wiki"
 
 
 @dataclass(slots=True)

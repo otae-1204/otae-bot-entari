@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import hashlib
 import json
 import math
 import re
 import time
 from dataclasses import (
+    asdict,
     replace,
 )
 from typing import (
@@ -19,6 +21,9 @@ from loguru import (
     logger,
 )
 from otae_bot.infrastructure.cache import AsyncTTLCache
+from otae_bot.infrastructure.http.json_values import json_memory_size
+from ..providers.repository import snapshot, query_snapshot
+from .akedata import AkeCatalog
 from ..providers.warfarin import (
     WarfarinAPIError,
     WarfarinClient,
@@ -243,9 +248,25 @@ class EndfieldService:
         self._char_growth_table: dict[str, Any] | None = None
         self._char_growth_version = ""
         self._query_generation = 0
-        self._weapon_relations: AsyncTTLCache[str, dict[str, tuple[str, ...]]] = AsyncTTLCache(
-            ttl_seconds=60.0, max_bytes=1024 * 1024, max_entries=16,
-            sizeof=lambda value: len(json.dumps(value, ensure_ascii=False).encode()),
+        self._ake_views = AsyncTTLCache(
+            ttl_seconds=600,
+            max_bytes=12 * 1024 * 1024,
+            max_entries=128,
+            sizeof=lambda value: (
+                json_memory_size(asdict(value))
+                if hasattr(value, "__dataclass_fields__")
+                else json_memory_size(value)
+            ),
+        )
+        self._weapon_relations: AsyncTTLCache[str, dict[str, tuple[str, ...]]] = (
+            AsyncTTLCache(
+                ttl_seconds=60.0,
+                max_bytes=1024 * 1024,
+                max_entries=16,
+                sizeof=lambda value: len(
+                    json.dumps(value, ensure_ascii=False).encode()
+                ),
+            )
         )
 
     async def clear_query_caches(self) -> int:
@@ -253,7 +274,94 @@ class EndfieldService:
         removed = int(self._char_growth_table is not None)
         self._char_growth_table = None
         self._char_growth_version = ""
-        return removed + await self._weapon_relations.clear()
+        return (
+            removed
+            + await self._weapon_relations.clear()
+            + await self._ake_views.clear()
+        )
+
+    async def ake_catalog(self) -> AkeCatalog:
+        return AkeCatalog(await snapshot())
+
+    async def _ake_view(self, method: str, *args, **kwargs):
+        catalog = await self.ake_catalog()
+        key = (catalog.data.revision, method, repr(args), repr(sorted(kwargs.items())))
+        result = await self._ake_views.get_or_create(
+            key, lambda: getattr(catalog, method)(*args, **kwargs)
+        )
+        # Renderers may add asset fallbacks; never expose the cached mutable DTO.
+        return copy.deepcopy(result)
+
+    async def _public_view(
+        self, method: str, fallback, *args, source: str = "", **kwargs
+    ):
+        if source not in {"", "akedata", "fz"}:
+            raise ValueError(f"Unsupported data source: {source}")
+        if source != "fz":
+            try:
+                return await self._ake_view(method, *args, **kwargs)
+            except (
+                WarfarinAPIError,
+                RuntimeError,
+                ValueError,
+                KeyError,
+                TypeError,
+            ) as exc:
+                if source:
+                    raise
+                logger.warning(
+                    "[endfield] AKE {} unavailable; whole-view fallback to FZ ({})",
+                    method,
+                    type(exc).__name__,
+                )
+        return await fallback(*args, **kwargs)
+
+    async def get_operator_view_from_akedata(self, query: str) -> OperatorView:
+        return await self._ake_view("operator_view", query)
+
+    async def get_weapon_view_from_akedata(self, query: str) -> WeaponView:
+        return await self._ake_view("weapon_view", query)
+
+    async def get_equipment_view_from_akedata(self, query: str) -> EquipmentView:
+        return await self._ake_view("equipment_view", query)
+
+    async def get_ake_items(self, item_ids) -> dict:
+        from ..providers.repository import localize
+
+        data = await snapshot()
+        items, texts = await data.tables("ItemTable", "I18nTextTable_CN")
+        return {key: localize(items[key], texts) for key in item_ids if key in items}
+
+    async def get_public_data_revision(self) -> str:
+        return (await snapshot()).revision
+
+    async def get_gacha_catalog_views(self):
+        async with query_snapshot():
+            return await asyncio.gather(
+                self.get_operator_catalog_view(), self.get_weapon_catalog_view()
+            )
+
+    async def get_ake_pool_metadata(self) -> dict:
+        from ..providers.repository import localize
+
+        data = await snapshot()
+        chars, weapons, texts = await data.tables(
+            "GachaCharPoolTable", "GachaWeaponPoolTable", "I18nTextTable_CN"
+        )
+        result = {}
+        for table, field, kind in (
+            (chars, "upCharIds", "char"),
+            (weapons, "upWeaponIds", "weapon"),
+        ):
+            for key, row in table.items():
+                result[key] = dict(
+                    pool_id=key,
+                    pool_name=localize(row.get("name"), texts),
+                    pool_kind=kind,
+                    up_item_ids=tuple(row.get(field) or ()),
+                    revision=data.revision,
+                )
+        return result
 
     async def get_operator_view(self, query: str) -> OperatorView | None:
         primary: OperatorView | None = None
@@ -262,11 +370,14 @@ class EndfieldService:
             try:
                 if source == "fz":
                     view = await self.get_operator_view_from_fz(query)
+                elif source == "akedata":
+                    view = await self.get_operator_view_from_akedata(query)
                 elif source == "warfarin":
                     view = await self.get_operator_view_from_warfarin(query)
                 else:
                     continue
-            except (WarfarinAPIError, ValueError, KeyError, TypeError):
+            except (WarfarinAPIError, RuntimeError, ValueError, KeyError, TypeError) as exc:
+                logger.warning("[endfield] operator source={} failed ({})", source, type(exc).__name__)
                 continue
             if view is not None:
                 primary = view
@@ -274,7 +385,7 @@ class EndfieldService:
                 break
         if primary is None:
             return None
-        if used_source != "fz":
+        if used_source not in {"fz", "akedata"}:
             await self._supplement_operator_assets(primary, query)
         return primary
 
@@ -299,22 +410,28 @@ class EndfieldService:
 
     async def get_weapon_view(self, query: str) -> WeaponView | None:
         primary: WeaponView | None = None
+        used_source = ""
         for source in source_order("weapon"):
             try:
                 if source == "fz":
                     view = await self.get_weapon_view_from_fz(query)
+                elif source == "akedata":
+                    view = await self.get_weapon_view_from_akedata(query)
                 elif source == "warfarin":
                     view = await self.get_weapon_view_from_warfarin(query)
                 else:
                     continue
-            except (WarfarinAPIError, ValueError, KeyError, TypeError):
+            except (WarfarinAPIError, RuntimeError, ValueError, KeyError, TypeError) as exc:
+                logger.warning("[endfield] weapon source={} failed ({})", source, type(exc).__name__)
                 continue
             if view is not None:
                 primary = view
+                used_source = source
                 break
         if primary is None:
             return None
-        await self._supplement_weapon_assets(primary, query)
+        if used_source != "akedata":
+            await self._supplement_weapon_assets(primary, query)
         return primary
 
     async def get_weapon_view_from_fz(self, query: str) -> WeaponView | None:
@@ -343,9 +460,12 @@ class EndfieldService:
             try:
                 if source == "fz":
                     view = await self.get_equipment_view_from_fz(query)
+                elif source == "akedata":
+                    view = await self.get_equipment_view_from_akedata(query)
                 else:
                     continue
-            except (WarfarinAPIError, ValueError, KeyError, TypeError):
+            except (WarfarinAPIError, RuntimeError, ValueError, KeyError, TypeError) as exc:
+                logger.warning("[endfield] equipment source={} failed ({})", source, type(exc).__name__)
                 continue
             if view is not None:
                 return view
@@ -358,7 +478,21 @@ class EndfieldService:
         raw, richtext = await _fz_article_and_richtext(self.client, title)
         return build_fz_equipment_view(raw, richtext)
 
-    async def get_loadout_view(
+    async def get_loadout_view(self, operator_title, weapon_title, equipment, *, source="", **options) -> LoadoutView:
+        # Resolve every numeric input inside one snapshot. Fallback rebuilds the
+        # whole view, never mixes AKE equipment with FZ operator attributes.
+        if source == "fz":
+            return await self.get_loadout_view_from_fz(operator_title, weapon_title, equipment, **options)
+        try:
+            async with query_snapshot():
+                return await (await self.ake_catalog()).loadout(operator_title, weapon_title, equipment, **options)
+        except (WarfarinAPIError, RuntimeError, ValueError, KeyError, TypeError) as exc:
+            if source:
+                raise
+            logger.warning("[endfield] AKE loadout unavailable; whole-view fallback to FZ ({})", type(exc).__name__)
+            return await self.get_loadout_view_from_fz(operator_title, weapon_title, equipment, **options)
+
+    async def get_loadout_view_from_fz(
         self,
         operator_title: str,
         weapon_title: str,
@@ -415,6 +549,9 @@ class EndfieldService:
             return {}
 
     async def get_recommended_weapon_title(self, operator_title: str) -> str:
+        return await self._public_view("recommended_weapon", self.get_recommended_weapon_title_from_fz, operator_title)
+
+    async def get_recommended_weapon_title_from_fz(self, operator_title: str) -> str:
         raw = await self.client.fz_article_by_title(operator_title)
         attrs = _fz_template_attrs(raw)
         weapons = attrs.get("weapons") if isinstance(attrs.get("weapons"), dict) else {}
@@ -427,7 +564,11 @@ class EndfieldService:
                     return name if name.startswith("武器/") else f"武器/{name}"
         raise ValueError("FZ 干员数据没有推荐武器")
 
-    async def get_equipment_catalog_view(
+    async def get_equipment_catalog_view(self, group_name="", rarity_filter="gold", *, include_details=True, source=""):
+        return await self._public_view("equipment_catalog", self.get_equipment_catalog_view_from_fz,
+            group_name, rarity_filter, include_details=include_details, source=source)
+
+    async def get_equipment_catalog_view_from_fz(
         self,
         group_name: str = "",
         rarity_filter: str = "gold",
@@ -461,7 +602,12 @@ class EndfieldService:
         )
         return view
 
-    async def get_equipment_attribute_catalog_view(
+    async def get_equipment_attribute_catalog_view(self, filters, rarity_filter="gold", *, source=""):
+        async def fallback(*, filters, rarity_filter):
+            return await self.get_equipment_attribute_catalog_view_from_fz(filters, rarity_filter)
+        return await self._public_view("equipment_catalog", fallback, filters=filters, rarity_filter=rarity_filter, source=source)
+
+    async def get_equipment_attribute_catalog_view_from_fz(
         self,
         filters: Sequence[EquipmentAttributeFilter],
         rarity_filter: str = "gold",
@@ -507,7 +653,10 @@ class EndfieldService:
             raise error or WarfarinAPIError(f"FZ 装备详情获取失败：{pending[0]}")
         return details
 
-    async def get_operator_catalog_view(
+    async def get_operator_catalog_view(self, element="", profession="", *, source=""):
+        return await self._public_view("operator_catalog", self.get_operator_catalog_view_from_fz, element, profession, source=source)
+
+    async def get_operator_catalog_view_from_fz(
         self,
         element: str = "",
         profession: str = "",
@@ -515,7 +664,10 @@ class EndfieldService:
         raw = await self.client.fz_article_by_title("干员")
         return build_fz_operator_catalog_view(raw, element, profession)
 
-    async def get_weapon_catalog_view(self, weapon_type: str = "") -> WeaponCatalogView:
+    async def get_weapon_catalog_view(self, weapon_type: str = "", *, source="") -> WeaponCatalogView:
+        return await self._public_view("weapon_catalog", self.get_weapon_catalog_view_from_fz, weapon_type, source=source)
+
+    async def get_weapon_catalog_view_from_fz(self, weapon_type: str = "") -> WeaponCatalogView:
         raw = await self.client.fz_article_by_title("武器")
         return build_fz_weapon_catalog_view(raw, weapon_type)
 

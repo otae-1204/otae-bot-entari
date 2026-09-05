@@ -21,7 +21,13 @@ from loguru import logger
 
 from otae_bot.infrastructure.cache import AsyncTTLCache, CacheStats
 from .json_values import freeze_json, freeze_json_object, json_memory_size, mutable_json
-from .disk import DiskImage, public_image_request, public_images
+from .disk import (
+    DiskImage,
+    public_image_request,
+    public_images,
+    public_table_request,
+    public_tables,
+)
 
 
 DEFAULT_CACHE_TTL_SECONDS = 600.0
@@ -270,9 +276,14 @@ async def _fetch_resource(
     )
 
     disk_key = hashlib.sha256(repr(key).encode()).hexdigest()
+    table_eligible = public_table_request(
+        url, namespace, headers, params, response_kind
+    )
+    disk = public_tables if table_eligible else public_images
+    disk_policy = public_table_request if table_eligible else public_image_request
     eligible = (
         ttl_seconds > 0
-        and public_image_request(url, namespace, headers, params, response_kind)
+        and disk_policy(url, namespace, headers, params, response_kind)
         and not any(
             name in effective_headers
             for name in (
@@ -286,21 +297,39 @@ async def _fetch_resource(
     )
     # Capture before the factory is scheduled: a clear must invalidate queued
     # work too, not only requests that already reached the network.
-    generation = public_images.register(namespace) if eligible else None
+    generation = disk.register(namespace) if eligible else None
+
+    def validate(resource):
+        if validator is None:
+            return resource
+        started = time.perf_counter()
+        decoded = freeze_json(validator(resource))
+        resource = replace(
+            resource, decoded=decoded, decoded_bytes=json_memory_size(decoded)
+        )
+        _cache_event(key, "decode_seconds", time.perf_counter() - started)
+        _cache_event(key, "decodes", 1)
+        return resource
 
     async def request() -> HttpResource:
         cached = None
         if eligible:
             try:
-                cached = await asyncio.to_thread(public_images.get, disk_key, max_bytes)
+                cached = await asyncio.to_thread(disk.get, disk_key, max_bytes)
             except (OSError, sqlite3.Error):
                 _cache_event(key, "disk_errors", 1)
         if cached is not None:
             deadline = cached.validated_at + min(ttl_seconds, cached.max_age)
             if time.time() < deadline:
                 _cache_event(key, "disk_hits", 1)
-                return HttpResource(
-                    cached.content, cached.content_type, 200, url, expires_at=deadline
+                return validate(
+                    HttpResource(
+                        cached.content,
+                        cached.content_type,
+                        200,
+                        url,
+                        expires_at=deadline,
+                    )
                 )
         request_headers = dict(headers or {})
         if cached is not None:
@@ -316,12 +345,13 @@ async def _fetch_resource(
             max_bytes=max_bytes,
             cached_image=cached,
         )
+        resource = validate(resource)  # Never persist malformed JSON.
         if eligible:
             private = resource.private_response or any(
                 flag in resource.cache_control.lower()
                 for flag in ("private", "no-store")
             )
-            private = private or not public_image_request(
+            private = private or not disk_policy(
                 resource.url, namespace, headers, None, response_kind
             )
             match = re.search(
@@ -338,7 +368,7 @@ async def _fetch_resource(
                 max_age = 0
             if private:
                 resource = replace(resource, expires_at=time.time())
-            elif resource.content_type.startswith("image/"):
+            elif resource.content_type.startswith("image/") or table_eligible:
                 value = DiskImage(
                     resource.content,
                     resource.content_type,
@@ -349,7 +379,7 @@ async def _fetch_resource(
                 )
                 try:
                     await asyncio.to_thread(
-                        public_images.put, disk_key, namespace, value, generation
+                        disk.put, disk_key, namespace, value, generation
                     )
                 except (OSError, sqlite3.Error):
                     _cache_event(key, "disk_errors", 1)
@@ -357,14 +387,6 @@ async def _fetch_resource(
             if resource.status_code == 304:
                 _cache_event(key, "not_modified", 1)
                 resource = replace(resource, status_code=200)
-        if validator is not None:
-            started = time.perf_counter()
-            decoded = freeze_json(validator(resource))
-            resource = replace(
-                resource, decoded=decoded, decoded_bytes=json_memory_size(decoded)
-            )
-            _cache_event(key, "decode_seconds", time.perf_counter() - started)
-            _cache_event(key, "decodes", 1)
         return resource
 
     if ttl_seconds <= 0:
@@ -553,12 +575,11 @@ async def clear_http_cache(
 ) -> int:
     disk_removed = 0
     if include_disk:
-        try:
-            disk_removed = await asyncio.to_thread(
-                public_images.clear, namespace_prefix
-            )
-        except (OSError, sqlite3.Error):
-            pass  # Disposable cache unavailable; memory invalidation must still run.
+        for disk in (public_images, public_tables):
+            try:
+                disk_removed += await asyncio.to_thread(disk.clear, namespace_prefix)
+            except (OSError, sqlite3.Error):
+                pass  # Memory invalidation must still run if a disk is unavailable.
     with _stats_lock:
         if namespace_prefix is None:
             _namespace_metrics.clear()
@@ -653,3 +674,4 @@ async def close_http_client() -> None:
     _semaphore_loop = None
     await clear_http_cache(include_disk=False)
     await asyncio.to_thread(public_images.close)
+    await asyncio.to_thread(public_tables.close)

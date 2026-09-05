@@ -651,8 +651,8 @@ class EndfieldCommandParserTests(unittest.TestCase):
 
     def test_source_help_lists_warfarin_weapon_fallback(self):
         text = commands.format_source()
-        self.assertIn("武器：FZ Wiki、Warfarin Wiki", text)
-        self.assertIn("装备：FZ Wiki", text)
+        self.assertIn("武器：AkeData、FZ Wiki、Warfarin Wiki", text)
+        self.assertIn("装备：AkeData、FZ Wiki", text)
 
     def test_help_documents_source_option(self):
         text = commands.format_help()
@@ -816,9 +816,10 @@ class EndfieldCommandParserTests(unittest.TestCase):
         self.assertIn("transform: translateX(-4px)", rendered_html)
         self.assertNotIn("PIL", rendered_html)
 
-    def test_plugin_prefers_official_calendar_and_keeps_akedata_fallback(self):
+    def test_plugin_tries_complete_ake_calendar_then_preserves_official_fallback(self):
         source = (ROOT / "plugins/endfield/handlers.py").read_text(encoding="utf-8")
 
+        self.assertLess(source.index("calendar_source.current_ake_primary()"), source.index("official_calendar_source.current()"))
         self.assertIn("official_calendar_source.current()", source)
         self.assertIn("draw_official_version_calendar(official)", source)
         self.assertIn("official calendar unavailable, use AkeData fallback", source)
@@ -1831,7 +1832,7 @@ class EndfieldServiceTests(unittest.TestCase):
         )
 
         view = asyncio.run(
-            service.EndfieldService(client).get_loadout_view(
+            service.EndfieldService(client).get_loadout_view_from_fz(
                 "干员/测试干员",
                 "武器/测试武器",
                 [],
@@ -2892,7 +2893,7 @@ class EndfieldServiceTests(unittest.TestCase):
         )
 
         view = asyncio.run(
-            service.EndfieldService(client).get_equipment_catalog_view("长息装备组")
+            service.EndfieldService(client).get_equipment_catalog_view_from_fz("长息装备组")
         )
 
         self.assertEqual(
@@ -2932,7 +2933,7 @@ class EndfieldServiceTests(unittest.TestCase):
         )
 
         view = asyncio.run(
-            service.EndfieldService(client).get_equipment_attribute_catalog_view(
+            service.EndfieldService(client).get_equipment_attribute_catalog_view_from_fz(
                 commands.parse_equipment_attribute_filters("副力量"),
             )
         )
@@ -2961,7 +2962,7 @@ class EndfieldServiceTests(unittest.TestCase):
         client = types.SimpleNamespace(fz_article_by_title=AsyncMock(side_effect=article))
 
         view = asyncio.run(
-            service.EndfieldService(client).get_equipment_attribute_catalog_view(
+            service.EndfieldService(client).get_equipment_attribute_catalog_view_from_fz(
                 commands.parse_equipment_attribute_filters("力量"),
             )
         )
@@ -2987,7 +2988,7 @@ class EndfieldServiceTests(unittest.TestCase):
         # 少一件详情就少一条结果，宁可报数据源故障也不给出被悄悄截断的清单。
         with self.assertRaises(service.WarfarinAPIError):
             asyncio.run(
-                service.EndfieldService(client).get_equipment_attribute_catalog_view(
+                service.EndfieldService(client).get_equipment_attribute_catalog_view_from_fz(
                     commands.parse_equipment_attribute_filters("主力量"),
                 )
             )
@@ -3004,7 +3005,7 @@ class EndfieldServiceTests(unittest.TestCase):
         )
 
         view = asyncio.run(
-            service.EndfieldService(client).get_equipment_catalog_view("长息装备组", "gold")
+            service.EndfieldService(client).get_equipment_catalog_view_from_fz("长息装备组", "gold")
         )
 
         group = view.groups[0]
@@ -3108,7 +3109,7 @@ class EndfieldServiceTests(unittest.TestCase):
         self.assertIn('"equipment_attribute": lambda key, source: _render_equipment_attribute', source)
         self.assertIn("attribute_filters = parse_equipment_attribute_filters(query)", source)
         self.assertIn('kind="equipment_attribute"', source)
-        self.assertIn("get_equipment_attribute_catalog_view(filters, rarity_filter)", source)
+        self.assertIn("get_equipment_attribute_catalog_view(filters, rarity_filter, source=source)", source)
         self.assertIn('{scope, "equipment_catalog", "equipment_attribute"}', source)
 
     def test_render_specific_equipment_catalog_uses_compact_four_column_layout(self):
@@ -3946,7 +3947,8 @@ class EndfieldSlugResolutionTests(unittest.TestCase):
             fz_article_data=service.WarfarinAPIError("FZ down"),
         )
         svc = service.EndfieldService(client)
-        view = asyncio.run(svc.get_operator_view("干员/陈千语"))
+        with patch.object(svc, "get_operator_view_from_akedata", AsyncMock(side_effect=ValueError("AKE down"))):
+            view = asyncio.run(svc.get_operator_view("干员/陈千语"))
 
         self.assertIsNotNone(view)
         self.assertEqual(view.name, "陈千语")
@@ -3959,7 +3961,8 @@ class EndfieldSlugResolutionTests(unittest.TestCase):
             fz_article_data=service.WarfarinAPIError("FZ down"),
         )
         svc = service.EndfieldService(client)
-        view = asyncio.run(svc.get_weapon_view("武器/典范"))
+        with patch.object(svc, "get_weapon_view_from_akedata", AsyncMock(side_effect=ValueError("AKE down"))):
+            view = asyncio.run(svc.get_weapon_view("武器/典范"))
 
         self.assertIsNotNone(view)
         self.assertEqual(view.name, "典范")

@@ -2596,6 +2596,14 @@ class EndfieldGachaServiceTests(unittest.IsolatedAsyncioTestCase):
         self.store.close()
         self.temp.cleanup()
 
+    def test_weapon_up_without_server_guarantee_is_explicitly_unknown(self):
+        record = store_module.GachaRecord("role", "server", "p", "池", "weapon", "1", 1, "wpn_up", "UP", 6, "武器")
+        view = gacha_module.build_gacha_analysis(self.role, [record], [], pool_rules={
+            "p": gacha_assets_module.GachaPoolRule("p", ("wpn_up",), 0)
+        })
+        self.assertFalse(view.pools[0].large_pity_known)
+        self.assertEqual(view.pools[0].large_pity_limit, 0)
+
     async def test_full_then_incremental_stops_at_saved_boundary(self):
         fake = _FakeGachaClient()
         service = gacha_module.EndfieldGachaService(self.store, fake, self.cipher)

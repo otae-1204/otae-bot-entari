@@ -830,7 +830,7 @@ async def draw_gacha_history_card(view: GachaHistoryView) -> bytes:
         "gacha-history-card",
         f"""
         <header><div><small>ENDFIELD / GACHA LOG</small><h1>{esc(view.nickname)} · 抽卡记录</h1><p>{esc(server_name)} · {esc(view.uid)}{filter_text}</p></div><div class="page"><b>{view.page} / {view.total_pages}</b><span>共 {view.total} 条</span></div></header>
-        <main><div class="history-head"><span>图</span><span>时间</span><span>卡池</span><span>名称</span><span>星级</span><span>类型</span></div><div class="history-list">{rows_html}</div><footer class="gacha-source"><span>星级与图片来源 FZ Wiki</span><span>图片已存入本地缓存</span></footer></main>
+        <main><div class="history-head"><span>图</span><span>时间</span><span>卡池</span><span>名称</span><span>星级</span><span>类型</span></div><div class="history-list">{rows_html}</div><footer class="gacha-source"><span>公开资料 AKEData 优先（含备用源）</span><span>图片已存入本地缓存</span></footer></main>
         """,
         extra_css="""
         header p{margin:8px 0 0;color:#d0d0d0}.page{text-align:right}.page b{display:block;font-size:24px}.page span{display:block;margin-top:6px;color:#ccc}
@@ -1606,7 +1606,7 @@ html,body{{margin:0;width:1500px;background:#d9dde0;color:#171b1f;font-family:"M
 .loadout-empty{{padding:14px;color:#7a8389;background:rgba(23,27,31,.055);font-weight:850}}
 .loadout-note{{margin-top:18px;padding:13px 16px;background:#20252a;color:#cbd1d4;font-size:13px;line-height:1.55;font-weight:800}} .loadout-note strong{{color:#fff}}
 </style></head><body><main class="loadout-card">
-<header class="loadout-head"><div><div class="loadout-kicker">终末地 · 配装模拟器</div><div class="loadout-title">配装面板</div></div><div class="loadout-subtitle">ARKNIGHTS: ENDFIELD<br>数据来源 api.fz.wiki · 更新 {esc(view.source_version or '--')}</div></header>
+<header class="loadout-head"><div><div class="loadout-kicker">终末地 · 配装模拟器</div><div class="loadout-title">配装面板</div></div><div class="loadout-subtitle">ARKNIGHTS: ENDFIELD<br>数据来源 {esc(view.source_name)} · 更新 {esc(view.source_version or '--')}</div></header>
 <section class="loadout-overview"><aside class="loadout-identity"><div class="operator-block"><div class="operator-visual">{f'<img src="{esc_attr(operator_img)}" alt="">' if operator_img else '<span>OP</span>'}</div><div><div class="operator-level">干员 · LEVEL {view.operator_level} · 潜能 {view.operator_potential}</div><div class="operator-name">{esc(view.operator_name)}</div><div class="operator-tags"><span class="operator-tag">主 · {esc(view.main_attribute)}</span><span class="operator-tag">副 · {esc(view.sub_attribute)}</span><span class="operator-tag">{esc(view.weapon_type)}</span></div></div></div><div class="weapon-block"><div class="weapon-visual">{f'<img src="{esc_attr(weapon_img)}" alt="">' if weapon_img else '<span>WP</span>'}</div><div><div class="weapon-label">武器 · LEVEL {view.weapon_level}</div><div class="weapon-name">{esc(view.weapon_name)}</div><div class="weapon-meta">潜能 {view.weapon_potential} · {esc(view.weapon_type)}</div></div></div></aside>
 <div class="loadout-panel"><h2 class="section-title">核心面板</h2><div class="core-grid">{stat_cards(view.primary_stats)}</div><div class="ability-grid">{stat_cards(view.ability_stats, 'ability')}</div></div></section>
 <section class="loadout-section"><h2 class="section-title">装备配置</h2><div class="loadout-items">{equipment_html}</div></section>
@@ -2033,7 +2033,7 @@ html,body {{ margin:0; width:{card_width}px; min-height:{card_min_height}px; bac
       <div class="suit-description">{suit_description or "该装备没有套装效果。"}</div>
       {equipment_piece_cards(view, piece_icons)}
     </div>
-    <div class="equipment-footer"><span>数据来源 api.fz.wiki</span><span>更新 {esc(view.source_version or "--")}</span></div>
+    <div class="equipment-footer"><span>数据来源 {esc(view.source_name)}</span><span>更新 {esc(view.source_version or "--")}</span></div>
   </section>
 </div>
 <script>
@@ -2199,7 +2199,7 @@ def _render_equipment_catalog_html(
     {equipment_catalog_legend(view)}
   </header>
   {equipment_catalog_groups(view, item_icons)}
-  <footer class="catalog-footer"><span>数据来源 api.fz.wiki</span><span>更新 {esc(view.source_version or "--")}</span></footer>
+  <footer class="catalog-footer"><span>数据来源 {esc(view.source_name)}</span><span>更新 {esc(view.source_version or "--")}</span></footer>
 </div>
 </body></html>"""
 
@@ -2361,7 +2361,7 @@ html,body { margin:0; width:1900px; min-height:680px; background:#d9dde0; font-f
     <div class="gallery-subtitle">默认按元素分类，并在元素内按职业划分子类</div>
   </header>
   {_operator_catalog_elements(view, icon_map)}
-  <footer class="gallery-footer"><span>数据来源 api.fz.wiki</span><span>更新 {esc(view.source_version or "--")}</span></footer>
+  <footer class="gallery-footer"><span>数据来源 {esc(view.source_name)}</span><span>更新 {esc(view.source_version or "--")}</span></footer>
 </div></body></html>"""
 
 
@@ -2463,7 +2463,7 @@ html,body { margin:0; width:1900px; min-height:680px; background:#d9dde0; font-f
     <div class="gallery-subtitle">按武器类型分类，展示星级、攻击力与核心词条</div>
   </header>
   {_weapon_catalog_groups(view, icon_map)}
-  <footer class="gallery-footer"><span>数据来源 api.fz.wiki</span><span>更新 {esc(view.source_version or "--")}</span></footer>
+  <footer class="gallery-footer"><span>数据来源 {esc(view.source_name)}</span><span>更新 {esc(view.source_version or "--")}</span></footer>
 </div></body></html>"""
 
 
@@ -3193,7 +3193,7 @@ def effect_card(effect: EffectView, fallback: str, icon_url: str, term_styles: d
 
 def skill_metric_rows(skill: SkillView) -> list[tuple[str, list[str]]]:
     if skill.category == "普攻":
-        if not skill.extra_levels:
+        if not skill.extra_levels or skill.preserve_metric_rows:
             rows = _rows_for_metric_names(skill, _skill_metric_names(skill))
             return _prefer_specific_metric_rows(rows)
         level_count = len(skill.levels) or len(LEVEL_COLUMNS)

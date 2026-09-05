@@ -1,6 +1,8 @@
-"""Bounded, disposable public-image cache. Never accepts account API requests.
+"""Bounded, disposable public caches. Never accept account API requests.
 
-Only hashed request keys and public image bytes/validators are stored. SQLite
+Only hashed request keys and whitelisted public bytes/validators are stored.
+Images and version-addressed AKE tables have separate SQLite files and budgets.
+The image-named storage types remain shared for backwards compatibility. SQLite
 transactions provide atomic replacement; content hashes detect damaged bodies.
 All callers run I/O in a worker thread. No stale-on-error fallback is provided.
 """
@@ -9,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import sqlite3
 import time
 from dataclasses import dataclass
@@ -33,6 +36,37 @@ def public_image_request(url, namespace, headers, params, kind):
     if prefix is None or not parts.path.startswith(prefix):
         return False
     allowed = {"accept", "user-agent", "referer", "origin", "cache-control"}
+    return all(key.lower() in allowed for key in (headers or {}))
+
+
+def public_table_request(url, namespace, headers, params, kind):
+    """Only version-addressed public AKE tables, never manifests or account APIs."""
+    parts = urlsplit(url)
+    if (
+        kind != "json"
+        or namespace != "akedata"
+        or params
+        or parts.query
+        or parts.scheme != "https"
+        or parts.hostname != "data.akedata.wiki"
+        or parts.username
+        or parts.password
+        or parts.port not in (None, 443)
+    ):
+        return False
+    if not re.fullmatch(
+        r"/public/[0-9.]+/[0-9-]+/TableCfg/[A-Za-z0-9_]+\.json", parts.path
+    ):
+        return False
+    allowed = {
+        "accept",
+        "accept-language",
+        "user-agent",
+        "referer",
+        "origin",
+        "cache-control",
+        "pragma",
+    }
     return all(key.lower() in allowed for key in (headers or {}))
 
 
@@ -200,4 +234,15 @@ public_images = PublicImageDiskCache(
         )
     ),
     max(0, int(os.environ.get("OTAE_PUBLIC_IMAGE_CACHE_MIB", "256"))) * 1024 * 1024,
+)
+
+# Separate disposable database and budget; the on-disk record format is shared.
+public_tables = PublicImageDiskCache(
+    Path(
+        os.environ.get(
+            "OTAE_PUBLIC_TABLE_CACHE_PATH", "data/cache/akedata-tables-v1.sqlite3"
+        )
+    ),
+    max(0, int(os.environ.get("OTAE_PUBLIC_TABLE_CACHE_MIB", "256"))) * 1024 * 1024,
+    max_entries=512,
 )
