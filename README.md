@@ -10,9 +10,13 @@ End 插件的公共资料默认优先 AKEData；账号接口仍用官方，缺�
 
 ## 分支与独立 UI 预览
 
-`refactor/project-architecture` 提供新的程序架构，并保留
-`design/endfield-ui-code-preview` 的独立前端预览，方便在同一个检出目录中评审。
-架构调整与 UI 预览是两个独立提交，预览没有接入正式插件；`main` 尚未合并这些改动。
+`main` 已于 2026-09-05 同步 `refactor/project-architecture` 的重构版本，
+包含新的程序架构、End 插件的缓存优化和 AKE 数据源迁移。
+切换前的旧主分支保存在 `backup/main-before-refactor-2026-09-05`，
+原重构分支也继续保留。
+
+主分支同时保留 `design/endfield-ui-code-preview` 的独立前端预览，
+方便在同一个检出目录中评审。预览没有接入正式插件。
 
 只查看 UI 时，不需要安装机器人依赖。在仓库根目录执行：
 
