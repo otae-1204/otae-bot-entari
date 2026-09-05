@@ -81,7 +81,7 @@ FZ Wiki 当前仅为资源副本提供分类说明，尚不足以形成完整的
 建议增加独立的关卡模型模块，避免继续扩大现有通用 `models.py`：
 
 ```text
-plugins/endfield/stage_models.py
+plugins/endfield/stages/models.py
 ```
 
 核心对象：
@@ -150,18 +150,18 @@ StageVariant
 为降低对现有干员、武器和装备查询的影响，新增关卡专用模块：
 
 ```text
-plugins/endfield/stage_models.py   领域模型与渲染 ViewModel
-plugins/endfield/stage_source.py   FZ 条目发现与原始结构解析
-plugins/endfield/stage_service.py  搜索、选择、默认变体和部分资料策略
-plugins/endfield/stage_draw.py     目录、详情和总览图片卡
+plugins/endfield/stages/models.py   领域模型与渲染 ViewModel
+plugins/endfield/stages/fz.py   FZ 条目发现与原始结构解析
+plugins/endfield/stages/service.py  搜索、选择、默认变体和部分资料策略
+plugins/endfield/stages/draw.py     目录、详情和总览图片卡
 ```
 
 现有文件只承担集成：
 
-- `plugins/endfield/commands.py`：增加 `关卡/副本` scope 和位置式变体解析结果。
-- `plugins/endfield/__init__.py`：接入候选收集、渲染分派、缓存和错误消息。
-- `plugins/endfield/sources.py`：声明 FZ 支持 `stage`；Warfarin 暂不支持。
-- `plugins/endfield/client.py`：复用现有 FZ article/category/search 请求，不增加新的 HTTP 框架。
+- `plugins/endfield/catalog/commands.py`：增加 `关卡/副本` scope 和位置式变体解析结果。
+- `plugins/endfield/handlers.py`：接入候选收集、渲染分派、缓存和错误消息。
+- `plugins/endfield/providers/registry.py`：声明 FZ 支持 `stage`；Warfarin 暂不支持。
+- `plugins/endfield/providers/warfarin.py`：复用现有 FZ article/category/search 请求，不增加新的 HTTP 框架。
 - `scripts/help_pages.json` 与 `assets/image/help/endfield.png`：补充用户可见语法。
 
 ## FZ Wiki 数据适配
@@ -238,7 +238,7 @@ plugins/endfield/stage_draw.py     目录、详情和总览图片卡
 
 ## 缓存与性能
 
-- 复用 `utils.http_client.fetch_json()` 的 600 秒有界缓存与并发限制。
+- 复用 `otae_bot.infrastructure.http.client.fetch_json()` 的 600 秒有界缓存与并发限制。
 - 复用现有渲染卡缓存和 singleflight，不增加第二套缓存基础设施。
 - 关卡卡缓存键至少包含：渲染版本、数据源、FZ revision、关卡 ID、变体 ID、渲染模式。
 - 目录缓存键包含分类规则版本和所有参与目录的 revision/更新时间摘要。

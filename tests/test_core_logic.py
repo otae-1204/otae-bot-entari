@@ -46,13 +46,13 @@ def _load_module(name: str, relative_path: str):
 
 
 def _load_minecraft_broadcast_module(name: str):
-    previous_entari_native = sys.modules.get("utils.entari_native")
+    previous_entari_native = sys.modules.get("otae_bot.adapters.entari")
     previous_arclet_entari = sys.modules.get("arclet.entari")
     previous_arclet = sys.modules.get("arclet")
     previous_pkg = sys.modules.get("plugins.minecraft_plugin")
     previous_ping = sys.modules.get("plugins.minecraft_plugin.ping")
 
-    entari_native = types.ModuleType("utils.entari_native")
+    entari_native = types.ModuleType("otae_bot.adapters.entari")
     entari_native.listen_notice = lambda *args, **kwargs: types.SimpleNamespace(
         handle=lambda: (lambda func: func),
         finish=lambda *a, **kw: None,
@@ -71,7 +71,7 @@ def _load_minecraft_broadcast_module(name: str):
     arclet_entari.Account = object
     arclet_entari.Event = object
 
-    sys.modules["utils.entari_native"] = entari_native
+    sys.modules["otae_bot.adapters.entari"] = entari_native
     sys.modules["arclet"] = arclet
     sys.modules["arclet.entari"] = arclet_entari
     pkg = previous_pkg or types.ModuleType("plugins.minecraft_plugin")
@@ -86,9 +86,9 @@ def _load_minecraft_broadcast_module(name: str):
         return _load_module(f"plugins.minecraft_plugin.{name}", "plugins/minecraft_plugin/broadcast.py")
     finally:
         if previous_entari_native is None:
-            sys.modules.pop("utils.entari_native", None)
+            sys.modules.pop("otae_bot.adapters.entari", None)
         else:
-            sys.modules["utils.entari_native"] = previous_entari_native
+            sys.modules["otae_bot.adapters.entari"] = previous_entari_native
         if previous_arclet_entari is None:
             sys.modules.pop("arclet.entari", None)
         else:
@@ -150,7 +150,7 @@ def _load_bili_new_module(module_name: str):
 
 
 async def _run_scheduled_cleanup_case(path: Path):
-    from utils.temp_files import schedule_temp_file_cleanup
+    from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
 
     path.write_text("temp", encoding="utf-8")
     schedule_temp_file_cleanup(path, delay_seconds=0)
@@ -170,7 +170,7 @@ def _image_file_path(segment) -> Path:
 
 class CoreLogicTests(unittest.TestCase):
     def test_entari_notice_hook_listens_to_notice_events(self):
-        entari_native = _load_module("entari_native_notice_for_test", "utils/entari_native.py")
+        entari_native = _load_module("entari_native_notice_for_test", "otae_bot/adapters/entari.py")
 
         message_hook = entari_native.listen_message()
         notice_hook = entari_native.listen_notice()
@@ -180,7 +180,7 @@ class CoreLogicTests(unittest.TestCase):
         self.assertTrue(callable(notice_hook.finish))
 
     def test_entari_account_adapter_name_handles_object_string_and_missing(self):
-        entari_native = _load_module("entari_native_adapter_for_test", "utils/entari_native.py")
+        entari_native = _load_module("entari_native_adapter_for_test", "otae_bot/adapters/entari.py")
 
         class AdapterObject:
             def get_name(self):
@@ -200,7 +200,7 @@ class CoreLogicTests(unittest.TestCase):
         self.assertEqual(entari_native.account_adapter_name(AccountWithoutAdapter()), "")
 
     def test_entari_on_ready_clears_account_on_disconnect(self):
-        entari_native = _load_module("entari_native_lifecycle_for_test", "utils/entari_native.py")
+        entari_native = _load_module("entari_native_lifecycle_for_test", "otae_bot/adapters/entari.py")
         captured = []
 
         def fake_listen(event_type):
@@ -234,7 +234,7 @@ class CoreLogicTests(unittest.TestCase):
 
     def test_entari_handler_resolves_injected_async_provider(self):
         entari_native = _load_module(
-            "entari_native_inject_for_test", "utils/entari_native.py"
+            "entari_native_inject_for_test", "otae_bot/adapters/entari.py"
         )
 
         event = types.SimpleNamespace(guild=types.SimpleNamespace(id="10001"))
@@ -259,7 +259,7 @@ class CoreLogicTests(unittest.TestCase):
 
     def test_entari_concurrent_private_prompt_keeps_original_session(self):
         entari_native = _load_module(
-            "entari_native_session_context_for_test", "utils/entari_native.py"
+            "entari_native_session_context_for_test", "otae_bot/adapters/entari.py"
         )
         captured = []
 
@@ -326,7 +326,7 @@ class CoreLogicTests(unittest.TestCase):
 
     def test_entari_prompt_retries_early_connection_disconnect_once(self):
         entari_native = _load_module(
-            "entari_native_prompt_retry_for_test", "utils/entari_native.py"
+            "entari_native_prompt_retry_for_test", "otae_bot/adapters/entari.py"
         )
 
         class FakeSession:
@@ -357,7 +357,7 @@ class CoreLogicTests(unittest.TestCase):
 
     def test_entari_silent_prompt_does_not_send_timeout_message(self):
         entari_native = _load_module(
-            "entari_native_silent_prompt_for_test", "utils/entari_native.py"
+            "entari_native_silent_prompt_for_test", "otae_bot/adapters/entari.py"
         )
 
         class FakeSession:
@@ -1508,7 +1508,7 @@ class CoreLogicTests(unittest.TestCase):
         self.assertIn("[ERROR] line 11", lines)
 
     def test_mcsm_log_path_does_not_truncate_before_parsing(self):
-        source = (ROOT / "plugins/mcsm/__init__.py").read_text(encoding="utf-8")
+        source = (ROOT / "plugins/mcsm/handlers.py").read_text(encoding="utf-8")
         start = source.index("async def _cmd_log")
         end = source.index("# ── hide / unhide", start)
         log_source = source[start:end]
@@ -1522,7 +1522,7 @@ class CoreLogicTests(unittest.TestCase):
         self.assertIn('mode="log"', log_source)
 
     def test_mcsm_log_route_parses_all_and_custom_limits_source_paths(self):
-        source = (ROOT / "plugins/mcsm/__init__.py").read_text(encoding="utf-8")
+        source = (ROOT / "plugins/mcsm/handlers.py").read_text(encoding="utf-8")
         start = source.index("def _parse_log_args")
         end = source.index("async def _cmd_log", start)
         parser_source = source[start:end]
@@ -1849,7 +1849,7 @@ class CoreLogicTests(unittest.TestCase):
         self.assertEqual(result, "daemon-good")
 
     def test_mcsm_dm_key_results_use_explicit_unimessage_send(self):
-        source = (ROOT / "plugins/mcsm/__init__.py").read_text(encoding="utf-8")
+        source = (ROOT / "plugins/mcsm/handlers.py").read_text(encoding="utf-8")
         start = source.index("async def _finish_dm_image_or_text")
         end = source.index("async def _finish_notice", start)
         dm_finish_source = source[start:end]
@@ -1864,7 +1864,7 @@ class CoreLogicTests(unittest.TestCase):
         self.assertNotIn("_finish_notice(dm_key_handler", source)
 
     def test_mcsm_dm_key_handler_does_not_call_eventhook_send_or_finish(self):
-        source = (ROOT / "plugins/mcsm/__init__.py").read_text(encoding="utf-8")
+        source = (ROOT / "plugins/mcsm/handlers.py").read_text(encoding="utf-8")
         start = source.index("async def handle_dm_key")
         end = source.index("async def _is_dm_for_pending_bind", start)
         handler_source = source[start:end]
@@ -1884,7 +1884,7 @@ class CoreLogicTests(unittest.TestCase):
             self.assertNotIn(text, handler_source)
 
     def test_mcsm_private_batch_bind_and_group_admin_source_paths(self):
-        source = (ROOT / "plugins/mcsm/__init__.py").read_text(encoding="utf-8")
+        source = (ROOT / "plugins/mcsm/handlers.py").read_text(encoding="utf-8")
 
         self.assertIn("_pending_bind_sessions", source)
         self.assertIn("dm_bind_handler = listen_message", source)
@@ -1896,7 +1896,7 @@ class CoreLogicTests(unittest.TestCase):
         self.assertNotIn("_store.add_admin(group_id, target,", source)
 
     def test_mcsm_delete_instance_command_is_wired(self):
-        source = (ROOT / "plugins/mcsm/__init__.py").read_text(encoding="utf-8")
+        source = (ROOT / "plugins/mcsm/handlers.py").read_text(encoding="utf-8")
 
         self.assertIn('if subcmd in ("delete", "del", "remove", "删除")', source)
         self.assertIn("async def _cmd_delete_instance", source)
@@ -1905,7 +1905,7 @@ class CoreLogicTests(unittest.TestCase):
         self.assertIn("delete | admin", source)
 
     def test_mcsm_list_uses_only_bound_instances_source_paths(self):
-        source = (ROOT / "plugins/mcsm/__init__.py").read_text(encoding="utf-8")
+        source = (ROOT / "plugins/mcsm/handlers.py").read_text(encoding="utf-8")
         start = source.index("async def _cmd_list")
         end = source.index("async def _cmd_status", start)
         list_source = source[start:end]
@@ -1920,7 +1920,7 @@ class CoreLogicTests(unittest.TestCase):
         self.assertIn("if status == 3:", list_source)
 
     def test_mcsm_list_status_text_helpers(self):
-        source = (ROOT / "plugins/mcsm/__init__.py").read_text(encoding="utf-8")
+        source = (ROOT / "plugins/mcsm/handlers.py").read_text(encoding="utf-8")
         start = source.index("def _mcsm_status_code")
         end = source.index("async def _extract_at_users", start)
         namespace = {
@@ -2324,7 +2324,7 @@ remotePort = {{ $v.Second }}
         self.assertEqual(deploy.remediation_summary(["写入 eula", "", "重启"]), "写入 eula；重启")
 
     def test_mcsm_deploy_flow_wires_eula_auto_remediation(self):
-        source = (ROOT / "plugins/mcsm/__init__.py").read_text(encoding="utf-8")
+        source = (ROOT / "plugins/mcsm/handlers.py").read_text(encoding="utf-8")
 
         self.assertIn("async def _auto_remediate_deploy_start", source)
         self.assertIn('client.write_instance_file(uuid, daemon_id_value, "eula.txt", EULA_REMEDIATION_TEXT)', source)
@@ -2333,7 +2333,7 @@ remotePort = {{ $v.Second }}
         self.assertIn("自动修复:", source)
 
     def test_mcsm_deploy_failure_summary_includes_transfer_state(self):
-        source = (ROOT / "plugins/mcsm/__init__.py").read_text(encoding="utf-8")
+        source = (ROOT / "plugins/mcsm/handlers.py").read_text(encoding="utf-8")
 
         self.assertIn('summary["transfer_status"] = "已下载到 Bot 临时目录"', source)
         self.assertIn('summary["transfer_status"] = "已上传到 daemon"', source)
@@ -2345,7 +2345,7 @@ remotePort = {{ $v.Second }}
         self.assertIn('summary["remote_install_retry_status"]', source)
 
     def test_mcsm_deploy_failure_auto_deletes_created_instance(self):
-        source = (ROOT / "plugins/mcsm/__init__.py").read_text(encoding="utf-8")
+        source = (ROOT / "plugins/mcsm/handlers.py").read_text(encoding="utf-8")
         start = source.index("async def _cmd_deploy")
         end = source.index("@dm_bind_handler.handle()", start)
         deploy_source = source[start:end]
@@ -2362,7 +2362,7 @@ remotePort = {{ $v.Second }}
         self.assertNotIn('await _finish_deploy_failure("璇嗗埆鍚姩鍛戒护", start_source, summary)', deploy_source)
 
     def test_mcsm_deploy_upload_permission_repair_is_wired(self):
-        source = (ROOT / "plugins/mcsm/__init__.py").read_text(encoding="utf-8")
+        source = (ROOT / "plugins/mcsm/handlers.py").read_text(encoding="utf-8")
         start = source.index("async def _cmd_deploy")
         end = source.index("@dm_bind_handler.handle()", start)
         deploy_source = source[start:end]
@@ -2375,7 +2375,7 @@ remotePort = {{ $v.Second }}
         self.assertIn("uploaded_name = await _retry_upload_after_permission_repair(client, uuid, did, local_file, summary)", deploy_source)
 
     def test_mcsm_deploy_retries_remote_install_after_upload_failure(self):
-        source = (ROOT / "plugins/mcsm/__init__.py").read_text(encoding="utf-8")
+        source = (ROOT / "plugins/mcsm/handlers.py").read_text(encoding="utf-8")
         start = source.index("async def _cmd_deploy")
         end = source.index("@dm_bind_handler.handle()", start)
         deploy_source = source[start:end]
@@ -2389,7 +2389,7 @@ remotePort = {{ $v.Second }}
         self.assertIn('lines.append("安装方式: daemon 远程下载直链")', deploy_source)
 
     def test_mcsm_deploy_refreshes_qflash_direct_urls_for_large_packages(self):
-        source = (ROOT / "plugins/mcsm/__init__.py").read_text(encoding="utf-8")
+        source = (ROOT / "plugins/mcsm/handlers.py").read_text(encoding="utf-8")
         start = source.index("async def _cmd_deploy")
         end = source.index("@dm_bind_handler.handle()", start)
         deploy_source = source[start:end]
@@ -2411,7 +2411,7 @@ remotePort = {{ $v.Second }}
         self.assertIn("闪传直链刷新:", source)
 
     def test_mcsm_deploy_does_not_report_session_stop_as_failure(self):
-        source = (ROOT / "plugins/mcsm/__init__.py").read_text(encoding="utf-8")
+        source = (ROOT / "plugins/mcsm/handlers.py").read_text(encoding="utf-8")
         start = source.index("async def _cmd_deploy")
         end = source.index("@dm_bind_handler.handle()", start)
         deploy_source = source[start:end]
@@ -2426,7 +2426,7 @@ remotePort = {{ $v.Second }}
         self.assertIn("raise", deploy_source[exit_index:generic_index])
 
     def test_mcsm_deploy_progress_messages_are_compact(self):
-        source = (ROOT / "plugins/mcsm/__init__.py").read_text(encoding="utf-8")
+        source = (ROOT / "plugins/mcsm/handlers.py").read_text(encoding="utf-8")
         daemon_start = source.index("def _daemon_label")
         daemon_end = source.index("async def _select_deploy_daemon", daemon_start)
         daemon_source = source[daemon_start:daemon_end]
@@ -2978,7 +2978,7 @@ remotePort = {{ $v.Second }}
                 legacy.mkdir(parents=True)
                 (legacy / "demo.json").write_text('{"value": 42}', encoding="utf-8")
 
-                import utils.plugin_data as plugin_data_module
+                import otae_bot.infrastructure.storage.plugin_data as plugin_data_module
 
                 plugin_data_module.JSON_PATH = str(legacy.absolute()) + "/"
                 data = plugin_data_module.Plugin_Data("demo")
@@ -3040,7 +3040,7 @@ remotePort = {{ $v.Second }}
         )
 
     def test_mcwiki_url_builders_encode_keywords(self):
-        wiki_module = _load_module("mcwiki_for_test", "plugins/McWikiQuery/__init__.py")
+        wiki_module = _load_module("mcwiki_for_test", "plugins/McWikiQuery/handlers.py")
 
         search_url = wiki_module._wiki_search_url("\u7ea2\u77f3 torch")
         article_url = wiki_module._wiki_article_url("/w/\u7ea2\u77f3")
@@ -3049,7 +3049,7 @@ remotePort = {{ $v.Second }}
         self.assertEqual(article_url, "https://zh.minecraft.wiki/w/\u7ea2\u77f3?variant=zh")
 
     def test_mcwiki_search_result_parser_handles_empty_html(self):
-        wiki_module = _load_module("mcwiki_parser_for_test", "plugins/McWikiQuery/__init__.py")
+        wiki_module = _load_module("mcwiki_parser_for_test", "plugins/McWikiQuery/handlers.py")
 
         self.assertIsNone(wiki_module._extract_first_result_path(""))
         self.assertIsNone(wiki_module._extract_first_result_path("   "))
@@ -3062,7 +3062,7 @@ remotePort = {{ $v.Second }}
         )
 
     def test_mcwiki_http_client_follows_redirects(self):
-        wiki_module = _load_module("mcwiki_client_for_test", "plugins/McWikiQuery/__init__.py")
+        wiki_module = _load_module("mcwiki_client_for_test", "plugins/McWikiQuery/handlers.py")
 
         self.assertEqual(
             wiki_module._wiki_client_kwargs("http://127.0.0.1:7890"),
@@ -3079,7 +3079,7 @@ remotePort = {{ $v.Second }}
         )
 
     def test_mcwiki_image_segment_uses_temp_file(self):
-        wiki_module = _load_module("mcwiki_image_for_test", "plugins/McWikiQuery/__init__.py")
+        wiki_module = _load_module("mcwiki_image_for_test", "plugins/McWikiQuery/handlers.py")
 
         segment = wiki_module._image_segment_from_png(b"png-data")
         path = _image_file_path(segment)
@@ -3090,7 +3090,7 @@ remotePort = {{ $v.Second }}
             path.unlink(missing_ok=True)
 
     def test_mcwiki_splits_tall_images(self):
-        wiki_module = _load_module("mcwiki_split_image_for_test", "plugins/McWikiQuery/__init__.py")
+        wiki_module = _load_module("mcwiki_split_image_for_test", "plugins/McWikiQuery/handlers.py")
         from PIL import Image as PILImage
 
         source = PILImage.new("RGB", (8, 21), "white")
@@ -3111,7 +3111,7 @@ remotePort = {{ $v.Second }}
                 path.unlink(missing_ok=True)
 
     def test_mcwiki_reply_message_uses_event_message_id(self):
-        wiki_module = _load_module("mcwiki_reply_for_test", "plugins/McWikiQuery/__init__.py")
+        wiki_module = _load_module("mcwiki_reply_for_test", "plugins/McWikiQuery/handlers.py")
 
         event = types.SimpleNamespace(msg_id="msg-1")
         message = wiki_module._reply_message(event, "hello")
@@ -3121,7 +3121,7 @@ remotePort = {{ $v.Second }}
         self.assertEqual(str(message[1]), "hello")
 
     def test_mcwiki_reply_message_falls_back_to_nested_message_id(self):
-        wiki_module = _load_module("mcwiki_reply_nested_for_test", "plugins/McWikiQuery/__init__.py")
+        wiki_module = _load_module("mcwiki_reply_nested_for_test", "plugins/McWikiQuery/handlers.py")
 
         event = types.SimpleNamespace(message=types.SimpleNamespace(id="nested-msg"))
         message = wiki_module._reply_message(event, "hello")
@@ -3130,7 +3130,7 @@ remotePort = {{ $v.Second }}
         self.assertEqual(message[0].id, "nested-msg")
 
     def test_mcwiki_reply_message_without_id_still_sends_content(self):
-        wiki_module = _load_module("mcwiki_reply_missing_for_test", "plugins/McWikiQuery/__init__.py")
+        wiki_module = _load_module("mcwiki_reply_missing_for_test", "plugins/McWikiQuery/handlers.py")
 
         message = wiki_module._reply_message(types.SimpleNamespace(), "hello")
 
@@ -3138,7 +3138,7 @@ remotePort = {{ $v.Second }}
         self.assertEqual(str(message[0]), "hello")
 
     def test_mcmod_search_url_encodes_keyword(self):
-        mcmod_module = _load_module("mcmod_for_test", "plugins/McModQuery/__init__.py")
+        mcmod_module = _load_module("mcmod_for_test", "plugins/McModQuery/handlers.py")
 
         self.assertEqual(
             mcmod_module._search_url("\u66ae\u8272 forest", filter_args="&filter=3&mold=0"),
@@ -3146,7 +3146,7 @@ remotePort = {{ $v.Second }}
         )
 
     def test_peek_helpers_use_stable_image_paths(self):
-        peek_module = _load_module("peek_helpers_for_test", "plugins/peek/__init__.py")
+        peek_module = _load_module("peek_helpers_for_test", "plugins/peek/handlers.py")
 
         self.assertEqual(peek_module._join_endpoint("http://example.com/", "/screenshot"), "http://example.com/screenshot")
         segment = peek_module._image_segment_from_bytes(b"png-data")
@@ -3158,7 +3158,7 @@ remotePort = {{ $v.Second }}
             path.unlink(missing_ok=True)
 
     def test_image_utils_playwright_proxy_keeps_scheme(self):
-        import utils.image_utils as image_utils
+        import otae_bot.infrastructure.rendering.browser as image_utils
 
         with patch.object(image_utils, "SYSTEM_PROXY", {"http": "http://127.0.0.1:7890/"}):
             self.assertEqual(
@@ -3173,7 +3173,7 @@ remotePort = {{ $v.Second }}
             )
 
     def test_web_image_builders_keeps_legacy_keyword_names(self):
-        import utils.image_utils as image_utils
+        import otae_bot.infrastructure.rendering.browser as image_utils
 
         async def fake_screenshot(web_url, selector):
             self.assertEqual(web_url, "https://example.com/wiki")
@@ -3192,7 +3192,7 @@ remotePort = {{ $v.Second }}
             self.assertEqual((Path(tmp) / "wiki.png").read_bytes(), b"png-data")
 
     def test_image_utils_uses_dedicated_browser_executor(self):
-        import utils.image_utils as image_utils
+        import otae_bot.infrastructure.rendering.browser as image_utils
 
         class FakeLoop:
             def __init__(self):
@@ -3223,7 +3223,7 @@ remotePort = {{ $v.Second }}
         self.assertTrue(executor._shutdown)
 
     def test_image_utils_prefers_playwright_bundled_chromium(self):
-        import utils.image_utils as image_utils
+        import otae_bot.infrastructure.rendering.browser as image_utils
 
         calls = []
 
@@ -3288,7 +3288,7 @@ remotePort = {{ $v.Second }}
         self.assertFalse(hidden)
 
     def test_minecraft_direct_address_offline_uses_list_card_source_paths(self):
-        source = (ROOT / "plugins/minecraft_plugin/__init__.py").read_text(encoding="utf-8")
+        source = (ROOT / "plugins/minecraft_plugin/handlers.py").read_text(encoding="utf-8")
         start = source.index("r = await ping(command_args")
         end = source.index("# ── add_server", start)
         direct_address_source = source[start:end]
@@ -3454,7 +3454,7 @@ remotePort = {{ $v.Second }}
                 os.chdir(cwd)
 
     def test_minecraft_broadcast_interval_command_source_paths(self):
-        source = (ROOT / "plugins/minecraft_plugin/__init__.py").read_text(encoding="utf-8")
+        source = (ROOT / "plugins/minecraft_plugin/handlers.py").read_text(encoding="utf-8")
         self.assertIn('broadcast_interval = _cmd("broadcastinterval"', source)
         self.assertIn('if unit in {"", "m", "分", "分钟"}:', source)
         self.assertIn("return value * 60", source)
@@ -3464,7 +3464,7 @@ remotePort = {{ $v.Second }}
         self.assertIn("data_manager.reset_group_broadcast_interval(group_id)", source)
 
     def test_minecraft_ping_group_name_prefers_event_guild_and_fallback(self):
-        source = (ROOT / "plugins/minecraft_plugin/__init__.py").read_text(encoding="utf-8")
+        source = (ROOT / "plugins/minecraft_plugin/handlers.py").read_text(encoding="utf-8")
         self.assertIn("async def _get_group_name", source)
         self.assertIn("guild_name = str(getattr(guild, \"name\", \"\") or \"\").strip()", source)
         self.assertIn("full_guild = await guild_get(guild_id=str(group_id))", source)
@@ -3502,7 +3502,7 @@ remotePort = {{ $v.Second }}
 
     def test_steam_to_image_data_supports_entari_image_src(self):
         from arclet.entari import Image
-        import plugins.steamInfo as steam_plugin
+        import plugins.steamInfo.handlers as steam_plugin
 
         raw_png = (
             b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
@@ -3554,7 +3554,7 @@ remotePort = {{ $v.Second }}
             )
 
     def test_steam_initial_refresh_error_does_not_log_traceback_or_secret(self):
-        import plugins.steamInfo as steam_plugin
+        import plugins.steamInfo.handlers as steam_plugin
 
         secret_key = "do-not-log-this-key"
 
@@ -3572,7 +3572,7 @@ remotePort = {{ $v.Second }}
         self.assertNotIn(secret_key, str(error.call_args))
 
     def test_steam_duration_text_uses_readable_chinese(self):
-        import plugins.steamInfo as steam_plugin
+        import plugins.steamInfo.handlers as steam_plugin
 
         with patch.object(steam_plugin.time, "time", return_value=1540):
             self.assertEqual(steam_plugin._play_time_text(1000), "9 分钟")
@@ -3582,7 +3582,7 @@ remotePort = {{ $v.Second }}
         self.assertEqual(steam_plugin._format_minutes(125), "2 小时 5 分钟")
         self.assertEqual(steam_plugin._format_minutes_compact(120), "2小时")
 
-        source = (ROOT / "plugins/steamInfo/__init__.py").read_text(encoding="utf-8")
+        source = (ROOT / "plugins/steamInfo/handlers.py").read_text(encoding="utf-8")
         self.assertIn("玩了 {play_time_text}", source)
         self.assertIn("后不玩了", source)
         for mojibake in ("灏忔椂", "鍒嗛挓", "鐜╀簡", "鍚庝笉鐜╀簡"):

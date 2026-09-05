@@ -29,17 +29,17 @@
 
 - `plugins/endfield/assets/calendar/current.json`
   - AkeData 降级版的版本窗口、栏目、泳道、展示文案和 ID 映射。
-- `plugins/endfield/official_calendar.py`
+- `plugins/endfield/calendar/official.py`
   - 从官网当前构建自动发现三个简中日历资源。
   - 限定 `web.hycdn.cn` 官方 CDN，并校验类型、尺寸和体积。
-- `plugins/endfield/official_calendar_draw.py`
+- `plugins/endfield/calendar/official_draw.py`
   - 按官网原始比例拼接标题、日期轴和正文。
   - 不在仓库内保存官方整图。
-- `plugins/endfield/version_calendar.py`
+- `plugins/endfield/calendar/akedata.py`
   - 校验 AkeData 降级清单。
   - 加载 AkeData 当前版本及数据表。
   - 用 AkeData 的时间、卡池名和素材 ID 水合条目。
-- `plugins/endfield/version_calendar_draw.py`
+- `plugins/endfield/calendar/draw.py`
   - 把时间换算为横向百分比。
   - 生成栏目、日期轴、活动条和页头页尾 HTML。
   - 下载 AkeData 素材并交给 Chromium 截图。

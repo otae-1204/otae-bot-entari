@@ -6,8 +6,8 @@ from unittest import mock
 
 import httpx
 
-from utils.async_cache import AsyncTTLCache
-from utils import http_client
+from otae_bot.infrastructure.cache import AsyncTTLCache
+from otae_bot.infrastructure.http import client as http_client
 
 
 class AsyncTTLCacheTests(unittest.IsolatedAsyncioTestCase):

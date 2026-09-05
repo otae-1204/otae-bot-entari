@@ -8,11 +8,11 @@ from unittest.mock import AsyncMock, patch
 
 from PIL import Image
 
-import plugins.endfield as endfield
-from plugins.endfield import draw
-from plugins.endfield.client import WarfarinAPIError
-from plugins.endfield.commands import EndfieldCandidate, ParsedEndfieldCommand
-from plugins.endfield.models import (
+import plugins.endfield.handlers as endfield
+from plugins.endfield.rendering import cards as draw
+from plugins.endfield.providers.warfarin import WarfarinAPIError
+from plugins.endfield.catalog.commands import EndfieldCandidate, ParsedEndfieldCommand
+from plugins.endfield.catalog.models import (
     EffectView,
     EquipmentCatalogGroupView,
     EquipmentCatalogItemView,
@@ -20,10 +20,10 @@ from plugins.endfield.models import (
     EquipmentView,
     OperatorView,
 )
-from utils.http_client import HttpResource, clear_http_cache
+from otae_bot.infrastructure.http.client import HttpResource, clear_http_cache
 
 
-service_module = importlib.import_module("plugins.endfield.service")
+service_module = importlib.import_module("plugins.endfield.catalog.service")
 
 
 class EndfieldPerformanceBehaviorTests(unittest.IsolatedAsyncioTestCase):

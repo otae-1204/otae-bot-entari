@@ -3,6 +3,12 @@ name = "otae-bot-entari"
 version = "1.0.0"
 description = "otae QQ Bot migrated to Entari"
 authors = ["otae"]
+packages = [
+    {include = "otae_bot"},
+    {include = "plugins"},
+    {include = "utils"},
+    {include = "configs"},
+]
 
 [tool.poetry.dependencies]
 python = ">=3.10,<3.14"
@@ -23,6 +29,15 @@ pypinyin = "*"
 apscheduler = ">=3.10.0"
 PyYAML = ">=6.0"
 pycryptodome = ">=3.20.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=8.0"
+ruff = ">=0.9"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+pythonpath = ["."]
 
 [build-system]
 requires = ["poetry_core>=1.0.0"]

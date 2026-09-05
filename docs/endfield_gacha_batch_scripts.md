@@ -93,7 +93,7 @@ chcp 65001 > $null; .\.venv\Scripts\python.exe scripts\aggregate_endfield_gacha_
 
 - **六星综合出率** = 六星数 / 付费抽数，附 95% Wilson 置信区间；免费十连不计入付费出率，单列 `free_pulls`。
 - **平均保底** = 相邻两个六星之间的付费抽数；每个池族第一个六星是左删失（本机记录可能不完整），单独计数 `left_censored_first_six`，不进平均。
-- **保底/池族判定**（角色 special 共享、joint / beginner 隔离；武器按单条流）与 `plugins/endfield/gacha.py` 对齐，以其为准。
+- **保底/池族判定**（角色 special 共享、joint / beginner 隔离；武器按单条流）与 `plugins/endfield/gacha/service.py` 对齐，以其为准。
 - **歪率 miss_up**：官方 `gacha_records` 不含 UP 归属，故仅取自**小黑盒导入**，输出中标 `"source": "xhh"`。
 
 ### 对比基线（官方概率公示，理论值）

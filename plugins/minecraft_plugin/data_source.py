@@ -21,7 +21,7 @@ import logging
 from functools import wraps
 from typing import Callable, Any, Optional, Dict, List, Union
 
-from utils.plugin_data import Plugin_Data
+from otae_bot.infrastructure.storage.plugin_data import Plugin_Data
 
 logger = logging.getLogger(__name__)
 

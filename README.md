@@ -1,7 +1,42 @@
 # otae Bot Entari
 
-The source project was copied as a read-only migration source. Runtime data,
-assets, plugin code, configs, and the real `.env` were copied into this project.
+基于 Entari / Satori 的 QQ 机器人。启动与公共设施位于 `otae_bot/`，
+功能插件位于 `plugins/`，可写数据仍使用原有的 `data/`、`configs/` 和资源目录。
+
+代码结构、模块职责及扩展方式见 [代码结构说明](docs/code_structure.md)。
+
+## 分支与独立 UI 预览
+
+`refactor/project-architecture` 提供新的程序架构，并保留
+`design/endfield-ui-code-preview` 的独立前端预览，方便在同一个检出目录中评审。
+架构调整与 UI 预览是两个独立提交，预览没有接入正式插件；`main` 尚未合并这些改动。
+
+只查看 UI 时，不需要安装机器人依赖。在仓库根目录执行：
+
+```bash
+python3 design/endfield-preview/tools/serve.py --port 8765
+```
+
+Windows 使用 `py -3` 替代 `python3`，随后打开 <http://127.0.0.1:8765/>。
+页面覆盖、示例截图与测试方法见 [预览说明](design/endfield-preview/README.md)。
+
+## Development and checks
+
+在项目根目录运行（Windows 使用 `.venv\Scripts\python.exe`）：
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements-dev.txt
+.venv/bin/python -m playwright install chromium
+.venv/bin/python -m pytest
+.venv/bin/python bot.py
+```
+
+Linux 首次运行浏览器截图时可使用
+`.venv/bin/python -m playwright install-deps chromium` 安装系统依赖。
+也支持 `.venv/bin/python -m otae_bot`，与 `bot.py` 使用同一启动流程。
+
+测试基线及环境限制见 [重构验证记录](docs/refactor_validation.md)。
 
 ## Run Locally
 

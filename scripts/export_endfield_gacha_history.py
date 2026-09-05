@@ -26,17 +26,17 @@ ROOT = Path(__file__).resolve().parents[1]
 PLUGIN_DIR = ROOT / "plugins" / "endfield"
 sys.path.insert(0, str(ROOT))
 
-import configs.config  # noqa: E402,F401  导入即把 .env 载入 os.environ
+import otae_bot.config.settings  # noqa: E402,F401  导入即把 .env 载入 os.environ
 
-# 以合成包加载插件模块，避免执行 plugins/endfield/__init__.py（会拉起整个 bot 依赖）。
+# 以合成包加载插件模块，避免执行 plugins/endfield/handlers.py（会拉起整个 bot 依赖）。
 _PACKAGE = "endfield_export_runtime"
 _package = types.ModuleType(_PACKAGE)
 _package.__path__ = [str(PLUGIN_DIR)]
 sys.modules[_PACKAGE] = _package
 
-account_client = importlib.import_module(f"{_PACKAGE}.account_client")
-account_crypto = importlib.import_module(f"{_PACKAGE}.account_crypto")
-account_store = importlib.import_module(f"{_PACKAGE}.account_store")
+account_client = importlib.import_module(f"{_PACKAGE}.account.client")
+account_crypto = importlib.import_module(f"{_PACKAGE}.account.crypto")
+account_store = importlib.import_module(f"{_PACKAGE}.account.store")
 
 CHARACTER_POOL_TYPES = account_client.CHARACTER_POOL_TYPES
 EndfieldAPIError = account_client.EndfieldAPIError

@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from utils.image_executor import close_image_executor, run_image_render
+from otae_bot.infrastructure.rendering.executor import close_image_executor, run_image_render
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -79,7 +79,7 @@ class ImageExecutorTests(unittest.IsolatedAsyncioTestCase):
 
 class ManagedSchedulerTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.module = _load_module("entari_native_runtime_for_test", "utils/entari_native.py")
+        self.module = _load_module("entari_native_runtime_for_test", "otae_bot/adapters/entari.py")
         self.subscribers = []
 
         class Subscriber:

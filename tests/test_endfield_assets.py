@@ -14,6 +14,8 @@ if str(ROOT) not in sys.path:
 
 
 def _load_module(name: str, relative_path: str):
+    if "." in name:
+        importlib.import_module(name.rpartition(".")[0])
     spec = importlib.util.spec_from_file_location(name, ROOT / relative_path)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -24,30 +26,30 @@ def _load_module(name: str, relative_path: str):
 
 def _load_endfield_modules():
     pkg_name = "endfield_asset_test"
-    if f"{pkg_name}.asset_urls" in sys.modules:
-        return sys.modules[f"{pkg_name}.asset_urls"]
+    if f"{pkg_name}.providers.assets" in sys.modules:
+        return sys.modules[f"{pkg_name}.providers.assets"]
     pkg = types.ModuleType(pkg_name)
     pkg.__path__ = [str(ROOT / "plugins/endfield")]
     sys.modules[pkg_name] = pkg
-    _load_module(f"{pkg_name}.models", "plugins/endfield/models.py")
-    return _load_module(f"{pkg_name}.asset_urls", "plugins/endfield/asset_urls.py")
+    _load_module(f"{pkg_name}.catalog.models", "plugins/endfield/catalog/models.py")
+    return _load_module(f"{pkg_name}.providers.assets", "plugins/endfield/providers/assets.py")
 
 
 def _load_draw():
     pkg_name = "endfield_asset_test"
     _load_endfield_modules()
-    if f"{pkg_name}.draw" in sys.modules:
-        return sys.modules[f"{pkg_name}.draw"]
+    if f"{pkg_name}.rendering.cards" in sys.modules:
+        return sys.modules[f"{pkg_name}.rendering.cards"]
     try:
-        _load_module(f"{pkg_name}.client", "plugins/endfield/client.py")
-        return _load_module(f"{pkg_name}.draw", "plugins/endfield/draw.py")
+        _load_module(f"{pkg_name}.providers.warfarin", "plugins/endfield/providers/warfarin.py")
+        return _load_module(f"{pkg_name}.rendering.cards", "plugins/endfield/rendering/cards.py")
     except Exception:
-        sys.modules.pop(f"{pkg_name}.draw", None)
+        sys.modules.pop(f"{pkg_name}.rendering.cards", None)
         raise
 
 
 asset_urls = _load_endfield_modules()
-models = sys.modules["endfield_asset_test.models"]
+models = sys.modules["endfield_asset_test.catalog.models"]
 OperatorView = models.OperatorView
 SkillView = models.SkillView
 EffectView = models.EffectView
@@ -239,11 +241,11 @@ class EndfieldAssetDonorTests(unittest.TestCase):
 
 class EndfieldAssetFetchTests(unittest.TestCase):
     def test_prepare_assets_uses_24mb_limit(self):
-        source = (ROOT / "plugins/endfield/draw.py").read_text(encoding="utf-8")
+        source = (ROOT / "plugins/endfield/rendering/cards.py").read_text(encoding="utf-8")
         self.assertIn("ASSET_FETCH_MAX_BYTES = 24 * 1024 * 1024", source)
-        account = (ROOT / "plugins/endfield/account_draw.py").read_text(encoding="utf-8")
+        account = (ROOT / "plugins/endfield/account/draw.py").read_text(encoding="utf-8")
         self.assertIn("max_bytes=24 * 1024 * 1024", account)
-        gacha = (ROOT / "plugins/endfield/gacha_assets.py").read_text(encoding="utf-8")
+        gacha = (ROOT / "plugins/endfield/gacha/assets.py").read_text(encoding="utf-8")
         self.assertIn("IMAGE_FETCH_MAX_BYTES = 24 * 1024 * 1024", gacha)
         self.assertIn("fetch_many_resilient", gacha)
 
@@ -252,7 +254,7 @@ class EndfieldAssetFetchTests(unittest.TestCase):
             draw = _load_draw()
         except ModuleNotFoundError as exc:
             self.skipTest(f"draw 依赖缺失: {exc}")
-        from utils.http_client import HttpResource
+        from otae_bot.infrastructure.http.client import HttpResource
 
         async def fake_fetch(urls, **_kwargs):
             resolved = {}

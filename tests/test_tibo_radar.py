@@ -13,8 +13,8 @@ from types import SimpleNamespace
 
 from PIL import Image
 
-from configs.config import Config as GlobalConfig
-from plugins.tibo_radar import _is_subscription_manager, _subscription_image_segment
+from otae_bot.config.settings import Config as GlobalConfig
+from plugins.tibo_radar.handlers import _is_subscription_manager, _subscription_image_segment
 from plugins.tibo_radar.client import parse_codex_reset_feed, parse_codex_reset_timeline, parse_codexradar_html
 from plugins.tibo_radar.draw import CardSection, render_card
 from plugins.tibo_radar.draw_x import CardSection as XCardSection, render_card as render_x_card

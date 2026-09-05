@@ -10,11 +10,11 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from plugins.endfield.client import WarfarinClient
-from plugins.endfield.official_calendar import OfficialVersionCalendarSource
-from plugins.endfield.official_calendar_draw import draw_official_version_calendar
-from plugins.endfield.version_calendar import AkeDataVersionCalendarSource
-from plugins.endfield.version_calendar_draw import draw_version_calendar
+from plugins.endfield.providers.warfarin import WarfarinClient
+from plugins.endfield.calendar.official import OfficialVersionCalendarSource
+from plugins.endfield.calendar.official_draw import draw_official_version_calendar
+from plugins.endfield.calendar.akedata import AkeDataVersionCalendarSource
+from plugins.endfield.calendar.draw import draw_version_calendar
 
 
 async def render(output: Path, *, generated: bool = False) -> None:

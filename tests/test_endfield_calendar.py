@@ -6,8 +6,8 @@ from unittest import mock
 
 from arclet.letoderea.exceptions import ExitState
 
-import plugins.endfield as endfield
-from plugins.endfield import commands as commands_module
+import plugins.endfield.handlers as endfield
+from plugins.endfield.catalog import commands as commands_module
 
 
 class EndfieldCalendarCommandTests(unittest.IsolatedAsyncioTestCase):

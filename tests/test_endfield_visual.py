@@ -11,8 +11,9 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw
 
-from plugins.endfield import draw, stage_draw
-from plugins.endfield.models import (
+from plugins.endfield.rendering import cards as draw
+from plugins.endfield.stages import draw as stage_draw
+from plugins.endfield.catalog.models import (
     EffectView,
     OperatorView,
     SkillLevelView,
@@ -21,7 +22,7 @@ from plugins.endfield.models import (
     WeaponSkillView,
     WeaponView,
 )
-from plugins.endfield.stage_models import (
+from plugins.endfield.stages.models import (
     BossRushStageDetails,
     Stage,
     StageCardView,
@@ -35,7 +36,7 @@ from plugins.endfield.stage_models import (
     StageSourceRef,
     StageVariant,
 )
-from utils.image_utils import screenshot_web_element
+from otae_bot.infrastructure.rendering.browser import screenshot_web_element
 
 
 EXPECTED_VISUALS: dict[str, tuple[str, str]] = {

@@ -2,7 +2,7 @@
 
 > 分支：`dev`　·　创建：2026-07-28
 > 性质：实证调研文档。记录森空岛 `achieveMedals` 解析经验、三源 id 关系、跨源关联方式。
-> 配套实现：`plugins/endfield/service.py` 的 `build_medal_missing_view` / `_parse_player_medal_progress`。
+> 配套实现：`plugins/endfield/catalog/service.py` 的 `build_medal_missing_view` / `_parse_player_medal_progress`。
 
 ---
 
@@ -121,7 +121,7 @@ hash matches: {'md5(achv)': 115} out of 115
 
 ## 5. 跨源关联实现方式
 
-代码在 `plugins/endfield/service.py`：
+代码在 `plugins/endfield/catalog/service.py`：
 
 1. **`_parse_player_medal_progress(raw)`**：解析森空岛响应，返回 `(by_hex, by_name)` 两个 dict：
    - `by_hex`：键 = `achievementData.id`（hex）→ `MedalProgressView(level, plated)`。**主键**。
@@ -189,7 +189,7 @@ PYTHONPATH=. .venv/Scripts/python.exe scripts/_dev_medal_repl.py 重查        #
 
 ```python
 import hashlib, json, glob
-from plugins.endfield.service import _norm_medal_name
+from plugins.endfield.catalog.service import _norm_medal_name
 raw = json.load(open(sorted(glob.glob('data/_manual_test/card_detail_raw_*.json'))[-1], encoding='utf-8'))
 sk = {m['achievementData']['id'] for m in raw['data']['detail']['achieve']['achieveMedals']}
 snap = json.load(open('data/endfield/medal_snapshot.json', encoding='utf-8'))

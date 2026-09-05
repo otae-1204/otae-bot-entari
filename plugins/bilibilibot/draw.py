@@ -7,8 +7,8 @@ from io import BytesIO
 
 from PIL import Image, ImageDraw, ImageFont
 
-from utils.http_client import fetch_bytes
-from utils.image_executor import run_image_render
+from otae_bot.infrastructure.http.client import fetch_bytes
+from otae_bot.infrastructure.rendering.executor import run_image_render
 
 from .models import BiliCard
 

@@ -4,7 +4,7 @@ import unittest
 
 from PIL import Image
 
-from plugins.endfield import draw
+from plugins.endfield.rendering import cards as draw
 from scripts.build_endfield_zero_potential_icon import build_zero_potential_icon
 
 

@@ -65,7 +65,7 @@ class MinecraftPluginTests(unittest.TestCase):
         self.assertIn("DNS", result["data"])
 
     def test_ping_command_resolves_saved_identifier_first(self):
-        source = (ROOT / "plugins/minecraft_plugin/__init__.py").read_text(encoding="utf-8")
+        source = (ROOT / "plugins/minecraft_plugin/handlers.py").read_text(encoding="utf-8")
         start = source.index("# 优先按已保存的地址、名称或昵称查找")
         end = source.index("r = await ping(command_args", start)
         lookup_source = source[start:end]

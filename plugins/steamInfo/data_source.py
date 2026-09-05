@@ -8,7 +8,7 @@ from PIL import Image
 from pathlib import Path
 from typing import Any, List, Dict, Optional, Tuple
 
-from configs.path_config import IMAGE_PATH
+from otae_bot.config.paths import IMAGE_PATH
 from .models import PlayerSummariesResponse
 
 

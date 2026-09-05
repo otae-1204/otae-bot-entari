@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from plugins.endfield.account_draw import (
+from plugins.endfield.account.draw import (
     draw_account_overview,
     draw_crisis_contract,
     draw_indie_hard,
@@ -17,9 +17,9 @@ from plugins.endfield.account_draw import (
     render_crisis_contract_html,
     render_indie_hard_html,
 )
-from plugins.endfield.account_models import AccountUiPayload
-from utils.http_client import close_http_client
-from utils.image_utils import close_browser
+from plugins.endfield.account.models import AccountUiPayload
+from otae_bot.infrastructure.http.client import close_http_client
+from otae_bot.infrastructure.rendering.browser import close_browser
 
 
 RESPONSE_DIR = ROOT / ".runtime" / "skland_reverse" / "responses"

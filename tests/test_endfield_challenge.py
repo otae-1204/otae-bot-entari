@@ -9,10 +9,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-import plugins.endfield.draw as endfield_draw
-from plugins.endfield import commands
-from plugins.endfield import account_challenge as challenge
-from plugins.endfield.account_challenge import (
+import plugins.endfield.rendering.cards as endfield_draw
+from plugins.endfield.catalog import commands
+from plugins.endfield.account.challenge import draw as challenge
+from plugins.endfield.account.challenge.draw import (
     ChallengeIdentity,
     ChallengeRecord,
     ChallengeResolutionError,
@@ -30,9 +30,9 @@ from plugins.endfield.account_challenge import (
     resolve_monument_detail,
     resolve_war_detail,
 )
-from plugins.endfield.account_client import EndfieldOfficialClient
-from plugins.endfield.account_challenge_i18n import build_challenge_locale
-from utils.http_client import HttpResource
+from plugins.endfield.account.client import EndfieldOfficialClient
+from plugins.endfield.account.challenge.i18n import build_challenge_locale
+from otae_bot.infrastructure.http.client import HttpResource
 
 
 def _monument_fixture() -> dict:
@@ -347,7 +347,7 @@ class EndfieldChallengeTests(unittest.TestCase):
 
     def test_challenge_mentions_ignore_bot_and_preserve_target_order(self):
         from arclet.entari import At, MessageChain, Text
-        import plugins.endfield as endfield_plugin
+        import plugins.endfield.handlers as endfield_plugin
 
         event = SimpleNamespace(
             content=MessageChain(
@@ -364,7 +364,7 @@ class EndfieldChallengeTests(unittest.TestCase):
 
     def test_challenge_mention_without_binding_returns_text(self):
         from arclet.entari import At, MessageChain, Text
-        import plugins.endfield as endfield_plugin
+        import plugins.endfield.handlers as endfield_plugin
 
         async def run():
             matcher = SimpleNamespace(finish=AsyncMock())
@@ -388,7 +388,7 @@ class EndfieldChallengeTests(unittest.TestCase):
 
     def test_challenge_mention_selects_target_primary_account(self):
         from arclet.entari import At, MessageChain, Text
-        import plugins.endfield as endfield_plugin
+        import plugins.endfield.handlers as endfield_plugin
 
         async def run():
             matcher = SimpleNamespace(finish=AsyncMock())
@@ -740,7 +740,7 @@ class EndfieldForwardSendTests(unittest.TestCase):
     """合并转发：优先 Satori 原生 <message forward>，失败才回退 OneBot 动作。"""
 
     def test_make_forward_nests_pages_with_one_author(self):
-        from utils.entari_native import make_forward
+        from otae_bot.adapters.entari import make_forward
 
         element = make_forward(
             ["第一页", "第二页"],
@@ -755,12 +755,12 @@ class EndfieldForwardSendTests(unittest.TestCase):
         self.assertIn("第二页", dumped)
 
     def test_make_forward_omits_author_without_uin(self):
-        from utils.entari_native import make_forward
+        from otae_bot.adapters.entari import make_forward
 
         self.assertNotIn("<author", str(make_forward(["仅正文"])))
 
     def test_forward_prefers_satori_element(self):
-        import plugins.endfield as endfield_plugin
+        import plugins.endfield.handlers as endfield_plugin
 
         send_forward = AsyncMock()
         onebot = AsyncMock()
@@ -781,7 +781,7 @@ class EndfieldForwardSendTests(unittest.TestCase):
         self.assertEqual(send_forward.await_args.kwargs["uin"], "10001")
 
     def test_forward_falls_back_to_onebot_action(self):
-        import plugins.endfield as endfield_plugin
+        import plugins.endfield.handlers as endfield_plugin
 
         send_forward = AsyncMock(side_effect=RuntimeError("no session"))
         onebot = AsyncMock()

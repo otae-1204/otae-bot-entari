@@ -28,13 +28,13 @@ F1/F2 详情每条显示 **描述**（黑）+ **获取条件**（浅色），分
 
 | 文件 | 职责 |
 |---|---|
-| `plugins/endfield/akedata_client.py` | `fetch_akedata_medal_tables` / `fetch_akedata_achievement_table`（历史基线） / `fetch_akedata_baseline` |
-| `plugins/endfield/service.py` | `build_akedata_medal_snapshot`（聚合全量） / `build_medal_diff`（F1） / `build_medal_missing_view`（F2） / `_i18n_text` / `_tier_text` |
-| `plugins/endfield/models.py` | `MedalItemView` / `MedalSnapshotView` / `MedalDiffView` / `MedalMissingView` / `MedalProgressView` / `MedalBaselineView` |
-| `plugins/endfield/medal_store.py` | 快照持久化（`current` + `baseline` 两个槽，SQLite/JSON） |
-| `plugins/endfield/draw.py` | `draw_medal_stats_card` / `draw_medal_missing_card` + `_medal_*` 渲染辅助（HTML→Playwright 截图） |
-| `plugins/endfield/commands.py` | 奖章命令解析（`MEDAL_ALIASES` / `MEDAL_REFRESH_ALIASES` / `MEDAL_MISSING_ALIASES`） |
-| `plugins/endfield/__init__.py` | `_handle_medal` / `_handle_medal_missing` |
+| `plugins/endfield/providers/akedata.py` | `fetch_akedata_medal_tables` / `fetch_akedata_achievement_table`（历史基线） / `fetch_akedata_baseline` |
+| `plugins/endfield/catalog/service.py` | `build_akedata_medal_snapshot`（聚合全量） / `build_medal_diff`（F1） / `build_medal_missing_view`（F2） / `_i18n_text` / `_tier_text` |
+| `plugins/endfield/catalog/models.py` | `MedalItemView` / `MedalSnapshotView` / `MedalDiffView` / `MedalMissingView` / `MedalProgressView` / `MedalBaselineView` |
+| `plugins/endfield/medals/store.py` | 快照持久化（`current` + `baseline` 两个槽，SQLite/JSON） |
+| `plugins/endfield/rendering/cards.py` | `draw_medal_stats_card` / `draw_medal_missing_card` + `_medal_*` 渲染辅助（HTML→Playwright 截图） |
+| `plugins/endfield/catalog/commands.py` | 奖章命令解析（`MEDAL_ALIASES` / `MEDAL_REFRESH_ALIASES` / `MEDAL_MISSING_ALIASES`） |
+| `plugins/endfield/handlers.py` | `_handle_medal` / `_handle_medal_missing` |
 
 ---
 

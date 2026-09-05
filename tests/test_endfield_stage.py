@@ -4,16 +4,16 @@ import unittest
 from dataclasses import replace
 from unittest.mock import AsyncMock, patch
 
-import plugins.endfield as endfield
-from plugins.endfield import commands
-from plugins.endfield.client import WarfarinAPIError
-from plugins.endfield import stage_draw
-from plugins.endfield.stage_draw import (
+import plugins.endfield.handlers as endfield
+from plugins.endfield.catalog import commands
+from plugins.endfield.providers.warfarin import WarfarinAPIError
+from plugins.endfield.stages import draw as stage_draw
+from plugins.endfield.stages.draw import (
     _stage_icon_urls,
     render_stage_card_html,
     render_stage_catalog_html,
 )
-from plugins.endfield.stage_models import (
+from plugins.endfield.stages.models import (
     CrisisContractStageDetails,
     MonumentStageDetails,
     Stage,
@@ -27,7 +27,7 @@ from plugins.endfield.stage_models import (
     StageVariant,
     WarEchoStageDetails,
 )
-from plugins.endfield.akedata_stage_source import (
+from plugins.endfield.stages.akedata import (
     AkeDataStageSource,
     AkeDataVersion,
     _enemy_metrics,
@@ -38,14 +38,14 @@ from plugins.endfield.akedata_stage_source import (
     parse_akedata_catalog,
     parse_akedata_stage,
 )
-from plugins.endfield.stage_service import (
+from plugins.endfield.stages.service import (
     EndfieldStageService,
     StageMatch,
     StageVariantNotFound,
     _match_item,
     select_variant,
 )
-from plugins.endfield.stage_source import FZStageSource, _localized, parse_enemy_resistances, parse_fz_stage
+from plugins.endfield.stages.fz import FZStageSource, _localized, parse_enemy_resistances, parse_fz_stage
 
 
 def _resistance_models() -> tuple[StageEnemyResistance, ...]:
@@ -59,7 +59,7 @@ def _resistance_models() -> tuple[StageEnemyResistance, ...]:
         )
         for row in _RESISTANCE_ROWS
     )
-from plugins.endfield.sources import source_order
+from plugins.endfield.providers.registry import source_order
 
 
 def _article(title: str, content: list[dict], *, description: str = "测试说明") -> dict:

@@ -27,6 +27,8 @@ PACKAGE = "endfield_account_for_test"
 
 
 def _load(name: str, relative_path: str):
+    if "." in name:
+        importlib.import_module(name.rpartition(".")[0])
     spec = importlib.util.spec_from_file_location(name, ROOT / relative_path)
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
@@ -40,33 +42,33 @@ if PACKAGE not in sys.modules:
     package.__path__ = [str(ROOT / "plugins/endfield")]
     sys.modules[PACKAGE] = package
 
-crypto = _load(f"{PACKAGE}.account_crypto", "plugins/endfield/account_crypto.py")
-store_module = _load(f"{PACKAGE}.account_store", "plugins/endfield/account_store.py")
-xhh_module = _load(f"{PACKAGE}.xhh_client", "plugins/endfield/xhh_client.py")
-client_module = _load(f"{PACKAGE}.account_client", "plugins/endfield/account_client.py")
-currency_module = _load(f"{PACKAGE}.account_currency", "plugins/endfield/account_currency.py")
-gacha_module = _load(f"{PACKAGE}.gacha", "plugins/endfield/gacha.py")
-gacha_assets_module = sys.modules[f"{PACKAGE}.gacha_assets"]
-models_module = _load(f"{PACKAGE}.models", "plugins/endfield/models.py")
-aliases_module = _load(f"{PACKAGE}.aliases", "plugins/endfield/aliases.py")
-sources_module = _load(f"{PACKAGE}.sources", "plugins/endfield/sources.py")
-commands_module = _load(f"{PACKAGE}.commands", "plugins/endfield/commands.py")
-draw_module = _load(f"{PACKAGE}.draw", "plugins/endfield/draw.py")
+crypto = _load(f"{PACKAGE}.account.crypto", "plugins/endfield/account/crypto.py")
+store_module = _load(f"{PACKAGE}.account.store", "plugins/endfield/account/store.py")
+xhh_module = _load(f"{PACKAGE}.gacha.xhh", "plugins/endfield/gacha/xhh.py")
+client_module = _load(f"{PACKAGE}.account.client", "plugins/endfield/account/client.py")
+currency_module = _load(f"{PACKAGE}.account.currency.service", "plugins/endfield/account/currency/service.py")
+gacha_module = _load(f"{PACKAGE}.gacha.service", "plugins/endfield/gacha/service.py")
+gacha_assets_module = sys.modules[f"{PACKAGE}.gacha.assets"]
+models_module = _load(f"{PACKAGE}.catalog.models", "plugins/endfield/catalog/models.py")
+aliases_module = _load(f"{PACKAGE}.catalog.aliases", "plugins/endfield/catalog/aliases.py")
+sources_module = _load(f"{PACKAGE}.providers.registry", "plugins/endfield/providers/registry.py")
+commands_module = _load(f"{PACKAGE}.catalog.commands", "plugins/endfield/catalog/commands.py")
+draw_module = _load(f"{PACKAGE}.rendering.cards", "plugins/endfield/rendering/cards.py")
 account_detail_models_module = _load(
-    f"{PACKAGE}.account_detail_models", "plugins/endfield/account_detail_models.py"
+    f"{PACKAGE}.account.detail.models", "plugins/endfield/account/detail/models.py"
 )
 account_detail_module = _load(
-    f"{PACKAGE}.account_detail_service", "plugins/endfield/account_detail_service.py"
+    f"{PACKAGE}.account.detail.service", "plugins/endfield/account/detail/service.py"
 )
-account_detail_names_module = sys.modules[f"{PACKAGE}.account_detail_names"]
+account_detail_names_module = sys.modules[f"{PACKAGE}.account.detail.names"]
 account_base_models_module = _load(
-    f"{PACKAGE}.account_base_models", "plugins/endfield/account_base_models.py"
+    f"{PACKAGE}.account.base.models", "plugins/endfield/account/base/models.py"
 )
 account_base_service_module = _load(
-    f"{PACKAGE}.account_base_service", "plugins/endfield/account_base_service.py"
+    f"{PACKAGE}.account.base.service", "plugins/endfield/account/base/service.py"
 )
 account_base_draw_module = _load(
-    f"{PACKAGE}.account_base_draw", "plugins/endfield/account_base_draw.py"
+    f"{PACKAGE}.account.base.draw", "plugins/endfield/account/base/draw.py"
 )
 COMPACT_THRESHOLD = account_detail_models_module.COMPACT_THRESHOLD
 

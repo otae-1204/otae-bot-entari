@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional
 
-from utils.json_store import JsonStore
+from otae_bot.infrastructure.storage.json_store import JsonStore
 
 
 class MCSMStore:

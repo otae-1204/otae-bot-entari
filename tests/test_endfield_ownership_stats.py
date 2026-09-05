@@ -9,19 +9,19 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-import plugins.endfield as endfield_plugin
+import plugins.endfield.handlers as endfield_plugin
 from loguru import logger
 from satori.model import IterablePageResult, PageResult
-from plugins.endfield.account_client import EndfieldAPIError
-from plugins.endfield.account_crypto import CredentialCipher
-from plugins.endfield.account_store import (
+from plugins.endfield.account.client import EndfieldAPIError
+from plugins.endfield.account.crypto import CredentialCipher
+from plugins.endfield.account.store import (
     EndfieldStore,
     OperatorCatalogEntry,
     OperatorSnapshotMember,
     RoleCandidate,
 )
-from plugins.endfield.commands import parse_command
-from plugins.endfield.ownership_stats import (
+from plugins.endfield.catalog.commands import parse_command
+from plugins.endfield.ownership.service import (
     CATALOG_MAPPING_REVISION,
     GroupMemberListError,
     OwnershipRefreshIssue,
@@ -708,11 +708,11 @@ class OwnershipRefreshAndGroupTests(unittest.TestCase):
         manifest = {"latest": "v1", "versions": [{"id": "v1", "tableCfgPath": "tables"}]}
         with (
             mock.patch(
-                "plugins.endfield.ownership_stats.fetch_akedata_manifest",
+                "plugins.endfield.ownership.service.fetch_akedata_manifest",
                 mock.AsyncMock(return_value=manifest),
             ),
             mock.patch(
-                "plugins.endfield.ownership_stats.fetch_operator_catalog",
+                "plugins.endfield.ownership.service.fetch_operator_catalog",
                 mock.AsyncMock(return_value=("v1", incoming)),
             ),
         ):
@@ -732,11 +732,11 @@ class OwnershipRefreshAndGroupTests(unittest.TestCase):
         manifest = {"latest": "v1", "versions": [{"id": "v1", "tableCfgPath": "tables"}]}
         with (
             mock.patch(
-                "plugins.endfield.ownership_stats.fetch_akedata_manifest",
+                "plugins.endfield.ownership.service.fetch_akedata_manifest",
                 mock.AsyncMock(return_value=manifest),
             ) as fetch_manifest,
             mock.patch(
-                "plugins.endfield.ownership_stats.fetch_operator_catalog",
+                "plugins.endfield.ownership.service.fetch_operator_catalog",
                 mock.AsyncMock(),
             ) as fetch_tables,
         ):
@@ -956,7 +956,7 @@ class OwnershipRefreshAndGroupTests(unittest.TestCase):
         with (
             mock.patch.object(service, "refresh_catalog", mock.AsyncMock(return_value=False)),
             mock.patch(
-                "plugins.endfield.ownership_stats.time.time",
+                "plugins.endfield.ownership.service.time.time",
                 side_effect=[100, 101, 102, 103],
             ),
         ):
@@ -1071,7 +1071,7 @@ class OwnershipRefreshAndGroupTests(unittest.TestCase):
                 raise RuntimeError(guild_id)
 
         with mock.patch(
-            "plugins.endfield.ownership_stats.call_onebot_action",
+            "plugins.endfield.ownership.service.call_onebot_action",
             mock.AsyncMock(side_effect=RuntimeError("unsupported")),
         ):
             with self.assertRaises(GroupMemberListError):
@@ -1080,7 +1080,7 @@ class OwnershipRefreshAndGroupTests(unittest.TestCase):
         fallback = mock.AsyncMock(
             return_value={"status": "ok", "data": [{"user_id": 300}, {"user_id": "400"}]}
         )
-        with mock.patch("plugins.endfield.ownership_stats.call_onebot_action", fallback):
+        with mock.patch("plugins.endfield.ownership.service.call_onebot_action", fallback):
             self.assertEqual(
                 asyncio.run(collect_group_member_ids(object(), "123")),
                 {"300", "400"},

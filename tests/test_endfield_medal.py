@@ -7,22 +7,22 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from plugins.endfield.medal_store import (
+from plugins.endfield.medals.store import (
     MedalSnapshotStore,
     _dict_to_snapshot,
     _snapshot_to_dict,
 )
-from plugins.endfield.akedata_client import game_version_label, pick_previous_game_version
-from plugins.endfield.models import (
+from plugins.endfield.providers.akedata import game_version_label, pick_previous_game_version
+from plugins.endfield.catalog.models import (
     MedalBaselineView,
     MedalDiffView,
     MedalItemView,
     MedalSnapshotView,
 )
-from plugins.endfield.service import EndfieldService
-from plugins.endfield.sources import source_order
+from plugins.endfield.catalog.service import EndfieldService
+from plugins.endfield.providers.registry import source_order
 
-endfield_service_module = importlib.import_module("plugins.endfield.service")
+endfield_service_module = importlib.import_module("plugins.endfield.catalog.service")
 
 
 def _make_medal(medal_id: str, *, name: str = "", max_level: int = 1, **kw) -> MedalItemView:
@@ -281,7 +281,7 @@ class AkedataFetchValidationTest(unittest.IsolatedAsyncioTestCase):
     async def test_empty_tables_are_rejected_before_persisting(self):
         service = EndfieldService.__new__(EndfieldService)
         with patch(
-            "plugins.endfield.akedata_client.fetch_akedata_medal_tables",
+            "plugins.endfield.providers.akedata.fetch_akedata_medal_tables",
             new=AsyncMock(return_value=({}, {}, {}, "1.4.4@test")),
         ):
             with self.assertRaisesRegex(ValueError, "AchievementTable 为空"):
@@ -361,8 +361,8 @@ class AkedataMedalSnapshotTest(unittest.TestCase):
         )
 
     def test_build_akedata_snapshot_fields(self):
-        from plugins.endfield.akedata_client import AKEDATA_ICON_BASE
-        from plugins.endfield.service import build_akedata_medal_snapshot
+        from plugins.endfield.providers.akedata import AKEDATA_ICON_BASE
+        from plugins.endfield.catalog.service import build_akedata_medal_snapshot
 
         achievement, type_table, i18n = self._tables()
         snap = build_akedata_medal_snapshot(
@@ -392,7 +392,7 @@ class AkedataMedalSnapshotTest(unittest.TestCase):
 
     def test_akedata_snapshot_plugs_into_md5_association(self):
         """AKEData 快照（achv_id 主键）与森空岛 hex 经 md5 关联，缺章判定正确。"""
-        from plugins.endfield.service import build_akedata_medal_snapshot
+        from plugins.endfield.catalog.service import build_akedata_medal_snapshot
 
         achievement, type_table, i18n = self._tables()
         snap = build_akedata_medal_snapshot(achievement, type_table, i18n)

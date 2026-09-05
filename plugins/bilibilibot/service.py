@@ -9,9 +9,9 @@ from typing import Iterable
 
 from arclet.entari import Account as Bot
 from loguru import logger
-from utils.entari_native import make_image, SendDest, ChainMsg, get_bot, account_adapter_name
+from otae_bot.adapters.entari import make_image, SendDest, ChainMsg, get_bot, account_adapter_name
 
-from utils.temp_files import schedule_temp_file_cleanup
+from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
 
 from .client import BiliAPIError, BiliClient
 from .draw import draw_bili_card

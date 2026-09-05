@@ -1,5 +1,5 @@
 # from utils.image_utils import PILBuildImage
-from configs.path_config import IMAGE_PATH, FONT_PATH
+from otae_bot.config.paths import IMAGE_PATH, FONT_PATH
 from pil_utils import BuildImage, Text2Image
 from PIL import Image, ImageDraw, ImageFilter, ImageChops, ImageOps
 from io import BytesIO

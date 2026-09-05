@@ -5,10 +5,10 @@ from hashlib import md5
 from dataclasses import replace
 import unittest
 
-from plugins.endfield.account_detail_names import AccountDetailNameMap
-from plugins.endfield.account_investment_draw import _render_detail_html, _render_summary_html
-from plugins.endfield.account_investment_models import InvestmentResourceView
-from plugins.endfield.account_investment_service import (
+from plugins.endfield.account.detail.names import AccountDetailNameMap
+from plugins.endfield.account.investment.draw import _render_detail_html, _render_summary_html
+from plugins.endfield.account.investment.models import InvestmentResourceView
+from plugins.endfield.account.investment.service import (
     InvestmentCatalog,
     _CharacterSpec,
     _Cost,
@@ -20,7 +20,7 @@ from plugins.endfield.account_investment_service import (
     _build_weapons,
     build_account_investment_view,
 )
-from plugins.endfield.commands import format_help, parse_command
+from plugins.endfield.catalog.commands import format_help, parse_command
 
 
 def _catalog() -> InvestmentCatalog:

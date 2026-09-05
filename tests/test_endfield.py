@@ -20,6 +20,8 @@ if str(ROOT) not in sys.path:
 
 
 def _load_module(name: str, relative_path: str):
+    if "." in name:
+        importlib.import_module(name.rpartition(".")[0])
     spec = importlib.util.spec_from_file_location(name, ROOT / relative_path)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -33,32 +35,32 @@ def _load_endfield_module(module_name: str):
     pkg = types.ModuleType(pkg_name)
     pkg.__path__ = [str(ROOT / "plugins/endfield")]
     sys.modules[pkg_name] = pkg
-    _load_module(f"{pkg_name}.models", "plugins/endfield/models.py")
-    _load_module(f"{pkg_name}.client", "plugins/endfield/client.py")
+    _load_module(f"{pkg_name}.catalog.models", "plugins/endfield/catalog/models.py")
+    _load_module(f"{pkg_name}.providers.warfarin", "plugins/endfield/providers/warfarin.py")
     if module_name == "commands":
-        return _load_module(f"{pkg_name}.commands", "plugins/endfield/commands.py")
+        return _load_module(f"{pkg_name}.catalog.commands", "plugins/endfield/catalog/commands.py")
     if module_name == "draw":
-        return _load_module(f"{pkg_name}.draw", "plugins/endfield/draw.py")
+        return _load_module(f"{pkg_name}.rendering.cards", "plugins/endfield/rendering/cards.py")
     if module_name == "service":
-        return _load_module(f"{pkg_name}.service", "plugins/endfield/service.py")
+        return _load_module(f"{pkg_name}.catalog.service", "plugins/endfield/catalog/service.py")
     if module_name == "version_calendar":
-        return _load_module(f"{pkg_name}.version_calendar", "plugins/endfield/version_calendar.py")
+        return _load_module(f"{pkg_name}.calendar.akedata", "plugins/endfield/calendar/akedata.py")
     if module_name == "version_calendar_draw":
         _load_endfield_module("version_calendar")
         return _load_module(
-            f"{pkg_name}.version_calendar_draw",
-            "plugins/endfield/version_calendar_draw.py",
+            f"{pkg_name}.calendar.draw",
+            "plugins/endfield/calendar/draw.py",
         )
     if module_name == "official_calendar":
         return _load_module(
-            f"{pkg_name}.official_calendar",
-            "plugins/endfield/official_calendar.py",
+            f"{pkg_name}.calendar.official",
+            "plugins/endfield/calendar/official.py",
         )
     if module_name == "official_calendar_draw":
         _load_endfield_module("official_calendar")
         return _load_module(
-            f"{pkg_name}.official_calendar_draw",
-            "plugins/endfield/official_calendar_draw.py",
+            f"{pkg_name}.calendar.official_draw",
+            "plugins/endfield/calendar/official_draw.py",
         )
     raise ValueError(module_name)
 
@@ -66,8 +68,8 @@ def _load_endfield_module(module_name: str):
 draw = _load_endfield_module("draw")
 service = _load_endfield_module("service")
 commands = _load_endfield_module("commands")
-models = sys.modules["endfield_for_test.models"]
-aliases = sys.modules["endfield_for_test.aliases"]
+models = sys.modules["endfield_for_test.catalog.models"]
+aliases = sys.modules["endfield_for_test.catalog.aliases"]
 
 render_operator_card_html = draw.render_operator_card_html
 render_weapon_card_html = draw.render_weapon_card_html
@@ -90,7 +92,7 @@ clean_text = service.clean_text
 
 class EndfieldCommandParserTests(unittest.TestCase):
     def test_handler_does_not_report_session_stop_as_failure(self):
-        source = (ROOT / "plugins/endfield/__init__.py").read_text(encoding="utf-8")
+        source = (ROOT / "plugins/endfield/handlers.py").read_text(encoding="utf-8")
         start = source.index("async def _handle_command")
         end = source.index("async def _collect_candidates", start)
         handler_source = source[start:end]
@@ -104,7 +106,7 @@ class EndfieldCommandParserTests(unittest.TestCase):
         self.assertIn('command.scope in {"operator", "weapon", "equipment"}', handler_source)
 
     def test_handler_reports_image_send_failure_separately(self):
-        source = (ROOT / "plugins/endfield/__init__.py").read_text(encoding="utf-8")
+        source = (ROOT / "plugins/endfield/handlers.py").read_text(encoding="utf-8")
         start = source.index("async def _handle_command")
         end = source.index("async def _collect_candidates", start)
         handler_source = source[start:end]
@@ -336,7 +338,7 @@ class EndfieldCommandParserTests(unittest.TestCase):
         self.assertEqual(aliases.alias_targets("weapon", "麦克风"), ("曜夜的首演",))
 
     def test_candidate_resolvers_require_source_verified_entities(self):
-        source = (ROOT / "plugins/endfield/__init__.py").read_text(encoding="utf-8")
+        source = (ROOT / "plugins/endfield/handlers.py").read_text(encoding="utf-8")
 
         self.assertIn('score_entity_candidate("operator", query, item.name', source)
         self.assertIn('score_entity_candidate("weapon", query, item.name', source)
@@ -642,7 +644,7 @@ class EndfieldCommandParserTests(unittest.TestCase):
         self.assertFalse(path.with_name(f".{path.name}.tmp").exists())
 
     def test_alias_command_is_superuser_gated(self):
-        source = (ROOT / "plugins/endfield/__init__.py").read_text(encoding="utf-8")
+        source = (ROOT / "plugins/endfield/handlers.py").read_text(encoding="utf-8")
         self.assertIn('if command.action == "alias":', source)
         self.assertIn('dev_visible_for_user(str(event_user_id(event)), Config.SUPERUSERS)', source)
         self.assertIn("_handle_alias_command(command)", source)
@@ -815,7 +817,7 @@ class EndfieldCommandParserTests(unittest.TestCase):
         self.assertNotIn("PIL", rendered_html)
 
     def test_plugin_prefers_official_calendar_and_keeps_akedata_fallback(self):
-        source = (ROOT / "plugins/endfield/__init__.py").read_text(encoding="utf-8")
+        source = (ROOT / "plugins/endfield/handlers.py").read_text(encoding="utf-8")
 
         self.assertIn("official_calendar_source.current()", source)
         self.assertIn("draw_official_version_calendar(official)", source)
@@ -823,11 +825,13 @@ class EndfieldCommandParserTests(unittest.TestCase):
         self.assertIn("calendar_source.current()", source)
 
     def test_plugin_help_uses_endfield_help_image_with_text_fallback(self):
-        source = (ROOT / "plugins/endfield/__init__.py").read_text(encoding="utf-8")
+        source = (ROOT / "plugins/endfield/handlers.py").read_text(encoding="utf-8")
 
         self.assertIn('if command.action == "help":', source)
         self.assertIn("return await _finish_endfield_help(matcher)", source)
-        self.assertIn('"assets" / "image" / "help" / "endfield.png"', source)
+        self.assertIn("from .paths import HELP_IMAGE_PATH as ENDFIELD_HELP_IMAGE_PATH", source)
+        paths_source = (ROOT / "plugins/endfield/paths.py").read_text(encoding="utf-8")
+        self.assertIn('"assets" / "image" / "help" / "endfield.png"', paths_source)
         self.assertIn("return await matcher.finish(format_help())", source)
 
     def test_endfield_help_image_and_spec_cover_account_features(self):
@@ -850,7 +854,7 @@ class EndfieldCommandParserTests(unittest.TestCase):
         self.assertIn("超限自动分页", spec)
 
     def test_gacha_import_is_private_only_before_phone_prompt(self):
-        source = (ROOT / "plugins/endfield/__init__.py").read_text(encoding="utf-8")
+        source = (ROOT / "plugins/endfield/handlers.py").read_text(encoding="utf-8")
 
         self.assertIn('private_only = {"bind", "primary", "unbind", "gacha_import"}', source)
         self.assertIn("该命令涉及账号凭据或手机号，仅支持私聊使用。", source)
@@ -3099,7 +3103,7 @@ class EndfieldServiceTests(unittest.TestCase):
         self.assertEqual(draw.equipment_catalog_layout(view), (1900, 8))
 
     def test_equipment_attribute_query_is_wired_into_the_handler(self):
-        source = (ROOT / "plugins/endfield/__init__.py").read_text(encoding="utf-8")
+        source = (ROOT / "plugins/endfield/handlers.py").read_text(encoding="utf-8")
 
         self.assertIn('"equipment_attribute": lambda key, source: _render_equipment_attribute', source)
         self.assertIn("attribute_filters = parse_equipment_attribute_filters(query)", source)

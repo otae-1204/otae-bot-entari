@@ -17,7 +17,7 @@ from urllib.parse import urlsplit
 import httpx
 from loguru import logger
 
-from configs.config import _env
+from otae_bot.config.settings import _env
 
 try:
     from .client import redact_sensitive_text

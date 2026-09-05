@@ -33,7 +33,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
-from utils.image_executor import run_image_render
+from otae_bot.infrastructure.rendering.executor import run_image_render
 
 from .client import TIBO_HANDLE, TIBO_PROFILE_URL
 from .models import ResetEvent, TiboPost
@@ -974,4 +974,3 @@ def event_sections(events: list[ResetEvent], event_label) -> list[CardSection]:
         accent = GREEN if event.status == "confirmed" else RED if event.status == "rejected" else AMBER
         sections.append(CardSection(f"重置事件 · {event.event_id}", lines, accent))
     return sections
-

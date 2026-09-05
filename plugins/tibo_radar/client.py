@@ -18,7 +18,7 @@ from typing import Any, Iterable, Mapping
 from lxml import html as lxml_html
 from loguru import logger
 
-from utils.http_client import fetch_bytes, fetch_json
+from otae_bot.infrastructure.http.client import fetch_bytes, fetch_json
 
 from .models import (
     EVENT_CONFIRMED,

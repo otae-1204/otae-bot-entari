@@ -4,10 +4,10 @@
 
 ## 接入入口
 
-接口位于 `plugins.endfield.ownership_stats`：
+接口位于 `plugins.endfield.ownership.service`：
 
 ```python
-from plugins.endfield.ownership_stats import (
+from plugins.endfield.ownership.service import (
     OwnershipStatsReport,
     register_ownership_stats_renderer,
 )

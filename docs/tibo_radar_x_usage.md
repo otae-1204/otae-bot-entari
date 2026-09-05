@@ -8,7 +8,7 @@
 
 ## 接入方式
 
-`plugins/tibo_radar/__init__.py` 只需一行导入（现已生效）：
+`plugins/tibo_radar/handlers.py` 只需一行导入（现已生效）：
 
 ```python
 # 旧版（draw.py 海军蓝雷达 / draw_v2.py 浅色信号日志）
@@ -44,7 +44,7 @@ from .draw_x import AMBER, CYAN, GREEN, CardSection, event_sections, render_card
 | `BG_TOP/BG_BOT` | `(8,10,14) / (14,18,26)` | 页面渐变背景 |
 | `PANEL` / `PANEL_EDGE` | `(22,28,39) / (56,68,90)` | 面板与描边 |
 
-字体沿用项目既有回退链：`assets/font/steamInfo/MiSans-*.ttf` → Windows 雅黑/黑体（显示=MiSans Bold，正文=Regular，引用/数据=Light）。画布 1080 宽，总高自动计算（上限 3900），`render_card` / `render_xfeed` 均经 `utils.image_executor.run_image_render` 在线程池渲染，须 `await`。
+字体沿用项目既有回退链：`assets/font/steamInfo/MiSans-*.ttf` → Windows 雅黑/黑体（显示=MiSans Bold，正文=Regular，引用/数据=Light）。画布 1080 宽，总高自动计算（上限 3900），`render_card` / `render_xfeed` 均经 `otae_bot.infrastructure.rendering.executor.run_image_render` 在线程池渲染，须 `await`。
 
 ## 本地预览（不启动 bot）
 
@@ -74,7 +74,7 @@ from .draw_x import AMBER, CYAN, GREEN, CardSection, event_sections, render_card
 
 - 新增 `plugins/tibo_radar/draw_x.py` — 统一 X 设计渲染器（通用卡 + 重导出 `render_xfeed`）
 - 新增 `plugins/tibo_radar/draw_xfeed.py` — X 时间线动态卡渲染器
-- 修改 `plugins/tibo_radar/__init__.py` — 全部命令切换到 draw_x，帮助文案更新
+- 修改 `plugins/tibo_radar/handlers.py` — 全部命令切换到 draw_x，帮助文案更新
 - 新增 `scripts/preview_tibo_x_all.py` / `scripts/preview_tibo_xfeed.py` — 预览脚本
 - 修改 `tests/test_tibo_radar.py` — 新增两个渲染测试
 

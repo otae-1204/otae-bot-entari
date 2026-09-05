@@ -260,10 +260,10 @@ AKEData：
 
 引入实际档位校正：`real_level = info.level + (info.init_level - 1)`（`init_level>0` 时；否则不偏移）。
 
-- `plugins/endfield/models.py` · `MedalProgressView`：保留 `init_level`（`achievementData.initLevel`）。
-- `plugins/endfield/service.py` · `_parse_player_medal_progress`：记录 `init_level`。
-- `plugins/endfield/service.py` · `build_medal_missing_view`：等级横条按 `real_level` 分档；未升满判定改 `real_level < medal.max_level`。
-- `plugins/endfield/draw.py` · `draw_medal_missing_card`：页脚「元数据：FZ Wiki」→「AKEData（游戏客户端 TableCfg）」。
+- `plugins/endfield/catalog/models.py` · `MedalProgressView`：保留 `init_level`（`achievementData.initLevel`）。
+- `plugins/endfield/catalog/service.py` · `_parse_player_medal_progress`：记录 `init_level`。
+- `plugins/endfield/catalog/service.py` · `build_medal_missing_view`：等级横条按 `real_level` 分档；未升满判定改 `real_level < medal.max_level`。
+- `plugins/endfield/rendering/cards.py` · `draw_medal_missing_card`：页脚「元数据：FZ Wiki」→「AKEData（游戏客户端 TableCfg）」。
 
 **验证**（大妖精Yousei）：等级分布 `{3:57, 2:55, 1:24}`；未升满只剩 `潜能解放奖章`（`谷地调查者奖章` 移出）；`pytest tests/test_endfield_medal.py` → **18 passed**（含回归用例 `test_init_level_offset_for_2_to_3_medal`，以 G=谷地调查者型 / H=潜能解放型 验证偏移校正）。
 

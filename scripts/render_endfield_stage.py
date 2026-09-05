@@ -9,12 +9,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from plugins.endfield.client import WarfarinClient
-from plugins.endfield.commands import score_candidate
-from plugins.endfield.stage_draw import draw_stage_card, draw_stage_catalog_cards
-from plugins.endfield.stage_service import EndfieldStageService
-from utils.http_client import close_http_client
-from utils.image_utils import close_browser
+from plugins.endfield.providers.warfarin import WarfarinClient
+from plugins.endfield.catalog.commands import score_candidate
+from plugins.endfield.stages.draw import draw_stage_card, draw_stage_catalog_cards
+from plugins.endfield.stages.service import EndfieldStageService
+from otae_bot.infrastructure.http.client import close_http_client
+from otae_bot.infrastructure.rendering.browser import close_browser
 
 
 def parse_args() -> argparse.Namespace:

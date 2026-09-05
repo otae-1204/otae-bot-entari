@@ -1,9 +1,9 @@
 import unittest
 from hashlib import md5
 
-from plugins.endfield.account_detail_names import build_account_detail_name_map
-from plugins.endfield.account_detail_service import build_account_detail_view
-from plugins.endfield.account_i18n import localized_text, server_label
+from plugins.endfield.account.detail.names import build_account_detail_name_map
+from plugins.endfield.account.detail.service import build_account_detail_view
+from plugins.endfield.account.i18n import localized_text, server_label
 
 
 class EndfieldAccountDetailNameTests(unittest.TestCase):

@@ -24,7 +24,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
-from utils.image_executor import run_image_render
+from otae_bot.infrastructure.rendering.executor import run_image_render
 
 from .client import TIBO_HANDLE
 from .models import TiboPost

@@ -1,5 +1,5 @@
-from configs.config import Plugin_Config
-from configs.path_config import IMAGE_PATH
+from otae_bot.config.settings import Plugin_Config
+from otae_bot.config.paths import IMAGE_PATH
 from plugins.eft_helper.entity import Ammo
 from pil_utils import BuildImage
 from io import BytesIO

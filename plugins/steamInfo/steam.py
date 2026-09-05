@@ -9,7 +9,7 @@ from typing import List, Optional, Union
 from lxml import html as lxml_html
 from loguru import logger
 
-from configs.path_config import IMAGE_PATH, JSON_PATH
+from otae_bot.config.paths import IMAGE_PATH, JSON_PATH
 from .models import PlayerSummaries, PlayerData
 
 

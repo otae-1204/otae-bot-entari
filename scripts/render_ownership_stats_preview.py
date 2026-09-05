@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from plugins.endfield.ownership_stats import (  # noqa: E402
+from plugins.endfield.ownership.service import (  # noqa: E402
     CollectionSummary,
     OperatorOwnership,
     OwnershipRefreshResult,
@@ -21,7 +21,7 @@ from plugins.endfield.ownership_stats import (  # noqa: E402
     PotentialBucket,
     fetch_operator_catalog,
 )
-from plugins.endfield.ownership_stats_draw import draw_ownership_stats  # noqa: E402
+from plugins.endfield.ownership.draw import draw_ownership_stats  # noqa: E402
 
 
 OUT_DIR = ROOT / "preview_out" / "ownership_stats"

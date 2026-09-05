@@ -1,0 +1,1459 @@
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import inspect
+import re
+import time
+from collections import Counter, defaultdict, deque
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass, replace
+from typing import Any, Literal
+
+from loguru import logger
+
+from otae_bot.adapters.onebot import call_onebot_action
+
+from ..account.client import EndfieldAPIError, EndfieldOfficialClient, is_asia_role
+from ..account.crypto import CredentialCipher, CredentialKeyError
+from ..account.i18n import localized_text, semantic_label
+from ..account.store import (
+    EndfieldRole,
+    EndfieldStore,
+    OperatorCatalogEntry,
+    OperatorRosterSnapshot,
+    OperatorSnapshotMember,
+)
+from ..providers.akedata import _get, fetch_akedata_manifest
+from ..gacha.service import ROLE_TASKS, TaskAlreadyRunning
+
+
+SNAPSHOT_TTL_SECONDS = 48 * 60 * 60
+REFRESH_INTERVAL_SECONDS = 24 * 60 * 60
+REFRESH_CONCURRENCY = 2
+REFRESH_BATCH_SIZE = 20
+REFRESH_RETRY_BASE_SECONDS = 15 * 60
+REFRESH_RETRY_MAX_SECONDS = 6 * 60 * 60
+REFRESH_AUTH_RETRY_BASE_SECONDS = 6 * 60 * 60
+REFRESH_AUTH_RETRY_MAX_SECONDS = 24 * 60 * 60
+SYSTEMIC_FAILURE_THRESHOLD = 3
+SYSTEMIC_FAILURE_WINDOW = 10
+SYSTEMIC_BACKOFF_BASE_SECONDS = 2.0
+SYSTEMIC_CIRCUIT_SECONDS = 15 * 60
+CATALOG_CHECK_INTERVAL_SECONDS = 6 * 60 * 60
+CATALOG_MAPPING_REVISION = "endministrator-gender-v2"
+_SYSTEMIC_COMMUNITY_OPERATIONS = {"账号授权", "获取社区凭据", "刷新社区签名"}
+_SYSTEMIC_COMMUNITY_CODES = {"405", "429", "502", "503", "504"}
+_TABLE_MAX_BYTES = 24 * 1024 * 1024
+_I18N_MAX_BYTES = 64 * 1024 * 1024
+_HEX_ID_RE = re.compile(r"[0-9a-f]{32}", re.IGNORECASE)
+_ENDMIN_MALE_SOURCE = "chr_0002_endminm"
+_ENDMIN_ACCOUNT_ALIAS_SOURCE = "chr_9000_endmin"
+_ENDMIN_FEMALE_SOURCE = "chr_0003_endminf"
+_ENDMIN_MALE_KEY = hashlib.md5(_ENDMIN_MALE_SOURCE.encode("utf-8")).hexdigest()
+_ENDMIN_FEMALE_KEY = hashlib.md5(_ENDMIN_FEMALE_SOURCE.encode("utf-8")).hexdigest()
+_ENDMIN_ACCOUNT_ALIAS_KEY = hashlib.md5(_ENDMIN_ACCOUNT_ALIAS_SOURCE.encode("utf-8")).hexdigest()
+_ENDMIN_DISPLAY_NAMES = {
+    _ENDMIN_MALE_SOURCE: "管理员·男",
+    _ENDMIN_FEMALE_SOURCE: "管理员·女",
+}
+_COMMUNITY_METRIC_KEYS = (
+    "cache_hits",
+    "singleflight_reuses",
+    "exchange_attempts",
+    "exchange_succeeded",
+    "exchange_failed",
+    "circuit_rejections",
+)
+
+
+class SnapshotValidationError(ValueError):
+    pass
+
+
+class GroupMemberListError(RuntimeError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        standard_error: Exception | None = None,
+        fallback_error: Exception | None = None,
+    ):
+        super().__init__(message)
+        self.standard_error_type = type(standard_error).__name__ if standard_error else "none"
+        self.fallback_error_type = type(fallback_error).__name__ if fallback_error else "none"
+
+
+class OwnershipStatsRendererUnavailable(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class PotentialBucket:
+    key: str
+    label: str
+    count: int
+    rate: float | None
+
+
+@dataclass(frozen=True, slots=True)
+class OperatorOwnership:
+    operator_key: str
+    source_id: str
+    name: str
+    rarity: int
+    profession: str
+    sort_order: int
+    owned_count: int
+    sample_count: int
+    ownership_rate: float | None
+    potential_buckets: tuple[PotentialBucket, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class CollectionSummary:
+    kind: Literal["profession", "rarity"]
+    label: str
+    operator_count: int
+    owned_slots: int
+    possible_slots: int
+    collection_rate: float | None
+
+
+@dataclass(frozen=True, slots=True)
+class OwnershipStatsSegment:
+    region: Literal["all", "cn", "asia"]
+    eligible_sample_count: int
+    valid_sample_count: int
+    excluded_sample_count: int
+    operators: tuple[OperatorOwnership, ...]
+    professions: tuple[CollectionSummary, ...]
+    rarities: tuple[CollectionSummary, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class OwnershipRefreshIssue:
+    key: str
+    label: str
+    count: int
+
+
+@dataclass(frozen=True, slots=True)
+class OwnershipRefreshResult:
+    attempted: int
+    succeeded: int
+    failed: int
+    skipped: int
+    catalog_updated: bool
+    started_at: int
+    finished_at: int
+    stopped_early: bool = False
+    stop_reason: str = ""
+    eligible: int = 0
+    requested: int = 0
+    deferred: int = 0
+    catalog_checked: bool = False
+    catalog_error: str = ""
+    issues: tuple[OwnershipRefreshIssue, ...] = ()
+    batch_id: str = ""
+    trigger: str = ""
+    cache_hits: int = 0
+    singleflight_reuses: int = 0
+    exchange_attempts: int = 0
+    exchange_succeeded: int = 0
+    exchange_failed: int = 0
+    circuit_rejections: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class _RefreshRoleOutcome:
+    status: Literal["success", "failed", "skipped"]
+    error: Exception | None = None
+    requested: int = 0
+    issue_key: str = ""
+    issue_label: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class OwnershipStatsReport:
+    scope: Literal["global", "group"]
+    generated_at: int
+    catalog_version: str
+    segments: tuple[OwnershipStatsSegment, ...]
+    refresh: OwnershipRefreshResult | None = None
+    # 有效样本中最新一次完整快照的抓取时间;无有效样本时为 None。
+    snapshot_updated_at: int | None = None
+
+    def segment(self, region: str) -> OwnershipStatsSegment | None:
+        return next((item for item in self.segments if item.region == region), None)
+
+
+OwnershipStatsRenderer = Callable[[OwnershipStatsReport], Awaitable[Any] | Any]
+_ownership_stats_renderer: OwnershipStatsRenderer | None = None
+
+
+def register_ownership_stats_renderer(renderer: OwnershipStatsRenderer | None) -> None:
+    """Register the presentation adapter without coupling statistics to a UI."""
+    global _ownership_stats_renderer
+    _ownership_stats_renderer = renderer
+
+
+async def render_ownership_stats(report: OwnershipStatsReport) -> Any:
+    if _ownership_stats_renderer is None:
+        raise OwnershipStatsRendererUnavailable("持有率展示组件尚未接入")
+    result = _ownership_stats_renderer(report)
+    return await result if inspect.isawaitable(result) else result
+
+
+async def fetch_operator_catalog(
+    manifest: Mapping[str, Any] | None = None,
+) -> tuple[str, tuple[OperatorCatalogEntry, ...]]:
+    manifest = manifest or await fetch_akedata_manifest()
+    latest, table_path = _operator_catalog_manifest(manifest)
+    character_table, profession_table, i18n = await asyncio.gather(
+        _get(f"/{table_path}/CharacterTable.json", max_bytes=_TABLE_MAX_BYTES),
+        _get(f"/{table_path}/CharProfessionTable.json", max_bytes=4 * 1024 * 1024),
+        _get(f"/{table_path}/I18nTextTable_CN.json", max_bytes=_I18N_MAX_BYTES),
+    )
+    return latest, build_operator_catalog(
+        character_table,
+        profession_table,
+        i18n,
+        version=latest,
+    )
+
+
+def _operator_catalog_manifest(manifest: Mapping[str, Any]) -> tuple[str, str]:
+    latest = str(manifest.get("latest") or "")
+    version = next(
+        (
+            item
+            for item in manifest.get("versions") or ()
+            if isinstance(item, Mapping) and str(item.get("id") or "") == latest
+        ),
+        None,
+    )
+    table_path = str((version or {}).get("tableCfgPath") or "").strip("/")
+    if not latest or not table_path:
+        raise RuntimeError("AKEData 当前版本缺少干员目录路径")
+    return latest, table_path
+
+
+def build_operator_catalog(
+    character_table: Any,
+    profession_table: Any,
+    i18n: Any,
+    *,
+    version: str = "",
+) -> tuple[OperatorCatalogEntry, ...]:
+    translations = i18n if isinstance(i18n, Mapping) else {}
+    professions: dict[str, str] = {}
+    for key, row in _rows(profession_table):
+        profession_id = _text(row.get("profession")) or key
+        professions[profession_id] = localized_text(row.get("name"), translations=translations) or "未知职业"
+
+    entries: list[OperatorCatalogEntry] = []
+    for key, row in _rows(character_table):
+        source_id = _text(row.get("charId")) or key
+        if not source_id:
+            continue
+        # AKEData also publishes chr_9000_endmin, but the account API uses its
+        # MD5 as a shared placeholder for either selected Endministrator sex.
+        # Gender, not this alias, decides which of the two operators is owned.
+        if source_id == _ENDMIN_ACCOUNT_ALIAS_SOURCE:
+            continue
+        name = localized_text(row.get("name"), translations=translations) or source_id
+        if source_id in _ENDMIN_DISPLAY_NAMES:
+            name = _ENDMIN_DISPLAY_NAMES[source_id]
+        entries.append(
+            OperatorCatalogEntry(
+                operator_key=hashlib.md5(source_id.encode("utf-8")).hexdigest(),
+                source_id=source_id,
+                name=name,
+                rarity=max(0, _int(row.get("rarity"))),
+                profession=professions.get(_text(row.get("profession")), "未知职业"),
+                sort_order=_int(row.get("sortOrder")),
+                source="akedata",
+                version=version,
+                available_cn=True,
+                available_asia=True,
+            )
+        )
+    if not entries:
+        raise ValueError("AKEData 未返回可用干员")
+    return tuple(entries)
+
+
+def parse_operator_snapshot(
+    detail: Mapping[str, Any],
+    catalog: Sequence[OperatorCatalogEntry] = (),
+) -> tuple[tuple[OperatorSnapshotMember, ...], int]:
+    raw_characters = detail.get("chars")
+    if not isinstance(raw_characters, (list, tuple)):
+        raise SnapshotValidationError("官方档案缺少干员列表")
+    by_key = {item.operator_key.casefold(): item for item in catalog}
+    by_source = {item.source_id.casefold(): item for item in catalog if item.source_id}
+    for item in catalog:
+        if item.source_id:
+            by_key.setdefault(hashlib.md5(item.source_id.encode("utf-8")).hexdigest(), item)
+    base_gender = _mapping(detail.get("base")).get("gender")
+    parsed: dict[str, OperatorSnapshotMember] = {}
+    for raw_character in raw_characters:
+        if not isinstance(raw_character, Mapping):
+            continue
+        char_data = _mapping(raw_character.get("charData"))
+        raw_id = _text(char_data.get("id") or raw_character.get("charId") or raw_character.get("id"))
+        if not raw_id:
+            continue
+        lowered = raw_id.casefold()
+        endministrator_source = _endministrator_source(
+            lowered,
+            raw_character.get("gender"),
+            char_data.get("gender"),
+            base_gender,
+        )
+        catalog_entry = (
+            by_source.get(endministrator_source)
+            if endministrator_source
+            else by_key.get(lowered) or by_source.get(lowered)
+        )
+        if endministrator_source:
+            operator_key = hashlib.md5(endministrator_source.encode("utf-8")).hexdigest()
+            source_id = endministrator_source
+        elif catalog_entry is not None:
+            operator_key = catalog_entry.operator_key
+            source_id = catalog_entry.source_id
+        elif _HEX_ID_RE.fullmatch(raw_id):
+            operator_key = lowered
+            source_id = ""
+        else:
+            source_id = raw_id
+            operator_key = hashlib.md5(raw_id.encode("utf-8")).hexdigest()
+        potential = _optional_int(raw_character.get("potentialLevel"))
+        if potential is not None and potential not in range(0, 6):
+            potential = None
+        member = OperatorSnapshotMember(
+            operator_key=operator_key,
+            potential_level=potential,
+            source_id=source_id,
+            name=(
+                _ENDMIN_DISPLAY_NAMES.get(source_id)
+                or (catalog_entry.name if catalog_entry else localized_text(char_data.get("name")))
+                or "未知干员"
+            ),
+            rarity=(catalog_entry.rarity if catalog_entry else _int(_semantic_value(char_data.get("rarity")))),
+            profession=(catalog_entry.profession if catalog_entry else semantic_label(char_data.get("profession")))
+            or "未知职业",
+        )
+        previous = parsed.get(operator_key)
+        if previous is None or _potential_rank(member.potential_level) > _potential_rank(previous.potential_level):
+            parsed[operator_key] = member
+
+    if not parsed:
+        raise SnapshotValidationError("官方档案未返回有效干员")
+    expected = _int(_mapping(detail.get("base")).get("charNum"))
+    if expected > 0 and expected != len(parsed):
+        raise SnapshotValidationError(f"干员列表不完整：预期 {expected}，实际 {len(parsed)}")
+    game_saved_at = _int(_mapping(detail.get("base")).get("saveTime"))
+    return tuple(parsed.values()), max(0, game_saved_at)
+
+
+class OwnershipStatsService:
+    def __init__(
+        self,
+        store: EndfieldStore,
+        client: EndfieldOfficialClient,
+        *,
+        snapshot_ttl_seconds: int = SNAPSHOT_TTL_SECONDS,
+        refresh_interval_seconds: int = REFRESH_INTERVAL_SECONDS,
+        concurrency: int = REFRESH_CONCURRENCY,
+        batch_size: int = REFRESH_BATCH_SIZE,
+        retry_base_seconds: int = REFRESH_RETRY_BASE_SECONDS,
+        retry_max_seconds: int = REFRESH_RETRY_MAX_SECONDS,
+        systemic_failure_threshold: int = SYSTEMIC_FAILURE_THRESHOLD,
+        systemic_failure_window: int = SYSTEMIC_FAILURE_WINDOW,
+        systemic_backoff_base_seconds: float = SYSTEMIC_BACKOFF_BASE_SECONDS,
+        systemic_circuit_seconds: int = SYSTEMIC_CIRCUIT_SECONDS,
+        catalog_check_interval_seconds: int = CATALOG_CHECK_INTERVAL_SECONDS,
+    ):
+        self.store = store
+        self.client = client
+        self.snapshot_ttl_seconds = max(60, int(snapshot_ttl_seconds))
+        self.refresh_interval_seconds = max(60, int(refresh_interval_seconds))
+        self.concurrency = max(1, int(concurrency))
+        self.batch_size = max(1, int(batch_size))
+        self.retry_base_seconds = max(1, int(retry_base_seconds))
+        self.retry_max_seconds = max(self.retry_base_seconds, int(retry_max_seconds))
+        self.systemic_failure_threshold = max(1, int(systemic_failure_threshold))
+        self.systemic_failure_window = max(
+            self.systemic_failure_threshold,
+            int(systemic_failure_window),
+        )
+        self.systemic_backoff_base_seconds = max(0.0, float(systemic_backoff_base_seconds))
+        self.systemic_circuit_seconds = max(60, int(systemic_circuit_seconds))
+        self.catalog_check_interval_seconds = max(60, int(catalog_check_interval_seconds))
+        self._catalog_lock = asyncio.Lock()
+        self._refresh_lock = asyncio.Lock()
+        self._next_catalog_check_at = 0.0
+        self._circuit_open_until = 0.0
+        self._circuit_reason = ""
+        self._batch_sequence = 0
+
+    async def refresh_catalog(self, *, force: bool = False) -> bool:
+        async with self._catalog_lock:
+            check_started = time.monotonic()
+            current = self.store.list_operator_catalog()
+            current_version = next((item.version for item in current if item.source == "akedata"), "")
+            current_revision = self.store.get_meta("operator_catalog_revision")
+            monotonic_now = time.monotonic()
+            if (
+                not force
+                and current
+                and current_revision == CATALOG_MAPPING_REVISION
+                and monotonic_now < self._next_catalog_check_at
+            ):
+                logger.debug(
+                    "[endfield-ownership] catalog check skipped "
+                    f"reason=memory_ttl version={current_version or 'unknown'}"
+                )
+                return False
+            manifest = await fetch_akedata_manifest()
+            version, _table_path = _operator_catalog_manifest(manifest)
+            if (
+                current
+                and current_version == version
+                and current_revision == CATALOG_MAPPING_REVISION
+            ):
+                self._next_catalog_check_at = monotonic_now + self.catalog_check_interval_seconds
+                logger.info(
+                    "[endfield-ownership] catalog check complete "
+                    f"status=unchanged version={version} source=manifest "
+                    f"elapsed_seconds={time.monotonic() - check_started:.3f}"
+                )
+                return False
+            version, entries = await fetch_operator_catalog(manifest)
+            current_signature = {
+                _catalog_entry_signature(item)
+                for item in current
+                if item.source == "akedata"
+            }
+            incoming_signature = {_catalog_entry_signature(item) for item in entries}
+            if (
+                current_version == version
+                and current_revision == CATALOG_MAPPING_REVISION
+                and current_signature == incoming_signature
+            ):
+                self._next_catalog_check_at = monotonic_now + self.catalog_check_interval_seconds
+                logger.info(
+                    "[endfield-ownership] catalog check complete "
+                    f"status=unchanged version={version} source=full_tables "
+                    f"elapsed_seconds={time.monotonic() - check_started:.3f}"
+                )
+                return False
+            self.store.replace_operator_catalog(
+                entries,
+                version,
+                revision=CATALOG_MAPPING_REVISION,
+            )
+            self._next_catalog_check_at = monotonic_now + self.catalog_check_interval_seconds
+            logger.info(
+                "[endfield-ownership] catalog check complete "
+                f"status=updated version={version} operators={len(entries)} "
+                f"elapsed_seconds={time.monotonic() - check_started:.3f}"
+            )
+            return True
+
+    async def persist_detail(
+        self,
+        role: EndfieldRole,
+        detail: Mapping[str, Any],
+        *,
+        fetched_at: int | None = None,
+    ) -> int:
+        members, game_saved_at = parse_operator_snapshot(detail, self.store.list_operator_catalog())
+        return self.store.replace_operator_snapshot(
+            role,
+            "asia" if is_asia_role(role) else "cn",
+            members,
+            fetched_at=fetched_at,
+            game_saved_at=game_saved_at,
+        )
+
+    async def refresh_due(
+        self,
+        cipher: CredentialCipher,
+        *,
+        now: int | None = None,
+        limit: int | None = None,
+    ) -> OwnershipRefreshResult:
+        return await self.refresh_roles(
+            self.store.list_all_roles(),
+            cipher,
+            now=now,
+            force=False,
+            limit=self.batch_size if limit is None else limit,
+            trigger="scheduled",
+        )
+
+    async def refresh_roles(
+        self,
+        roles: Sequence[EndfieldRole],
+        cipher: CredentialCipher,
+        *,
+        now: int | None = None,
+        force: bool = True,
+        limit: int | None = None,
+        trigger: str = "direct",
+    ) -> OwnershipRefreshResult:
+        started = int(now or time.time())
+        trigger = _safe_log_token(trigger, "direct")
+        batch_started = time.monotonic()
+        metrics_before = _community_metric_snapshot(self.client)
+        self._batch_sequence += 1
+        batch_id = f"{started:x}-{self._batch_sequence:x}"
+        lock_started = time.monotonic()
+        async with self._refresh_lock:
+            lock_wait_seconds = time.monotonic() - lock_started
+            groups = _group_roles(roles)
+            snapshots = {
+                (item.server_id, item.role_id): item
+                for item in self.store.list_operator_snapshots(groups.keys())
+            }
+            due_before = started - self.refresh_interval_seconds
+            eligible_items: list[
+                tuple[tuple[str, str], tuple[EndfieldRole, ...]]
+            ] = []
+            retry_deferred = 0
+            for key, candidates in groups.items():
+                snapshot = snapshots.get(key)
+                due = (
+                    force
+                    or snapshot is None
+                    or snapshot.fetched_at < due_before
+                    or bool(snapshot.last_error)
+                    or _has_legacy_shared_endministrator(snapshot)
+                )
+                if not due:
+                    continue
+                if (
+                    not force
+                    and snapshot is not None
+                    and snapshot.next_attempt_at > started
+                ):
+                    retry_deferred += 1
+                    continue
+                eligible_items.append((key, candidates))
+
+            eligible = len(eligible_items) + retry_deferred
+            eligible_items.sort(
+                key=lambda item: (
+                    snapshots[item[0]].fetched_at if item[0] in snapshots else -1,
+                    snapshots[item[0]].last_attempt_at if item[0] in snapshots else 0,
+                    item[0],
+                )
+            )
+            selected_limit = len(eligible_items) if limit is None else max(0, int(limit))
+            selected = eligible_items[:selected_limit]
+            limit_deferred = max(0, len(eligible_items) - len(selected))
+            deferred = retry_deferred + limit_deferred
+            selection_log = logger.info if eligible or force else logger.debug
+            selection_log(
+                "[endfield-ownership] refresh batch selected "
+                f"batch_id={batch_id} trigger={trigger} force={str(force).lower()} "
+                f"input_bindings={len(roles)} unique_roles={len(groups)} "
+                f"eligible={eligible} queued={len(selected)} "
+                f"retry_deferred={retry_deferred} limit_deferred={limit_deferred} "
+                f"limit={selected_limit} concurrency={self.concurrency} "
+                f"lock_wait_seconds={lock_wait_seconds:.3f}"
+            )
+            catalog_updated = False
+            catalog_checked = False
+            catalog_error = ""
+            if selected:
+                try:
+                    catalog_updated = await self.refresh_catalog()
+                    catalog_checked = True
+                except Exception as exc:
+                    catalog_checked = True
+                    catalog_error = _safe_catalog_error(exc)
+                    logger.warning(
+                        "[endfield-ownership] catalog check failed "
+                        f"batch_id={batch_id} trigger={trigger} "
+                        f"error_type={type(exc).__module__}.{type(exc).__name__}"
+                    )
+            catalog = self.store.list_operator_catalog()
+
+            if selected and not catalog:
+                issue = OwnershipRefreshIssue(
+                    "catalog-unavailable",
+                    "干员目录不可用",
+                    len(selected),
+                )
+                self.store.cleanup_orphan_operator_snapshots()
+                result = OwnershipRefreshResult(
+                    attempted=len(selected),
+                    succeeded=0,
+                    failed=0,
+                    skipped=len(selected),
+                    catalog_updated=False,
+                    started_at=started,
+                    finished_at=int(time.time()),
+                    stopped_early=True,
+                    stop_reason="干员目录不可用，已停止本批刷新",
+                    eligible=eligible,
+                    requested=0,
+                    deferred=deferred,
+                    catalog_checked=catalog_checked,
+                    catalog_error=catalog_error or "干员目录为空",
+                    issues=(issue,),
+                )
+                return self._finalize_refresh_result(
+                    result,
+                    metrics_before,
+                    batch_id=batch_id,
+                    trigger=trigger,
+                    force=force,
+                    batch_started=batch_started,
+                    lock_wait_seconds=lock_wait_seconds,
+                )
+
+            circuit_delay = self._circuit_open_until - time.monotonic()
+            if selected and circuit_delay > 0:
+                issue = OwnershipRefreshIssue(
+                    "community-circuit-open",
+                    "官方社区接口冷却中",
+                    len(selected),
+                )
+                self.store.cleanup_orphan_operator_snapshots()
+                result = OwnershipRefreshResult(
+                    attempted=len(selected),
+                    succeeded=0,
+                    failed=0,
+                    skipped=len(selected),
+                    catalog_updated=catalog_updated,
+                    started_at=started,
+                    finished_at=int(time.time()),
+                    stopped_early=True,
+                    stop_reason=self._circuit_reason or "官方社区接口冷却中",
+                    eligible=eligible,
+                    requested=0,
+                    deferred=deferred,
+                    catalog_checked=catalog_checked,
+                    catalog_error=catalog_error,
+                    issues=(issue,),
+                )
+                return self._finalize_refresh_result(
+                    result,
+                    metrics_before,
+                    batch_id=batch_id,
+                    trigger=trigger,
+                    force=force,
+                    batch_started=batch_started,
+                    lock_wait_seconds=lock_wait_seconds,
+                )
+
+            results, queue_skipped, stopped_early, stop_reason = await self._run_workers(
+                selected,
+                snapshots,
+                cipher,
+                catalog,
+                fixed_timestamp=started if now is not None else None,
+                batch_id=batch_id,
+            )
+            issue_counts: Counter[tuple[str, str]] = Counter(
+                (item.issue_key, item.issue_label)
+                for item in results
+                if item.issue_key
+            )
+            if queue_skipped:
+                issue_counts[
+                    (
+                        "community-protective-stop",
+                        "官方社区接口保护性停止",
+                    )
+                ] += queue_skipped
+            self.store.cleanup_orphan_operator_snapshots()
+            result = OwnershipRefreshResult(
+                attempted=len(selected),
+                succeeded=sum(item.status == "success" for item in results),
+                failed=sum(item.status == "failed" for item in results),
+                skipped=sum(item.status == "skipped" for item in results) + queue_skipped,
+                catalog_updated=catalog_updated,
+                started_at=started,
+                finished_at=int(time.time()),
+                stopped_early=stopped_early,
+                stop_reason=stop_reason,
+                eligible=eligible,
+                requested=sum(item.requested for item in results),
+                deferred=deferred,
+                catalog_checked=catalog_checked,
+                catalog_error=catalog_error,
+                issues=tuple(
+                    OwnershipRefreshIssue(key, label, count)
+                    for (key, label), count in sorted(
+                        issue_counts.items(),
+                        key=lambda item: (-item[1], item[0][1], item[0][0]),
+                    )
+                ),
+            )
+            return self._finalize_refresh_result(
+                result,
+                metrics_before,
+                batch_id=batch_id,
+                trigger=trigger,
+                force=force,
+                batch_started=batch_started,
+                lock_wait_seconds=lock_wait_seconds,
+            )
+
+    async def _run_workers(
+        self,
+        selected: Sequence[
+            tuple[tuple[str, str], tuple[EndfieldRole, ...]]
+        ],
+        snapshots: Mapping[tuple[str, str], OperatorRosterSnapshot],
+        cipher: CredentialCipher,
+        catalog: Sequence[OperatorCatalogEntry],
+        *,
+        fixed_timestamp: int | None,
+        batch_id: str,
+    ) -> tuple[list[_RefreshRoleOutcome], int, bool, str]:
+        if not selected:
+            return [], 0, False, ""
+        queue: asyncio.Queue[
+            tuple[tuple[str, str], tuple[EndfieldRole, ...]]
+        ] = asyncio.Queue()
+        for item in selected:
+            queue.put_nowait(item)
+        results: list[_RefreshRoleOutcome] = []
+        state_lock = asyncio.Lock()
+        stop_event = asyncio.Event()
+        systemic_window: deque[str] = deque(maxlen=self.systemic_failure_window)
+        backoff_until = 0.0
+        stop_reason = ""
+
+        async def worker() -> None:
+            nonlocal backoff_until, stop_reason
+            while not stop_event.is_set():
+                try:
+                    key, candidates = queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    return
+                try:
+                    async with state_lock:
+                        delay = max(0.0, backoff_until - time.monotonic())
+                    if delay:
+                        await asyncio.sleep(delay)
+                    if stop_event.is_set():
+                        queue.put_nowait((key, candidates))
+                        return
+                    outcome = await self._refresh_one(
+                        candidates,
+                        cipher,
+                        catalog,
+                        snapshots.get(key),
+                        fixed_timestamp=fixed_timestamp,
+                    )
+                    results.append(outcome)
+                    async with state_lock:
+                        systemic_code = _systemic_community_error_code(outcome.error)
+                        systemic_window.append(systemic_code)
+                        if not systemic_code:
+                            continue
+                        matching_failures = sum(
+                            code == systemic_code for code in systemic_window
+                        )
+                        retry_after = _error_retry_after(outcome.error)
+                        if matching_failures >= self.systemic_failure_threshold:
+                            stop_reason = (
+                                f"官方社区接口近期多次返回 {systemic_code}，"
+                                "已保护性停止剩余刷新"
+                            )
+                            self._circuit_open_until = time.monotonic() + max(
+                                self.systemic_circuit_seconds,
+                                retry_after,
+                            )
+                            self._circuit_reason = stop_reason
+                            logger.warning(
+                                "[endfield-ownership] refresh circuit opened "
+                                f"batch_id={batch_id} code={systemic_code} "
+                                f"matches={matching_failures} window={len(systemic_window)} "
+                                f"cooldown_seconds={int(max(self.systemic_circuit_seconds, retry_after))} "
+                                f"queue_remaining={queue.qsize()}"
+                            )
+                            stop_event.set()
+                        else:
+                            backoff_seconds = max(
+                                retry_after,
+                                self.systemic_backoff_base_seconds
+                                * (2 ** (matching_failures - 1)),
+                            )
+                            backoff_until = max(
+                                backoff_until,
+                                time.monotonic() + backoff_seconds,
+                            )
+                finally:
+                    queue.task_done()
+
+        workers = [
+            asyncio.create_task(worker())
+            for _ in range(min(self.concurrency, len(selected)))
+        ]
+        await asyncio.gather(*workers)
+        queue_skipped = queue.qsize()
+        return results, queue_skipped, stop_event.is_set(), stop_reason
+
+    async def _refresh_one(
+        self,
+        candidates: tuple[EndfieldRole, ...],
+        cipher: CredentialCipher,
+        catalog: Sequence[OperatorCatalogEntry],
+        previous: OperatorRosterSnapshot | None,
+        *,
+        fixed_timestamp: int | None = None,
+    ) -> _RefreshRoleOutcome:
+        reference = candidates[0]
+        region = "asia" if any(is_asia_role(role) for role in candidates) else "cn"
+        last_error: Exception | None = None
+        requested = 0
+        try:
+            async with ROLE_TASKS.claim(reference):
+                for index, role in enumerate(candidates):
+                    try:
+                        token = self.store.decrypt_token(role, cipher)
+                        requested += 1
+                        detail = await _background_card_detail(self.client, token, role)
+                        members, game_saved_at = parse_operator_snapshot(detail, catalog)
+                        succeeded_at = fixed_timestamp or int(time.time())
+                        self.store.replace_operator_snapshot(
+                            reference,
+                            region,
+                            members,
+                            fetched_at=succeeded_at,
+                            game_saved_at=game_saved_at,
+                        )
+                        return _RefreshRoleOutcome("success", requested=requested)
+                    except (CredentialKeyError, LookupError) as exc:
+                        last_error = exc
+                        continue
+                    except EndfieldAPIError as exc:
+                        last_error = exc
+                        if (
+                            index + 1 < len(candidates)
+                            and _is_authentication_error(exc)
+                            and not _systemic_community_error_code(exc)
+                        ):
+                            continue
+                        break
+                    except Exception as exc:
+                        last_error = exc
+                        break
+        except TaskAlreadyRunning:
+            return _RefreshRoleOutcome(
+                "skipped",
+                requested=requested,
+                issue_key="role-busy",
+                issue_label="同角色已有任务",
+            )
+        attempted_at = fixed_timestamp or int(time.time())
+        failure_count = (previous.failure_count if previous is not None else 0) + 1
+        retry_after = _refresh_retry_delay(
+            last_error,
+            failure_count,
+            base_seconds=self.retry_base_seconds,
+            max_seconds=self.retry_max_seconds,
+        )
+        self.store.record_operator_snapshot_failure(
+            reference,
+            region,
+            _safe_refresh_error(last_error),
+            attempted_at=attempted_at,
+            retry_after_seconds=retry_after,
+        )
+        issue_key, issue_label = _refresh_issue(last_error)
+        return _RefreshRoleOutcome(
+            "failed",
+            last_error,
+            requested=requested,
+            issue_key=issue_key,
+            issue_label=issue_label,
+        )
+
+    def _finalize_refresh_result(
+        self,
+        result: OwnershipRefreshResult,
+        metrics_before: Mapping[str, int],
+        *,
+        batch_id: str,
+        trigger: str,
+        force: bool,
+        batch_started: float,
+        lock_wait_seconds: float,
+    ) -> OwnershipRefreshResult:
+        metrics_after = _community_metric_snapshot(self.client)
+        metric_delta = {
+            key: max(0, metrics_after.get(key, 0) - metrics_before.get(key, 0))
+            for key in _COMMUNITY_METRIC_KEYS
+        }
+        finalized = replace(
+            result,
+            batch_id=batch_id,
+            trigger=trigger,
+            **metric_delta,
+        )
+        if finalized.catalog_error:
+            catalog_status = "failed"
+        elif not finalized.catalog_checked:
+            catalog_status = "not_checked"
+        elif finalized.catalog_updated:
+            catalog_status = "updated"
+        else:
+            catalog_status = "unchanged"
+        issues = ",".join(
+            f"{item.key}:{item.count}" for item in finalized.issues
+        ) or "none"
+        message = (
+            "[endfield-ownership] refresh batch complete "
+            f"batch_id={batch_id} trigger={trigger} force={str(force).lower()} "
+            f"eligible={finalized.eligible} queued={finalized.attempted} "
+            f"requested={finalized.requested} succeeded={finalized.succeeded} "
+            f"failed={finalized.failed} skipped={finalized.skipped} "
+            f"deferred={finalized.deferred} stopped_early={str(finalized.stopped_early).lower()} "
+            f"catalog_status={catalog_status} cache_hits={finalized.cache_hits} "
+            f"singleflight_reuses={finalized.singleflight_reuses} "
+            f"exchange_attempts={finalized.exchange_attempts} "
+            f"exchange_succeeded={finalized.exchange_succeeded} "
+            f"exchange_failed={finalized.exchange_failed} "
+            f"circuit_rejections={finalized.circuit_rejections} "
+            f"issues={issues} lock_wait_seconds={lock_wait_seconds:.3f} "
+            f"elapsed_seconds={time.monotonic() - batch_started:.3f}"
+        )
+        if finalized.stopped_early:
+            logger.warning(message)
+        elif finalized.eligible or force:
+            logger.info(message)
+        else:
+            logger.debug(message)
+        return finalized
+
+    def build_report(
+        self,
+        scope: Literal["global", "group"],
+        roles: Sequence[EndfieldRole],
+        *,
+        now: int | None = None,
+        refresh: OwnershipRefreshResult | None = None,
+    ) -> OwnershipStatsReport:
+        current = int(now or time.time())
+        grouped = _group_roles(roles)
+        regions = {
+            key: ("asia" if any(is_asia_role(role) for role in candidates) else "cn")
+            for key, candidates in grouped.items()
+        }
+        snapshots = {
+            (item.server_id, item.role_id): item
+            for item in self.store.list_operator_snapshots(grouped.keys())
+        }
+        fresh_after = current - self.snapshot_ttl_seconds
+        valid = {
+            key: snapshot
+            for key, snapshot in snapshots.items()
+            if key in grouped
+            and snapshot.fetched_at >= fresh_after
+            and snapshot.members
+            and snapshot.operator_count == len(snapshot.members)
+            and not _has_legacy_shared_endministrator(snapshot)
+        }
+        catalog = self.store.list_operator_catalog()
+        catalog_version = next((item.version for item in catalog if item.source == "akedata"), "")
+        all_keys = set(grouped)
+        cn_keys = {key for key, region in regions.items() if region == "cn"}
+        asia_keys = {key for key, region in regions.items() if region == "asia"}
+        segments = (
+            _build_segment("all", all_keys, valid, catalog),
+            _build_segment("cn", cn_keys, valid, catalog),
+            _build_segment("asia", asia_keys, valid, catalog),
+        )
+        snapshot_updated_at = max(
+            (snapshot.fetched_at for snapshot in valid.values()), default=None
+        )
+        return OwnershipStatsReport(
+            scope=scope,
+            generated_at=current,
+            catalog_version=catalog_version,
+            segments=segments,
+            refresh=refresh,
+            snapshot_updated_at=snapshot_updated_at,
+        )
+
+
+def with_refresh(report: OwnershipStatsReport, refresh: OwnershipRefreshResult) -> OwnershipStatsReport:
+    return replace(report, refresh=refresh)
+
+
+def _build_segment(
+    region: Literal["all", "cn", "asia"],
+    eligible_keys: set[tuple[str, str]],
+    valid: Mapping[tuple[str, str], OperatorRosterSnapshot],
+    catalog: Sequence[OperatorCatalogEntry],
+) -> OwnershipStatsSegment:
+    snapshots = [valid[key] for key in eligible_keys if key in valid]
+    sample_count = len(snapshots)
+    if region == "cn":
+        segment_catalog = [item for item in catalog if item.available_cn]
+    elif region == "asia":
+        segment_catalog = [item for item in catalog if item.available_asia]
+    else:
+        segment_catalog = [item for item in catalog if item.available_cn or item.available_asia]
+    segment_catalog = [
+        item
+        for item in segment_catalog
+        if item.operator_key.casefold() != _ENDMIN_ACCOUNT_ALIAS_KEY
+    ]
+
+    member_maps = [
+        {member.operator_key: member for member in snapshot.members}
+        for snapshot in snapshots
+    ]
+    operators: list[OperatorOwnership] = []
+    for entry in segment_catalog:
+        potential_counts = {f"potential_{level}": 0 for level in range(6)}
+        unknown = 0
+        owned = 0
+        for members in member_maps:
+            member = members.get(entry.operator_key)
+            if member is None:
+                continue
+            owned += 1
+            if member.potential_level in range(0, 6):
+                potential_counts[f"potential_{member.potential_level}"] += 1
+            else:
+                unknown += 1
+        bucket_counts = {
+            "unowned": sample_count - owned,
+            **potential_counts,
+            "unknown": unknown,
+        }
+        operators.append(
+            OperatorOwnership(
+                operator_key=entry.operator_key,
+                source_id=entry.source_id,
+                name=entry.name,
+                rarity=entry.rarity,
+                profession=entry.profession,
+                sort_order=entry.sort_order,
+                owned_count=owned,
+                sample_count=sample_count,
+                ownership_rate=_rate(owned, sample_count),
+                potential_buckets=tuple(
+                    PotentialBucket(key, _potential_bucket_label(key), count, _rate(count, sample_count))
+                    for key, count in bucket_counts.items()
+                ),
+            )
+        )
+    operators.sort(
+        key=lambda item: (
+            -item.rarity,
+            -item.owned_count,
+            item.sort_order,
+            item.operator_key,
+        )
+    )
+    professions = _collection_summaries("profession", operators, sample_count)
+    rarities = _collection_summaries("rarity", operators, sample_count)
+    return OwnershipStatsSegment(
+        region=region,
+        eligible_sample_count=len(eligible_keys),
+        valid_sample_count=sample_count,
+        excluded_sample_count=len(eligible_keys) - sample_count,
+        operators=tuple(operators),
+        professions=professions,
+        rarities=rarities,
+    )
+
+
+def _collection_summaries(
+    kind: Literal["profession", "rarity"],
+    operators: Sequence[OperatorOwnership],
+    sample_count: int,
+) -> tuple[CollectionSummary, ...]:
+    groups: dict[str, list[OperatorOwnership]] = defaultdict(list)
+    for operator in operators:
+        label = operator.profession if kind == "profession" else str(operator.rarity)
+        groups[label].append(operator)
+    summaries = [
+        CollectionSummary(
+            kind=kind,
+            label=label,
+            operator_count=len(items),
+            owned_slots=sum(item.owned_count for item in items),
+            possible_slots=sample_count * len(items),
+            collection_rate=_rate(sum(item.owned_count for item in items), sample_count * len(items)),
+        )
+        for label, items in groups.items()
+    ]
+    summaries.sort(
+        key=(
+            (lambda item: (-_int(item.label), item.label))
+            if kind == "rarity"
+            else (lambda item: item.label)
+        )
+    )
+    return tuple(summaries)
+
+
+async def collect_group_member_ids(bot: Any, guild_id: str) -> set[str]:
+    getter = getattr(bot, "guild_member_list", None)
+    if not guild_id:
+        raise GroupMemberListError("当前会话缺少群号")
+    standard_error: Exception | None = None
+    if callable(getter):
+        try:
+            members = await _standard_group_members(getter, str(guild_id))
+        except Exception as exc:
+            standard_error = exc
+        else:
+            return _group_member_ids(members)
+
+    try:
+        result = await call_onebot_action(
+            bot,
+            "get_group_member_list",
+            group_id=_numeric_id(guild_id),
+            no_cache=True,
+        )
+        members = _onebot_group_members(result)
+    except Exception as exc:
+        message = (
+            "获取当前群成员列表失败"
+            if standard_error is not None
+            else "当前适配器不支持获取群成员列表"
+        )
+        raise GroupMemberListError(
+            message,
+            standard_error=standard_error,
+            fallback_error=exc,
+        ) from exc
+    return _group_member_ids(members)
+
+
+async def _standard_group_members(getter: Callable[..., Any], guild_id: str) -> list[Any]:
+    result = getter(guild_id=guild_id)
+    # Satori IterablePageResult is both Awaitable and AsyncIterable. Iterating
+    # it is what follows every `next` token; awaiting it returns only one page.
+    if hasattr(result, "__aiter__"):
+        members: list[Any] = []
+        async for member in result:
+            members.append(member)
+        return members
+    if inspect.isawaitable(result):
+        result = await result
+    data = getattr(result, "data", None)
+    if data is not None:
+        result = data
+    elif isinstance(result, Mapping) and "data" in result:
+        result = result["data"]
+    if isinstance(result, Iterable) and not isinstance(result, (str, bytes, Mapping)):
+        return list(result)
+    raise TypeError("群成员接口返回格式异常")
+
+
+def _onebot_group_members(result: Any) -> list[Any]:
+    data = getattr(result, "data", None)
+    if data is not None:
+        result = data
+    elif isinstance(result, Mapping) and "data" in result:
+        result = result["data"]
+    if isinstance(result, Iterable) and not isinstance(result, (str, bytes, Mapping)):
+        return list(result)
+    raise TypeError("OneBot 群成员接口返回格式异常")
+
+
+def _group_member_ids(members: Iterable[Any]) -> set[str]:
+    user_ids = {_member_user_id(member) for member in members}
+    user_ids.discard("")
+    return user_ids
+
+
+def _numeric_id(value: Any) -> int | str:
+    text = str(value or "")
+    return int(text) if text.isdecimal() else text
+
+
+GROUP_ADMIN_ROLE_TOKENS = {
+    "admin",
+    "administrator",
+    "owner",
+    "manager",
+    "群主",
+    "管理员",
+}
+
+
+def member_has_group_admin_role(member: Any) -> bool:
+    if member is None:
+        return False
+    for attribute in ("is_owner", "is_admin", "is_administrator", "owner", "admin"):
+        value = _field(member, attribute)
+        if value is True or (
+            isinstance(value, str) and value.strip().casefold() in {"1", "true", "yes", "on"}
+        ):
+            return True
+    roles = _field(member, "roles") or ()
+    if isinstance(roles, (str, bytes, Mapping)):
+        roles = (roles,)
+    for role in roles:
+        values = role.values() if isinstance(role, Mapping) else (
+            getattr(role, "id", ""),
+            getattr(role, "name", ""),
+        )
+        for value in values:
+            lowered = str(value or "").strip().casefold()
+            if lowered and any(token in lowered for token in GROUP_ADMIN_ROLE_TOKENS):
+                return True
+    return False
+
+
+async def is_group_manager(bot: Any, event: Any, guild_id: str, user_id: str) -> bool:
+    member = getattr(event, "member", None)
+    if member_has_group_admin_role(member):
+        return True
+    getter = getattr(bot, "guild_member_get", None)
+    if not callable(getter) or not guild_id:
+        return False
+    try:
+        member = getter(guild_id=str(guild_id), user_id=str(user_id))
+        if inspect.isawaitable(member):
+            member = await member
+    except Exception:
+        return False
+    return member_has_group_admin_role(member)
+
+
+def _group_roles(roles: Sequence[EndfieldRole]) -> dict[tuple[str, str], tuple[EndfieldRole, ...]]:
+    grouped: dict[tuple[str, str], list[EndfieldRole]] = defaultdict(list)
+    for role in roles:
+        grouped[(str(role.server_id), str(role.role_id))].append(role)
+    return {key: tuple(items) for key, items in grouped.items()}
+
+
+def _catalog_entry_signature(entry: OperatorCatalogEntry) -> tuple[Any, ...]:
+    return (
+        entry.operator_key,
+        entry.source_id,
+        entry.name,
+        entry.rarity,
+        entry.profession,
+        entry.sort_order,
+        entry.available_cn,
+        entry.available_asia,
+    )
+
+
+def _endministrator_source(raw_id: str, *gender_values: Any) -> str:
+    normalized_id = str(raw_id or "").strip().casefold()
+    if normalized_id in {_ENDMIN_MALE_SOURCE, _ENDMIN_MALE_KEY}:
+        return _ENDMIN_MALE_SOURCE
+    if normalized_id in {_ENDMIN_FEMALE_SOURCE, _ENDMIN_FEMALE_KEY}:
+        return _ENDMIN_FEMALE_SOURCE
+    if normalized_id not in {_ENDMIN_ACCOUNT_ALIAS_SOURCE, _ENDMIN_ACCOUNT_ALIAS_KEY}:
+        return ""
+    for value in gender_values:
+        source_id = _endministrator_source_from_gender(value)
+        if source_id:
+            return source_id
+    raise SnapshotValidationError("官方档案缺少管理员性别，无法生成准确快照")
+
+
+def _endministrator_source_from_gender(value: Any) -> str:
+    normalized = _text(_semantic_value(value)).casefold().replace("-", "_").replace(" ", "_")
+    if normalized in {"1", "m", "male", "char_gender_male"}:
+        return _ENDMIN_MALE_SOURCE
+    if normalized in {"2", "f", "female", "char_gender_female"}:
+        return _ENDMIN_FEMALE_SOURCE
+    return ""
+
+
+def _has_legacy_shared_endministrator(snapshot: OperatorRosterSnapshot) -> bool:
+    return any(
+        member.operator_key.casefold() == _ENDMIN_ACCOUNT_ALIAS_KEY
+        for member in snapshot.members
+    )
+
+
+def _member_user_id(member: Any) -> str:
+    user = _field(member, "user")
+    return str(_field(user, "id") or _field(member, "user_id") or _field(member, "id") or "")
+
+
+def _field(value: Any, name: str) -> Any:
+    if isinstance(value, Mapping):
+        return value.get(name)
+    return getattr(value, name, None)
+
+
+def _is_authentication_error(error: EndfieldAPIError) -> bool:
+    if error.operation in {"账号授权", "获取社区凭据", "刷新社区签名"}:
+        return True
+    return str(error.code).casefold() in {"401", "403", "10001", "10002", "10003", "10004"}
+
+
+def _systemic_community_error_code(error: Exception | None) -> str:
+    if not isinstance(error, EndfieldAPIError):
+        return ""
+    code = str(error.code)
+    if error.operation not in _SYSTEMIC_COMMUNITY_OPERATIONS:
+        return ""
+    return code if code in _SYSTEMIC_COMMUNITY_CODES else ""
+
+
+async def _background_card_detail(
+    client: EndfieldOfficialClient,
+    token: str,
+    role: EndfieldRole,
+) -> dict[str, Any]:
+    method = client.card_detail
+    try:
+        supports_background = "background" in inspect.signature(method).parameters
+    except (TypeError, ValueError):
+        supports_background = False
+    if supports_background:
+        return await method(token, role, background=True)
+    return await method(token, role)
+
+
+def _community_metric_snapshot(client: Any) -> dict[str, int]:
+    getter = getattr(client, "community_context_metrics", None)
+    if not callable(getter):
+        return {key: 0 for key in _COMMUNITY_METRIC_KEYS}
+    try:
+        values = getter()
+    except Exception:
+        return {key: 0 for key in _COMMUNITY_METRIC_KEYS}
+    if not isinstance(values, Mapping):
+        return {key: 0 for key in _COMMUNITY_METRIC_KEYS}
+    return {
+        key: max(0, _int(values.get(key)))
+        for key in _COMMUNITY_METRIC_KEYS
+    }
+
+
+def _safe_log_token(value: Any, fallback: str) -> str:
+    normalized = re.sub(r"[^a-z0-9_-]+", "-", str(value or "").strip().casefold())
+    return normalized.strip("-")[:32] or fallback
+
+
+def _error_retry_after(error: Exception | None) -> float:
+    if not isinstance(error, EndfieldAPIError):
+        return 0.0
+    return max(0.0, float(getattr(error, "retry_after_seconds", 0.0) or 0.0))
+
+
+def _refresh_retry_delay(
+    error: Exception | None,
+    failure_count: int,
+    *,
+    base_seconds: int,
+    max_seconds: int,
+) -> int:
+    if (
+        isinstance(error, EndfieldAPIError)
+        and _is_authentication_error(error)
+        and not _systemic_community_error_code(error)
+    ):
+        base_seconds = max(base_seconds, REFRESH_AUTH_RETRY_BASE_SECONDS)
+        max_seconds = max(max_seconds, REFRESH_AUTH_RETRY_MAX_SECONDS)
+    exponent = min(10, max(0, int(failure_count) - 1))
+    calculated = min(max_seconds, base_seconds * (2 ** exponent))
+    return int(max(calculated, _error_retry_after(error)))
+
+
+def _refresh_issue(error: Exception | None) -> tuple[str, str]:
+    if isinstance(error, CredentialKeyError):
+        return "credential-decrypt", "账号凭据无法解密"
+    if isinstance(error, LookupError):
+        return "credential-missing", "账号凭据不存在"
+    if isinstance(error, SnapshotValidationError):
+        return "snapshot-invalid", "官方档案结构不完整"
+    if isinstance(error, EndfieldAPIError):
+        operation = str(error.operation or "官方接口")
+        code = str(error.code or "未知错误")
+        return f"api:{operation}:{code}", f"{operation}（{code}）"
+    if error is None:
+        return "unknown", "未知刷新错误"
+    return f"internal:{type(error).__name__}", f"内部错误（{type(error).__name__}）"
+
+
+def _safe_catalog_error(error: Exception) -> str:
+    if isinstance(error, EndfieldAPIError):
+        return _refresh_issue(error)[1]
+    return f"{type(error).__name__}: 目录检查失败"
+
+
+def _safe_refresh_error(error: Exception | None) -> str:
+    if error is None:
+        return "刷新失败"
+    if isinstance(error, CredentialKeyError):
+        return "账号凭据无法解密"
+    if isinstance(error, LookupError):
+        return "账号凭据不存在"
+    if isinstance(error, SnapshotValidationError):
+        return str(error)
+    if isinstance(error, EndfieldAPIError):
+        return str(error)
+    return f"{type(error).__name__}: 刷新失败"
+
+
+def _rows(value: Any) -> tuple[tuple[str, Mapping[str, Any]], ...]:
+    if not isinstance(value, Mapping):
+        return ()
+    return tuple((str(key), row) for key, row in value.items() if isinstance(row, Mapping))
+
+
+def _mapping(value: Any) -> Mapping[str, Any]:
+    return value if isinstance(value, Mapping) else {}
+
+
+def _text(value: Any) -> str:
+    if value is None or isinstance(value, (dict, list, tuple)):
+        return ""
+    return str(value).strip()
+
+
+def _semantic_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return value.get("value") if value.get("value") is not None else value.get("key")
+    return value
+
+
+def _int(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        match = re.search(r"-?\d+", str(value or ""))
+        return int(match.group()) if match else 0
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _potential_rank(value: int | None) -> int:
+    return value if value is not None else -1
+
+
+def _potential_bucket_label(key: str) -> str:
+    if key == "unowned":
+        return "未持有"
+    if key == "unknown":
+        return "未知"
+    return f"潜能 {key.removeprefix('potential_')}"
+
+
+def _rate(numerator: int, denominator: int) -> float | None:
+    return numerator / denominator if denominator > 0 else None

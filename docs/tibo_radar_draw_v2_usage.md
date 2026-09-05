@@ -11,11 +11,11 @@ draw_v2 导出的名称与 draw.py 相同：
 - `post_sections(posts, relevance_label)` / `event_sections(events, event_label)` — 由数据模型构建分节
 - 颜色常量 `AMBER` / `CYAN` / `GREEN`（以及 `BG`、`PANEL`、`RED` 等）
 
-分节内容的行分类规则（时间线 `#n` 行、`直接相关 · 时间 · id` 动态行、`键：值` 行、来源健康行、PT 时区行、历史统计磁贴与 24 小时柱状图）与旧版保持一致，因此 `plugins/tibo_radar/__init__.py` 生成的所有文案都能被正确排版。
+分节内容的行分类规则（时间线 `#n` 行、`直接相关 · 时间 · id` 动态行、`键：值` 行、来源健康行、PT 时区行、历史统计磁贴与 24 小时柱状图）与旧版保持一致，因此 `plugins/tibo_radar/handlers.py` 生成的所有文案都能被正确排版。
 
 ## 启用新版渲染
 
-只需修改 `plugins/tibo_radar/__init__.py` 中的一行导入（第 19 行）：
+只需修改 `plugins/tibo_radar/handlers.py` 中的一行导入（第 19 行）：
 
 ```python
 # 旧版
@@ -50,4 +50,4 @@ png: bytes = await render_card(
 )
 ```
 
-注意 `render_card` 是异步函数（内部经 `utils.image_executor.run_image_render` 在线程池中渲染），需要在事件循环中 `await`；字体回退顺序为 `assets/font/steamInfo/MiSans-*.ttf` → Windows 雅黑/黑体，与旧版一致。
+注意 `render_card` 是异步函数（内部经 `otae_bot.infrastructure.rendering.executor.run_image_render` 在线程池中渲染），需要在事件循环中 `await`；字体回退顺序为 `assets/font/steamInfo/MiSans-*.ttf` → Windows 雅黑/黑体，与旧版一致。

@@ -1,7 +1,7 @@
-from utils.database import SQLiteHelper
-from configs.path_config import SQL_PATH, IMAGE_PATH
+from otae_bot.infrastructure.storage.database import SQLiteHelper
+from otae_bot.config.paths import SQL_PATH, IMAGE_PATH
 from .entity import Ammo
-from configs.config import Plugin_Config, SYSTEM_PROXY
+from otae_bot.config.settings import Plugin_Config, SYSTEM_PROXY
 import httpx
 
 sql = SQLiteHelper("ammo.db", SQL_PATH+"eft_helper/")
@@ -207,4 +207,3 @@ class DataSource:
         except Exception as e:
             print(e)
             return False
-

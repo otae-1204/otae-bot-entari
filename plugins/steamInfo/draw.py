@@ -8,7 +8,7 @@ from typing import List, Dict, Tuple
 from colorsys import rgb_to_hsv, hsv_to_rgb
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
 
-from configs.path_config import IMAGE_PATH, FONT_PATH
+from otae_bot.config.paths import IMAGE_PATH, FONT_PATH
 from .models import Player
 
 

@@ -14,7 +14,7 @@
 对比基线来自官方概率公示与 gacha.py 的综合概率常量。付费抽的实测出率应当对齐
 「综合概率」（已含保底），而非 0.8% 基础概率——脚本会同时给出两者以免误读。
 
-保底/池族判定逻辑对齐 plugins/endfield/gacha.py，以其为准。
+保底/池族判定逻辑对齐 plugins/endfield/gacha/service.py，以其为准。
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ _PACKAGE = "endfield_stats_runtime"
 _package = types.ModuleType(_PACKAGE)
 _package.__path__ = [str(PLUGIN_DIR)]
 sys.modules[_PACKAGE] = _package
-account_store = importlib.import_module(f"{_PACKAGE}.account_store")
+account_store = importlib.import_module(f"{_PACKAGE}.account.store")
 
 EndfieldStore = account_store.EndfieldStore
 EndfieldRole = account_store.EndfieldRole

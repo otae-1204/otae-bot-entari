@@ -4,10 +4,12 @@ import re
 import unittest
 from unittest import mock
 
-import plugins.endfield as endfield
-from plugins.endfield import account_detail_draw, account_detail_models, commands as commands_module
-from plugins.endfield.account_store import EndfieldRole
-from plugins.endfield.account_draw import (
+import plugins.endfield.handlers as endfield
+from plugins.endfield.account.detail import draw as account_detail_draw
+from plugins.endfield.account.detail import models as account_detail_models
+from plugins.endfield.catalog import commands as commands_module
+from plugins.endfield.account.store import EndfieldRole
+from plugins.endfield.account.draw import (
     CANVAS_HEIGHT,
     CANVAS_WIDTH,
     FONT_ASSETS,
@@ -22,7 +24,7 @@ from plugins.endfield.account_draw import (
     _profile_html,
     _property_icon_url,
 )
-from plugins.endfield.account_models import AccountUiPayload
+from plugins.endfield.account.models import AccountUiPayload
 
 
 def fixture_payload() -> AccountUiPayload:

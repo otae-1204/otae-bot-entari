@@ -3,8 +3,8 @@ from __future__ import annotations
 import asyncio
 import unittest
 
-from plugins.endfield import ownership_stats_draw
-from plugins.endfield.ownership_stats import (
+from plugins.endfield.ownership import draw as ownership_stats_draw
+from plugins.endfield.ownership.service import (
     CollectionSummary,
     OperatorOwnership,
     OwnershipRefreshResult,

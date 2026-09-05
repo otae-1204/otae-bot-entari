@@ -7,13 +7,13 @@ import logging
 import time
 import traceback
 
-from utils.entari_native import listen_notice, get_bot
+from otae_bot.adapters.entari import listen_notice, get_bot
 from arclet.entari import Account as Bot, Event
-from utils.entari_native import Pred
-from utils.entari_native import ChainMsg, SendDest, account_adapter_name
-from utils.entari_native import timer
+from otae_bot.adapters.entari import Pred
+from otae_bot.adapters.entari import ChainMsg, SendDest, account_adapter_name
+from otae_bot.adapters.entari import timer
 
-from configs.config import Config, MC_BROADCAST_INTERVAL
+from otae_bot.config.settings import Config, MC_BROADCAST_INTERVAL
 from .data_source import PlayerGameTimeManager
 from .ping import ping
 from .broadcast_utils import (

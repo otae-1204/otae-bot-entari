@@ -11,7 +11,7 @@ from typing import Iterable, Sequence
 
 from PIL import Image, ImageDraw, ImageFont
 
-from configs.path_config import FONT_PATH
+from otae_bot.config.paths import FONT_PATH
 
 CANVAS_W = 960
 CARD_X = 32
