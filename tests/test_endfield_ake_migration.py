@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 
-from plugins.endfield.catalog.akedata import AkeCatalog, effect_values
+from plugins.endfield.catalog.akedata import AkeCatalog, article, effect_values
 from plugins.endfield.catalog.service import EndfieldService
 from plugins.endfield.providers.repository import (
     AkeSnapshot,
@@ -151,9 +151,207 @@ class NativeAkeTests(unittest.IsolatedAsyncioTestCase):
         advanced = {row.key: row.value for row in view.advanced_stats}
         self.assertEqual(advanced["CriticalDamageIncrease"], "50.0%")
 
-    async def test_incomplete_legacy_admin_talent_requires_whole_view_fallback(self):
+    async def test_admin_uses_shared_talents_and_preserves_variant_skills(self):
+        for query, key in (
+            ("管理员", "chr_0002_endminm"),
+            ("chr_0002_endminm", "chr_0002_endminm"),
+            ("chr_0003_endminf", "chr_0003_endminf"),
+        ):
+            with self.subTest(query=query):
+                view = await self.catalog.operator_view(query)
+                self.assertEqual(view.operator_id, key)
+                self.assertEqual(view.source_name, "AKEData")
+                self.assertIn(key, view.portrait_url)
+                self.assertEqual(len(view.skills), 4)
+                self.assertTrue(all(s.skill_id.startswith(key) for s in view.skills))
+                self.assertTrue(
+                    all(
+                        sid.startswith(key)
+                        for s in view.skills
+                        for sid in s.extra_levels
+                    )
+                )
+                skills = {s.category: s for s in view.skills}
+                self.assertIn("使用源石技艺", skills["战技"].description)
+                self.assertIn("<#ba.consume>消耗</>", skills["连携技"].description)
+                talents = {t.title: t for t in view.talents}
+                self.assertEqual(set(talents), {"本质瓦解", "现实静滞"})
+                self.assertIn("+30%", talents["本质瓦解"].description)
+                self.assertIn("15秒", talents["本质瓦解"].description)
+                self.assertIn("+20%", talents["现实静滞"].description)
+                for effect in (*view.talents, *view.potentials):
+                    self.assertTrue(effect.effect_id.startswith("chr_9000_endmin_"))
+                    self.assertNotIn("--", effect.description)
+                    self.assertNotIn("{", effect.description)
+                self.assertEqual(len(view.potentials), 5)
+        # Normalization must not rewrite the shared snapshot or its legacy rows.
+        legacy = self.data._tables["CharGrowthTable"]["chr_0002_endminm"]
+        self.assertTrue(
+            any(
+                node.get("passiveSkillNodeInfo", {}).get("talentEffectId")
+                == "chr_0002_endminm_talent_1_2"
+                for node in legacy["talentNodeMap"].values()
+            )
+        )
+
+    async def test_admin_missing_shared_growth_is_incomplete(self):
+        self.data._tables["CharGrowthTable"].pop("chr_9000_endmin")
+        with self.assertRaisesRegex(
+            AkeDataIncomplete, "shared operator talents missing"
+        ):
+            await self.catalog.operator_view("管理员")
+
+    async def test_admin_missing_shared_effect_is_incomplete(self):
+        self.data._tables["PotentialTalentEffectTable"].pop(
+            "chr_9000_endmin_talent_1_2"
+        )
+        with self.assertRaisesRegex(AkeDataIncomplete, "talents/potentials incomplete"):
+            await self.catalog.operator_view("管理员")
+
+    async def test_admin_missing_shared_skill_group_is_incomplete(self):
+        growth = self.data._tables["CharGrowthTable"]["chr_9000_endmin"]
+        growth["skillGroupMap"].pop("chr_9000_endmin_NormalSkill")
+        with self.assertRaisesRegex(
+            AkeDataIncomplete, "shared operator skill group missing"
+        ):
+            await self.catalog.operator_view("管理员")
+
+    async def test_admin_missing_shared_parameters_is_incomplete(self):
+        effect = self.data._tables["PotentialTalentEffectTable"][
+            "chr_9000_endmin_talent_1_2"
+        ]
+        effect["dataList"][0]["attachBuff"]["blackboard"] = []
         with self.assertRaisesRegex(AkeDataIncomplete, "parameters unavailable"):
             await self.catalog.operator_view("管理员")
+
+    async def test_admin_loadout_uses_shared_talents(self):
+        for key in ("chr_0002_endminm", "chr_0003_endminf"):
+            with self.subTest(key=key):
+                view = await self.catalog.loadout(key, "熔铸火焰", [])
+                self.assertEqual(view.source_name, "AKEData")
+                self.assertEqual(view.operator_id, key)
+
+    async def test_admin_handler_default_and_explicit_ake_do_not_request_legacy(self):
+        from plugins.endfield import handlers as end
+
+        service = EndfieldService(end.client)
+        await end._CARD_CACHE.clear()
+        try:
+            with (
+                patch.object(end, "service", service),
+                patch.object(
+                    service, "ake_catalog", AsyncMock(return_value=self.catalog)
+                ),
+                patch.object(repository, "snapshot", AsyncMock(return_value=self.data)),
+                patch.object(
+                    end.client,
+                    "_get_json",
+                    AsyncMock(side_effect=AssertionError("Legacy source requested")),
+                ) as legacy,
+                patch.object(
+                    end, "draw_operator_card", AsyncMock(return_value=b"png")
+                ) as draw,
+            ):
+                for query in ("管理员", "chr_0003_endminf"):
+                    for source in ("", "akedata"):
+                        with self.subTest(query=query, source=source):
+                            rows = await end._collect_candidates(
+                                "operator", query, source
+                            )
+                            candidate, ambiguous = end.choose_candidate(rows)
+                            self.assertFalse(ambiguous)
+                            self.assertEqual(candidate.source, "akedata")
+                            self.assertEqual(
+                                await end._render_candidate(candidate, source),
+                                (b"png",),
+                            )
+                self.assertEqual(draw.await_count, 2)
+                self.assertTrue(
+                    all(
+                        call.args[0].source_name == "AKEData"
+                        for call in draw.await_args_list
+                    )
+                )
+                legacy.assert_not_awaited()
+        finally:
+            await end._CARD_CACHE.clear()
+            await service._ake_views.close()
+
+    async def test_admin_fallback_resolves_fz_title_by_id_only_when_ake_incomplete(
+        self,
+    ):
+        from plugins.endfield import handlers as end
+
+        self.data._tables["CharGrowthTable"].pop("chr_9000_endmin")
+        roster = article(
+            "干员",
+            {
+                "roster": {
+                    "entries": [
+                        {"charId": "chr_0002_endminm", "title": "干员/管理员·男"},
+                        {"charId": "chr_0003_endminf", "title": "干员/管理员·女"},
+                    ]
+                }
+            },
+            "fixture",
+        )
+        client = SimpleNamespace(fz_article_by_title=AsyncMock(return_value=roster))
+        service = EndfieldService(client)
+        await end._CARD_CACHE.clear()
+        try:
+            with (
+                patch.object(end, "service", service),
+                patch.object(
+                    service, "ake_catalog", AsyncMock(return_value=self.catalog)
+                ),
+                patch.object(repository, "snapshot", AsyncMock(return_value=self.data)),
+                patch.object(
+                    service,
+                    "get_operator_view_from_fz",
+                    AsyncMock(return_value="fz-view"),
+                ) as fallback,
+                patch.object(
+                    end, "draw_operator_card", AsyncMock(return_value=b"fz-png")
+                ) as draw,
+            ):
+                for key, title in (
+                    ("chr_0002_endminm", "干员/管理员·男"),
+                    ("chr_0003_endminf", "干员/管理员·女"),
+                ):
+                    with self.subTest(key=key):
+                        candidate = end.EndfieldCandidate(
+                            "operator",
+                            key,
+                            "管理员",
+                            100,
+                            "akedata",
+                            revision=self.data.revision,
+                        )
+                        with self.assertRaises(AkeDataIncomplete):
+                            await end._render_candidate(candidate, "akedata")
+                        before = fallback.await_count
+                        self.assertEqual(
+                            await end._render_candidate(candidate), (b"fz-png",)
+                        )
+                        fallback.assert_awaited_with(title)
+                        # FZ may cache its own PNG, but a later explicit AKE query
+                        # must still fail rather than reuse it as AKE-complete.
+                        self.assertEqual(fallback.await_count, before + 1)
+                        with self.assertRaises(AkeDataIncomplete):
+                            await end._render_candidate(candidate, "akedata")
+                self.assertEqual(draw.await_count, 2)
+                self.assertIsNone(
+                    await service.find_fz_operator_title("chr_9999_unknown")
+                )
+                self.assertTrue(
+                    all(
+                        call.args == ("干员",)
+                        for call in client.fz_article_by_title.await_args_list
+                    )
+                )
+        finally:
+            await end._CARD_CACHE.clear()
+            await service._ake_views.close()
 
     async def test_deduplicated_female_admin_still_resolves_by_id(self):
         from plugins.endfield import handlers as end

@@ -1008,6 +1008,15 @@ class EndfieldService:
             return None
         if query.startswith("干员/"):
             return query
+        if query.startswith("chr_"):
+            # AKE display names can merge variants which FZ stores separately.
+            # Resolve the same character ID instead of guessing an article title.
+            catalog = await self.client.fz_article_by_title("干员")
+            for item in _fz_overview_entries(catalog):
+                title = str(item.get("title") or "").strip()
+                if item.get("charId") == query and title.startswith("干员/"):
+                    return title
+            return None
         exact_title = f"干员/{query}"
         try:
             summaries = await self.client.fz_article_summaries("干员/")

@@ -86,6 +86,13 @@ MODIFIERS = {
     8: "BaseFinalMultiplier",
 }
 PARTS = {0: ("Body", "护甲"), 1: ("Hand", "护手"), 2: ("EDC", "配件")}
+# Endministrator variants retain obsolete talents and skill text in CharGrowthTable.
+# Current gameplay metadata belongs to the shared character, as do potentials;
+# identity, portraits and gender-specific skill IDs still use the variant record.
+SHARED_OPERATOR_GROWTH = {
+    "chr_0002_endminm": "chr_9000_endmin",
+    "chr_0003_endminf": "chr_9000_endmin",
+}
 
 
 def article(title: str, attrs: dict, revision: str) -> dict:
@@ -121,9 +128,7 @@ def effect_values(effect: dict) -> dict:
 def effect_description(effect: dict) -> str:
     rendered = _format_fz_template(effect.get("desc", ""), effect_values(effect))
     if "--" in rendered or re.search(r"\{[^{}]+\}", rendered):
-        # Some legacy Endministrator effects reference positional values not
-        # included in TableCfg (the shared SkillData defaults are zero, too).
-        # A whole-view fallback is safer than publishing invented/empty values.
+        # Reject unresolved parameters instead of publishing invented values.
         raise AkeDataIncomplete("AKE talent/potential parameters unavailable")
     return rendered
 
@@ -378,6 +383,35 @@ class AkeCatalog:
         texts = tables["I18nTextTable_CN"]
         growth = localize(tables["CharGrowthTable"][key], texts)
         potential = localize(tables["CharacterPotentialTable"].get(key, {}), texts)
+        shared_growth_id = SHARED_OPERATOR_GROWTH.get(key)
+        if shared_growth_id:
+            shared = localize(
+                tables["CharGrowthTable"].get(shared_growth_id, {}), texts
+            )
+            if not shared.get("talentNodeMap"):
+                raise AkeDataIncomplete(
+                    f"AKE shared operator talents missing: {shared_growth_id}"
+                )
+            growth["talentNodeMap"] = shared["talentNodeMap"]
+            shared_groups = {
+                group.get("skillGroupType"): group
+                for group in shared.get("skillGroupMap", {}).values()
+            }
+            for group in growth.get("skillGroupMap", {}).values():
+                shared_group = shared_groups.get(group.get("skillGroupType"))
+                if not shared_group or not set(group.get("skillIdList", [])).issubset(
+                    shared_group.get("skillIdList", [])
+                ):
+                    raise AkeDataIncomplete(
+                        f"AKE shared operator skill group missing: {shared_growth_id}"
+                    )
+                group.update(
+                    {
+                        field: value
+                        for field, value in shared_group.items()
+                        if field not in {"skillIdList", "skillGroupId", "icon"}
+                    }
+                )
         effect_ids = {
             node.get("passiveSkillNodeInfo", {}).get("talentEffectId")
             for node in growth.get("talentNodeMap", {}).values()

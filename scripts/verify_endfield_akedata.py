@@ -155,7 +155,7 @@ async def main():
     if args.fixture:
         make_fixture(data._tables, args.fixture)
     catalog = AkeCatalog(data)
-    errors, counts, fallbacks = [], {}, []
+    errors, counts = [], {}
     for kind, table_name in (
         ("operator", "CharGrowthTable"),
         ("weapon", "WeaponBasicTable"),
@@ -170,6 +170,13 @@ async def main():
                 if not view.name:
                     raise ValueError("Empty name")
                 if kind == "operator":
+                    for effect in (*view.talents, *view.potentials):
+                        if "--" in effect.description or re.search(
+                            r"\{[^{}]+\}", effect.description
+                        ):
+                            raise ValueError(
+                                f"Unresolved effect field: {effect.effect_id}"
+                            )
                     for skill in view.skills:
                         fields = [skill.description]
                         fields.extend(
@@ -189,15 +196,9 @@ async def main():
                             raise ValueError(f"Unresolved skill field: {skill.name}")
                 counts[kind] += 1
             except Exception as exc:
-                target = (
-                    fallbacks
-                    if key in {"chr_0002_endminm", "chr_0003_endminf"}
-                    and str(exc) == "AKE talent/potential parameters unavailable"
-                    else errors
-                )
-                target.append({"kind": kind, "key": key, "error": str(exc)})
+                errors.append({"kind": kind, "key": key, "error": str(exc)})
     loadouts = []
-    for name in ("莱万汀", "提弗洛斯", "弭弗"):
+    for name in ("莱万汀", "提弗洛斯", "弭弗", "chr_0002_endminm", "chr_0003_endminf"):
         try:
             weapon = await catalog.recommended_weapon(name)
             view = await catalog.loadout(name, weapon, [("长息轻护甲", 3, ())])
@@ -209,7 +210,7 @@ async def main():
         "mode": "offline public replay (not live latency)",
         "counts": counts,
         "errors": errors,
-        "known_incomplete_requires_whole_view_fallback": fallbacks,
+        "known_incomplete_requires_whole_view_fallback": [],
         "loadouts": loadouts,
     }
     if args.report:
@@ -219,7 +220,7 @@ async def main():
         )
     print(
         json.dumps(
-            {"counts": counts, "errors": errors, "fallbacks": fallbacks},
+            {"counts": counts, "errors": errors},
             ensure_ascii=False,
             indent=2,
         )

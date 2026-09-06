@@ -203,7 +203,7 @@ _MEDAL_LOCK = asyncio.Lock()
 _FORWARD_SENDER_NAME = "Endfield"
 CARD_CACHE_TTL_SECONDS = 600.0
 CARD_CACHE_MAX_BYTES = 48 * 1024 * 1024
-CARD_RENDER_VERSION = "endfield-card-v43"
+CARD_RENDER_VERSION = "endfield-card-v44"
 CardCacheKey = tuple[str, str, str, str, str, str, str]
 _CARD_CACHE: AsyncTTLCache[CardCacheKey, tuple[bytes, ...]] = AsyncTTLCache(
     ttl_seconds=CARD_CACHE_TTL_SECONDS,
@@ -2644,9 +2644,13 @@ async def _render_candidate(
                 except (WarfarinAPIError, RuntimeError, ValueError, KeyError, TypeError) as exc:
                     if requested_source or candidate.kind not in {"operator", "weapon", "equipment", "operator_catalog", "weapon_catalog", "equipment_catalog", "equipment_attribute"}:
                         raise
-                    logger.warning("[endfield] AKE render input incomplete; whole-view FZ fallback ({})", type(exc).__name__)
+                    logger.warning("[endfield] AKE render input incomplete; whole-view FZ fallback ({}: {})", type(exc).__name__, exc)
                     prefix = {"operator": "干员", "weapon": "武器", "equipment": "装备"}.get(candidate.kind)
                     key = f"{prefix}/{candidate.display_name}" if prefix else candidate.key
+                    if candidate.kind == "operator":
+                        key = await service.find_fz_operator_title(candidate.key)
+                        if not key:
+                            raise _CardNotFound
                     output = await _render_candidate(replace(candidate, source="fz", key=key, revision=""), "fz")
                     degraded = True  # Never label/cache a fallback result as AKE-complete.
             else:
