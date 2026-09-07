@@ -14,6 +14,7 @@ from pathlib import Path
 import httpx
 
 from .config import HywConfig, HywError
+from .network_errors import report_error
 from .web import fetch_page, search
 
 SYSTEM_PROMPT = (Path(__file__).parent / "assets/system_prompt.txt").read_text(encoding="utf-8")
@@ -86,10 +87,8 @@ async def complete(client: httpx.AsyncClient, config: HywConfig, messages: list[
         if not isinstance(result, str) or not result.strip():
             raise ValueError("empty response")
         return result[:40000]
-    except httpx.TimeoutException:
-        raise HywError("模型响应超时，请稍后重试。") from None
-    except httpx.HTTPError:
-        raise HywError("无法连接模型服务，请管理员检查接口地址和代理。") from None
+    except httpx.HTTPError as error:
+        raise HywError(report_error(error, config)) from None
     except (KeyError, IndexError, TypeError, ValueError):
         raise HywError("模型服务返回了无法识别的响应。") from None
 

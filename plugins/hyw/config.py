@@ -19,18 +19,23 @@ class HywConfig:
     @classmethod
     def from_env(cls) -> HywConfig:
         # Read the complete credential/endpoint/model tuple from one source.
-        source = str(_env("HYW_CONFIG_SOURCE", "hyw")).lower()
+        source = str(_env("HYW_CONFIG_SOURCE", "hyw")).strip().lower()
         prefixes = {"hyw": "HYW", "llm": "LLM", "steam": "STEAM_LLM"}
         if source not in prefixes:
             raise ValueError("HYW_CONFIG_SOURCE 应为 hyw、llm 或 steam")
         prefix = prefixes[source]
         default_base = cls.base_url if source == "hyw" else "https://api.deepseek.com"
         default_model = cls.model if source == "hyw" else "deepseek-v4-flash"
+        proxy = str(_env("HYW_PROXY", "") or "").strip()
+        if proxy.lower() == "direct":
+            proxy = ""
+        elif not proxy:
+            proxy = str(SYSTEM_PROXY.get("https") or SYSTEM_PROXY.get("http") or "").strip()
         return cls(
             api_key=str(_env(f"{prefix}_API_KEY", "") or "").strip(),
-            base_url=str(_env(f"{prefix}_BASE_URL", "") or default_base).rstrip("/"),
-            model=str(_env(f"{prefix}_MODEL", "") or default_model),
-            proxy=str(_env("HYW_PROXY", "") or SYSTEM_PROXY.get("https") or SYSTEM_PROXY.get("http") or ""),
+            base_url=str(_env(f"{prefix}_BASE_URL", "") or default_base).strip().rstrip("/"),
+            model=str(_env(f"{prefix}_MODEL", "") or default_model).strip(),
+            proxy=proxy,
             render=str(_env("HYW_RENDER", True)).lower() not in {"false", "0", "no"},
         )
 

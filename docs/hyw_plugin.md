@@ -26,6 +26,7 @@ HYW_PROXY=
 未配置密钥时仍能正常加载插件，调用时提示管理员配置。
 
 `HYW_PROXY` 用于模型、搜索和图片下载；留空时继承 `HTTPS_PROXY/HTTP_PROXY`。
+填 `HYW_PROXY=direct` 可仅让 HYW 直连，其他插件继续使用原有全局代理。
 默认搜索 DuckDuckGo Lite，失败后尝试其 HTML 接口，无需额外搜索密钥。
 搜索引擎可能要求验证，此时明确返回工具错误，不能保证所有网络环境都可搜索。
 开发环境最初遇到 HTTP 202 验证页，随后实测 Lite 接口在全时段和近一周筛选下均返回 5 条结果；
@@ -39,6 +40,29 @@ HYW_PROXY=
 ```
 
 `HYW_RENDER=false` 可关闭卡片。渲染失败或卡片过长时回退为分段文字。
+
+## 排查模型连接失败
+
+接口地址和模型参数填写正确，也可能因运行机器的 DNS、TLS、代理或连接中断而失败。
+旧版统一显示“无法连接模型服务”，无法仅凭这句话判断根因。
+现在聊天回复会显示错误分类和 HTTPX 异常类型，并注明当前使用代理还是直连；
+日志会记录如 `code=tls_certificate error=ConnectError route=direct`，不会输出原始异常中的密钥或代理密码。
+
+- `dns`：检查运行机器的域名解析；使用代理时也要检查代理域名。
+- `tls_certificate`：检查系统时间、Python CA 证书和接口/代理的证书链，保持证书校验开启。
+- `proxy` / `connection_refused`：检查代理是否启动、地址端口及认证；可设置 `HYW_PROXY=direct` 对比直连。
+- `connection_interrupted`：接口网关或代理连接中断，需结合服务端日志排查。
+- `request_protocol`：检查复制密钥时是否带入了换行等异常字符。
+
+仅验证连通性时无需密钥。例如在 Windows 机器人运行机器上执行：
+
+```powershell
+curl.exe --noproxy "*" --connect-timeout 10 --max-time 20 -i https://llm.hyw.mom/v1/models
+```
+
+未带密钥返回 HTTP 401 表示此次直连已到达接口；它不验证密钥、模型是否可用，
+也不能代替机器人使用相同 Python 环境和代理路径时的连接测试。
+修改 `.env` 后需重启，且进程已有的环境变量优先于 `.env` 文件。
 
 ## 用法
 

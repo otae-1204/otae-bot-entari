@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import socket
+import ssl
 import unittest
 from dataclasses import replace
 from io import BytesIO
@@ -14,7 +16,7 @@ from arclet.entari import MessageChain
 from PIL import Image as PILImage
 from satori import Image, Text
 
-from plugins.hyw import agent, handlers, rendering, web
+from plugins.hyw import agent, handlers, network_errors, rendering, web
 from plugins.hyw.config import HywConfig, HywError
 from plugins.hyw.history import HistoryStore
 
@@ -71,6 +73,13 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual((config.api_key, config.base_url, config.model), ("general-secret", "https://llm.example/v1", "vision-model"))
         self.assertNotIn("secret", repr(config))
 
+    def test_hyw_proxy_can_override_or_bypass_global_proxy(self):
+        global_proxy = {"https": "http://global.example:8080", "http": "http://other.example:8080"}
+        for value, expected in [("", global_proxy["https"]), ("  ", global_proxy["https"]), (" DIRECT ", ""), ("http://custom.example:7890", "http://custom.example:7890")]:
+            with self.subTest(value=value), patch("plugins.hyw.config.SYSTEM_PROXY", global_proxy), patch("plugins.hyw.config._env", side_effect=lambda key, default=None, selected=value: selected if key == "HYW_PROXY" else default):
+                self.assertEqual(HywConfig.from_env().proxy, expected)
+        self.assertEqual(global_proxy["https"], "http://global.example:8080")
+
     def test_render_data_survives_upstream_bootstrap_and_escapes_html(self):
         answer = agent.Answer('# 中文\n<summary>摘要</summary>\n<script>alert(1)</script><img src=x onerror=alert(2)>', [], [], 1)
         document = rendering.prepare_html(answer)
@@ -117,7 +126,67 @@ class HistoryTests(unittest.TestCase):
         self.assertEqual(store.get(SCOPE, "oversized"), [])
 
 
+class NetworkErrorTests(unittest.TestCase):
+    def test_wrapped_transport_causes_are_distinguished(self):
+        cases = [
+            (ssl.SSLCertVerificationError(1, "certificate verify failed"), "tls_certificate"),
+            (ssl.SSLError(1, "handshake failed"), "tls_handshake"),
+            (socket.gaierror(-2, "host not found"), "dns"),
+            (ConnectionRefusedError(111, "connection refused"), "connection_refused"),
+            (OSError(10061, "Windows connection refused"), "connection_refused"),
+        ]
+        for cause, expected in cases:
+            with self.subTest(cause=type(cause).__name__):
+                wrapper = RuntimeError("transport wrapper")
+                wrapper.__cause__ = cause
+                error = httpx.ConnectError("connection failed")
+                error.__cause__ = wrapper
+                self.assertEqual(network_errors.classify_error(error).code, expected)
+
+    def test_protocol_proxy_and_timeout_errors_have_separate_classifications(self):
+        cases = [
+            (httpx.ProxyError, "proxy"), (httpx.RemoteProtocolError, "connection_interrupted"),
+            (httpx.ReadError, "connection_interrupted"), (httpx.LocalProtocolError, "request_protocol"),
+            (httpx.ReadTimeout, "timeout"), (httpx.UnsupportedProtocol, "url_protocol"),
+            (httpx.DecodingError, "response_encoding"), (httpx.ConnectError, "connection"),
+        ]
+        for error_type, expected in cases:
+            with self.subTest(error=error_type.__name__):
+                self.assertEqual(network_errors.classify_error(error_type("private detail")).code, expected)
+
+    def test_wrapped_ssl_marker_and_cyclic_causes(self):
+        error = httpx.ConnectError("[SSL: CERTIFICATE_VERIFY_FAILED] sensitive URL")
+        self.assertEqual(network_errors.classify_error(error).code, "tls_certificate")
+        error = httpx.ConnectError("unknown")
+        error.__cause__ = error
+        self.assertEqual(network_errors.classify_error(error).code, "connection")
+
+    def test_logs_and_replies_do_not_expose_exception_payloads(self):
+        config = replace(HywConfig(), api_key="private-key", proxy="http://name:private-password@proxy.example")
+        error = httpx.LocalProtocolError("Illegal header value b'Bearer private-key' via private-password")
+        with patch.object(network_errors.logger, "warning") as warning:
+            reply = network_errors.report_error(error, config)
+        self.assertIn("LocalProtocolError", reply)
+        self.assertIn("HYW_PROXY=direct", reply)
+        for value in (reply, repr(warning.call_args)):
+            self.assertNotIn("private-key", value)
+            self.assertNotIn("private-password", value)
+        self.assertEqual(warning.call_args.args[-1], "proxy")
+
+
 class AgentTests(unittest.IsolatedAsyncioTestCase):
+    async def test_http_failure_surfaces_diagnostic_category_and_route(self):
+        def disconnect(request):
+            raise httpx.RemoteProtocolError("upstream private payload")
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(disconnect)) as client:
+            with self.assertRaises(HywError) as caught:
+                await agent.complete(client, HywConfig(), [])
+        message = str(caught.exception)
+        self.assertIn("RemoteProtocolError / connection_interrupted", message)
+        self.assertIn("直连", message)
+        self.assertNotIn("private payload", message)
+
     async def test_continuation_retains_sources_without_leaking_local_metadata(self):
         store = HistoryStore()
         prior = [{"role": "assistant", "content": "资料[1]", "_sources": [{"index": 1, "title": "资料", "url": "https://example.com"}]}]
