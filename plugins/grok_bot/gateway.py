@@ -11,7 +11,7 @@ from uuid import uuid4
 
 import httpx
 
-from .config import GrokConfig, GrokError
+from .config import GatewayError, GrokConfig, GrokError
 
 PROTOCOL_ERROR = "Grok Bot 网关返回了无法识别的数据，请管理员检查网关版本。"
 AWAITING_USER = "Grok Bot 正在等待人工确认，请管理员打开 Grok Bot 应用处理后再提问。"
@@ -72,24 +72,31 @@ class Gateway:
                 headers=headers, **({} if health else {"json": body or {}}),
                 follow_redirects=False,
             )
+        except (httpx.ConnectTimeout, httpx.ConnectError, httpx.PoolTimeout):
+            raise GatewayError(f"连接 Grok Bot 网关失败（{command}），请求尚未提交，请检查 Tailscale 和云端服务。", not_submitted=True) from None
         except httpx.TimeoutException:
-            raise GrokError("连接或读取 Grok Bot 网关超时，请检查 Tailscale 和云端后台服务；已提交的任务可能仍在运行。") from None
+            raise GatewayError(f"读取 Grok Bot 网关超时（{command}），已提交的任务可能仍在运行，请检查 Tailscale 和云端服务。") from None
         except httpx.HTTPError:
-            raise GrokError("无法连接 Grok Bot 网关，请检查两端 Tailscale、网关地址及云端后台服务。") from None
+            raise GatewayError(f"Grok Bot 网关通信失败（{command}），请检查两端 Tailscale、网关地址及云端后台服务。") from None
         if response.status_code in {401, 403}:
-            raise GrokError("Grok Bot 网关认证失败，请管理员检查 GROKBOT_GATEWAY_TOKEN。")
+            raise GatewayError("Grok Bot 网关认证失败，请管理员检查 GROKBOT_GATEWAY_TOKEN。", not_submitted=True)
+        if response.status_code in {400, 422}:
+            raise GatewayError(
+                f"Grok Bot 网关拒绝请求（{command} / HTTP {response.status_code}）。请检查网关版本、请求参数和 Bot 数量限制。",
+                not_submitted=True,
+            )
         if response.status_code == 404:
-            raise GrokError(f"Grok Bot 网关接口 {command} 返回 404，请检查基址和网关版本。")
+            raise GatewayError(f"Grok Bot 网关接口 {command} 返回 404，请检查基址和网关版本。", not_submitted=True)
         if response.status_code == 429:
-            raise GrokError("Grok Bot 网关请求过于频繁，请稍后重试。")
+            raise GatewayError("Grok Bot 网关请求过于频繁，请稍后重试。", not_submitted=True)
         if not 200 <= response.status_code < 300:
-            raise GrokError(f"Grok Bot 网关请求失败（HTTP {response.status_code}）。")
+            raise GatewayError(f"Grok Bot 网关请求失败（{command} / HTTP {response.status_code}）。")
         try:
             data = response.json()
         except ValueError:
-            raise GrokError(PROTOCOL_ERROR) from None
+            raise GatewayError(PROTOCOL_ERROR) from None
         if isinstance(data, dict) and data.get("error"):
-            raise GrokError(f"Grok Bot 网关未能完成 {command}，请在应用中查看详情。")
+            raise GatewayError(f"Grok Bot 网关未能完成 {command}，请在应用中查看详情。")
         return data
 
     async def agent(self) -> dict:

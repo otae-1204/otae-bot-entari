@@ -14,6 +14,14 @@ class GrokError(Exception):
     """A diagnostic safe to show in QQ; never include upstream bodies."""
 
 
+class GatewayError(GrokError):
+    """Transport metadata, without upstream response bodies or credentials."""
+
+    def __init__(self, message: str, *, not_submitted: bool = False):
+        super().__init__(message)
+        self.not_submitted = not_submitted
+
+
 @dataclass(frozen=True)
 class GrokConfig:
     base_url: str = ""

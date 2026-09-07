@@ -282,6 +282,16 @@ async def check_group_switches():
     assert feature_store.is_enabled(scope, 'grok_bot')
     await run_command(current, '/grok 帮助')
     current.send.assert_awaited_once()
+    grok = plugin_service.plugins['plugins.grok_bot'].module
+    with patch.object(grok.GrokConfig, 'from_env', return_value=SimpleNamespace()), \\
+         patch.object(grok.queue, 'run', AsyncMock(return_value='已修复')) as repair_run:
+        await run_command(admin, '/grok 修复会话')
+        repair_run.assert_not_awaited()
+        assert '仅 SuperUser' in str(admin.send.await_args.args[0])
+        await run_command(current, '/grok 修复会话')
+        repair_run.assert_awaited_once()
+        assert repair_run.await_args.kwargs['repair_only'] is True
+        assert repair_run.await_args.args[3].peer_id == '100'
 
     # Legacy commands are filtered too, without disabling the manager.
     await run_command(current, '/插件 关闭 help')

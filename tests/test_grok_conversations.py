@@ -16,10 +16,11 @@ from satori import ChannelType
 from otae_bot.config.settings import Config
 from otae_bot.group_features import GroupFeatureStore
 from plugins.grok_bot import conversations, handlers
-from plugins.grok_bot.config import GrokConfig, GrokError
+from plugins.grok_bot.config import GatewayError, GrokConfig, GrokError
 from plugins.grok_bot.conversations import (
     ConversationScope,
     SessionStore,
+    repair_binding,
     resolve_agent,
     scope_from_session,
 )
@@ -57,7 +58,7 @@ class Host:
             data = self.agents
         elif command == "createAgent":
             agent = {"id": str(uuid4()), "isGroup": False, "isRunning": False, "isComposingMessage": False,
-                     **{key: body[key] for key in ("name", "description", "purpose")}}
+                     **{key: body[key] for key in ("name", "description")}}
             self.agents.append(agent)
             if self.lose_create_response:
                 raise httpx.ReadTimeout("secret upstream error", request=request)
@@ -100,7 +101,7 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(creates), len(scopes))
         for body in creates:
             self.assertIn("多惠的人设", body["description"])
-            self.assertFalse(body["isKickstartRequested"])
+            self.assertEqual(set(body), {"name", "description", "isIntroductionSuppressed"})
             self.assertTrue(body["isIntroductionSuppressed"])
         self.assertEqual(self.host.agents[0]["description"], "旧会话")
         self.assertNotIn(self.config.token, self.path.read_text())
@@ -134,10 +135,110 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
             await self.resolve()
         self.assertEqual([name for name, _ in self.host.calls], ["listAgents"])
 
+    async def test_rejected_create_does_not_leave_a_permanent_pending_binding(self):
+        for status in (400, 401, 403, 404, 422, 429):
+            with self.subTest(status=status):
+                scope = replace(SCOPE, peer_id=str(status))
+                failure = httpx.Response(status, json={"error": "secret-token private upstream body"})
+
+                def respond(request, failure=failure):
+                    if request.url.path.endswith("/createAgent"):
+                        return failure
+                    return self.host.respond(request)
+
+                async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+                    with self.assertRaises(GatewayError) as caught:
+                        await resolve_agent(Gateway(self.config, client), scope, self.store)
+                self.assertTrue(caught.exception.not_submitted)
+                self.assertNotIn("secret-token", str(caught.exception))
+                self.assertNotIn(scope.key, SessionStore(self.path).snapshot()["bindings"])
+                self.assertEqual(await self.resolve(scope), self.host.agents[-1]["id"])
+
+    async def test_connect_failure_can_retry_but_read_write_and_server_failures_stay_pending(self):
+        for index, (error, retryable) in enumerate((
+            (httpx.ConnectError("secret"), True), (httpx.ConnectTimeout("secret"), True),
+            (httpx.PoolTimeout("secret"), True), (httpx.ReadTimeout("secret"), False),
+            (httpx.WriteError("secret"), False), (None, False),
+        )):
+            scope = replace(SCOPE, peer_id=f"network-{index}")
+
+            def respond(request, error=error):
+                if request.url.path.endswith("/createAgent"):
+                    if error is not None:
+                        raise error
+                    return httpx.Response(500, text="secret")
+                return self.host.respond(request)
+
+            async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+                with self.subTest(error=error), self.assertRaises(GatewayError) as caught:
+                    await resolve_agent(Gateway(self.config, client), scope, self.store)
+            self.assertEqual(caught.exception.not_submitted, retryable)
+            self.assertEqual(scope.key not in self.store.snapshot()["bindings"], retryable)
+
+    async def test_legacy_purpose_binding_migrates_without_creating_another_bot(self):
+        marker = conversations.conversation_marker(self.store.snapshot(), SCOPE)
+        agent_id = str(uuid4())
+        self.store.put(SCOPE.key, agent_id, str(uuid4()))
+        self.host.agents.append({"id": agent_id, "isGroup": False, "name": "旧多惠", "description": "旧人设", "purpose": marker})
+        self.assertEqual(await self.resolve(), agent_id)
+        self.assertIn(f"[{marker}]", self.host.agents[-1]["description"].splitlines())
+        self.assertFalse(any(name == "createAgent" for name, _ in self.host.calls))
+
+    async def test_repair_clears_only_current_pending_record_and_does_not_create_or_delete_bots(self):
+        nonce = str(uuid4())
+        self.store.put(SCOPE.key, None, nonce)
+        self.store.put("other-pending", None, str(uuid4()))
+        self.store.put("other-bound", str(uuid4()), str(uuid4()))
+        before = self.store.snapshot()
+        async with httpx.AsyncClient(transport=httpx.MockTransport(self.host.respond)) as client:
+            reply = await repair_binding(Gateway(self.config, client), SCOPE, self.store)
+        self.assertIn("已清除", reply)
+        after = SessionStore(self.path).snapshot()
+        del before["bindings"][SCOPE.key]
+        self.assertEqual(before, after)
+        self.assertEqual([name for name, _ in self.host.calls], ["listAgents"])
+        self.assertEqual(await self.resolve(), self.host.agents[-1]["id"])
+
+    async def test_repair_recovers_a_created_bot_and_preserves_active_binding(self):
+        self.host.lose_create_response = True
+        with self.assertRaises(GrokError):
+            await self.resolve()
+        async with httpx.AsyncClient(transport=httpx.MockTransport(self.host.respond)) as client:
+            gw = Gateway(self.config, client)
+            self.assertIn("已确认", await repair_binding(gw, SCOPE, self.store))
+            self.assertIn("已确认", await repair_binding(gw, SCOPE, self.store))
+        self.assertEqual(self.store.snapshot()["bindings"][SCOPE.key]["agent_id"], self.host.agents[-1]["id"])
+        self.assertEqual(sum(name == "createAgent" for name, _ in self.host.calls), 1)
+
+    async def test_repair_refuses_unmarked_same_name_or_failed_roster_check(self):
+        self.store.put(SCOPE.key, None, str(uuid4()))
+        before = self.path.read_bytes()
+        self.host.agents.append({"id": str(uuid4()), "name": conversations.conversation_name(SCOPE), "isGroup": False})
+        async with httpx.AsyncClient(transport=httpx.MockTransport(self.host.respond)) as client:
+            with self.assertRaisesRegex(GrokError, "同名"):
+                await repair_binding(Gateway(self.config, client), SCOPE, self.store)
+        self.assertEqual(self.path.read_bytes(), before)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(503))) as client:
+            with self.assertRaises(GrokError):
+                await repair_binding(Gateway(self.config, client), SCOPE, self.store)
+        self.assertEqual(self.path.read_bytes(), before)
+
+    def test_clear_pending_checks_nonce_bound_state_and_atomic_writes(self):
+        nonce = str(uuid4())
+        self.store.put(SCOPE.key, None, nonce)
+        self.assertFalse(self.store.clear_pending(SCOPE.key, str(uuid4())))
+        before = self.path.read_bytes()
+        with patch.object(conversations.os, "replace", side_effect=OSError("disk full")), self.assertRaises(GrokError):
+            self.store.clear_pending(SCOPE.key, nonce)
+        self.assertEqual(self.path.read_bytes(), before)
+        self.assertIn(SCOPE.key, self.store.snapshot()["bindings"])
+        self.store.put(SCOPE.key, str(uuid4()), nonce)
+        self.assertFalse(self.store.clear_pending(SCOPE.key, nonce))
+
     async def test_bad_or_ambiguous_remote_binding_never_uses_shared_or_different_chat(self):
         await self.resolve()
         original = self.host.agents[-1].copy()
-        for replacement in (None, {**original, "purpose": "different-conversation"},
+        for replacement in (None, {**original, "description": "different-conversation"},
                             {**original, "id": str(uuid4())}, {**original, "isGroup": True}):
             self.host.agents = self.host.agents[:1] + ([replacement] if replacement else [])
             with self.subTest(replacement=replacement), self.assertRaises(GrokError):
@@ -325,3 +426,40 @@ class ConcurrentTests(unittest.IsolatedAsyncioTestCase):
             await handlers.handle_grok(private, message("关闭"))
             await handlers.handle_grok(private, message("你好"))
             run.assert_awaited_once()
+
+    async def test_only_superuser_can_request_repair_in_the_current_enabled_scope(self):
+        with patch.object(Config, "SUPERUSERS", ["root"]), patch.object(handlers.queue, "run", return_value="已修复") as run, \
+             patch.object(GrokConfig, "from_env", return_value=self.config):
+            for roles in ([], ["admin"], ["owner"]):
+                current = session()
+                current.event.member = SimpleNamespace(roles=roles)
+                await handlers.handle_grok(current, message("修复会话"))
+                self.assertIn("仅 SuperUser", str(current.send.await_args))
+            run.assert_not_awaited()
+            current = session(user="root")
+            await handlers.handle_grok(current, message("修复会话"))
+            self.assertIs(run.await_args.kwargs["repair_only"], True)
+            self.assertEqual(run.await_args.args[3], SCOPE)
+            await handlers.handle_grok(current, message("修复会话 101"))
+            self.assertNotIn("repair_only", run.await_args.kwargs)
+
+    async def test_repair_waits_for_same_scope_request_and_never_sends_a_prompt(self):
+        queue = handlers.RequestQueue()
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def ask(*_):
+            entered.set()
+            await release.wait()
+            return "answer"
+
+        with patch.object(handlers, "ask", side_effect=ask) as ask_call, patch.object(handlers, "repair", return_value="repaired") as repair:
+            first = asyncio.create_task(queue.run(self.config, "question", AsyncMock(), SCOPE))
+            await asyncio.wait_for(entered.wait(), 1)
+            second = asyncio.create_task(queue.run(self.config, "", AsyncMock(), SCOPE, repair_only=True))
+            await asyncio.sleep(.01)
+            repair.assert_not_awaited()
+            release.set()
+            self.assertEqual(await asyncio.gather(first, second), ["answer", "repaired"])
+            ask_call.assert_awaited_once()
+            repair.assert_awaited_once_with(self.config, SCOPE)
+        self.assertEqual((queue.active, queue.pending, queue.slots), (0, 0, {}))
