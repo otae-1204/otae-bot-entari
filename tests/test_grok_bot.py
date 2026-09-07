@@ -122,7 +122,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         host = Host()
         async with host.client() as client:
             result = await gateway.Gateway(CONFIG, client).ask("问题")
-        self.assertEqual(result, host.answer)
+        self.assertEqual(result.text, host.answer)
         self.assertGreaterEqual(host.polls, 5)
         self.assertEqual(sum(name == "sendPrompt" for name, _, _ in host.calls), 1)
         for name, body, request in host.calls:
@@ -149,7 +149,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
 
         host.override["getAgentTranscriptTail"] = tail
         async with host.client() as client:
-            self.assertEqual(await gateway.Gateway(CONFIG, client).ask("问题"), "答案")
+            self.assertEqual((await gateway.Gateway(CONFIG, client).ask("问题")).text, "答案")
 
     async def test_intervening_app_input_does_not_become_qq_reply(self):
         host = Host()
@@ -201,7 +201,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
 
         host.override["promptAcceptanceStatus"] = lookup
         async with host.client() as client:
-            self.assertEqual(await gateway.Gateway(CONFIG, client).ask("问题"), host.answer)
+            self.assertEqual((await gateway.Gateway(CONFIG, client).ask("问题")).text, host.answer)
 
     async def test_waiting_for_user_missing_agent_and_unknown_state_are_not_idle(self):
         for row in (None, {**Host().agent(), "awaitingUserResponse": {"prompt": "private"}}, {"id": AGENT}):
@@ -365,8 +365,8 @@ class HandlerTests(unittest.IsolatedAsyncioTestCase):
             await handlers.handle_grok(target, result("x" * 6001))
             self.assertIn("6000", str(target.send.await_args.args[0]))
             await handlers.handle_grok(target, SimpleNamespace(all_matched_args={"content": [Image(src="https://example.test/a.png")]}))
-            self.assertIn("图片", str(target.send.await_args.args[0]))
-            run.assert_awaited_once()
+            self.assertEqual(run.await_args.kwargs["images"], ("https://example.test/a.png",))
+            self.assertEqual(run.await_count, 2)
 
     async def test_error_logging_is_redacted_and_output_is_plain_text(self):
         target = session()

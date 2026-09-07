@@ -7,14 +7,33 @@ unique prompt, and keep the caller's per-agent lock until polling has finished.
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
+from dataclasses import replace
+from urllib.parse import unquote, urlsplit
 from uuid import uuid4
 
 import httpx
 
 from .config import GatewayError, GrokConfig, GrokError
+from .media import (
+    MAX_FILE_BYTES,
+    MAX_IMAGE_BYTES,
+    MAX_REPLY_BYTES,
+    MAX_REPLY_FILES,
+    REPLY_DOWNLOAD_TIMEOUT,
+    Attachment,
+    Reply,
+    decode_data_url,
+    download_url,
+    filename,
+    mime_type,
+    remote_path,
+)
 
 PROTOCOL_ERROR = "Grok Bot 网关返回了无法识别的数据，请管理员检查网关版本。"
 AWAITING_USER = "Grok Bot 正在等待人工确认，请管理员打开 Grok Bot 应用处理后再提问。"
+CHUNK_BYTES = 1024 * 1024
 
 
 def entries_from(payload: object) -> list[dict]:
@@ -30,7 +49,38 @@ def entries_from(payload: object) -> list[dict]:
     return result
 
 
-def reply_from(entries: list[dict], marker: str) -> str | None:
+def attachments_from(message: dict) -> list[Attachment]:
+    """Only explicit outgoing media; never turn tool output into QQ files."""
+    records = []
+    images = message.get("images")
+    if isinstance(images, list):
+        records.extend((item, True) for item in images if isinstance(item, dict))
+    if message.get("type") in {"attachment", "file", "image"}:
+        nested = message.get("attachment")
+        records.append(({**message, **nested} if isinstance(nested, dict) else message, message.get("type") == "image"))
+    result = []
+    for row, is_image in records:
+        mime = mime_type(row.get("mime", row.get("mimeType")))
+        is_image = is_image or mime.startswith("image/")
+        paths = row.get("attachmentPaths")
+        paths = paths if isinstance(paths, list) else [row.get("file_path") or row.get("filePath") or row.get("path") or row.get("url") or ""]
+        names = row.get("attachmentNames")
+        names = names if isinstance(names, list) else []
+        for index, source in enumerate(paths):
+            if not isinstance(source, str):
+                continue
+            name = names[index] if index < len(names) else row.get("fileName", row.get("file_name", row.get("alt", "")))
+            name = name if isinstance(name, str) else ""
+            if not name and source and not source.startswith("data:"):
+                try:
+                    name = unquote(urlsplit(source).path).rsplit("/", 1)[-1]
+                except ValueError:
+                    pass
+            result.append(Attachment(filename(name, "image.png" if is_image else "attachment.bin"), source, mime, is_image))
+    return result
+
+
+def reply_from(entries: list[dict], marker: str) -> Reply | None:
     """An old answer or another user's prompt must never satisfy this request."""
     anchor = None
     for index, row in enumerate(entries):
@@ -38,40 +88,54 @@ def reply_from(entries: list[dict], marker: str) -> str | None:
             anchor = index
     if anchor is None:
         return None
-    outgoing, assistant = [], []
+    outgoing, assistant, attachments = [], [], []
     for row in entries[anchor + 1:]:
         if row.get("role") == "user":
             raise GrokError("Grok Bot 会话中出现了另一条输入，无法可靠对应本次回答。请在应用中查看结果。")
         if row.get("streaming") is True:
             continue
         message = row.get("message")
-        if row.get("kind") == "send-message" and isinstance(message, dict) and message.get("type") == "text":
-            value = message.get("content")
-            if isinstance(value, str) and value.strip():
-                outgoing.append(value.strip())
+        if row.get("kind") == "send-message" and isinstance(message, dict):
+            if message.get("type") == "text":
+                value = message.get("content")
+                if isinstance(value, str) and value.strip():
+                    outgoing.append(value.strip())
+            for item in attachments_from(message):
+                if item not in attachments:
+                    attachments.append(item)
         elif row.get("kind") in (None, "message") and row.get("role") == "assistant":
             value = row.get("content")
             if isinstance(value, str) and value.strip():
                 assistant.append(value.strip())
-    return "\n\n".join(outgoing) if outgoing else (assistant[-1] if assistant else None)
+    text = "\n\n".join(outgoing) if outgoing else (assistant[-1] if assistant and not attachments else "")
+    if len(attachments) > MAX_REPLY_FILES:
+        text += f"\n\n本次附件超过 {MAX_REPLY_FILES} 个，其余附件请在 Grok Bot 应用中查看。"
+        attachments = attachments[:MAX_REPLY_FILES]
+    return Reply(text, tuple(attachments)) if text or attachments else None
 
 
 class Gateway:
     def __init__(self, config: GrokConfig, client: httpx.AsyncClient):
         self.config, self.client = config, client
 
-    async def request(self, command: str, body: dict | None = None):
+    async def request(self, command: str, body: dict | None = None, *, response_limit: int | None = None):
         health = command == "health"
         headers = {"x-sand-request-id": str(uuid4()), "x-sand-slim-avatars": "1"}
         if not health:
             headers["Authorization"] = "Bearer " + self.config.token
         try:
-            response = await self.client.request(
-                "GET" if health else "POST",
-                self.config.base_url + ("/health" if health else "/api/" + command),
-                headers=headers, **({} if health else {"json": body or {}}),
-                follow_redirects=False,
-            )
+            args = ("GET" if health else "POST", self.config.base_url + ("/health" if health else "/api/" + command))
+            kwargs = {"headers": headers, "follow_redirects": False, **({} if health else {"json": body or {}})}
+            if response_limit is None:
+                response = await self.client.request(*args, **kwargs)
+            else:
+                async with self.client.stream(*args, **kwargs) as streamed:
+                    content = bytearray()
+                    async for chunk in streamed.aiter_bytes(chunk_size=65536):
+                        if len(content) + len(chunk) > response_limit:
+                            raise GrokError("Grok Bot 附件接口响应过大，已停止读取。")
+                        content.extend(chunk)
+                    response = httpx.Response(streamed.status_code, content=bytes(content))
         except (httpx.ConnectTimeout, httpx.ConnectError, httpx.PoolTimeout):
             raise GatewayError(f"连接 Grok Bot 网关失败（{command}），请求尚未提交，请检查 Tailscale 和云端服务。", not_submitted=True) from None
         except httpx.TimeoutException:
@@ -99,6 +163,85 @@ class Gateway:
             raise GatewayError(f"Grok Bot 网关未能完成 {command}，请在应用中查看详情。")
         return data
 
+    async def upload_images(self, images: tuple[Attachment, ...]) -> tuple[Attachment, ...]:
+        """Desktop 0.30.0: uploadAttachment({agentId?, filename, bytesBase64})."""
+        uploaded = []
+        for item in images:
+            if not item.data or len(item.data) > MAX_IMAGE_BYTES:
+                raise GrokError("图片内容无效或超过大小限制，问题尚未发送。")
+            result = await self.request("uploadAttachment", {
+                "agentId": self.config.agent_id, "filename": f"{uuid4().hex}-{item.name}",
+                "bytesBase64": base64.b64encode(item.data).decode("ascii"),
+            }, response_limit=65536)
+            if not isinstance(result, dict) or not isinstance(result.get("path"), str):
+                raise GrokError("Grok Bot 图片上传未返回有效路径，问题尚未发送，请检查网关版本。")
+            uploaded.append(replace(item, source=remote_path(result["path"]), data=None))
+        return tuple(uploaded)
+
+    async def read_attachment(self, item: Attachment, limit: int) -> tuple[bytes, str]:
+        if item.source.startswith("data:"):
+            return decode_data_url(item.source, limit)
+        if item.source.startswith(("https://", "http://")):
+            return await download_url(item.source, limit=limit)
+        path = remote_path(item.source)
+
+        async def chunk_at(offset: int, length: int):
+            result = await self.request("readAttachmentChunk", {
+                "agentId": self.config.agent_id, "path": path, "offset": offset, "length": length,
+            }, response_limit=2 * CHUNK_BYTES)
+            if not isinstance(result, dict) or type(result.get("totalSize")) is not int or result["totalSize"] < 0:
+                raise GrokError("云端附件不可用或返回格式不兼容，请在 Grok Bot 应用中查看。")
+            return result
+
+        # A zero-length read gives the size before allocating/downloading bytes.
+        head = await chunk_at(0, 0)
+        size = head["totalSize"]
+        if size > limit:
+            raise GrokError("附件超过单个 20 MB 或本次合计 50 MB 的限制，未下载。")
+        data = bytearray()
+        mime = mime_type(head.get("mime"))
+        while len(data) < size:
+            length = min(CHUNK_BYTES, size - len(data))
+            part = await chunk_at(len(data), length)
+            encoded = part.get("bytesBase64")
+            if part["totalSize"] != size or not isinstance(encoded, str) or len(encoded) > ((length + 2) // 3) * 4:
+                raise GrokError("云端附件在下载时发生变化或返回不完整，请重新生成后再试。")
+            try:
+                chunk = base64.b64decode(encoded, validate=True)
+            except (ValueError, binascii.Error):
+                raise GrokError("云端附件编码无效，未转发不完整文件。") from None
+            if not chunk or len(chunk) > length:
+                raise GrokError("云端附件下载不完整，请在 Grok Bot 应用中查看。")
+            data.extend(chunk)
+            if mime == "application/octet-stream":
+                mime = mime_type(part.get("mime"))
+        return bytes(data), mime
+
+    async def collect_reply(self, reply: Reply) -> Reply:
+        """Copy files while holding the conversation lock; retain partial success."""
+        result = []
+        remaining = MAX_REPLY_BYTES
+        deadline = asyncio.get_running_loop().time() + REPLY_DOWNLOAD_TIMEOUT
+        for item in reply.attachments:
+            try:
+                timeout = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    raise GrokError("本次附件合计已达 50 MB，其余附件请在 Grok Bot 应用中查看。")
+                if timeout <= 0:
+                    raise GrokError("本次附件下载超时，其余附件请在 Grok Bot 应用中查看。")
+                data, mime = await asyncio.wait_for(self.read_attachment(item, min(MAX_FILE_BYTES, remaining)), timeout)
+                remaining -= len(data)
+                mime = mime_type(mime) if mime != "application/octet-stream" else item.mime
+                image = mime in {"image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp"}
+                image = image or (item.image and mime == "application/octet-stream")
+                # QQ cannot display SVG/TIFF as pictures; preserve them as files.
+                result.append(replace(item, source="", data=data, mime=mime, image=image))
+            except asyncio.TimeoutError:
+                result.append(replace(item, source="", error="附件下载超时，请在 Grok Bot 应用中查看。"))
+            except GrokError as error:
+                result.append(replace(item, source="", error=str(error)))
+        return replace(reply, attachments=tuple(result))
+
     async def agent(self) -> dict:
         rows = await self.request("listAgents")
         if not isinstance(rows, list):
@@ -125,7 +268,7 @@ class Gateway:
         busy = bool(row["isRunning"] or row["isComposingMessage"] or tasks or any(item.get("status") == "running" for item in subagents))
         return row, busy
 
-    async def transcript(self, marker: str) -> str | None:
+    async def transcript(self, marker: str) -> Reply | None:
         rows, before = [], None
         # Limit memory and RPCs while still finding the prompt behind tool events.
         for _ in range(10):
@@ -142,7 +285,7 @@ class Gateway:
             before = cursor
         raise GrokError("Grok Bot 任务记录过长，无法可靠定位本次回答，请在应用中查看结果。")
 
-    async def ask(self, prompt: str) -> str:
+    async def ask(self, prompt: str, attachments: tuple[Attachment, ...] = ()) -> Reply:
         # Wait for app-initiated or previously timed-out work before adding input.
         while True:
             _, busy = await self.state()
@@ -152,7 +295,11 @@ class Gateway:
         nonce = str(uuid4())
         marker = f"[QQ请求编号:{nonce}]"
         content = f"{marker}\n{prompt}\n\n请直接回答本次问题，回复中无需包含请求编号。"
-        accepted = await self.request("sendPrompt", {"agentId": self.config.agent_id, "prompt": content, "clientNonce": nonce})
+        body = {"agentId": self.config.agent_id, "prompt": content, "clientNonce": nonce}
+        if attachments:
+            body["attachmentPaths"] = [item.source for item in attachments]
+            body["attachmentNames"] = [item.name for item in attachments]
+        accepted = await self.request("sendPrompt", body)
         if not isinstance(accepted, dict) or accepted.get("accepted") is not True:
             raise GrokError("Grok Bot 未接受本次问题，请在应用中检查状态。")
         previous_reply = None
@@ -192,7 +339,7 @@ def make_client() -> httpx.AsyncClient:
     return httpx.AsyncClient(trust_env=False, timeout=httpx.Timeout(20, connect=10), follow_redirects=False)
 
 
-async def ask(config: GrokConfig, prompt: str) -> str:
+async def ask(config: GrokConfig, prompt: str) -> Reply:
     async with make_client() as client:
         try:
             return await asyncio.wait_for(Gateway(config, client).ask(prompt), timeout=config.timeout)

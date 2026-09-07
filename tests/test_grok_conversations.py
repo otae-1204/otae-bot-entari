@@ -25,6 +25,7 @@ from plugins.grok_bot.conversations import (
     scope_from_session,
 )
 from plugins.grok_bot.gateway import Gateway
+from plugins.grok_bot.media import Reply
 
 SCOPE = ConversationScope("qq", "bot", "group", "100", "100")
 REFERENCE = str(uuid4())
@@ -296,8 +297,8 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_prompt_is_routed_to_resolved_bot(self):
         with patch.object(conversations, "make_client", side_effect=lambda: httpx.AsyncClient(transport=httpx.MockTransport(self.host.respond))), \
-             patch.object(conversations, "session_store", self.store), patch.object(Gateway, "ask", autospec=True, return_value="回答") as ask:
-            self.assertEqual(await conversations.ask(self.config, "问题", SCOPE), "回答")
+             patch.object(conversations, "session_store", self.store), patch.object(Gateway, "ask", autospec=True, return_value=Reply("回答")) as ask:
+            self.assertEqual(await conversations.ask(self.config, "问题", SCOPE), Reply("回答"))
             self.assertEqual(ask.await_args.args[0].config.agent_id, self.host.agents[-1]["id"])
             self.assertNotEqual(ask.await_args.args[0].config.agent_id, REFERENCE)
 

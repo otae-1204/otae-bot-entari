@@ -14,9 +14,11 @@ from otae_bot.permissions import is_superuser
 
 from .config import GrokConfig, GrokError
 from .conversations import ConversationScope, ask, repair, scope_from_session
+from .media import MAX_INPUT_IMAGES, Reply, send_attachment
 
 HELP = """Grok Bot 问答
-/grok 问题：发送文字问题；引用消息后 /grok 问题可附上引用正文。
+/grok 问题：文字或图片提问；引用消息后提问可附上引用正文和图片（合计最多 3 张，每张 5 MB）。
+Grok Bot 回复的图片和文件会转发到当前会话（单个最多 20 MB，每次最多 10 个、合计 50 MB）。
 别名：/grokbot。同群共用本群对话，不同群与私聊分别独立，默认花园多惠人设。
 支持同一用户连续提交；同会话排队，不同会话可并行处理。
 默认关闭：SuperUser 在目标群执行 /功能 开启 grok；管理员和群主可关闭。
@@ -41,7 +43,7 @@ class RequestQueue:
         self.pending = 0
 
     async def run(self, config: GrokConfig, prompt: str, progress: Callable[[str], Awaitable[None]], scope: ConversationScope,
-                  *, repair_only: bool = False) -> str:
+                  *, repair_only: bool = False, images: tuple[str, ...] = (), account=None) -> Reply | str:
         if self.pending >= config.max_pending:
             raise GrokError("Grok Bot 等待队列已满，请稍后重试。")
         slot = self.slots.setdefault(scope.key, SessionSlot())
@@ -70,6 +72,8 @@ class RequestQueue:
                 raise GrokError("当前会话的 Grok Bot 已关闭，本次问题尚未发送。")
             if repair_only:
                 return await repair(config, scope)
+            if images:
+                return await ask(config, prompt, scope, images=images, account=account)
             return await ask(config, prompt, scope)
         finally:
             if running:
@@ -88,10 +92,17 @@ queue = RequestQueue()
 
 
 def plain_text(elements) -> str:
-    elements = list(elements)
-    if any(isinstance(item, Image) for item in elements):
-        raise GrokError("Grok Bot 当前支持文字提问和引用正文，图片暂未接入。")
     return "".join(item.text if isinstance(item, Text) else item for item in elements if isinstance(item, (Text, str))).strip()
+
+
+def image_sources(elements) -> tuple[str, ...]:
+    sources = []
+    for item in elements:
+        if isinstance(item, Image):
+            if not isinstance(item.src, str) or not item.src:
+                raise GrokError("图片地址缺失，请重新发送图片。")
+            sources.append(item.src)
+    return tuple(sources)
 
 
 async def send_text(session: Session, text: str):
@@ -100,14 +111,30 @@ async def send_text(session: Session, text: str):
         await session.send(MessageChain([Text(text[start:start + 2000])]), reply_to=True)
 
 
+async def send_reply(session: Session, reply: Reply | str):
+    if isinstance(reply, str):
+        reply = Reply(reply)
+    text = reply.text
+    if len(text) > 20000:
+        text = text[:20000] + "\n\n回答过长，剩余内容请在 Grok Bot 应用中查看。"
+    if text:
+        await send_text(session, text)
+    for attachment in reply.attachments:
+        try:
+            await send_attachment(session, attachment)
+        except GrokError as error:
+            await send_text(session, f"附件「{attachment.name}」转发失败：{error}")
+
+
 async def handle_grok(session: Session, result: Arparma):
     try:
-        text = plain_text(result.all_matched_args.get("content", []) or [])
-        if text.lower() in {"帮助", "help", "--help"} or (not text and not session.reply):
+        elements = list(result.all_matched_args.get("content", []) or [])
+        text, images = plain_text(elements), image_sources(elements)
+        if not images and (text.lower() in {"帮助", "help", "--help"} or (not text and not session.reply)):
             await send_text(session, HELP)
             return
         scope = scope_from_session(session)
-        if text in {"开启", "关闭"} and not session.reply:
+        if text in {"开启", "关闭"} and not images and not session.reply:
             if scope.kind != "private":
                 await send_text(session, "请用 /功能 开启 grok 或 /功能 关闭 grok 管理本群开关。")
             elif not is_superuser(session.event):
@@ -119,16 +146,22 @@ async def handle_grok(session: Session, result: Arparma):
         if not feature_store.is_enabled(scope.feature_scope, "grok_bot"):
             await send_text(session, "当前会话的 Grok Bot 默认关闭，需 SuperUser 手动开启。群内用 /功能 开启 grok，自己的私聊用 /grok 开启。")
             return
-        repair_only = text == "修复会话" and not session.reply
+        repair_only = text == "修复会话" and not images and not session.reply
         if repair_only and not is_superuser(session.event):
             await send_text(session, "仅 SuperUser 可修复当前 Grok Bot 会话。")
             return
         if session.reply and session.reply.origin:
-            quoted = plain_text(MessageChain(session.reply.origin.message))
+            quoted_elements = MessageChain(session.reply.origin.message)
+            quoted = plain_text(quoted_elements)
+            images += image_sources(quoted_elements)
             if quoted:
                 text = f"{text or '请回答或解释以下引用内容。'}\n\n[引用消息]\n{quoted}"
+        if len(images) > MAX_INPUT_IMAGES:
+            raise GrokError(f"发送和引用的图片合计不能超过 {MAX_INPUT_IMAGES} 张。")
+        if images and not text:
+            text = "请描述并分析这些图片。"
         if not text:
-            raise GrokError("请输入文字问题，或引用一条包含正文的消息。")
+            raise GrokError("请输入文字问题、附带图片，或引用一条包含正文或图片的消息。")
         if len(text) > 6000:
             raise GrokError("问题和引用内容合计不能超过 6000 字。")
         config = GrokConfig.from_env()
@@ -142,10 +175,8 @@ async def handle_grok(session: Session, result: Arparma):
         # Group members share a conversation but must remain distinguishable.
         user_id = str(getattr(getattr(session.event, "user", None), "id", "") or "")
         text = f"[本次发言者 ID：{user_id}]\n{text}"
-        answer = await queue.run(config, text, progress, scope)
-        if len(answer) > 20000:
-            answer = answer[:20000] + "\n\n回答过长，剩余内容请在 Grok Bot 应用中查看。"
-        await send_text(session, answer)
+        answer = await queue.run(config, text, progress, scope, **({"images": images, "account": session.account} if images else {}))
+        await send_reply(session, answer)
     except GrokError as error:
         await send_text(session, str(error))
     except (OSError, ValueError) as error:

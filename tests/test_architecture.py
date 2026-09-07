@@ -408,12 +408,27 @@ async def check_grok_quoted_dispatch():
          patch.object(grok.queue, 'run', run), patch.object(Session, 'send', AsyncMock(return_value=[])) as send:
         for alias in ('grok', 'grokbot'):
             run.reset_mock()
-            event = quote_event([Quote('quoted-id'), At('quoted-user'), Text(' /' + alias + ' 解释')])
-            event.account.protocol.message_get.return_value = MessageObject('quoted-id', '引用正文', user=User('quoted-user'))
+            event = quote_event([Quote('quoted-id'), At('quoted-user'), Text(' /' + alias + ' 解释'), Image(src='https://cdn.example/current.png')])
+            event.account.protocol.message_get.return_value = MessageObject('quoted-id', '引用正文<img src="https://cdn.example/quoted.png"/>', user=User('quoted-user'))
             await publish(event, scope='.commands')
             run.assert_awaited_once()
             assert '引用正文' in run.await_args.args[1], run.await_args
+            assert run.await_args.kwargs['images'] == ('https://cdn.example/current.png', 'https://cdn.example/quoted.png'), run.await_args
+            assert run.await_args.kwargs['account'] is event.account
             assert send.await_args.kwargs['reply_to'] is True
+        run.reset_mock()
+        event = quote_event([Text(' /grok '), Image(src='https://cdn.example/only.png')])
+        await publish(event, scope='.commands')
+        run.assert_awaited_once()
+        assert run.await_args.kwargs['images'] == ('https://cdn.example/only.png',)
+        assert '请描述并分析这些图片' in run.await_args.args[1]
+        run.reset_mock()
+        event = quote_event([Quote('quoted-id'), At('quoted-user'), Text(' /grok')])
+        event.account.protocol.message_get.return_value = MessageObject('quoted-id', '<img src="https://cdn.example/quoted-only.png"/>', user=User('quoted-user'))
+        await publish(event, scope='.commands')
+        run.assert_awaited_once()
+        assert run.await_args.kwargs['images'] == ('https://cdn.example/quoted-only.png',)
+        assert '请描述并分析这些图片' in run.await_args.args[1]
 
 asyncio.get_event_loop().run_until_complete(check_grok_quoted_dispatch())
 print('CONTRACT ' + json.dumps({'plugins': sorted(expected), 'jobs': jobs}, ensure_ascii=False))

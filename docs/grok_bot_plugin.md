@@ -17,8 +17,8 @@
 
 - `/功能 列表`：查看本群插件状态，Grok Bot 会注明仅 SuperUser 可开启。
 - `/功能 关闭 grok`：SuperUser、本群管理员或群主可关闭；管理员和群主不能重新开启。
-- `/grok 问题` 或 `/grokbot 问题`：文字问答。开启后，本群成员均可使用。
-- 引用消息后发送 `/grok 问题`：附上引用正文；引用自带的 @ 由公共命令层处理。
+- `/grok 问题` 或 `/grokbot 问题`：文字或图片问答。开启后，本群成员均可使用。
+- 引用消息后发送 `/grok 问题`：附上引用正文和图片；引用自带的 @ 由公共命令层处理。
 - `/help grok`：未开启时也可查看接入说明；开启后可用 `/grok 帮助`。
 - `/grok 修复会话`：仅 SuperUser 可执行，用于首次创建失败后遗留的待确认记录。
   先确认云端没有对应的新 Bot，再在出错的群或私聊执行，随后重新提问。
@@ -29,6 +29,31 @@
 `data/group_manager/switches.json`，重启后保留。开关命令不会创建云端 Bot，
 首次实际提问时才创建。关闭后，已排队但未处理的问题不再发送；
 已提交的云端任务可能继续运行并完成回复。
+
+## 图片与文件
+
+- 在同一条消息中发送 `/grok 看看这张图` 和图片，或引用一条有图片的消息后发送该命令。
+- `/grok` 只附图片、只引用图片也可以，会默认要求描述并分析图片。
+- 当前消息的图片排在引用图片之前，合计最多 3 张，每张原始大小最多 5 MB。
+  支持 PNG、JPEG、WebP、GIF 等 Pillow 可解码格式；输入转为最长边 2048 像素的 JPEG，
+  自动旋转、透明背景铺白，动图取第一帧；超过 2000 万像素会要求先压缩。
+- 图片内容先上传到 Grok Bot 网关，再随本次问题提交给该会话绑定的 Bot。
+  下载或上传失败会明确报错，不会忽略失败的图片继续提问。
+- Grok Bot 在本次回复中发送的图片和文件，会下载原始内容后转发到当前群或私聊。
+  仅有附件、没有文字的回复也会发送。单个最多 20 MB，每次最多 10 个、合计 50 MB；
+  超限、下载失败或适配器发送失败时会提示对应附件，保留正文和其他成功的附件。
+- 回复附件合计最多等待 60 秒下载，读取云端文件时先检查大小，再分块下载。
+  下载期间仍持有当前会话锁，避免下条问题覆盖尚未取回的同名成品；不同 Bot 仍共享云端文件系统。
+- 图片使用 Satori 图片消息。LLOneBot 文件通过同一适配器的
+  `internal/onebot11/upload_group_file` 或 `upload_private_file` 上传并发送，
+  无需另外配置 OneBot 地址或密钥；其他适配器使用 Satori 文件消息，需要支持文件发送。
+  SVG、TIFF 等无法直接显示的图片格式按文件发送，保留原始内容。
+
+这里转发的是应用回复中实际附带的图片和文件。只在正文写出一个云端路径，
+不会自动把该路径读成附件；默认人设已要求使用应用附件功能交付成品。
+本次问题之前的文件、用户输入附件和内部工具记录不会转发。
+云端路径只通过网关读取，不会被当作 Windows 本地路径打开；
+公开 HTTP/HTTPS 附件另行下载，不向这些地址发送网关 Token。
 
 ## Windows 配置
 
@@ -96,7 +121,7 @@ curl.exe --noproxy "*" --connect-timeout 10 "http://100.x.x.x:1340/health"
 `GROKBOT_MAX_PENDING` 限制全部已接收的问题（含运行和排队），默认 8，范围 1～32。
 `GROKBOT_MAX_CONCURRENT` 限制同时处理的会话数，范围 1～16。
 同群的排队请求不会占满其他会话的执行名额。排队最多等待 `GROKBOT_TIMEOUT` 秒；
-进入处理后，创建 Bot、同步人设和等待回答合计再受同样的时限约束。
+进入处理后，准备和上传图片、创建 Bot、同步人设和等待回答合计再受同样的时限约束。
 默认各 300 秒，配置范围 30～1800。
 
 每个独立会话会占用一个云端 Bot 名额，仍受账号的 Bot 数量限制和订阅额度限制。
@@ -180,9 +205,17 @@ tailscale serve --bg --tcp=1340 tcp://127.0.0.1:1340
 `sendPrompt`、`promptAcceptanceStatus`、`getAgentTranscriptTail`，均使用 POST；
 `/health` 使用 GET。
 
+附件字段进一步核对了官方 Grok Bot 桌面客户端 0.30.0 的调用代码：
+`uploadAttachment` 使用 `filename`、`bytesBase64` 与可选 `agentId`，返回 `path`；
+`readAttachmentChunk` 使用 `path`、`offset`、`length` 与可选 `agentId`，返回
+`bytesBase64`、`totalSize`、`mime`。插件使用分块读取原始图片和文件，
+不依赖 `readAttachmentImage` 的图片预览大小限制。
+版本、来源、校验值和脱敏结构样例见 [附件协议核对记录](grok_bot_attachment_protocol.md)。
+
 自动测试覆盖会话映射、重启恢复、人设同步、并发和排队、创建拒绝与响应丢失、
-SuperUser 会话修复、旧回复过滤、认证错误，以及真实 Entari 命令分发与群开关权限。真实 Windows 到云端的连通性、
-创建 Bot 和问答仍需在部署环境按上述步骤验证。
+SuperUser 会话修复、旧回复过滤、认证错误、图片上传、附件分块下载与转发、
+大小限制、部分失败，以及真实 Entari 命令分发与群开关权限。真实 Windows 到云端的连通性、
+创建 Bot、图片识别和 QQ 文件收发仍需在部署环境验证。
 
 参考：[远程网关说明](https://github.com/Adam91holt/grokbot-sdk/blob/c14347fa82d167b9a5984ec1baff56b2f074485a/docs/remote.md)、
 [Tailscale Serve](https://tailscale.com/docs/reference/tailscale-cli/serve)。
