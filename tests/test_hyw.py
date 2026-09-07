@@ -25,12 +25,12 @@ FINAL = '<final_response>这是答案。</final_response>'
 SCOPE = ("qq", "bot", "guild", "channel", "user")
 
 
-def session(user="user", channel="channel", bot="bot"):
+def session(user="user", channel="channel", bot="bot", receipt_prefix=""):
     sent = []
 
-    async def send(message):
+    async def send(message, **kwargs):
         sent.append(message)
-        return [SimpleNamespace(id=str(len(sent)))]
+        return [SimpleNamespace(id=receipt_prefix + str(len(sent)))]
 
     return SimpleNamespace(
         account=SimpleNamespace(platform="qq", self_id=bot),
@@ -429,20 +429,96 @@ class HandlerTests(unittest.IsolatedAsyncioTestCase):
         current = session()
         with patch.object(HywConfig, "from_env", return_value=replace(HywConfig(), api_key="test")), patch.object(handlers, "run_request", AsyncMock(side_effect=HywError("模型失败"))):
             await handlers.handle_hyw(current, command_result("问题"))
-        self.assertEqual(handlers._active, set())
+        self.assertEqual(handlers._active, {})
         self.assertIn("模型失败", str(current.sent[0]))
         with patch.object(HywConfig, "from_env", return_value=replace(HywConfig(), api_key="test")), patch.object(handlers, "run_request", AsyncMock(side_effect=asyncio.CancelledError)), self.assertRaises(asyncio.CancelledError):
             await handlers.handle_hyw(current, command_result("问题"))
-        self.assertEqual(handlers._active, set())
+        self.assertEqual(handlers._active, {})
 
-    async def test_busy_user_cannot_start_or_clear_inflight_history(self):
-        handlers._active.add(SCOPE)
+    async def test_same_user_parallel_answers_keep_their_own_replies_and_history(self):
+        started = {text: asyncio.Event() for text in ("first", "second")}
+        release = {text: asyncio.Event() for text in started}
+        sessions = {text: session(receipt_prefix=text) for text in started}
+
+        async def answer(client, config, content, **kwargs):
+            started[content].set()
+            await release[content].wait()
+            history = [{"role": "user", "content": content}, {"role": "assistant", "content": "answer " + content}]
+            return agent.Answer("answer " + content, [], history, 1)
+
+        config = replace(HywConfig(), api_key="test", render=False)
+        with patch.object(HywConfig, "from_env", return_value=config), patch.object(handlers, "ask", side_effect=answer):
+            tasks = {text: asyncio.create_task(handlers.handle_hyw(current, command_result(text))) for text, current in sessions.items()}
+            try:
+                await asyncio.wait_for(asyncio.gather(*(event.wait() for event in started.values())), timeout=2)
+                release["second"].set()
+                await tasks["second"]
+                self.assertEqual(handlers._active, {SCOPE: 1})
+                self.assertEqual(self.store.get(SCOPE, "second1")[0]["content"], "second")
+                self.assertEqual(self.store.get(SCOPE, "first1"), [])
+                release["first"].set()
+                await tasks["first"]
+            finally:
+                for event in release.values():
+                    event.set()
+                await asyncio.gather(*tasks.values(), return_exceptions=True)
+        for text, current in sessions.items():
+            self.assertEqual(self.store.get(SCOPE, text + "1")[0]["content"], text)
+            self.assertEqual(str(current.sent[0]), "answer " + text)
+            self.assertTrue(current.send.await_args.kwargs["reply_to"])
+        self.assertEqual(handlers._active, {})
+
+    async def test_parallel_requests_count_towards_global_limit_and_release_individually(self):
+        started = asyncio.Queue()
+        release = {text: asyncio.Event() for text in ("0", "1", "2", "3", "replacement")}
+        self.store.put(SCOPE, "old", [{"role": "user", "content": "old question"}])
+
+        async def run(current, config, scope, text, images, prior):
+            started.put_nowait(text)
+            await release[text].wait()
+            if text == "1":
+                raise HywError("模型失败")
+
+        config = replace(HywConfig(), api_key="test")
+        with patch.object(HywConfig, "from_env", return_value=config), patch.object(handlers, "run_request", side_effect=run) as request:
+            tasks = []
+            try:
+                for text in ("0", "1", "2", "3"):
+                    tasks.append(asyncio.create_task(handlers.handle_hyw(session(), command_result(text))))
+                    self.assertEqual(await asyncio.wait_for(started.get(), timeout=2), text)
+                for current in (session(), session(user="other")):
+                    await handlers.handle_hyw(current, command_result("extra"))
+                    self.assertIn("当前较忙", str(current.sent[0]))
+                self.assertEqual(request.await_count, 4)
+
+                tasks[0].cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await tasks[0]
+                tasks.append(asyncio.create_task(handlers.handle_hyw(session(), command_result("replacement"))))
+                self.assertEqual(await asyncio.wait_for(started.get(), timeout=2), "replacement")
+                release["1"].set()
+                await tasks[1]
+                self.assertEqual(handlers._active, {SCOPE: 3})
+                current = session()
+                await handlers.handle_hyw(current, command_result("清空"))
+                self.assertIn("全部完成", str(current.sent[0]))
+                self.assertTrue(self.store.get(SCOPE, "old"))
+            finally:
+                for event in release.values():
+                    event.set()
+                await asyncio.gather(*tasks, return_exceptions=True)
+        self.assertEqual(handlers._active, {})
+        await handlers.handle_hyw(session(), command_result("清空"))
+        self.assertEqual(self.store.get(SCOPE, "old"), [])
+
+    async def test_card_reply_is_attached_to_its_question(self):
         current = session()
-        with patch.object(handlers, "run_request", AsyncMock()) as run:
-            await handlers.handle_hyw(current, command_result("问题"))
-            await handlers.handle_hyw(current, command_result("清空"))
-        run.assert_not_awaited()
-        self.assertTrue(all("处理中" in str(message) for message in current.sent))
+        answer = agent.Answer("# answer", [], [], 1)
+        buffer = BytesIO()
+        PILImage.new("RGB", (1, 1)).save(buffer, "PNG")
+        with patch.object(handlers, "ask", AsyncMock(return_value=answer)), patch.object(handlers, "render_answer", AsyncMock(return_value=buffer.getvalue())):
+            await handlers.run_request(current, HywConfig(), SCOPE, "question", [], [])
+        self.assertTrue(current.send.await_args.kwargs["reply_to"])
 
     async def test_card_failure_delivers_text_and_saves_reply_history(self):
         current = session()

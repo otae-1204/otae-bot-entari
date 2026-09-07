@@ -31,7 +31,7 @@ HELP = """HYW / 何意味
 别名：/hyw、/何意味。每次不引用回答时会开始新对话。
 输入和引用内容会发送给配置的模型服务；搜索词会发送给 DuckDuckGo。"""
 history_store = HistoryStore()
-_active: set[Scope] = set()
+_active: dict[Scope, int] = {}
 
 
 def scope_for(session: Session) -> Scope:
@@ -100,7 +100,7 @@ async def model_content(client: httpx.AsyncClient, text: str, images: list[str])
 async def send_text(session: Session, text: str) -> list:
     receipts = []
     for start in range(0, len(text), 2000):
-        receipts.extend(await session.send(MessageChain([Text(text[start:start + 2000])])) or [])
+        receipts.extend(await session.send(MessageChain([Text(text[start:start + 2000])]), reply_to=True) or [])
     return receipts
 
 
@@ -132,7 +132,7 @@ async def run_request(session: Session, config: HywConfig, scope: Scope, text: s
         except Exception as error:  # noqa: BLE001 - Rendering must fall back without logging user content.
             logger.warning("[hyw] card render failed: {}", type(error).__name__)
         else:
-            receipts = await session.send(MessageChain([make_image(raw=card)])) or []
+            receipts = await session.send(MessageChain([make_image(raw=card)]), reply_to=True) or []
     if not receipts:
         receipts = await send_text(session, answer.text)
     # Save as each successfully delivered answer becomes available, including multipart replies.
@@ -152,15 +152,12 @@ async def handle_hyw(session: Session, result: Arparma):
         return
     if text.lower() in {"清空", "重置", "clear", "reset"} and not images:
         if scope in _active:
-            await send_text(session, "当前问题还在处理中，请完成后再清空。")
+            await send_text(session, "当前仍有问题在处理中，请全部完成后再清空。")
             return
         history_store.clear(scope)
         await send_text(session, "已清除你在当前会话中的 HYW 历史。")
         return
-    if scope in _active:
-        await send_text(session, "你的上一条问题还在处理中，请稍等。")
-        return
-    if len(_active) >= 4:
+    if sum(_active.values()) >= 4:
         await send_text(session, "HYW 当前较忙，请稍后重试。")
         return
     try:
@@ -179,7 +176,8 @@ async def handle_hyw(session: Session, result: Arparma):
             quoted_text, quoted_images = parts_from(MessageChain(origin.message))
             text = f"{text}\n\n[引用消息]\n{quoted_text}".strip()
             images = [*images, *quoted_images]
-    _active.add(scope)
+    # Admission and reservation contain no await: count requests, including one user's parallel questions.
+    _active[scope] = _active.get(scope, 0) + 1
     try:
         await asyncio.wait_for(run_request(session, config, scope, text, images, prior), timeout=config.timeout)
     except HywError as error:
@@ -191,7 +189,10 @@ async def handle_hyw(session: Session, result: Arparma):
         logger.warning("[hyw] request failed: {}", type(error).__name__)
         await send_text(session, "HYW 处理失败，请稍后重试。")
     finally:
-        _active.discard(scope)
+        if _active.get(scope, 0) <= 1:
+            _active.pop(scope, None)
+        else:
+            _active[scope] -= 1
 
 
 hyw_command = Alconna(["q", "hyw", "何意味"], Args["content;?", AllParam])
