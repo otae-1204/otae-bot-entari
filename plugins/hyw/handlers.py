@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+from contextlib import AsyncExitStack
 from io import BytesIO
 
 import httpx
@@ -106,13 +107,24 @@ async def send_text(session: Session, text: str) -> list:
 async def run_request(session: Session, config: HywConfig, scope: Scope, text: str, images: list[str], prior: list[dict]):
     # Credentials are attached only to POST /chat/completions, never to search/image GETs.
     transport = httpx.AsyncHTTPTransport(proxy=config.proxy or None)
-    async with httpx.AsyncClient(transport=transport, trust_env=False, headers={"User-Agent": "Mozilla/5.0"}) as client:
+    async with (
+        httpx.AsyncClient(transport=transport, trust_env=False, headers={"User-Agent": "Mozilla/5.0"}) as client,
+        AsyncExitStack() as stack,
+    ):
+        search_proxy = config.proxy if config.search_proxy is None else config.search_proxy
+        tool_client = client
+        if search_proxy != config.proxy:
+            tool_client = await stack.enter_async_context(httpx.AsyncClient(
+                transport=httpx.AsyncHTTPTransport(proxy=search_proxy or None),
+                trust_env=False, headers={"User-Agent": "Mozilla/5.0"},
+            ))
+        logger.info("[hyw] request routes: model={} search={}", "proxy" if config.proxy else "direct", "proxy" if search_proxy else "direct")
         content = await model_content(client, text, images)
 
         async def progress(message: str):
             await send_text(session, message)
 
-        answer = await ask(client, config, content, history=prior, progress=progress)
+        answer = await ask(client, config, content, history=prior, progress=progress, tool_client=tool_client)
     receipts = []
     if config.render and wants_card(answer.text):
         try:

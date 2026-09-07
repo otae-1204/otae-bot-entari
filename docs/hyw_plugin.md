@@ -16,6 +16,7 @@ HYW_BASE_URL=https://openrouter.ai/api/v1
 HYW_MODEL=gpt-4o
 HYW_RENDER=true
 HYW_PROXY=
+HYW_SEARCH_PROXY=
 ```
 
 接口需兼容 OpenAI Chat Completions，`HYW_BASE_URL` 填 API 根地址，
@@ -25,9 +26,21 @@ HYW_PROXY=
 `steam` 整组复用 `STEAM_LLM_*`，不会混用不同供应商的密钥和接口。
 未配置密钥时仍能正常加载插件，调用时提示管理员配置。
 
-`HYW_PROXY` 用于模型、搜索和图片下载；留空时继承 `HTTPS_PROXY/HTTP_PROXY`。
-填 `HYW_PROXY=direct` 可仅让 HYW 直连，其他插件继续使用原有全局代理。
+`HYW_PROXY` 用于模型和用户图片下载；留空时继承 `HTTPS_PROXY/HTTP_PROXY`。
+填 `HYW_PROXY=direct` 可让它们直连，其他插件继续使用原有全局代理。
+`HYW_SEARCH_PROXY` 单独控制 DuckDuckGo 搜索及 `web_fetch` 网页读取；
+留空沿用 HYW_PROXY 的有效配置，填 `direct` 表示直连。
+如果模型接口可以直连，但搜索需要代理，可设置：
+
+```dotenv
+HYW_PROXY=direct
+HYW_SEARCH_PROXY=http://127.0.0.1:7890
+```
+
+其中 `7890` 仅为示例，需要换成机器人运行机器实际可用的代理地址和端口。
+HTTP 代理通常填写 `http://` 地址，即使目标网页是 HTTPS。
 默认搜索 DuckDuckGo Lite，失败后尝试其 HTML 接口，无需额外搜索密钥。
+目前这两个固定入口属于同一个搜索引擎，尚未接入其他搜索 API 或模型供应商自带的联网工具。
 搜索引擎可能要求验证，此时明确返回工具错误，不能保证所有网络环境都可搜索。
 开发环境最初遇到 HTTP 202 验证页，随后实测 Lite 接口在全时段和近一周筛选下均返回 5 条结果；
 仍建议在部署网络验证可用性，遇到验证页时可检查代理。
@@ -63,6 +76,19 @@ curl.exe --noproxy "*" --connect-timeout 10 --max-time 20 -i https://llm.hyw.mom
 未带密钥返回 HTTP 401 表示此次直连已到达接口；它不验证密钥、模型是否可用，
 也不能代替机器人使用相同 Python 环境和代理路径时的连接测试。
 修改 `.env` 后需重启，且进程已有的环境变量优先于 `.env` 文件。
+
+## 排查“外部网络检索服务不可用”
+
+这句话不是预设的最终回答。上游提示词强制事实性问题优先检索，
+模型收到工具错误后可能在最终回答中转述失败情况；模型接口正常不代表搜索入口也可达。
+搜索请求由机器人运行机器发出，并不会自动使用模型供应商的联网能力。
+
+日志中的 `[hyw] request routes` 显示模型、搜索各自使用代理还是直连；
+`[hyw] search endpoint=... results=N` 表示实际检索成功（0 为没有匹配结果）。
+失败日志和工具返回值会保留 `dns`、`tls_certificate`、`connection`、`http_403`、
+`http_202`、`challenge`（验证页）、`unexpected_page`（页面格式异常）等原因。
+这样可以区分网络故障、搜索引擎验证和没有搜索结果；仅模型自行声称不能联网而没有搜索日志，
+不能作为工具不可用的证据。
 
 ## 用法
 

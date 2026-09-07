@@ -80,6 +80,18 @@ class ProtocolTests(unittest.TestCase):
                 self.assertEqual(HywConfig.from_env().proxy, expected)
         self.assertEqual(global_proxy["https"], "http://global.example:8080")
 
+    def test_search_proxy_is_independent_and_blank_preserves_existing_route(self):
+        for model, search, expected in [
+            ("direct", "http://search.example:7890", ("", "http://search.example:7890")),
+            ("http://model.example:7890", "direct", ("http://model.example:7890", "")),
+            ("http://model.example:7890", "", ("http://model.example:7890", "http://model.example:7890")),
+            ("direct", "", ("", "")),
+        ]:
+            values = {"HYW_PROXY": model, "HYW_SEARCH_PROXY": search}
+            with self.subTest(values=values), patch("plugins.hyw.config._env", side_effect=lambda key, default=None, settings=values: settings.get(key, default)):
+                config = HywConfig.from_env()
+            self.assertEqual((config.proxy, config.search_proxy), expected)
+
     def test_render_data_survives_upstream_bootstrap_and_escapes_html(self):
         answer = agent.Answer('# 中文\n<summary>摘要</summary>\n<script>alert(1)</script><img src=x onerror=alert(2)>', [], [], 1)
         document = rendering.prepare_html(answer)
@@ -175,6 +187,28 @@ class NetworkErrorTests(unittest.TestCase):
 
 
 class AgentTests(unittest.IsolatedAsyncioTestCase):
+    async def test_model_and_search_requests_use_separate_clients(self):
+        model_requests, web_requests = [], []
+
+        def model_response(request):
+            model_requests.append(request)
+            output = CALL if len(model_requests) == 1 else '<final_response>结果[1]</final_response>'
+            return httpx.Response(200, json={"choices": [{"message": {"content": output}}]})
+
+        def search_response(request):
+            web_requests.append(request)
+            return httpx.Response(200, content=b'<a class="result-link" href="https://example.com/doc">Documentation</a>')
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(model_response)) as model_client, httpx.AsyncClient(transport=httpx.MockTransport(search_response)) as search_client:
+            with patch.object(web, "validate_url", AsyncMock()):
+                answer = await agent.ask(model_client, replace(HywConfig(), api_key="test-key"), "question", tool_client=search_client)
+        self.assertEqual(len(model_requests), 2)
+        self.assertTrue(all(request.url.host == "openrouter.ai" for request in model_requests))
+        self.assertTrue(all(request.headers["authorization"] == "Bearer test-key" for request in model_requests))
+        self.assertEqual(web_requests[0].url.host, "lite.duckduckgo.com")
+        self.assertNotIn("authorization", web_requests[0].headers)
+        self.assertEqual(answer.sources[0]["url"], "https://example.com/doc")
+
     async def test_http_failure_surfaces_diagnostic_category_and_route(self):
         def disconnect(request):
             raise httpx.RemoteProtocolError("upstream private payload")
@@ -306,6 +340,37 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
             with patch.object(web, "validate_url", AsyncMock()), self.assertRaisesRegex(HywError, "搜索服务暂时不可用"):
                 await web.search(client, "Entari", time_range="w")
 
+    async def test_search_failures_preserve_reason_without_logging_private_payloads(self):
+        for status, content, reason in [(202, b"challenge", "http_202"), (200, b"<form id='challenge-form'>verify</form>", "challenge"), (200, b"<html>unexpected page</html>", "unexpected_page")]:
+            with self.subTest(reason=reason):
+                async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request, code=status, body=content: httpx.Response(code, content=body))) as client:
+                    with patch.object(web, "validate_url", AsyncMock()), self.assertRaises(HywError) as caught:
+                        await web.search(client, "private question")
+                self.assertIn(reason, str(caught.exception))
+                self.assertIn("HYW_SEARCH_PROXY", str(caught.exception))
+                self.assertNotIn("private question", str(caught.exception))
+
+        with patch.object(web, "download", AsyncMock(side_effect=httpx.ConnectError("private-password"))), patch.object(web.logger, "warning") as warning, self.assertRaises(HywError) as caught:
+            await web.search(None, "private query")
+        self.assertIn("connection", str(caught.exception))
+        self.assertNotIn("private", repr(warning.call_args_list))
+        self.assertNotIn("private", str(caught.exception))
+
+    async def test_search_falls_back_after_challenge_and_distinguishes_no_results(self):
+        requests = []
+
+        def respond(request):
+            requests.append(request)
+            content = b'<form id="challenge-form">verify</form>' if request.url.host.startswith("lite.") else b'<div class="no-results">No results found</div>'
+            return httpx.Response(200, content=content)
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            with patch.object(web, "validate_url", AsyncMock()):
+                result = await web.search(client, "query")
+        self.assertEqual([request.url.host for request in requests], ["lite.duckduckgo.com", "html.duckduckgo.com"])
+        self.assertEqual(result["results"], [])
+        self.assertNotIn("error", result)
+
     async def test_search_parses_results_and_preserves_time_filter(self):
         content = b'<table><tr><td><a class="result-link" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fdoc">Entari docs</a></td></tr><tr><td class="result-snippet">Useful result.</td></tr></table>'
         requests = []
@@ -388,6 +453,25 @@ class HandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("https://example.com", str(current.sent[1]))
         self.assertTrue(self.store.get(SCOPE, "1"))
         self.assertTrue(self.store.get(SCOPE, "2"))
+
+    async def test_distinct_tool_client_is_closed_with_model_client(self):
+        config = replace(HywConfig(), proxy="", search_proxy="http://search.example:7890")
+        answer = agent.Answer("answer", [], [], 1)
+        transport = httpx.MockTransport(lambda request: httpx.Response(200))
+        with patch.object(handlers.httpx, "AsyncHTTPTransport", return_value=transport) as create_transport, patch.object(handlers, "ask", AsyncMock(return_value=answer)) as ask:
+            await handlers.run_request(session(), config, SCOPE, "question", [], [])
+        self.assertEqual([call.kwargs["proxy"] for call in create_transport.call_args_list], [None, "http://search.example:7890"])
+        model_client, tool_client = ask.await_args.args[0], ask.await_args.kwargs["tool_client"]
+        self.assertIsNot(model_client, tool_client)
+        self.assertTrue(model_client.is_closed)
+        self.assertTrue(tool_client.is_closed)
+
+    async def test_same_routes_reuse_one_client(self):
+        answer = agent.Answer("answer", [], [], 1)
+        with patch.object(handlers, "ask", AsyncMock(return_value=answer)) as ask:
+            await handlers.run_request(session(), HywConfig(), SCOPE, "question", [], [])
+        self.assertIs(ask.await_args.args[0], ask.await_args.kwargs["tool_client"])
+        self.assertTrue(ask.await_args.args[0].is_closed)
 
     async def test_images_are_real_multimodal_payloads_and_limited(self):
         buffer = BytesIO()

@@ -7,9 +7,17 @@ import socket
 from urllib.parse import parse_qs, urljoin, urlsplit
 
 import httpx
+from loguru import logger
 from lxml import etree, html
 
 from .config import HywError
+from .network_errors import classify_error
+
+
+class WebReadError(HywError):
+    def __init__(self, message: str, code: str):
+        super().__init__(message)
+        self.code = code
 
 
 def public_url(url: str) -> bool:
@@ -34,16 +42,16 @@ def public_url(url: str) -> bool:
 
 async def validate_url(url: str):
     if not public_url(url):
-        raise HywError("仅支持公开的 HTTP/HTTPS 网页或图片地址。")
+        raise WebReadError("仅支持公开的 HTTP/HTTPS 网页或图片地址。", "address_policy")
     parts = urlsplit(url)
     try:
         addresses = await asyncio.get_running_loop().getaddrinfo(
             parts.hostname, parts.port or (443 if parts.scheme == "https" else 80), type=socket.SOCK_STREAM,
         )
     except OSError:
-        raise HywError("网页地址无法解析。") from None
+        raise WebReadError("网页地址无法解析。", "dns") from None
     if not addresses or any(not ipaddress.ip_address(item[4][0]).is_global for item in addresses):
-        raise HywError("不能读取本机或内网地址。")
+        raise WebReadError("不能读取本机或内网地址。", "address_policy")
 
 
 async def download(client: httpx.AsyncClient, url: str, *, max_bytes: int = 2_000_000) -> tuple[bytes, str, str]:
@@ -57,7 +65,7 @@ async def download(client: httpx.AsyncClient, url: str, *, max_bytes: int = 2_00
                 url = urljoin(url, location)
                 continue
             if response.status_code != 200:
-                raise HywError(f"网页读取失败（HTTP {response.status_code}）。")
+                raise WebReadError(f"网页读取失败（HTTP {response.status_code}）。", f"http_{response.status_code}")
             data = bytearray()
             async for chunk in response.aiter_bytes():
                 data.extend(chunk)
@@ -98,18 +106,32 @@ async def search(client: httpx.AsyncClient, query: str, *, time_range: str = "a"
     if kl:
         params["kl"] = kl
     # Both official HTML interfaces share the same filters; never parse a challenge as evidence.
+    failures = []
     for endpoint in ("https://lite.duckduckgo.com/lite/", "https://html.duckduckgo.com/html/"):
         url = str(httpx.URL(endpoint, params=params))
+        host = urlsplit(endpoint).hostname
         try:
             content, _, _ = await download(client, url, max_bytes=1_000_000)
             if b"anomaly.js" in content or b"challenge-form" in content:
-                continue
-            results = parse_search(content)
-            if results or b"no-results" in content or b"No results found" in content:
-                return {"query": query, "engine": "DuckDuckGo", "time_range": time_range, "kl": kl, "results": results}
-        except (HywError, httpx.HTTPError, ValueError, etree.LxmlError):
-            continue
-    raise HywError("搜索服务暂时不可用或要求验证，请稍后重试；管理员可检查 HYW_PROXY。")
+                reason = "challenge"
+            else:
+                results = parse_search(content)
+                if results or b"no-results" in content or b"No results found" in content:
+                    logger.info("[hyw] search endpoint={} results={}", host, len(results))
+                    return {"query": query, "engine": "DuckDuckGo", "time_range": time_range, "kl": kl, "results": results}
+                reason = "unexpected_page"
+        except WebReadError as error:
+            reason = error.code
+        except httpx.HTTPError as error:
+            reason = classify_error(error).code
+        except HywError:
+            reason = "web_read"
+        except (ValueError, etree.LxmlError):
+            reason = "parse_failed"
+        # Fixed endpoint and reason only; no search terms, proxy credentials or raw exceptions.
+        logger.warning("[hyw] search endpoint={} failed: reason={}", host, reason)
+        failures.append(f"{host}: {reason}")
+    raise HywError("DuckDuckGo 搜索服务暂时不可用（" + "；".join(failures) + "）。请检查 HYW_SEARCH_PROXY；遇到验证页时请稍后重试。")
 
 
 async def fetch_page(client: httpx.AsyncClient, url: str) -> dict:

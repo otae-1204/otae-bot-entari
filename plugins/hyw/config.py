@@ -11,6 +11,7 @@ class HywConfig:
     base_url: str = "https://openrouter.ai/api/v1"
     model: str = "gpt-4o"
     proxy: str = field(default="", repr=False)
+    search_proxy: str | None = field(default=None, repr=False)
     render: bool = True
     timeout: float = 120
     max_turns: int = 10
@@ -31,11 +32,17 @@ class HywConfig:
             proxy = ""
         elif not proxy:
             proxy = str(SYSTEM_PROXY.get("https") or SYSTEM_PROXY.get("http") or "").strip()
+        search_proxy = str(_env("HYW_SEARCH_PROXY", "") or "").strip()
+        if search_proxy.lower() == "direct":
+            search_proxy = ""
+        elif not search_proxy:
+            search_proxy = proxy
         return cls(
             api_key=str(_env(f"{prefix}_API_KEY", "") or "").strip(),
             base_url=str(_env(f"{prefix}_BASE_URL", "") or default_base).strip().rstrip("/"),
             model=str(_env(f"{prefix}_MODEL", "") or default_model).strip(),
             proxy=proxy,
+            search_proxy=search_proxy,
             render=str(_env("HYW_RENDER", True)).lower() not in {"false", "0", "no"},
         )
 
