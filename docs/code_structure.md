@@ -9,6 +9,7 @@ otae_bot/
   application.py               创建 Entari、连接配置、启动协调
   lifecycle.py                 单实例锁、共享资源释放
   plugin_registry.py           按原顺序发现顶层插件
+  group_features.py            按机器人账号和群保存插件开关
   paths.py                     随源码定位的资源根目录
   config/                      环境变量解析、原有路径配置
   adapters/                    Entari 会话/命令/定时任务、OneBot、消息构造
@@ -74,6 +75,11 @@ tests/                         功能回归、结构约束、真实插件加载�
 
 增加普通插件时，在 `plugins/<name>/` 提供入口、处理器及需要的业务模块，
 顶层自动发现规则无需修改。纯资源目录没有 `__init__.py` 时不会被注册为插件。
+应用会为插件及其子模块的 Entari scope 安装群开关检查，覆盖命令和事件监听；
+热重载后重新安装。`ChainMsg.send(dest, bot)` 根据 Entari 订阅器上下文识别
+所属插件，对群推送应用同一开关。后台任务应通过共享 `timer` 注册，
+并使用 `ChainMsg.send` 发送群消息，以保留插件归属和目标群过滤。
+管理命令及权限核验位于 `plugins/group_manager/`，用法见 [群内功能管理](group_features.md)。
 
 增加终末地功能时，将模型、解析/服务及绘图放入对应业务域，在 `handlers.py`
 接入命令与交互。涉及静态资料转换时优先使用 `catalog/views`，

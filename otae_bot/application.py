@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from arclet.entari import Cleanup, Entari, WS, listen, load_plugin
+from arclet.entari import WS, Cleanup, Entari, listen, load_plugin
+from arclet.entari.event.plugin import PluginLoadedSuccess
 
+from otae_bot.adapters.feature_gate import install_group_feature_gates, on_plugin_loaded
 from otae_bot.config.settings import SATORI_CLIENTS
 from otae_bot.lifecycle import acquire_run_lock, close_shared_resources
 from otae_bot.plugin_registry import discover_plugins
@@ -29,8 +31,10 @@ def build_networks(clients: list[dict] | None = None) -> list[WS]:
 def create_app() -> Entari:
     app = Entari(*build_networks())
     listen(Cleanup)(close_shared_resources)
+    listen(PluginLoadedSuccess)(on_plugin_loaded)
     for name in discover_plugins():
         load_plugin(name)
+    install_group_feature_gates()
     return app
 
 

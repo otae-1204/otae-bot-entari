@@ -10,6 +10,8 @@ from otae_bot.adapters.entari import cmd as _cmd, get_rest
 HELP_IMAGE_DIR = Path(IMAGE_PATH) / "help"
 HYW_HELP = "HYW 搜索问答：/q 问题，可附带图片；引用自己的回答后 /q 追问。\n/q 帮助 查看详细用法，/q 清空 删除当前会话历史。\n别名：/hyw、/何意味。管理员需先配置 HYW_* 模型参数。"
 TEXT_TOPICS = {name: HYW_HELP for name in ("hyw", "q", "何意味")}
+GROUP_FEATURE_HELP = "群内插件开关：/功能 列表、/功能 关闭 hyw、/功能 开启 hyw。\n支持插件名和 ef、steam、bili、mc、tibo 等别名。\n仅 SuperUser、本群管理员或群主可执行，只影响当前群，重启后保留。"
+TEXT_TOPICS.update({name: GROUP_FEATURE_HELP for name in ("功能", "插件", "plugin")})
 
 # 子指令 → 图片文件名（不含扩展名）映射
 TOPIC_MAP: dict[str, str] = {

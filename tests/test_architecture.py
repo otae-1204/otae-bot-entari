@@ -194,6 +194,100 @@ async def check_hyw_dispatch():
     assert session.send.await_count == 3, session.send.await_count
 
 asyncio.get_event_loop().run_until_complete(check_hyw_dispatch())
+
+from satori import ChannelType, Role
+from arclet.entari.const import ITEM_ACCOUNT, ITEM_SESSION
+from arclet.letoderea import EVENT, STOP, post
+from arclet.entari.event.command import CommandExecute
+from otae_bot.config.settings import Config
+from otae_bot.group_features import feature_store, scope_from_event
+from otae_bot.adapters.feature_gate import GroupFeatureGate
+from unittest.mock import patch
+Config.SUPERUSERS = ['test-root']
+
+def group_session(group='100', user='test-root', bot='test-bot', private=False):
+    session = object.__new__(Session)
+    session.account = SimpleNamespace(
+        platform='qq', self_id=bot,
+        guild_member_get=AsyncMock(return_value=SimpleNamespace(roles=[])),
+        internal=AsyncMock(return_value={}),
+    )
+    session.event = SimpleNamespace(
+        user=SimpleNamespace(id=user), member=SimpleNamespace(roles=[]),
+        guild=None if private else SimpleNamespace(id=group),
+        channel=SimpleNamespace(id=group, type=ChannelType.DIRECT if private else ChannelType.TEXT),
+        content='https://www.bilibili.com/video/BVtest',
+    )
+    session.reply = None
+    session.send = AsyncMock(return_value=[])
+    return session
+
+async def run_command(session, text):
+    session.send.reset_mock()
+    await post(CommandExecute(_remove_config_prefix(MessageChain(text)), session),
+               inherit_ctx={ITEM_ACCOUNT: session.account})
+
+async def check_group_switches():
+    current = group_session()
+    scope = scope_from_event(current.account, current.event)
+    # Every scope, including handlers submodules, is guarded before dispatch.
+    for plugin in plugin_service.plugins.values():
+        if plugin.path.startswith('plugins.hyw'):
+            assert any(isinstance(gate, GroupFeatureGate) for gate in plugin._scope.propagators), plugin.path
+    await run_command(current, '/功能 关闭 hyw')
+    assert current.send.await_count == 1, current.send.await_args_list
+    assert '已关闭' in str(current.send.await_args.args[0]), current.send.await_args_list
+    assert not feature_store.is_enabled(scope, 'hyw')
+    for alias in ('q', 'hyw', '何意味'):
+        await run_command(current, '/' + alias + ' 帮助')
+        current.send.assert_not_awaited()
+    # Command parser's generated help is also covered by the gate.
+    await run_command(current, '/q --help')
+    current.send.assert_not_awaited()
+    for other in (group_session(group='101'), group_session(bot='other-bot'), group_session(private=True)):
+        await run_command(other, '/q 帮助')
+        other.send.assert_awaited_once()
+    await run_command(current, '/plugin on q')
+    assert feature_store.is_enabled(scope, 'hyw')
+    await run_command(current, '/q 帮助')
+    current.send.assert_awaited_once()
+
+    # Legacy commands are filtered too, without disabling the manager.
+    await run_command(current, '/插件 关闭 help')
+    assert not feature_store.is_enabled(scope, 'help_plugin')
+    await run_command(current, '/help hyw')
+    current.send.assert_not_awaited()
+    await run_command(current, '/功能 开启 help')
+    await run_command(current, '/help hyw')
+    current.send.assert_awaited_once()
+
+    for rejected in (group_session(user='member'), group_session(private=True)):
+        await run_command(rejected, '/功能 关闭 hyw')
+        rejected.send.assert_awaited_once()
+        assert feature_store.is_enabled(scope, 'hyw')
+    admin = group_session(user='group-admin')
+    admin.event.member.roles = [Role('admin')]
+    await run_command(admin, '/功能 关闭 hyw')
+    assert not feature_store.is_enabled(scope, 'hyw')
+    await run_command(current, '/功能 开启 hyw')
+
+    # Actual passive listener, using the loaded module and its registered scope.
+    bili = plugin_service.plugins['plugins.bilibilibot'].module
+    listeners = [sub for plg in plugin_service.plugins.values()
+                 if plg.path.startswith('plugins.bilibilibot')
+                 for sub, _ in plg._scope.subscribers.values()
+                 if sub.callable_target.__qualname__.startswith('_EventHook.')]
+    assert len(listeners) == 1, listeners
+    with patch.object(bili.client, 'parse_link', AsyncMock(return_value=None)) as parse_link:
+        await run_command(current, '/功能 关闭 bili')
+        ctx = {ITEM_SESSION: current, ITEM_ACCOUNT: current.account, EVENT: current.event}
+        assert await listeners[0].handle(ctx.copy()) is STOP
+        parse_link.assert_not_awaited()
+        await run_command(current, '/功能 开启 bili')
+        await listeners[0].handle(ctx.copy())
+        parse_link.assert_awaited_once()
+
+asyncio.get_event_loop().run_until_complete(check_group_switches())
 print('CONTRACT ' + json.dumps({'plugins': sorted(expected), 'jobs': jobs}, ensure_ascii=False))
 """
         with tempfile.TemporaryDirectory() as directory:

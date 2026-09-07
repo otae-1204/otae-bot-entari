@@ -41,6 +41,7 @@ from nepattern import AnyString
 from satori import ChannelType
 
 from otae_bot.adapters import runtime
+from otae_bot.adapters.feature_gate import allow_group_delivery
 
 
 @dataclass
@@ -147,6 +148,8 @@ class ChainMsg(MessageChain):
 
     async def send(self, dest: SendDest | None = None, bot: Account | None = None):
         if dest and bot:
+            if not allow_group_delivery(dest, bot):
+                return []
             if dest.private:
                 return await bot.protocol.send_private_message(dest.id, self)
             return await bot.protocol.send_message(dest.id, self)
