@@ -8,6 +8,9 @@
 End 插件的公共资料默认优先 AKEData；账号接口仍用官方，缺失资料保留兼容回退。
 覆盖范围、缓存变化与实测见 [AKE 迁移记录](docs/endfield_ake_migration_execution.md)。
 
+HYW 搜索问答插件已接入：`/q 问题`、图片解释和引用追问。
+配置模型后使用，详见 [HYW 配置与用法](docs/hyw_plugin.md)。
+
 ## 分支
 
 `main` 已于 2026-09-05 同步 `refactor/project-architecture` 的重构版本，

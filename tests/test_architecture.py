@@ -173,6 +173,27 @@ for name in ('bili_live_check', 'bili_video_check', 'bili_dynamic_check',
     assert name in jobs, (name, jobs)
 for job in timer._jobs.values():
     assert job.subscriber is not None
+import asyncio
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from arclet.entari import MessageChain, Session, command
+from arclet.entari.command.provider import _remove_config_prefix
+from arclet.entari.config import EntariConfig
+EntariConfig.instance.basic.prefix = ['/']
+
+async def check_hyw_dispatch():
+    session = object.__new__(Session)
+    session.account = SimpleNamespace(platform='qq', self_id='test-bot')
+    session.event = SimpleNamespace(user=SimpleNamespace(id='test-user'), guild=None,
+                                    channel=SimpleNamespace(id='test-channel'))
+    session.reply = None
+    session.send = AsyncMock(return_value=[])
+    for name in ('q', 'hyw', '何意味'):
+        message = _remove_config_prefix(MessageChain('/' + name + ' 帮助'))
+        await command.execute(message, session)
+    assert session.send.await_count == 3, session.send.await_count
+
+asyncio.get_event_loop().run_until_complete(check_hyw_dispatch())
 print('CONTRACT ' + json.dumps({'plugins': sorted(expected), 'jobs': jobs}, ensure_ascii=False))
 """
         with tempfile.TemporaryDirectory() as directory:
@@ -189,7 +210,9 @@ print('CONTRACT ' + json.dumps({'plugins': sorted(expected), 'jobs': jobs}, ensu
             )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         contract = next(line.removeprefix("CONTRACT ") for line in result.stdout.splitlines() if line.startswith("CONTRACT "))
-        self.assertEqual(len(json.loads(contract)["plugins"]), 13)
+        loaded = json.loads(contract)["plugins"]
+        self.assertEqual(loaded, list(discover_plugins(ROOT / "plugins")))
+        self.assertIn("plugins.hyw", loaded)
 
 
 class LifecycleTests(unittest.IsolatedAsyncioTestCase):

@@ -8,6 +8,8 @@ from otae_bot.config.paths import IMAGE_PATH
 from otae_bot.adapters.entari import cmd as _cmd, get_rest
 
 HELP_IMAGE_DIR = Path(IMAGE_PATH) / "help"
+HYW_HELP = "HYW 搜索问答：/q 问题，可附带图片；引用自己的回答后 /q 追问。\n/q 帮助 查看详细用法，/q 清空 删除当前会话历史。\n别名：/hyw、/何意味。管理员需先配置 HYW_* 模型参数。"
+TEXT_TOPICS = {name: HYW_HELP for name in ("hyw", "q", "何意味")}
 
 # 子指令 → 图片文件名（不含扩展名）映射
 TOPIC_MAP: dict[str, str] = {
@@ -46,7 +48,7 @@ def _resolve_image(topic: str) -> Path | None:
 
 
 def _available_topics() -> list[str]:
-    return sorted({
+    return sorted(set(TEXT_TOPICS) | {
         topic
         for topic, image_name in TOPIC_MAP.items()
         if (HELP_IMAGE_DIR / f"{image_name}.png").exists()
@@ -59,6 +61,10 @@ help_cmd = _cmd("help", aliases={"Help", "h", "帮助"}, priority=5, block=True)
 @help_cmd.handle()
 async def handle_help_command(rest: ArgVal[str]):
     command_args = get_rest(rest)
+
+    if command_args.lower() in TEXT_TOPICS:
+        await help_cmd.finish(TEXT_TOPICS[command_args.lower()])
+        return
 
     if command_args.lower() in ("list", "列表"):
         available = _available_topics()
