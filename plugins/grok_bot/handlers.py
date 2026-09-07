@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import asyncio
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from collections.abc import Callable
 
 from arclet.alconna import Alconna, AllParam, Args, Arparma
 from arclet.entari import MessageChain, Session, command
+from arclet.entari.plugin import current_plugin, keeping
 from loguru import logger
 from satori import Image, Text
 
@@ -13,84 +12,24 @@ from otae_bot.group_features import feature_store
 from otae_bot.permissions import is_superuser
 
 from .config import GrokConfig, GrokError
-from .conversations import ConversationScope, ask, repair, scope_from_session
+from .conversations import scope_from_session
 from .media import MAX_INPUT_IMAGES, Reply, send_attachment
+from .stream import RequestQueue
 
 HELP = """Grok Bot 问答
 /grok 问题：文字或图片提问；引用消息后提问可附上引用正文和图片（合计最多 3 张，每张 5 MB）。
 Grok Bot 回复的图片和文件会转发到当前会话（单个最多 20 MB，每次最多 10 个、合计 50 MB）。
 别名：/grokbot。同群共用本群对话，不同群与私聊分别独立，默认花园多惠人设。
-支持同一用户连续提交；同会话排队，不同会话可并行处理。
+支持任务进行中追加输入；每个会话统一接收回复，不同会话可并行处理。
+本轮没有追加输入时引用初始问题回复；追加后直接发到当前会话，下一轮重新判断。
 默认关闭：SuperUser 在目标群执行 /功能 开启 grok；管理员和群主可关闭。
 私聊需 SuperUser 用 /grok 开启 或 /grok 关闭 管理自己的私聊开关。
 创建失败后卡在待确认状态：SuperUser 确认云端无对应 Bot 后，用 /grok 修复会话 处理当前会话。
 需要人工确认时，请管理员在 Grok Bot 应用中处理。"""
 
 
-@dataclass
-class SessionSlot:
-    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-    users: int = 0
-
-
-class RequestQueue:
-    """Serialize each conversation before acquiring shared execution capacity."""
-
-    def __init__(self):
-        self.slots: dict[str, SessionSlot] = {}
-        self.capacity = asyncio.Condition()
-        self.active = 0
-        self.pending = 0
-
-    async def run(self, config: GrokConfig, prompt: str, progress: Callable[[str], Awaitable[None]], scope: ConversationScope,
-                  *, repair_only: bool = False, images: tuple[str, ...] = (), account=None,
-                  on_reply: Callable[[Reply], Awaitable[None]] | None = None) -> Reply | str:
-        if self.pending >= config.max_pending:
-            raise GrokError("Grok Bot 等待队列已满，请稍后重试。")
-        slot = self.slots.setdefault(scope.key, SessionSlot())
-        slot.users += 1
-        self.pending += 1
-        acquired = running = False
-
-        async def acquire():
-            nonlocal acquired, running
-            await slot.lock.acquire()
-            acquired = True
-            async with self.capacity:
-                await self.capacity.wait_for(lambda: self.active < config.max_concurrent)
-                self.active += 1
-                running = True
-
-        try:
-            if slot.users > 1 or self.active >= config.max_concurrent:
-                await progress("Grok Bot 正在处理其他问题，本次问题已排队。")
-            try:
-                await asyncio.wait_for(acquire(), timeout=config.timeout)
-            except asyncio.TimeoutError:
-                raise GrokError("Grok Bot 排队等待超时，本次问题尚未发送，请稍后重试。") from None
-            # An administrator may have disabled this conversation while queued.
-            if not feature_store.is_enabled(scope.feature_scope, "grok_bot"):
-                raise GrokError("当前会话的 Grok Bot 已关闭，本次问题尚未发送。")
-            if repair_only:
-                return await repair(config, scope)
-            kwargs = {"images": images, "account": account} if images else {}
-            if on_reply is not None:
-                kwargs["on_reply"] = on_reply
-            return await ask(config, prompt, scope, **kwargs)
-        finally:
-            if running:
-                async with self.capacity:
-                    self.active -= 1
-                    self.capacity.notify_all()
-            if acquired:
-                slot.lock.release()
-            slot.users -= 1
-            if not slot.users:
-                self.slots.pop(scope.key, None)
-            self.pending -= 1
-
-
-queue = RequestQueue()
+queue = (keeping("grok_conversation_receiver", obj_factory=RequestQueue, dispose=RequestQueue.close)
+         if current_plugin.get(None) else RequestQueue())
 
 
 def plain_text(elements) -> str:
@@ -107,25 +46,27 @@ def image_sources(elements) -> tuple[str, ...]:
     return tuple(sources)
 
 
-async def send_text(session: Session, text: str):
+async def send_text(session: Session, text: str, *, reply_to: bool | Callable[[], bool] = True):
     for start in range(0, len(text), 2000):
         # Satori Text prevents model output from injecting mentions or media tags.
-        await session.send(MessageChain([Text(text[start:start + 2000])]), reply_to=True)
+        await session.send(MessageChain([Text(text[start:start + 2000])]), reply_to=reply_to() if callable(reply_to) else reply_to)
 
 
-async def send_reply(session: Session, reply: Reply | str):
+async def send_reply(session: Session, reply: Reply | str, *, reply_to: bool | Callable[[], bool] = True):
     if isinstance(reply, str):
         reply = Reply(reply)
     text = reply.text
     if len(text) > 20000:
         text = text[:20000] + "\n\n回答过长，剩余内容请在 Grok Bot 应用中查看。"
     if text:
-        await send_text(session, text)
+        await send_text(session, text, reply_to=reply_to)
     for attachment in reply.attachments:
         try:
-            await send_attachment(session, attachment)
+            if not attachment.image and not attachment.error and (reply_to() if callable(reply_to) else reply_to):
+                await send_text(session, f"文件：{attachment.name}", reply_to=reply_to)
+            await send_attachment(session, attachment, reply_to=reply_to)
         except GrokError as error:
-            await send_text(session, f"附件「{attachment.name}」转发失败：{error}")
+            await send_text(session, f"附件「{attachment.name}」转发失败：{error}", reply_to=reply_to)
 
 
 async def handle_grok(session: Session, result: Arparma):
@@ -178,8 +119,8 @@ async def handle_grok(session: Session, result: Arparma):
         user_id = str(getattr(getattr(session.event, "user", None), "id", "") or "")
         text = f"[本次发言者 ID：{user_id}]\n{text}"
 
-        async def deliver(reply: Reply):
-            await send_reply(session, reply)
+        async def deliver(reply: Reply, *, reply_to=True):
+            await send_reply(session, reply, reply_to=reply_to)
 
         answer = await queue.run(config, text, progress, scope, on_reply=deliver,
                                  **({"images": images, "account": session.account} if images else {}))

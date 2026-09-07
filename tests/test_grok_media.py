@@ -210,7 +210,8 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         sent = [call.args[0] for call in current.send.await_args_list]
         self.assertEqual(str(sent[0]), "正文")
         self.assertIn("bad.txt", str(sent[1]))
-        self.assertIsInstance(sent[2][0], File)
+        self.assertIn("good.txt", str(sent[2]))
+        self.assertIsInstance(sent[3][0], File)
         self.assertEqual(current.account.protocol.upload_create.await_count, 1)
 
     async def test_send_failure_is_redacted_and_does_not_resend_ambiguously(self):
@@ -374,11 +375,10 @@ class GatewayMediaTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as directory:
             switches = GroupFeatureStore(Path(directory) / "switches.json")
             switches.set_enabled(SCOPE.feature_scope, "grok_bot", True)
-            queue = handlers.RequestQueue()
             with patch.object(conversations, "make_client", side_effect=host.client), \
                  patch.object(conversations, "session_store", SessionStore(Path(directory) / "sessions.json")), \
                  patch.object(handlers, "feature_store", switches), patch.object(gateway.Gateway, "read_attachment", read):
-                task = asyncio.create_task(queue.run(CONFIG, "问题", AsyncMock(), SCOPE, on_reply=deliver))
+                task = asyncio.create_task(conversations.ask(CONFIG, "问题", SCOPE, on_reply=deliver))
                 try:
                     await asyncio.wait_for(first_file_sent.wait(), 1)
                     await asyncio.wait_for(second_started.wait(), 1)
@@ -389,7 +389,6 @@ class GatewayMediaTests(unittest.IsolatedAsyncioTestCase):
                         await asyncio.sleep(.001)
                     self.assertTrue(any(reply.text == "后续正文" for reply in delivered))
                     self.assertFalse(task.done())
-                    self.assertTrue(queue.slots[SCOPE.key].lock.locked())
                     self.assertEqual(sum(bool(reply.attachments) for reply in delivered), 1)
                     release_second.set()
                     idle.set()
@@ -400,7 +399,6 @@ class GatewayMediaTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, Reply())
         self.assertEqual([reply.text for reply in delivered if reply.text], ["先发正文", "后续正文"])
         self.assertEqual([item.data for reply in delivered for item in reply.attachments], [png(), b"report bytes"])
-        self.assertEqual(queue.pending, 0)
         self.assertEqual(sum(command == "sendPrompt" for command, _ in host.calls), 1)
 
     async def test_relay_limits_and_repeated_snapshots_apply_to_whole_question(self):
@@ -494,7 +492,7 @@ class GatewayMediaTests(unittest.IsolatedAsyncioTestCase):
             switches.set_enabled(SCOPE.feature_scope, "grok_bot", True)
             with patch.object(conversations, "make_client", side_effect=host.client), \
                  patch.object(conversations, "session_store", store), patch.object(handlers, "feature_store", switches):
-                reply = await handlers.RequestQueue().run(CONFIG, "解释两张图", AsyncMock(), SCOPE, images=(data_url(png()), data_url(png())))
+                reply = await conversations.ask(CONFIG, "解释两张图", SCOPE, images=(data_url(png()), data_url(png())))
         self.assertEqual(reply.text, "")
         self.assertEqual([item.data for item in reply.attachments], [png(), b"report bytes"])
         sent = next(body for command, body in host.calls if command == "sendPrompt")
@@ -507,7 +505,8 @@ class GatewayMediaTests(unittest.IsolatedAsyncioTestCase):
         target = session()
         await handlers.send_reply(target, reply)
         self.assertIsInstance(target.send.await_args_list[0].args[0][0], Image)
-        self.assertIsInstance(target.send.await_args_list[1].args[0][0], File)
+        self.assertIn("report.txt", str(target.send.await_args_list[1].args[0]))
+        self.assertIsInstance(target.send.await_args_list[2].args[0][0], File)
 
     async def test_invalid_image_does_not_create_bot_and_failed_upload_never_sends_partial_prompt(self):
         host = MediaHost()
@@ -594,28 +593,3 @@ class GatewayMediaTests(unittest.IsolatedAsyncioTestCase):
             api = gateway.Gateway(CONFIG, client)
             with self.assertRaisesRegex(GrokError, "响应过大"):
                 await api.request("readAttachmentChunk", {}, response_limit=100)
-
-    async def test_same_conversation_lock_covers_reply_download(self):
-        queue = handlers.RequestQueue()
-        started, release = asyncio.Event(), asyncio.Event()
-        calls = []
-
-        async def ask(config, prompt, scope):
-            calls.append(prompt)
-            if prompt == "first":
-                started.set()
-                await release.wait()
-            return Reply(prompt, (Attachment("file.txt", data=prompt.encode()),))
-
-        with tempfile.TemporaryDirectory() as directory:
-            switches = GroupFeatureStore(Path(directory) / "switches.json")
-            switches.set_enabled(SCOPE.feature_scope, "grok_bot", True)
-            with patch.object(handlers, "feature_store", switches), patch.object(handlers, "ask", side_effect=ask):
-                first = asyncio.create_task(queue.run(CONFIG, "first", AsyncMock(), SCOPE))
-                await started.wait()
-                second = asyncio.create_task(queue.run(CONFIG, "second", AsyncMock(), SCOPE))
-                await asyncio.sleep(0)
-                self.assertEqual(calls, ["first"])
-                release.set()
-                replies = await asyncio.gather(first, second)
-        self.assertEqual([reply.attachments[0].data for reply in replies], [b"first", b"second"])

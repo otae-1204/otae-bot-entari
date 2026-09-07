@@ -434,81 +434,17 @@ class HandlerTests(unittest.IsolatedAsyncioTestCase):
             await handlers.handle_grok(target, result("问题"))
         target.send.assert_awaited_once()
 
-    async def test_same_user_can_queue_multiple_questions_and_replies_stay_local(self):
-        queue = handlers.RequestQueue()
-        first_started, release = asyncio.Event(), asyncio.Event()
+    async def test_delivery_policy_is_checked_for_each_qq_text_chunk(self):
+        target = session()
+        interrupted = False
 
-        async def ask(_, text, scope, **kwargs):
-            self.assertEqual(scope, SCOPE)
-            if text.endswith("one"):
-                first_started.set()
-                await release.wait()
-            return text + "-answer"
+        async def send(*args, **kwargs):
+            nonlocal interrupted
+            interrupted = True
 
-        first, second = session(), session()
-        with patch.object(handlers, "queue", queue), patch.object(handlers, "ask", side_effect=ask), patch.object(GrokConfig, "from_env", return_value=CONFIG):
-            task1 = asyncio.create_task(handlers.handle_grok(first, result("one")))
-            await first_started.wait()
-            task2 = asyncio.create_task(handlers.handle_grok(second, result("two")))
-            await asyncio.sleep(0)
-            self.assertEqual(queue.pending, 2)
-            self.assertIn("排队", str(second.send.await_args.args[0]))
-            release.set()
-            await asyncio.gather(task1, task2)
-        self.assertIn("one-answer", str(first.send.await_args.args[0]))
-        self.assertIn("two-answer", str(second.send.await_args.args[0]))
-        for target in (first, second):
-            self.assertTrue(all(call.kwargs["reply_to"] for call in target.send.await_args_list))
-        self.assertEqual(queue.pending, 0)
-        self.assertEqual(queue.slots, {})
-        self.assertEqual(queue.active, 0)
-
-    async def test_queue_cancellation_releases_capacity_without_releasing_another_request(self):
-        queue = handlers.RequestQueue()
-        entered, release = asyncio.Event(), asyncio.Event()
-
-        async def ask(*_):
-            entered.set()
-            await release.wait()
-            return "done"
-
-        with patch.object(handlers, "ask", side_effect=ask):
-            first = asyncio.create_task(queue.run(CONFIG, "one", AsyncMock(), SCOPE))
-            await entered.wait()
-            second = asyncio.create_task(queue.run(CONFIG, "two", AsyncMock(), SCOPE))
-            await asyncio.sleep(0)
-            second.cancel()
-            with self.assertRaises(asyncio.CancelledError):
-                await second
-            self.assertEqual(queue.pending, 1)
-            self.assertTrue(queue.slots[SCOPE.key].lock.locked())
-            with self.assertRaisesRegex(GrokError, "队列已满"):
-                await queue.run(replace(CONFIG, max_pending=1), "three", AsyncMock(), SCOPE)
-            release.set()
-            await first
-        self.assertEqual(queue.pending, 0)
-        self.assertEqual(queue.slots, {})
-        self.assertEqual(queue.active, 0)
-
-    async def test_queue_wait_timeout_never_sends_that_prompt(self):
-        queue = handlers.RequestQueue()
-        entered, release = asyncio.Event(), asyncio.Event()
-
-        async def ask(*_):
-            entered.set()
-            await release.wait()
-            return "done"
-
-        with patch.object(handlers, "ask", side_effect=ask) as call:
-            first = asyncio.create_task(queue.run(CONFIG, "one", AsyncMock(), SCOPE))
-            await entered.wait()
-            with self.assertRaisesRegex(GrokError, "尚未发送"):
-                await queue.run(replace(CONFIG, timeout=.01), "prompt", AsyncMock(), SCOPE)
-            self.assertEqual(call.await_count, 1)
-            release.set()
-            await first
-        self.assertEqual(queue.pending, 0)
-        self.assertEqual(queue.slots, {})
+        target.send.side_effect = send
+        await handlers.send_reply(target, Reply("x" * 2001), reply_to=lambda: not interrupted)
+        self.assertEqual([call.kwargs["reply_to"] for call in target.send.await_args_list], [True, False])
 
     async def test_help_quotes_images_and_length_validation(self):
         for alias in ("grok", "grokbot"):

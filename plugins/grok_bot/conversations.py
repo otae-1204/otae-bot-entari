@@ -64,7 +64,8 @@ class SessionStore:
     """Atomic bindings; pending creation survives cancellation and lost replies.
 
     The application run lock excludes other bot processes using this data dir.
-    Per-conversation async locks are held by RequestQueue throughout resolution.
+    RequestQueue gives each scope one receiver, which resolves its binding once;
+    a repair cannot run concurrently with that scope's receiver.
     """
 
     def __init__(self, path: Path = Path("data/grok_bot/sessions.json")):

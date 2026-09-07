@@ -21,6 +21,7 @@ class ReplyRelay:
         self.worker: asyncio.Task | None = None
         self.budget = DownloadBudget()
         self.delivered = False
+        self.pending_files = 0
 
     async def emit(self, reply: Reply) -> None:
         try:
@@ -55,15 +56,18 @@ class ReplyRelay:
                     await self.emit(Reply(f"本次附件超过 {MAX_REPLY_FILES} 个，其余附件请在 Grok Bot 应用中查看。"))
                 continue
             self.files.put_nowait(item)
+            self.pending_files += 1
             if self.worker is None:
                 self.worker = asyncio.create_task(self.forward_files())
 
     async def forward_files(self) -> None:
         while (item := await self.files.get()) is not None:
-            completed = await self.gateway.collect_attachment(item, self.budget)
-            # The next file cannot hold up this completed file. Text polling
-            # runs separately and can still deliver during download/upload.
-            await self.emit(Reply(attachments=(completed,)))
+            try:
+                completed = await self.gateway.collect_attachment(item, self.budget)
+                # Text polling runs separately during download/upload.
+                await self.emit(Reply(attachments=(completed,)))
+            finally:
+                self.pending_files -= 1
 
     async def finish(self) -> None:
         if self.worker is not None:

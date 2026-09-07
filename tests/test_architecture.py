@@ -430,6 +430,16 @@ async def check_grok_quoted_dispatch():
         assert run.await_args.kwargs['images'] == ('https://cdn.example/quoted-only.png',)
         assert '请描述并分析这些图片' in run.await_args.args[1]
 
+    async def interrupted_run(*args, on_reply, **kwargs):
+        await on_reply(grok.Reply('插入后的回答'), reply_to=False)
+        return grok.Reply()
+
+    with patch.object(grok.GrokConfig, 'from_env', return_value=SimpleNamespace()), \\
+         patch.object(grok.queue, 'run', interrupted_run), patch.object(Session, 'send', AsyncMock(return_value=[])) as send:
+        await publish(quote_event([Quote('quoted-id'), At('quoted-user'), Text(' /grok 追加')]), scope='.commands')
+        send.assert_awaited_once()
+        assert send.await_args.kwargs['reply_to'] is False
+
 asyncio.get_event_loop().run_until_complete(check_grok_quoted_dispatch())
 print('CONTRACT ' + json.dumps({'plugins': sorted(expected), 'jobs': jobs}, ensure_ascii=False))
 """

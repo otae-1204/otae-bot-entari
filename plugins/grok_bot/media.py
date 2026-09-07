@@ -209,7 +209,7 @@ async def send_llonebot_file(session, attachment: Attachment, name: str) -> None
         raise GrokError("LLOneBot 文件上传或发送失败，请检查适配器的群文件或私聊文件支持。")
 
 
-async def send_attachment(session, attachment: Attachment) -> None:
+async def send_attachment(session, attachment: Attachment, *, reply_to=True) -> None:
     if attachment.data is None:
         raise GrokError(attachment.error or "附件内容不可用，请在 Grok Bot 应用中查看。")
     name = filename(attachment.name, "image.jpg" if attachment.image else "attachment.bin")
@@ -232,7 +232,8 @@ async def send_attachment(session, attachment: Attachment) -> None:
         # File-only messages work with QQ bridges that reject mixed file/text.
         from arclet.entari import MessageChain
 
-        receipts = await asyncio.wait_for(session.send(MessageChain([element]), reply_to=attachment.image), 60)
+        quote = (reply_to() if callable(reply_to) else reply_to) and attachment.image
+        receipts = await asyncio.wait_for(session.send(MessageChain([element]), reply_to=quote), 60)
         if not receipts:
             raise GrokError("适配器未确认附件发送，请在 Grok Bot 应用中查看。")
     except asyncio.CancelledError:

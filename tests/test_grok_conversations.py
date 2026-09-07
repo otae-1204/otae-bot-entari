@@ -338,78 +338,6 @@ class ConcurrentTests(unittest.IsolatedAsyncioTestCase):
         self.enterContext(patch.object(handlers, "feature_store", self.store))
         self.config = GrokConfig(max_concurrent=2)
 
-    async def test_same_group_backlog_does_not_block_parallel_group(self):
-        queue = handlers.RequestQueue()
-        first_started, other_started, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
-        order = []
-
-        async def ask(_, text, scope):
-            order.append(text)
-            if text == "first":
-                first_started.set()
-                await release.wait()
-            if scope == self.other:
-                other_started.set()
-            return text
-
-        with patch.object(handlers, "ask", side_effect=ask):
-            first = asyncio.create_task(queue.run(self.config, "first", AsyncMock(), SCOPE))
-            await asyncio.wait_for(first_started.wait(), 1)
-            second = asyncio.create_task(queue.run(self.config, "second", AsyncMock(), SCOPE))
-            third = asyncio.create_task(queue.run(self.config, "other", AsyncMock(), self.other))
-            await asyncio.wait_for(other_started.wait(), 1)
-            self.assertEqual(order, ["first", "other"])
-            release.set()
-            self.assertEqual(await asyncio.gather(first, second, third), ["first", "second", "other"])
-        self.assertEqual((queue.active, queue.pending, queue.slots), (0, 0, {}))
-
-    async def test_global_limit_and_cancellation_of_capacity_waiter(self):
-        queue = handlers.RequestQueue()
-        entered, release = asyncio.Event(), asyncio.Event()
-        config = replace(self.config, max_concurrent=1)
-
-        async def ask(*_):
-            entered.set()
-            await release.wait()
-            return "done"
-
-        with patch.object(handlers, "ask", side_effect=ask) as call:
-            first = asyncio.create_task(queue.run(config, "first", AsyncMock(), SCOPE))
-            await asyncio.wait_for(entered.wait(), 1)
-            second = asyncio.create_task(queue.run(config, "other", AsyncMock(), self.other))
-            await asyncio.sleep(.01)
-            self.assertEqual(call.await_count, 1)
-            second.cancel()
-            with self.assertRaises(asyncio.CancelledError):
-                await second
-            self.assertEqual((queue.active, queue.pending), (1, 1))
-            self.assertNotIn(self.other.key, queue.slots)
-            release.set()
-            await first
-        self.assertEqual((queue.active, queue.pending, queue.slots), (0, 0, {}))
-
-    async def test_disabling_while_queued_prevents_submission(self):
-        queue = handlers.RequestQueue()
-        entered, release = asyncio.Event(), asyncio.Event()
-
-        async def ask(*_):
-            entered.set()
-            await release.wait()
-            return "done"
-
-        with patch.object(handlers, "ask", side_effect=ask) as call:
-            first = asyncio.create_task(queue.run(self.config, "first", AsyncMock(), SCOPE))
-            await asyncio.wait_for(entered.wait(), 1)
-            second = asyncio.create_task(queue.run(self.config, "second", AsyncMock(), SCOPE))
-            await asyncio.sleep(0)
-            self.store.set_enabled(SCOPE.feature_scope, "grok_bot", False)
-            release.set()
-            await first
-            with self.assertRaisesRegex(GrokError, "已关闭"):
-                await second
-            self.assertEqual(call.await_count, 1)
-        self.assertEqual(queue.slots, {})
-
     async def test_private_default_off_and_only_superuser_can_opt_in_own_chat(self):
         private = session(private=True, user="root")
         other = session(private=True, user="member")
@@ -443,24 +371,3 @@ class ConcurrentTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(run.await_args.args[3], SCOPE)
             await handlers.handle_grok(current, message("修复会话 101"))
             self.assertNotIn("repair_only", run.await_args.kwargs)
-
-    async def test_repair_waits_for_same_scope_request_and_never_sends_a_prompt(self):
-        queue = handlers.RequestQueue()
-        entered, release = asyncio.Event(), asyncio.Event()
-
-        async def ask(*_):
-            entered.set()
-            await release.wait()
-            return "answer"
-
-        with patch.object(handlers, "ask", side_effect=ask) as ask_call, patch.object(handlers, "repair", return_value="repaired") as repair:
-            first = asyncio.create_task(queue.run(self.config, "question", AsyncMock(), SCOPE))
-            await asyncio.wait_for(entered.wait(), 1)
-            second = asyncio.create_task(queue.run(self.config, "", AsyncMock(), SCOPE, repair_only=True))
-            await asyncio.sleep(.01)
-            repair.assert_not_awaited()
-            release.set()
-            self.assertEqual(await asyncio.gather(first, second), ["answer", "repaired"])
-            ask_call.assert_awaited_once()
-            repair.assert_awaited_once_with(self.config, SCOPE)
-        self.assertEqual((queue.active, queue.pending, queue.slots), (0, 0, {}))

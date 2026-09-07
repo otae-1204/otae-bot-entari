@@ -1,7 +1,7 @@
 """HTTP gateway protocol checked against adam91holt/grokbot-sdk c14347f.
 
-The gateway accepts prompts asynchronously. Read only replies anchored to our
-unique prompt, and keep the caller's per-agent lock until polling has finished.
+The gateway accepts prompts asynchronously. The QQ receiver reads from its first
+unique prompt; the standalone ask helper retains strict one-question matching.
 """
 
 from __future__ import annotations
@@ -96,7 +96,8 @@ def attachments_from(message: dict) -> list[Attachment]:
     return result
 
 
-def reply_from(entries: list[dict], marker: str, *, include_assistant: bool = True, limit_attachments: bool = True) -> Reply | None:
+def reply_from(entries: list[dict], marker: str, *, include_assistant: bool = True, limit_attachments: bool = True,
+               allow_intervening: bool = False) -> Reply | None:
     """An old answer or another user's prompt must never satisfy this request."""
     anchor = None
     for index, row in enumerate(entries):
@@ -106,7 +107,7 @@ def reply_from(entries: list[dict], marker: str, *, include_assistant: bool = Tr
         return None
     outgoing, assistant, attachments = [], [], []
     for row in entries[anchor + 1:]:
-        if row.get("role") == "user":
+        if row.get("role") == "user" and not allow_intervening:
             raise GrokError("Grok Bot 会话中出现了另一条输入，无法可靠对应本次回答。请在应用中查看结果。")
         if row.get("streaming") is True:
             continue
@@ -345,6 +346,34 @@ class Gateway:
 
     async def transcript(self, marker: str) -> Reply | None:
         return reply_from(await self.transcript_entries(marker), marker)
+
+    async def submit(self, prompt: str, nonce: str, attachments: tuple[Attachment, ...] = ()) -> None:
+        content = f"[QQ请求编号:{nonce}]\n{prompt}\n\n请直接回答本次问题，回复中无需包含请求编号。"
+        body = {"agentId": self.config.agent_id, "prompt": content, "clientNonce": nonce}
+        if attachments:
+            body["attachmentPaths"] = [item.source for item in attachments]
+            body["attachmentNames"] = [item.name for item in attachments]
+        accepted = await self.request("sendPrompt", body)
+        if not isinstance(accepted, dict) or accepted.get("accepted") is not True:
+            raise GrokError("Grok Bot 未确认接受本次问题，请在应用中检查状态；本次未重复提交。")
+
+    async def acceptance(self, nonce: str) -> str:
+        payload = await self.request("promptAcceptanceStatus", {"accountSlot": "host", "clientNonce": nonce})
+        if not isinstance(payload, dict):
+            raise GrokError(PROTOCOL_ERROR)
+        outcome = payload.get("outcome")
+        if outcome == "found":
+            record = payload.get("record")
+            if not isinstance(record, dict) or record.get("clientNonce") != nonce or record.get("agentId") != self.config.agent_id:
+                raise GrokError(PROTOCOL_ERROR)
+            if record.get("status") not in {"pending", "accepted", "rejected"}:
+                raise GrokError(PROTOCOL_ERROR)
+            return record["status"]
+        if outcome == "not-found":
+            return "pending"
+        if outcome == "unknown-durability":
+            return outcome
+        raise GrokError(PROTOCOL_ERROR)
 
     async def ask(self, prompt: str, attachments: tuple[Attachment, ...] = (), *,
                   on_reply: Callable[[Reply], Awaitable[None]] | None = None) -> Reply:
