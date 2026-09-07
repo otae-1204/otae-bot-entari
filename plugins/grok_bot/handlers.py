@@ -43,7 +43,8 @@ class RequestQueue:
         self.pending = 0
 
     async def run(self, config: GrokConfig, prompt: str, progress: Callable[[str], Awaitable[None]], scope: ConversationScope,
-                  *, repair_only: bool = False, images: tuple[str, ...] = (), account=None) -> Reply | str:
+                  *, repair_only: bool = False, images: tuple[str, ...] = (), account=None,
+                  on_reply: Callable[[Reply], Awaitable[None]] | None = None) -> Reply | str:
         if self.pending >= config.max_pending:
             raise GrokError("Grok Bot 等待队列已满，请稍后重试。")
         slot = self.slots.setdefault(scope.key, SessionSlot())
@@ -72,9 +73,10 @@ class RequestQueue:
                 raise GrokError("当前会话的 Grok Bot 已关闭，本次问题尚未发送。")
             if repair_only:
                 return await repair(config, scope)
-            if images:
-                return await ask(config, prompt, scope, images=images, account=account)
-            return await ask(config, prompt, scope)
+            kwargs = {"images": images, "account": account} if images else {}
+            if on_reply is not None:
+                kwargs["on_reply"] = on_reply
+            return await ask(config, prompt, scope, **kwargs)
         finally:
             if running:
                 async with self.capacity:
@@ -175,7 +177,12 @@ async def handle_grok(session: Session, result: Arparma):
         # Group members share a conversation but must remain distinguishable.
         user_id = str(getattr(getattr(session.event, "user", None), "id", "") or "")
         text = f"[本次发言者 ID：{user_id}]\n{text}"
-        answer = await queue.run(config, text, progress, scope, **({"images": images, "account": session.account} if images else {}))
+
+        async def deliver(reply: Reply):
+            await send_reply(session, reply)
+
+        answer = await queue.run(config, text, progress, scope, on_reply=deliver,
+                                 **({"images": images, "account": session.account} if images else {}))
         await send_reply(session, answer)
     except GrokError as error:
         await send_text(session, str(error))

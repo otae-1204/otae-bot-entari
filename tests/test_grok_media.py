@@ -22,6 +22,7 @@ from plugins.grok_bot import conversations, gateway, handlers, media
 from plugins.grok_bot.config import GrokConfig, GrokError
 from plugins.grok_bot.conversations import ConversationScope, SessionStore
 from plugins.grok_bot.media import Attachment, Reply
+from plugins.grok_bot.relay import ReplyRelay
 
 
 def png() -> bytes:
@@ -289,6 +290,158 @@ class MediaHost:
 
 
 class GatewayMediaTests(unittest.IsolatedAsyncioTestCase):
+    async def test_streaming_pipeline_delivers_text_and_each_file_before_idle_without_duplicates(self):
+        host = MediaHost()
+        original = host.respond
+        idle, text_sent, first_file_sent = asyncio.Event(), asyncio.Event(), asyncio.Event()
+        release_second, second_started = asyncio.Event(), asyncio.Event()
+        delivered = []
+
+        def respond(request):
+            command = request.url.path.rsplit("/", 1)[-1]
+            response = original(request)
+            if command == "getAsyncTasks" and host.prompt and not idle.is_set():
+                return httpx.Response(200, json=[{"id": "still-running"}])
+            if command == "getAgentTranscriptTail":
+                payload = response.json()
+                payload["entries"][3]["message"]["content"] = "先发正文"
+                if second_started.is_set():
+                    payload["entries"].append({"kind": "send-message", "message": {"type": "text", "content": "后续正文"}})
+                return httpx.Response(200, json=payload)
+            return response
+
+        host.respond = respond
+        original_read = gateway.Gateway.read_attachment
+
+        async def read(api, item, limit):
+            self.assertTrue(text_sent.is_set())
+            if item.name == "report.txt":
+                second_started.set()
+                await release_second.wait()
+            return await original_read(api, item, limit)
+
+        async def deliver(reply):
+            delivered.append(reply)
+            if reply.text == "先发正文":
+                text_sent.set()
+            if reply.attachments:
+                first_file_sent.set()
+
+        with tempfile.TemporaryDirectory() as directory:
+            switches = GroupFeatureStore(Path(directory) / "switches.json")
+            switches.set_enabled(SCOPE.feature_scope, "grok_bot", True)
+            queue = handlers.RequestQueue()
+            with patch.object(conversations, "make_client", side_effect=host.client), \
+                 patch.object(conversations, "session_store", SessionStore(Path(directory) / "sessions.json")), \
+                 patch.object(handlers, "feature_store", switches), patch.object(gateway.Gateway, "read_attachment", read):
+                task = asyncio.create_task(queue.run(CONFIG, "问题", AsyncMock(), SCOPE, on_reply=deliver))
+                try:
+                    await asyncio.wait_for(first_file_sent.wait(), 1)
+                    await asyncio.wait_for(second_started.wait(), 1)
+                    # More text must get through while the second file is blocked.
+                    for _ in range(100):
+                        if any(reply.text == "后续正文" for reply in delivered):
+                            break
+                        await asyncio.sleep(.001)
+                    self.assertTrue(any(reply.text == "后续正文" for reply in delivered))
+                    self.assertFalse(task.done())
+                    self.assertTrue(queue.slots[SCOPE.key].lock.locked())
+                    self.assertEqual(sum(bool(reply.attachments) for reply in delivered), 1)
+                    release_second.set()
+                    idle.set()
+                    result = await asyncio.wait_for(task, 1)
+                finally:
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+        self.assertEqual(result, Reply())
+        self.assertEqual([reply.text for reply in delivered if reply.text], ["先发正文", "后续正文"])
+        self.assertEqual([item.data for reply in delivered for item in reply.attachments], [png(), b"report bytes"])
+        self.assertEqual(queue.pending, 0)
+        self.assertEqual(sum(command == "sendPrompt" for command, _ in host.calls), 1)
+
+    async def test_relay_limits_and_repeated_snapshots_apply_to_whole_question(self):
+        api = gateway.Gateway(CONFIG, None)
+        deliver = AsyncMock()
+        relay = ReplyRelay(api, deliver)
+        attachments = tuple(Attachment(f"{i}.txt", f"/out/{i}.txt") for i in range(media.MAX_REPLY_FILES + 2))
+        with patch.object(api, "read_attachment", AsyncMock(return_value=(b"12", "text/plain"))) as read:
+            relay.budget.remaining = 2
+            await relay.publish(Reply("x" * 20001, attachments))
+            await relay.publish(Reply("x" * 20001 + "追加正文", attachments))
+            await relay.finish()
+        texts = [call.args[0].text for call in deliver.await_args_list if call.args[0].text]
+        self.assertEqual(sum("回答过长" in text for text in texts), 1)
+        self.assertEqual(sum("附件超过" in text for text in texts), 1)
+        self.assertNotIn("追加正文", "".join(texts))
+        self.assertEqual(read.await_count, 1)
+        self.assertEqual(len([call for call in deliver.await_args_list if call.args[0].attachments]), media.MAX_REPLY_FILES)
+
+    async def test_relay_does_not_resend_when_attachment_metadata_changes(self):
+        api = gateway.Gateway(CONFIG, None)
+        deliver = AsyncMock()
+        relay = ReplyRelay(api, deliver)
+        item = Attachment("photo.png", "/out/photo.png")
+        with patch.object(api, "read_attachment", AsyncMock(return_value=(png(), "image/png"))) as read:
+            await relay.publish(Reply("正文", (item,)))
+            await relay.publish(Reply("正文", (replace(item, mime="image/png", image=True),)))
+            await relay.finish()
+        read.assert_awaited_once()
+        self.assertEqual(deliver.await_count, 2)  # One text and one picture.
+        with self.assertRaisesRegex(GrokError, "发生变化"):
+            await relay.publish(Reply("被改写的旧正文"))
+        self.assertEqual(deliver.await_count, 2)
+
+    async def test_attachment_send_failure_is_not_retried_at_finish(self):
+        api = gateway.Gateway(CONFIG, None)
+        deliver = AsyncMock(side_effect=GrokError("发送结果未知"))
+        relay = ReplyRelay(api, deliver)
+        with patch.object(api, "read_attachment", AsyncMock(return_value=(b"file", "text/plain"))):
+            try:
+                await relay.publish(Reply(attachments=(Attachment("file.txt", "/out/file.txt"),)))
+                with self.assertRaisesRegex(GrokError, "发送结果未知"):
+                    await relay.finish()
+            finally:
+                await relay.cancel()
+        deliver.assert_awaited_once()
+
+    async def test_cancelling_conversation_stops_attachment_worker_and_never_resends(self):
+        host = MediaHost()
+        started, stopped = asyncio.Event(), asyncio.Event()
+
+        async def read(*_):
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                stopped.set()
+
+        deliver = AsyncMock()
+        with tempfile.TemporaryDirectory() as directory, patch.object(conversations, "make_client", side_effect=host.client), \
+             patch.object(conversations, "session_store", SessionStore(Path(directory) / "sessions.json")), \
+             patch.object(gateway.Gateway, "read_attachment", read):
+            task = asyncio.create_task(conversations.ask(CONFIG, "问题", SCOPE, on_reply=deliver))
+            await asyncio.wait_for(started.wait(), 1)
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+        self.assertTrue(stopped.is_set())
+        deliver.assert_not_awaited()
+        self.assertEqual(sum(command == "sendPrompt" for command, _ in host.calls), 1)
+
+    async def test_timeout_after_early_reply_does_not_repeat_text(self):
+        host = MediaHost()
+        deliver = AsyncMock()
+
+        async def ask(api, prompt, attachments=(), *, on_reply):
+            await on_reply(Reply("已完成正文"))
+            await asyncio.Event().wait()
+
+        with tempfile.TemporaryDirectory() as directory, patch.object(conversations, "make_client", side_effect=host.client), \
+             patch.object(conversations, "session_store", SessionStore(Path(directory) / "sessions.json")), \
+             patch.object(gateway.Gateway, "ask", ask), self.assertRaisesRegex(GrokError, "已转发当前回复"):
+            await conversations.ask(replace(CONFIG, timeout=.03), "问题", SCOPE, on_reply=deliver)
+        deliver.assert_awaited_once_with(Reply("已完成正文"))
+
     async def test_images_reach_bound_bot_and_attachment_only_reply_is_downloaded_and_sent(self):
         host = MediaHost()
         with tempfile.TemporaryDirectory() as directory:

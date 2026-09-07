@@ -9,7 +9,8 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
-from dataclasses import replace
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, replace
 from urllib.parse import unquote, urlsplit
 from uuid import uuid4
 
@@ -34,6 +35,12 @@ from .media import (
 PROTOCOL_ERROR = "Grok Bot 网关返回了无法识别的数据，请管理员检查网关版本。"
 AWAITING_USER = "Grok Bot 正在等待人工确认，请管理员打开 Grok Bot 应用处理后再提问。"
 CHUNK_BYTES = 1024 * 1024
+
+
+@dataclass
+class DownloadBudget:
+    remaining: int = MAX_REPLY_BYTES
+    seconds: float = REPLY_DOWNLOAD_TIMEOUT
 
 
 def entries_from(payload: object) -> list[dict]:
@@ -80,7 +87,7 @@ def attachments_from(message: dict) -> list[Attachment]:
     return result
 
 
-def reply_from(entries: list[dict], marker: str) -> Reply | None:
+def reply_from(entries: list[dict], marker: str, *, include_assistant: bool = True, limit_attachments: bool = True) -> Reply | None:
     """An old answer or another user's prompt must never satisfy this request."""
     anchor = None
     for index, row in enumerate(entries):
@@ -107,8 +114,8 @@ def reply_from(entries: list[dict], marker: str) -> Reply | None:
             value = row.get("content")
             if isinstance(value, str) and value.strip():
                 assistant.append(value.strip())
-    text = "\n\n".join(outgoing) if outgoing else (assistant[-1] if assistant and not attachments else "")
-    if len(attachments) > MAX_REPLY_FILES:
+    text = "\n\n".join(outgoing) if outgoing else (assistant[-1] if include_assistant and assistant and not attachments else "")
+    if limit_attachments and len(attachments) > MAX_REPLY_FILES:
         text += f"\n\n本次附件超过 {MAX_REPLY_FILES} 个，其余附件请在 Grok Bot 应用中查看。"
         attachments = attachments[:MAX_REPLY_FILES]
     return Reply(text, tuple(attachments)) if text or attachments else None
@@ -217,29 +224,32 @@ class Gateway:
                 mime = mime_type(part.get("mime"))
         return bytes(data), mime
 
+    async def collect_attachment(self, item: Attachment, budget: DownloadBudget) -> Attachment:
+        started = asyncio.get_running_loop().time()
+        try:
+            if budget.remaining <= 0:
+                raise GrokError("本次附件合计已达 50 MB，其余附件请在 Grok Bot 应用中查看。")
+            if budget.seconds <= 0:
+                raise GrokError("本次附件下载超时，其余附件请在 Grok Bot 应用中查看。")
+            data, mime = await asyncio.wait_for(self.read_attachment(item, min(MAX_FILE_BYTES, budget.remaining)), budget.seconds)
+            budget.remaining -= len(data)
+            mime = mime_type(mime) if mime != "application/octet-stream" else item.mime
+            image = mime in {"image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp"}
+            image = image or (item.image and mime == "application/octet-stream")
+            # QQ cannot display SVG/TIFF as pictures; preserve them as files.
+            return replace(item, source="", data=data, mime=mime, image=image)
+        except asyncio.TimeoutError:
+            return replace(item, source="", error="附件下载超时，请在 Grok Bot 应用中查看。")
+        except GrokError as error:
+            return replace(item, source="", error=str(error))
+        finally:
+            # Count download time, excluding model waits and QQ uploads.
+            budget.seconds -= asyncio.get_running_loop().time() - started
+
     async def collect_reply(self, reply: Reply) -> Reply:
         """Copy files while holding the conversation lock; retain partial success."""
-        result = []
-        remaining = MAX_REPLY_BYTES
-        deadline = asyncio.get_running_loop().time() + REPLY_DOWNLOAD_TIMEOUT
-        for item in reply.attachments:
-            try:
-                timeout = deadline - asyncio.get_running_loop().time()
-                if remaining <= 0:
-                    raise GrokError("本次附件合计已达 50 MB，其余附件请在 Grok Bot 应用中查看。")
-                if timeout <= 0:
-                    raise GrokError("本次附件下载超时，其余附件请在 Grok Bot 应用中查看。")
-                data, mime = await asyncio.wait_for(self.read_attachment(item, min(MAX_FILE_BYTES, remaining)), timeout)
-                remaining -= len(data)
-                mime = mime_type(mime) if mime != "application/octet-stream" else item.mime
-                image = mime in {"image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp"}
-                image = image or (item.image and mime == "application/octet-stream")
-                # QQ cannot display SVG/TIFF as pictures; preserve them as files.
-                result.append(replace(item, source="", data=data, mime=mime, image=image))
-            except asyncio.TimeoutError:
-                result.append(replace(item, source="", error="附件下载超时，请在 Grok Bot 应用中查看。"))
-            except GrokError as error:
-                result.append(replace(item, source="", error=str(error)))
+        budget = DownloadBudget(remaining=MAX_REPLY_BYTES)
+        result = [await self.collect_attachment(item, budget) for item in reply.attachments]
         return replace(reply, attachments=tuple(result))
 
     async def agent(self) -> dict:
@@ -268,7 +278,7 @@ class Gateway:
         busy = bool(row["isRunning"] or row["isComposingMessage"] or tasks or any(item.get("status") == "running" for item in subagents))
         return row, busy
 
-    async def transcript(self, marker: str) -> Reply | None:
+    async def transcript_entries(self, marker: str) -> list[dict]:
         rows, before = [], None
         # Limit memory and RPCs while still finding the prompt behind tool events.
         for _ in range(10):
@@ -278,14 +288,18 @@ class Gateway:
             payload = await self.request("getAgentTranscriptTail", body)
             rows = entries_from(payload) + rows
             if any(row.get("role") == "user" and marker in str(row.get("content", "")) for row in rows):
-                return reply_from(rows, marker)
+                return rows
             cursor = payload.get("nextBeforeSeq") if isinstance(payload, dict) else None
             if not isinstance(cursor, int) or cursor == before:
-                return None
+                return []
             before = cursor
         raise GrokError("Grok Bot 任务记录过长，无法可靠定位本次回答，请在应用中查看结果。")
 
-    async def ask(self, prompt: str, attachments: tuple[Attachment, ...] = ()) -> Reply:
+    async def transcript(self, marker: str) -> Reply | None:
+        return reply_from(await self.transcript_entries(marker), marker)
+
+    async def ask(self, prompt: str, attachments: tuple[Attachment, ...] = (), *,
+                  on_reply: Callable[[Reply], Awaitable[None]] | None = None) -> Reply:
         # Wait for app-initiated or previously timed-out work before adding input.
         while True:
             _, busy = await self.state()
@@ -322,11 +336,20 @@ class Gateway:
                 pending = True
             elif outcome != "unknown-durability":
                 raise GrokError(PROTOCOL_ERROR)
+            entries = None
+            if on_reply is not None and not pending:
+                entries = await self.transcript_entries(marker)
+                outgoing = reply_from(entries, marker, include_assistant=False, limit_attachments=False)
+                if outgoing:
+                    # A completed send-message is already visible in the app.
+                    # Forward it before waiting on background/subagent state.
+                    await on_reply(outgoing)
             _, busy = await self.state()
             if busy or pending:
                 previous_reply = None
             else:
-                reply = await self.transcript(marker)
+                reply = (reply_from(entries, marker, limit_attachments=False)
+                         if entries is not None else await self.transcript(marker))
                 # Two idle snapshots avoid returning a transient intermediate text.
                 if reply and reply == previous_reply:
                     return reply

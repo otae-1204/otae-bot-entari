@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import tempfile
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from threading import RLock
@@ -20,6 +21,7 @@ from otae_bot.group_features import GroupScope
 from .config import GatewayError, GrokConfig, GrokError
 from .gateway import PROTOCOL_ERROR, Gateway, make_client
 from .media import Reply, input_images
+from .relay import ReplyRelay
 
 
 @dataclass(frozen=True)
@@ -256,20 +258,38 @@ async def repair(config: GrokConfig, scope: ConversationScope) -> str:
             raise GrokError("Grok Bot 会话修复检查超时，请检查网关连接后重试。") from None
 
 
-async def ask(config: GrokConfig, prompt: str, scope: ConversationScope, *, images: tuple[str, ...] = (), account=None) -> Reply:
+async def ask(config: GrokConfig, prompt: str, scope: ConversationScope, *, images: tuple[str, ...] = (), account=None,
+              on_reply: Callable[[Reply], Awaitable[None]] | None = None) -> Reply:
     async with make_client() as client:
+        relay = None
+
         async def request():
+            nonlocal relay
             prepared = await input_images(images, account) if images else ()
             agent_id = await resolve_agent(Gateway(config, client), scope, session_store)
             gateway = Gateway(replace(config, agent_id=agent_id), client)
             uploaded = await gateway.upload_images(prepared) if prepared else ()
-            reply = await gateway.ask(prompt, uploaded) if uploaded else await gateway.ask(prompt)
+            if on_reply is not None:
+                relay = ReplyRelay(gateway, on_reply)
+                reply = await gateway.ask(prompt, uploaded, on_reply=relay.publish)
+            else:
+                reply = await gateway.ask(prompt, uploaded) if uploaded else await gateway.ask(prompt)
             return gateway, reply
 
         try:
-            gateway, reply = await asyncio.wait_for(request(), timeout=config.timeout)
-        except asyncio.TimeoutError:
-            raise GrokError(f"Grok Bot 本次等待超过 {config.timeout:g} 秒，任务可能仍在云端运行，请在应用中查看。") from None
-        # Download has its own shared budget so a slow attachment cannot erase
-        # the completed text answer. RequestQueue still holds the scope lock.
-        return await gateway.collect_reply(reply)
+            try:
+                gateway, reply = await asyncio.wait_for(request(), timeout=config.timeout)
+            except asyncio.TimeoutError:
+                if relay is not None:
+                    await relay.finish()
+                    if relay.delivered:
+                        raise GrokError(f"已转发当前回复，但云端任务在 {config.timeout:g} 秒内未结束；后续结果请在 Grok Bot 应用中查看。") from None
+                raise GrokError(f"Grok Bot 本次等待超过 {config.timeout:g} 秒，任务可能仍在云端运行，请在应用中查看。") from None
+            if relay is not None:
+                await relay.publish(reply)
+                await relay.finish()
+                return Reply()  # Already delivered; do not send the final snapshot again.
+            return await gateway.collect_reply(reply)
+        finally:
+            if relay is not None:
+                await relay.cancel()

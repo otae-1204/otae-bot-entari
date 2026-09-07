@@ -17,6 +17,7 @@ from otae_bot.group_features import GroupFeatureStore
 from plugins.grok_bot import gateway, handlers
 from plugins.grok_bot.config import GrokConfig, GrokError
 from plugins.grok_bot.conversations import ConversationScope
+from plugins.grok_bot.media import Reply
 
 AGENT = "00000000-0000-4000-8000-000000000001"
 CONFIG = GrokConfig(base_url="http://grok.test:1340", token="private-token", agent_id=AGENT, poll_interval=0)
@@ -118,6 +119,49 @@ class ConfigTests(unittest.TestCase):
 
 
 class GatewayTests(unittest.IsolatedAsyncioTestCase):
+    async def test_completed_outgoing_text_is_published_before_background_tasks_finish(self):
+        host = Host()
+        published = []
+
+        async def publish(reply):
+            published.append((host.polls, reply))
+
+        async with host.client() as client:
+            result = await gateway.Gateway(CONFIG, client).ask("问题", on_reply=publish)
+        self.assertEqual(published[0][0], 2)  # Accepted, but async/subagent tasks still run.
+        self.assertEqual(published[0][1].text, host.answer)
+        self.assertGreaterEqual(host.polls, 5)  # Conversation remains occupied until idle.
+        self.assertEqual(result.text, host.answer)
+        self.assertTrue(all(reply.text == host.answer for _, reply in published))
+
+    async def test_early_publish_excludes_streaming_and_assistant_fallback(self):
+        host = Host()
+        host.override["getAgentTranscriptTail"] = lambda _: {"entries": [
+            {"role": "user", "content": host.prompt},
+            {"role": "assistant", "content": "内部中间记录"},
+            {"kind": "send-message", "streaming": True, "message": {"type": "text", "content": "未完成"}},
+        ]}
+        publish = AsyncMock()
+        async with host.client() as client:
+            reply = await gateway.Gateway(CONFIG, client).ask("问题", on_reply=publish)
+        publish.assert_not_awaited()
+        self.assertGreaterEqual(host.polls, 5)
+        self.assertEqual(reply.text, "内部中间记录")  # Legacy fallback only after stable idle.
+
+    async def test_early_publish_rejects_intervening_input_and_missing_anchor(self):
+        for intervening in (False, True):
+            host = Host()
+            host.override["getAgentTranscriptTail"] = lambda _, fixture=host, other=intervening: {"entries": [
+                {"role": "user", "content": fixture.prompt if other else "old question"},
+                *([{"role": "user", "content": "another question"}] if other else []),
+                {"kind": "send-message", "message": {"type": "text", "content": "不可转发"}},
+            ]}
+            publish = AsyncMock()
+            async with host.client() as client:
+                with self.subTest(intervening=intervening), self.assertRaises(GrokError if intervening else asyncio.TimeoutError):
+                    await asyncio.wait_for(gateway.Gateway(CONFIG, client).ask("问题", on_reply=publish), .05)
+            publish.assert_not_awaited()
+
     async def test_complete_request_waits_for_acceptance_tasks_and_full_answer(self):
         host = Host()
         async with host.client() as client:
@@ -275,11 +319,23 @@ class HandlerTests(unittest.IsolatedAsyncioTestCase):
         self.store.set_enabled(SCOPE.feature_scope, "grok_bot", True)
         self.enterContext(patch.object(handlers, "feature_store", self.store))
 
+    async def test_handler_forwards_early_reply_and_does_not_repeat_at_completion(self):
+        target = session()
+
+        async def run(*args, on_reply, **kwargs):
+            await on_reply(Reply("已经完成的正文"))
+            self.assertEqual(str(target.send.await_args.args[0]), "已经完成的正文")
+            return Reply()
+
+        with patch.object(GrokConfig, "from_env", return_value=CONFIG), patch.object(handlers.queue, "run", side_effect=run):
+            await handlers.handle_grok(target, result("问题"))
+        target.send.assert_awaited_once()
+
     async def test_same_user_can_queue_multiple_questions_and_replies_stay_local(self):
         queue = handlers.RequestQueue()
         first_started, release = asyncio.Event(), asyncio.Event()
 
-        async def ask(_, text, scope):
+        async def ask(_, text, scope, **kwargs):
             self.assertEqual(scope, SCOPE)
             if text.endswith("one"):
                 first_started.set()
