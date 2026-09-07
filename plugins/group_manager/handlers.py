@@ -8,11 +8,13 @@ from otae_bot.adapters.entari import ArgVal, Session, cmd, get_rest
 from otae_bot.adapters.feature_gate import loaded_group_plugins
 from otae_bot.group_features import (
     PROTECTED_PLUGINS,
+    SUPERUSER_ENABLE_PLUGINS,
     feature_store,
     plugin_label,
     resolve_plugin,
     scope_from_event,
 )
+from otae_bot.permissions import is_superuser
 
 from .permissions import can_manage
 
@@ -20,6 +22,7 @@ HELP = """本群插件开关（仅 SuperUser、本群管理员或群主可用）
 /功能 列表：查看本群插件状态
 /功能 关闭 hyw：关闭本群 HYW 问答
 /功能 开启 hyw：恢复本群 HYW 问答
+Grok Bot 默认关闭，仅 SuperUser 可用 /功能 开启 grok 开启本群；管理员和群主可关闭。
 可使用插件名或别名，如 ef、steam、bili、mc、tibo。
 只影响当前机器人在本群的功能，重启后保留；不接受群号参数。
 别名：/插件、/plugin。"""
@@ -48,7 +51,8 @@ async def handle_group_features(session: Session, rest: ArgVal[str]):
                 if name in PROTECTED_PLUGINS:
                     continue
                 status = "开启" if feature_store.is_enabled(scope, name) else "关闭"
-                lines.append(f"[{status}] {name} · {plugin_label(name)}")
+                restriction = "（仅 SuperUser 可开启）" if name in SUPERUSER_ENABLE_PLUGINS else ""
+                lines.append(f"[{status}] {name} · {plugin_label(name)}{restriction}")
             lines.append("用法：/功能 关闭 hyw 或 /功能 开启 hyw")
             lines.append("群管理和全局请求处理插件不支持群开关。")
             await feature_cmd.finish("\n".join(lines))
@@ -66,6 +70,9 @@ async def handle_group_features(session: Session, rest: ArgVal[str]):
             await feature_cmd.finish("群管理和全局请求处理插件不支持群开关。")
             return
         enabled = actions[parts[0].casefold()]
+        if enabled and name in SUPERUSER_ENABLE_PLUGINS and not is_superuser(session.event):
+            await feature_cmd.finish(f"仅 SuperUser 可开启 {plugin_label(name)}，本群管理员和群主可关闭。")
+            return
         changed = feature_store.set_enabled(scope, name, enabled)
     except (OSError, ValueError) as exc:
         logger.error("[group_manager] switch storage failed error_type={}", type(exc).__name__)

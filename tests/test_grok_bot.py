@@ -2,17 +2,21 @@ from __future__ import annotations
 
 import asyncio
 import json
+import tempfile
 import unittest
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import httpx
 from arclet.entari import MessageChain
-from satori import Image, MessageObject, Text
+from satori import ChannelType, Image, MessageObject, Text
 
+from otae_bot.group_features import GroupFeatureStore
 from plugins.grok_bot import gateway, handlers
 from plugins.grok_bot.config import GrokConfig, GrokError
+from plugins.grok_bot.conversations import ConversationScope
 
 AGENT = "00000000-0000-4000-8000-000000000001"
 CONFIG = GrokConfig(base_url="http://grok.test:1340", token="private-token", agent_id=AGENT, poll_interval=0)
@@ -93,6 +97,7 @@ class ConfigTests(unittest.TestCase):
             "GROKBOT_AGENT_ID": ["QQBOT", "not-a-uuid"],
             "GROKBOT_TIMEOUT": [0, 1801, "bad", "NaN"],
             "GROKBOT_MAX_PENDING": [0, 33, "bad", True, 1.5],
+            "GROKBOT_MAX_CONCURRENT": [0, 17, "bad", True, 1.5],
         }.items():
             for value in values:
                 with self.subTest(key=key, value=value), self.assertRaises(GrokError) as caught:
@@ -104,6 +109,12 @@ class ConfigTests(unittest.TestCase):
             gateway.make_client()
         self.assertIs(client.call_args.kwargs["trust_env"], False)
         self.assertIs(client.call_args.kwargs["follow_redirects"], False)
+
+    def test_reference_agent_is_optional_and_default_persona_is_loadable(self):
+        config = self.load(GROKBOT_AGENT_ID="")
+        self.assertEqual(config.agent_id, "")
+        self.assertEqual(config.max_concurrent, 4)
+        self.assertIn("花园多惠", config.persona())
 
 
 class GatewayTests(unittest.IsolatedAsyncioTestCase):
@@ -225,6 +236,12 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(health.method, "GET")
         self.assertNotIn("Authorization", health.headers)
 
+    async def test_diagnostic_without_reference_agent_only_reads_health_and_roster(self):
+        host = Host()
+        with patch.object(gateway, "make_client", side_effect=host.client):
+            self.assertIn("未创建 Bot", await gateway.check(replace(CONFIG, agent_id="")))
+        self.assertEqual([name for name, _, _ in host.calls], ["health", "listAgents"])
+
     async def test_timeout_is_bounded_and_does_not_interrupt_shared_bot(self):
         host = Host()
         host.override["listAgents"] = lambda _: [{**host.agent(), "isRunning": True}]
@@ -233,8 +250,17 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(any(name in {"sendPrompt", "interruptAgentRun", "deleteAgent"} for name, _, _ in host.calls))
 
 
-def session():
-    return SimpleNamespace(reply=None, send=AsyncMock(return_value=[]))
+SCOPE = ConversationScope("qq", "bot", "group", "100", "100")
+
+
+def session(group="100", user="200", private=False):
+    return SimpleNamespace(
+        reply=None, send=AsyncMock(return_value=[]),
+        account=SimpleNamespace(platform="qq", self_id="bot"),
+        event=SimpleNamespace(user=SimpleNamespace(id=user),
+                              guild=None if private else SimpleNamespace(id=group),
+                              channel=SimpleNamespace(id=group, type=ChannelType.DIRECT if private else ChannelType.TEXT)),
+    )
 
 
 def result(text):
@@ -242,12 +268,20 @@ def result(text):
 
 
 class HandlerTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.store = GroupFeatureStore(Path(directory.name) / "switches.json")
+        self.store.set_enabled(SCOPE.feature_scope, "grok_bot", True)
+        self.enterContext(patch.object(handlers, "feature_store", self.store))
+
     async def test_same_user_can_queue_multiple_questions_and_replies_stay_local(self):
         queue = handlers.RequestQueue()
         first_started, release = asyncio.Event(), asyncio.Event()
 
-        async def ask(_, text):
-            if text == "one":
+        async def ask(_, text, scope):
+            self.assertEqual(scope, SCOPE)
+            if text.endswith("one"):
                 first_started.set()
                 await release.wait()
             return text + "-answer"
@@ -267,7 +301,8 @@ class HandlerTests(unittest.IsolatedAsyncioTestCase):
         for target in (first, second):
             self.assertTrue(all(call.kwargs["reply_to"] for call in target.send.await_args_list))
         self.assertEqual(queue.pending, 0)
-        self.assertFalse(queue.lock.locked())
+        self.assertEqual(queue.slots, {})
+        self.assertEqual(queue.active, 0)
 
     async def test_queue_cancellation_releases_capacity_without_releasing_another_request(self):
         queue = handlers.RequestQueue()
@@ -279,33 +314,42 @@ class HandlerTests(unittest.IsolatedAsyncioTestCase):
             return "done"
 
         with patch.object(handlers, "ask", side_effect=ask):
-            first = asyncio.create_task(queue.run(CONFIG, "one", AsyncMock()))
+            first = asyncio.create_task(queue.run(CONFIG, "one", AsyncMock(), SCOPE))
             await entered.wait()
-            second = asyncio.create_task(queue.run(CONFIG, "two", AsyncMock()))
+            second = asyncio.create_task(queue.run(CONFIG, "two", AsyncMock(), SCOPE))
             await asyncio.sleep(0)
             second.cancel()
             with self.assertRaises(asyncio.CancelledError):
                 await second
             self.assertEqual(queue.pending, 1)
-            self.assertTrue(queue.lock.locked())
+            self.assertTrue(queue.slots[SCOPE.key].lock.locked())
             with self.assertRaisesRegex(GrokError, "队列已满"):
-                await queue.run(replace(CONFIG, max_pending=1), "three", AsyncMock())
+                await queue.run(replace(CONFIG, max_pending=1), "three", AsyncMock(), SCOPE)
             release.set()
             await first
         self.assertEqual(queue.pending, 0)
-        self.assertFalse(queue.lock.locked())
+        self.assertEqual(queue.slots, {})
+        self.assertEqual(queue.active, 0)
 
     async def test_queue_wait_timeout_never_sends_that_prompt(self):
         queue = handlers.RequestQueue()
-        await queue.lock.acquire()
-        try:
-            with patch.object(handlers, "ask", AsyncMock()) as ask:
-                with self.assertRaisesRegex(GrokError, "尚未发送"):
-                    await queue.run(replace(CONFIG, timeout=.01), "prompt", AsyncMock())
-                ask.assert_not_awaited()
-        finally:
-            queue.lock.release()
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def ask(*_):
+            entered.set()
+            await release.wait()
+            return "done"
+
+        with patch.object(handlers, "ask", side_effect=ask) as call:
+            first = asyncio.create_task(queue.run(CONFIG, "one", AsyncMock(), SCOPE))
+            await entered.wait()
+            with self.assertRaisesRegex(GrokError, "尚未发送"):
+                await queue.run(replace(CONFIG, timeout=.01), "prompt", AsyncMock(), SCOPE)
+            self.assertEqual(call.await_count, 1)
+            release.set()
+            await first
         self.assertEqual(queue.pending, 0)
+        self.assertEqual(queue.slots, {})
 
     async def test_help_quotes_images_and_length_validation(self):
         for alias in ("grok", "grokbot"):
@@ -313,7 +357,7 @@ class HandlerTests(unittest.IsolatedAsyncioTestCase):
         target = session()
         with patch.object(GrokConfig, "from_env", side_effect=AssertionError("help needs no config")):
             await handlers.handle_grok(target, result("帮助"))
-        self.assertIn("共用", str(target.send.await_args.args[0]))
+        self.assertIn("独立", str(target.send.await_args.args[0]))
         target.reply = SimpleNamespace(origin=MessageObject("quoted", "引用正文"))
         with patch.object(GrokConfig, "from_env", return_value=CONFIG), patch.object(handlers.queue, "run", AsyncMock(return_value="回答")) as run:
             await handlers.handle_grok(target, result("解释一下"))

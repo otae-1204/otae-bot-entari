@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
@@ -61,6 +62,21 @@ class StoreTests(unittest.TestCase):
         self.assertFalse(self.store.set_enabled(self.scope, "hyw", False))
         self.assertTrue(self.store.set_enabled(self.scope, "hyw", True))
         self.assertTrue(GroupFeatureStore(self.path).is_enabled(self.scope, "hyw"))
+
+    def test_grok_defaults_off_and_v1_migration_preserves_other_switches(self):
+        self.path.write_text(json.dumps({"version": 1, "disabled": {self.scope.key: ["hyw"]}}))
+        self.assertFalse(self.store.is_enabled(self.scope, "grok_bot"))
+        self.assertFalse(self.store.is_enabled(self.scope, "hyw"))
+        self.assertTrue(self.store.set_enabled(self.scope, "grok_bot", True))
+        restarted = GroupFeatureStore(self.path)
+        self.assertTrue(restarted.is_enabled(self.scope, "grok_bot"))
+        self.assertFalse(restarted.is_enabled(self.scope, "hyw"))
+        self.assertFalse(restarted.is_enabled(GroupScope("qq", "300", "101"), "grok_bot"))
+        self.assertFalse(restarted.is_enabled(GroupScope("qq", "301", "100"), "grok_bot"))
+        self.assertFalse(restarted.is_enabled(GroupScope("qq", "300", "100", private=True), "grok_bot"))
+        self.assertEqual(json.loads(self.path.read_text())["version"], 2)
+        self.assertTrue(restarted.set_enabled(self.scope, "grok_bot", False))
+        self.assertFalse(GroupFeatureStore(self.path).is_enabled(self.scope, "grok_bot"))
 
     def test_failed_write_keeps_memory_and_disk_unchanged(self):
         self.store.set_enabled(self.scope, "hyw", False)
@@ -192,7 +208,7 @@ class HandlerTests(unittest.IsolatedAsyncioTestCase):
         self.store = GroupFeatureStore(Path(directory.name) / "switches.json")
         self.enterContext(patch.object(handlers, "feature_store", self.store))
         self.enterContext(patch.object(handlers, "loaded_group_plugins", return_value=[
-            "group_manager", "hyw", "endfield", "request_handler", "steamInfo"]))
+            "group_manager", "hyw", "endfield", "request_handler", "steamInfo", "grok_bot"]))
         self.reply = self.enterContext(patch.object(handlers.feature_cmd, "finish", new_callable=AsyncMock))
         self.enterContext(patch.object(permissions.Config, "SUPERUSERS", ["root"]))
 
@@ -213,6 +229,20 @@ class HandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("[关闭] hyw", await self.run_command(current, "列表"))
         self.assertIn("已开启", await self.run_command(current, "开启 q"))
         self.assertTrue(self.store.is_enabled(scope, "hyw"))
+
+    async def test_only_superuser_enables_grok_but_group_admin_can_disable(self):
+        root = session(user="root")
+        scope = scope_from_event(root.account, root.event)
+        for role in ("admin", "owner"):
+            for action in ("开启 grok", "enable grokbot", "打开 grok_bot"):
+                self.assertIn("仅 SuperUser", await self.run_command(session(roles=[Role(role)]), action))
+                self.assertFalse(self.store.is_enabled(scope, "grok_bot"))
+        self.assertFalse(self.store.path.exists())
+        self.assertIn("已开启", await self.run_command(root, "开启 grok"))
+        self.assertTrue(self.store.is_enabled(scope, "grok_bot"))
+        self.assertIn("仅 SuperUser 可开启", await self.run_command(root, "列表"))
+        self.assertIn("已关闭", await self.run_command(session(roles=[Role("admin")]), "关闭 grok"))
+        self.assertFalse(self.store.is_enabled(scope, "grok_bot"))
 
     async def test_private_superuser_and_ordinary_members_cannot_manage(self):
         self.assertIn("群内", await self.run_command(session(user="root", private=True), "关闭 hyw"))

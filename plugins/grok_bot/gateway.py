@@ -199,5 +199,11 @@ async def check(config: GrokConfig) -> str:
         health = await gateway.request("health")
         if not isinstance(health, dict) or health.get("ok") is not True:
             raise GrokError("Grok Bot 网关健康检查未通过。")
+        config.persona()
+        if not config.agent_id:
+            rows = await gateway.request("listAgents")
+            if not isinstance(rows, list):
+                raise GrokError(PROTOCOL_ERROR)
+            return "Grok Bot 网关、Token 和本地人设模板检查通过。各会话首次提问时创建独立 Bot；本检查未创建 Bot。"
         _, busy = await gateway.state()
-        return "Grok Bot 网关、Token 和目标 Bot 检查通过。" + ("目标 Bot 正在处理任务。" if busy else "目标 Bot 当前空闲。")
+        return "Grok Bot 网关、Token、人设和参考 Bot 检查通过。" + ("参考 Bot 正在处理任务。" if busy else "参考 Bot 当前空闲。") + "问答会使用各会话独立的 Bot。"

@@ -13,6 +13,8 @@ from typing import Any
 from satori import ChannelType
 
 PROTECTED_PLUGINS = {"group_manager", "request_handler"}
+DEFAULT_OFF_PLUGINS = {"grok_bot"}
+SUPERUSER_ENABLE_PLUGINS = {"grok_bot"}
 PLUGIN_NAMES = {
     "McModQuery": ("MC 百科", "mod", "模组", "mcmod"),
     "McWikiQuery": ("MC Wiki", "wiki"),
@@ -53,9 +55,12 @@ class GroupScope:
     platform: str
     self_id: str
     group_id: str
+    private: bool = False
 
     @property
     def key(self) -> str:
+        if self.private:
+            return json.dumps(["private", self.platform, self.self_id, self.group_id], ensure_ascii=False)
         return json.dumps([self.platform, self.self_id, self.group_id], ensure_ascii=False)
 
 
@@ -79,7 +84,7 @@ def scope_from_event(account: Any, event: Any) -> GroupScope | None:
 
 
 class GroupFeatureStore:
-    """Keep only disabled plugins; commit atomically before changing memory.
+    """Keep explicit switches; commit atomically before changing memory.
 
     A bot process is protected by the application's run lock. The local lock
     also serializes updates/reads made by worker threads. Invalid files are
@@ -89,6 +94,7 @@ class GroupFeatureStore:
     def __init__(self, path: Path = Path("data/group_manager/switches.json")):
         self.path = path
         self._disabled: dict[str, set[str]] | None = None
+        self._enabled: dict[str, set[str]] = {}
         self._lock = RLock()
 
     def _load(self) -> dict[str, set[str]]:
@@ -97,14 +103,17 @@ class GroupFeatureStore:
                 data = json.loads(self.path.read_text(encoding="utf-8"))
             except FileNotFoundError:
                 data = {"version": 1, "disabled": {}}
-            if not isinstance(data, dict) or data.get("version") != 1:
+            if not isinstance(data, dict) or data.get("version") not in (1, 2):
                 raise ValueError("invalid group feature store version")
             groups = data.get("disabled")
-            if not isinstance(groups, dict) or any(
-                not isinstance(items, list) or any(not isinstance(item, str) for item in items)
-                for items in groups.values()
-            ):
-                raise ValueError("invalid group feature switches")
+            enabled = data.get("enabled") if data["version"] == 2 else {}
+            for mapping in (groups, enabled):
+                if not isinstance(mapping, dict) or any(
+                    not isinstance(items, list) or any(not isinstance(item, str) for item in items)
+                    for items in mapping.values()
+                ):
+                    raise ValueError("invalid group feature switches")
+            self._enabled = {key: set(items) for key, items in enabled.items()}
             self._disabled = {key: set(items) for key, items in groups.items()}
         return self._disabled
 
@@ -112,7 +121,10 @@ class GroupFeatureStore:
         if scope is None or not plugin or plugin in PROTECTED_PLUGINS:
             return True
         with self._lock:
-            return plugin not in self._load().get(scope.key, set())
+            disabled = self._load().get(scope.key, set())
+            return plugin not in disabled and (
+                plugin not in DEFAULT_OFF_PLUGINS or plugin in self._enabled.get(scope.key, set())
+            )
 
     def set_enabled(self, scope: GroupScope, plugin: str, enabled: bool) -> bool:
         if plugin in PROTECTED_PLUGINS or not plugin:
@@ -120,18 +132,27 @@ class GroupFeatureStore:
         with self._lock:
             current = self._load()
             disabled = set(current.get(scope.key, ()))
-            if (plugin not in disabled) == enabled:
+            if self.is_enabled(scope, plugin) == enabled:
                 return False
+            explicit = set(self._enabled.get(scope.key, ()))
             if enabled:
                 disabled.discard(plugin)
+                explicit.add(plugin)
             else:
                 disabled.add(plugin)
+                explicit.discard(plugin)
             updated = dict(current)
+            updated_enabled = dict(self._enabled)
+            if explicit:
+                updated_enabled[scope.key] = explicit
+            else:
+                updated_enabled.pop(scope.key, None)
             if disabled:
                 updated[scope.key] = disabled
             else:
                 updated.pop(scope.key, None)
-            payload = {"version": 1, "disabled": {key: sorted(items) for key, items in updated.items()}}
+            payload = {"version": 2, "disabled": {key: sorted(items) for key, items in updated.items()},
+                       "enabled": {key: sorted(items) for key, items in updated_enabled.items()}}
             self.path.parent.mkdir(parents=True, exist_ok=True)
             temp_path = None
             try:
@@ -147,6 +168,7 @@ class GroupFeatureStore:
                 if temp_path is not None:
                     temp_path.unlink(missing_ok=True)
             self._disabled = updated
+            self._enabled = updated_enabled
             return True
 
 

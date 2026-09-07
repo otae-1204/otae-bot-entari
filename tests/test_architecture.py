@@ -270,7 +270,14 @@ async def check_group_switches():
     for name in ('grok', 'grokbot'):
         await run_command(current, '/' + name + ' 帮助')
         current.send.assert_not_awaited()
-    await run_command(group_session(group='101'), '/grok 帮助')
+    other = group_session(group='101')
+    await run_command(other, '/grok 帮助')
+    other.send.assert_not_awaited()
+    admin = group_session(user='group-admin')
+    admin.event.member.roles = [Role('admin')]
+    await run_command(admin, '/功能 开启 grok')
+    assert '仅 SuperUser' in str(admin.send.await_args.args[0])
+    assert not feature_store.is_enabled(scope, 'grok_bot')
     await run_command(current, '/功能 开启 grokbot')
     assert feature_store.is_enabled(scope, 'grok_bot')
     await run_command(current, '/grok 帮助')

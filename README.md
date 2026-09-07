@@ -11,7 +11,8 @@ End 插件的公共资料默认优先 AKEData；账号接口仍用官方，缺�
 HYW 搜索问答插件已接入：`/q 问题`、图片解释和引用追问。
 配置模型后使用，详见 [HYW 配置与用法](docs/hyw_plugin.md)。
 
-Cursor Grok Bot 应用可通过私网网关接入：`/grok 问题`，支持引用正文和请求排队。
+Cursor Grok Bot 应用可通过私网网关接入：`/grok 问题`，支持引用正文，按群聊/私聊隔离会话，默认花园多惠人设。
+Grok Bot 默认关闭，需要 SuperUser 在目标群执行 `/功能 开启 grok`。
 Windows 配置和连接检查见 [Grok Bot 配置与用法](docs/grok_bot_plugin.md)。
 
 群内插件开关：`/功能 列表`、`/功能 关闭 hyw`、`/功能 开启 hyw`。
