@@ -290,6 +290,50 @@ class MediaHost:
 
 
 class GatewayMediaTests(unittest.IsolatedAsyncioTestCase):
+    async def test_transcript_and_partial_attachment_disconnects_preserve_early_reply_without_duplicates(self):
+        host = MediaHost()
+        original = host.respond
+        tail_reads = file_reads = 0
+        delivered = []
+
+        class BrokenStream(httpx.AsyncByteStream):
+            async def __aiter__(self):
+                yield b'{"bytesBase64":"private-token'
+                raise httpx.ReadError("private-token upstream-body")
+
+        def respond(request):
+            nonlocal tail_reads, file_reads
+            response = original(request)
+            command = request.url.path.rsplit("/", 1)[-1]
+            if command == "getAgentTranscriptTail":
+                tail_reads += 1
+                if tail_reads == 2:
+                    raise httpx.RemoteProtocolError("private-token")
+                payload = response.json()
+                payload["entries"][3]["message"]["content"] = "正文先到"
+                if tail_reads > 2:
+                    payload["entries"].append({"kind": "send-message", "message": {"type": "text", "content": "恢复后的正文"}})
+                return httpx.Response(200, json=payload)
+            if command == "readAttachmentChunk" and json.loads(request.content)["length"] > 0:
+                file_reads += 1
+                if file_reads == 1:
+                    return httpx.Response(200, stream=BrokenStream())
+            return response
+
+        async def deliver(reply):
+            delivered.append(reply)
+
+        host.respond = respond
+        with tempfile.TemporaryDirectory() as directory, patch.object(conversations, "make_client", side_effect=host.client), \
+             patch.object(conversations, "session_store", SessionStore(Path(directory) / "sessions.json")), \
+             patch.object(gateway, "READ_RETRY_DELAYS", (0, 0)):
+            result = await conversations.ask(CONFIG, "问题", SCOPE, on_reply=deliver)
+        self.assertEqual(result, Reply())
+        self.assertEqual([reply.text for reply in delivered if reply.text], ["正文先到", "恢复后的正文"])
+        self.assertEqual([item.data for reply in delivered for item in reply.attachments], [png(), b"report bytes"])
+        self.assertEqual(sum(command == "sendPrompt" for command, _ in host.calls), 1)
+        self.assertEqual(sum(command == "createAgent" for command, _ in host.calls), 1)
+
     async def test_streaming_pipeline_delivers_text_and_each_file_before_idle_without_duplicates(self):
         host = MediaHost()
         original = host.respond

@@ -11,10 +11,12 @@ import base64
 import binascii
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
+from time import monotonic
 from urllib.parse import unquote, urlsplit
 from uuid import uuid4
 
 import httpx
+from loguru import logger
 
 from .config import GatewayError, GrokConfig, GrokError
 from .media import (
@@ -35,6 +37,13 @@ from .media import (
 PROTOCOL_ERROR = "Grok Bot 网关返回了无法识别的数据，请管理员检查网关版本。"
 AWAITING_USER = "Grok Bot 正在等待人工确认，请管理员打开 Grok Bot 应用处理后再提问。"
 CHUNK_BYTES = 1024 * 1024
+# These POST RPCs only read state. Never retry a mutation on a lost response.
+READ_ONLY_COMMANDS = frozenset({
+    "health", "listAgents", "getAsyncTasks", "getSubagents", "promptAcceptanceStatus",
+    "getAgentTranscriptTail", "readAttachmentChunk",
+})
+READ_RETRY_DELAYS = (0.5, 1.0)
+TRANSCRIPT_READ_TIMEOUT = 60
 
 
 @dataclass
@@ -126,6 +135,23 @@ class Gateway:
         self.config, self.client = config, client
 
     async def request(self, command: str, body: dict | None = None, *, response_limit: int | None = None):
+        attempts = 1 + len(READ_RETRY_DELAYS) if command in READ_ONLY_COMMANDS else 1
+        for attempt in range(attempts):
+            started = monotonic()
+            try:
+                return await self._request_once(command, body, response_limit=response_limit)
+            except GatewayError as error:
+                retry = error.retryable and attempt + 1 < attempts
+                # All GatewayError text is generated locally; do not log upstream
+                # exception strings, response bodies, headers, prompts or URLs.
+                logger.warning("[grok_bot] gateway command={} attempt={}/{} elapsed={:.2f}s retry={} error={}",
+                               command, attempt + 1, attempts, monotonic() - started, retry, error)
+                if not retry:
+                    raise
+                # Cancellation / the caller's total task timeout also bounds retries.
+                await asyncio.sleep(READ_RETRY_DELAYS[attempt])
+
+    async def _request_once(self, command: str, body: dict | None = None, *, response_limit: int | None = None):
         health = command == "health"
         headers = {"x-sand-request-id": str(uuid4()), "x-sand-slim-avatars": "1"}
         if not health:
@@ -133,6 +159,9 @@ class Gateway:
         try:
             args = ("GET" if health else "POST", self.config.base_url + ("/health" if health else "/api/" + command))
             kwargs = {"headers": headers, "follow_redirects": False, **({} if health else {"json": body or {}})}
+            if command == "getAgentTranscriptTail":
+                # Long tool transcripts can take longer than ordinary state RPCs.
+                kwargs["timeout"] = httpx.Timeout(20, connect=10, read=TRANSCRIPT_READ_TIMEOUT)
             if response_limit is None:
                 response = await self.client.request(*args, **kwargs)
             else:
@@ -143,12 +172,21 @@ class Gateway:
                             raise GrokError("Grok Bot 附件接口响应过大，已停止读取。")
                         content.extend(chunk)
                     response = httpx.Response(streamed.status_code, content=bytes(content))
-        except (httpx.ConnectTimeout, httpx.ConnectError, httpx.PoolTimeout):
-            raise GatewayError(f"连接 Grok Bot 网关失败（{command}），请求尚未提交，请检查 Tailscale 和云端服务。", not_submitted=True) from None
-        except httpx.TimeoutException:
-            raise GatewayError(f"读取 Grok Bot 网关超时（{command}），已提交的任务可能仍在运行，请检查 Tailscale 和云端服务。") from None
-        except httpx.HTTPError:
-            raise GatewayError(f"Grok Bot 网关通信失败（{command}），请检查两端 Tailscale、网关地址及云端后台服务。") from None
+        except (httpx.ConnectTimeout, httpx.ConnectError, httpx.PoolTimeout) as error:
+            raise GatewayError(
+                f"连接 Grok Bot 网关失败（{command} / {type(error).__name__}），请求尚未提交，请检查 Tailscale 和云端服务。",
+                not_submitted=True, retryable=True,
+            ) from None
+        except httpx.TimeoutException as error:
+            raise GatewayError(
+                f"Grok Bot 网关请求超时（{command} / {type(error).__name__}），已提交的任务可能仍在云端运行。",
+                retryable=True,
+            ) from None
+        except httpx.HTTPError as error:
+            raise GatewayError(
+                f"Grok Bot 网关通信失败（{command} / {type(error).__name__}），请检查两端 Tailscale、网关及云端后台服务；已提交的任务可能仍在云端运行。",
+                retryable=isinstance(error, (httpx.NetworkError, httpx.RemoteProtocolError)),
+            ) from None
         if response.status_code in {401, 403}:
             raise GatewayError("Grok Bot 网关认证失败，请管理员检查 GROKBOT_GATEWAY_TOKEN。", not_submitted=True)
         if response.status_code in {400, 422}:
@@ -159,9 +197,10 @@ class Gateway:
         if response.status_code == 404:
             raise GatewayError(f"Grok Bot 网关接口 {command} 返回 404，请检查基址和网关版本。", not_submitted=True)
         if response.status_code == 429:
-            raise GatewayError("Grok Bot 网关请求过于频繁，请稍后重试。", not_submitted=True)
+            raise GatewayError("Grok Bot 网关请求过于频繁，请稍后重试。", not_submitted=True, retryable=True)
         if not 200 <= response.status_code < 300:
-            raise GatewayError(f"Grok Bot 网关请求失败（{command} / HTTP {response.status_code}）。")
+            raise GatewayError(f"Grok Bot 网关请求失败（{command} / HTTP {response.status_code}）。",
+                               retryable=response.status_code in {408, 500, 502, 503, 504})
         try:
             data = response.json()
         except ValueError:
@@ -266,10 +305,19 @@ class Gateway:
         raise GrokError("找不到配置的 Grok Bot，请管理员检查 GROKBOT_AGENT_ID。")
 
     async def state(self) -> tuple[dict, bool]:
-        row, tasks, subagents = await asyncio.gather(
+        calls = [asyncio.create_task(call) for call in (
             self.agent(), self.request("getAsyncTasks", {"id": self.config.agent_id}),
             self.request("getSubagents", {"id": self.config.agent_id}),
-        )
+        )]
+        try:
+            row, tasks, subagents = await asyncio.gather(*calls)
+        finally:
+            # gather does not cancel siblings when one RPC fails. Join them before
+            # closing the HTTP client, including any sibling retry backoff.
+            for call in calls:
+                if not call.done():
+                    call.cancel()
+            await asyncio.gather(*calls, return_exceptions=True)
         if not isinstance(tasks, list) or not isinstance(subagents, list) or any(not isinstance(item, dict) for item in subagents):
             raise GrokError(PROTOCOL_ERROR)
         waiting = row.get("awaitingUserResponse")
