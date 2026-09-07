@@ -195,6 +195,19 @@ async def check_hyw_dispatch():
 
 asyncio.get_event_loop().run_until_complete(check_hyw_dispatch())
 
+async def check_grok_dispatch():
+    session = object.__new__(Session)
+    session.account = SimpleNamespace(platform='qq', self_id='test-bot')
+    session.event = SimpleNamespace(user=SimpleNamespace(id='test-user'), guild=None,
+                                    channel=SimpleNamespace(id='test-channel'))
+    session.reply = None
+    session.send = AsyncMock(return_value=[])
+    for name in ('grok', 'grokbot'):
+        await command.execute(_remove_config_prefix(MessageChain('/' + name + ' 帮助')), session)
+    assert session.send.await_count == 2, session.send.await_count
+
+asyncio.get_event_loop().run_until_complete(check_grok_dispatch())
+
 from satori import ChannelType, Role
 from arclet.entari.const import ITEM_ACCOUNT, ITEM_SESSION
 from arclet.letoderea import EVENT, STOP, post
@@ -250,6 +263,17 @@ async def check_group_switches():
     await run_command(current, '/plugin on q')
     assert feature_store.is_enabled(scope, 'hyw')
     await run_command(current, '/q 帮助')
+    current.send.assert_awaited_once()
+
+    await run_command(current, '/功能 关闭 grok')
+    assert not feature_store.is_enabled(scope, 'grok_bot')
+    for name in ('grok', 'grokbot'):
+        await run_command(current, '/' + name + ' 帮助')
+        current.send.assert_not_awaited()
+    await run_command(group_session(group='101'), '/grok 帮助')
+    await run_command(current, '/功能 开启 grokbot')
+    assert feature_store.is_enabled(scope, 'grok_bot')
+    await run_command(current, '/grok 帮助')
     current.send.assert_awaited_once()
 
     # Legacy commands are filtered too, without disabling the manager.
@@ -359,6 +383,22 @@ async def check_quoted_command_dispatch():
         feature_store.set_enabled(scope, 'hyw', True)
 
 asyncio.get_event_loop().run_until_complete(check_quoted_command_dispatch())
+
+async def check_grok_quoted_dispatch():
+    grok = plugin_service.plugins['plugins.grok_bot'].module
+    run = AsyncMock(return_value='Grok 回答')
+    with patch.object(grok.GrokConfig, 'from_env', return_value=SimpleNamespace()), \\
+         patch.object(grok.queue, 'run', run), patch.object(Session, 'send', AsyncMock(return_value=[])) as send:
+        for alias in ('grok', 'grokbot'):
+            run.reset_mock()
+            event = quote_event([Quote('quoted-id'), At('quoted-user'), Text(' /' + alias + ' 解释')])
+            event.account.protocol.message_get.return_value = MessageObject('quoted-id', '引用正文', user=User('quoted-user'))
+            await publish(event, scope='.commands')
+            run.assert_awaited_once()
+            assert '引用正文' in run.await_args.args[1], run.await_args
+            assert send.await_args.kwargs['reply_to'] is True
+
+asyncio.get_event_loop().run_until_complete(check_grok_quoted_dispatch())
 print('CONTRACT ' + json.dumps({'plugins': sorted(expected), 'jobs': jobs}, ensure_ascii=False))
 """
         with tempfile.TemporaryDirectory() as directory:
@@ -378,6 +418,7 @@ print('CONTRACT ' + json.dumps({'plugins': sorted(expected), 'jobs': jobs}, ensu
         loaded = json.loads(contract)["plugins"]
         self.assertEqual(loaded, list(discover_plugins(ROOT / "plugins")))
         self.assertIn("plugins.hyw", loaded)
+        self.assertIn("plugins.grok_bot", loaded)
 
 
 class LifecycleTests(unittest.IsolatedAsyncioTestCase):

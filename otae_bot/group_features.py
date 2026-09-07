@@ -20,6 +20,7 @@ PLUGIN_NAMES = {
     "eft_helper": ("塔科夫", "eft"),
     "endfield": ("终末地", "ef", "zmd"),
     "forkout": ("叉出去", "fork"),
+    "grok_bot": ("Grok Bot", "grok", "grokbot"),
     "help_plugin": ("帮助", "help"),
     "hyw": ("HYW 问答", "q", "何意味"),
     "mcsm": ("MCSManager",),

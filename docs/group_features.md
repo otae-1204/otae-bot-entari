@@ -19,6 +19,7 @@
 | 插件 | 常用别名 |
 | --- | --- |
 | `hyw` | `q`、`何意味` |
+| `grok_bot` | `grok`、`grokbot` |
 | `endfield` | `ef`、`终末地` |
 | `steamInfo` | `steam` |
 | `bilibilibot` | `bili`、`bilibili` |
