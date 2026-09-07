@@ -66,6 +66,10 @@ HTTP 代理通常填写 `http://` 地址，即使目标网页是 HTTPS。
 - `proxy` / `connection_refused`：检查代理是否启动、地址端口及认证；可设置 `HYW_PROXY=direct` 对比直连。
 - `connection_interrupted`：接口网关或代理连接中断，需结合服务端日志排查。
 - `request_protocol`：检查复制密钥时是否带入了换行等异常字符。
+- `timeout` / `ReadTimeout`：等待模型响应超时。当前单次模型请求的读取超时为 60 秒，
+  整个问答仍有 120 秒总时限；接口排队、生成较慢及链路延迟都可能触发。
+  旧版可能把异常链中的 `SSLWantReadError` 误判为 `tls_handshake`，
+  出现 `ReadTimeout / tls_handshake` 时应先更新并按读取超时排查，不能据此认定 TLS 协议配置错误。
 
 仅验证连通性时无需密钥。例如在 Windows 机器人运行机器上执行：
 
@@ -98,6 +102,9 @@ curl.exe --noproxy "*" --connect-timeout 10 --max-time 20 -i https://llm.hyw.mom
 - 引用其他消息后 `/q 这是什么意思`：把被引用的文字和图片一起分析。
 - 引用自己的 HYW 回答后 `/q 继续解释第二点`：恢复上下文继续追问。
 - `/q 清空`：删除自己在当前聊天中的历史。
+
+引用消息自动附带的“@被引用者”会在命令前缀匹配前移除，无需手动删除。
+这只处理引用开头与原消息作者一致的提及；引用正文、图片和问题中的 @ 保留。
 
 回复中的 `[1]` 等引用对应工具返回的真实网址；卡片之外也会发送可点击的来源链接。
 支持 `web_search(query, time_range, kl)` 和 `web_fetch(url)`，后者只提取公开网页正文。

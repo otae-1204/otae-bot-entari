@@ -173,6 +173,26 @@ class NetworkErrorTests(unittest.TestCase):
         error.__cause__ = error
         self.assertEqual(network_errors.classify_error(error).code, "connection")
 
+    def test_tls_want_read_during_read_timeout_is_not_a_handshake_failure(self):
+        timeout = TimeoutError()
+        timeout.__context__ = ssl.SSLWantReadError(2, "read operation did not complete")
+        error = httpx.ReadTimeout("private upstream detail")
+        error.__cause__ = timeout
+        failure = network_errors.classify_error(error)
+        self.assertEqual(failure.code, "timeout")
+        self.assertIn("等待模型响应超时", failure.message)
+        self.assertNotIn("TLS", failure.message)
+
+    def test_transient_ssl_wait_states_do_not_override_transport_errors(self):
+        for error_type, expected in ((httpx.ConnectTimeout, "timeout"),
+                                     (httpx.WriteTimeout, "timeout"),
+                                     (httpx.ReadError, "connection_interrupted")):
+            for ssl_type in (ssl.SSLWantReadError, ssl.SSLWantWriteError):
+                with self.subTest(error=error_type, cause=ssl_type):
+                    error = error_type("private upstream detail")
+                    error.__context__ = ssl_type(2, "operation did not complete")
+                    self.assertEqual(network_errors.classify_error(error).code, expected)
+
     def test_logs_and_replies_do_not_expose_exception_payloads(self):
         config = replace(HywConfig(), api_key="private-key", proxy="http://name:private-password@proxy.example")
         error = httpx.LocalProtocolError("Illegal header value b'Bearer private-key' via private-password")

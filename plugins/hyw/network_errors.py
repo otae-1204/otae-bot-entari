@@ -30,7 +30,13 @@ def classify_error(error: httpx.HTTPError) -> NetworkFailure:
         return NetworkFailure("tls_certificate", "TLS 证书校验失败，请管理员检查接口证书链、系统时间和 Python CA 证书。")
     if any(isinstance(item, socket.gaierror) for item in causes):
         return NetworkFailure("dns", "域名解析失败，请管理员检查机器人运行机器的 DNS 和代理地址。")
-    if any(isinstance(item, ssl.SSLError) for item in causes):
+    # Async TLS reads normally pass through SSLWantReadError. It can remain in
+    # a timeout's exception context even after the handshake has succeeded.
+    if isinstance(error, httpx.ReadTimeout):
+        return NetworkFailure("timeout", "等待模型响应超时，可能是模型生成较慢、接口排队或网络延迟，请稍后重试。")
+    if isinstance(error, httpx.TimeoutException):
+        return NetworkFailure("timeout", "模型请求超时，请稍后重试；管理员可检查接口及代理是否可达。")
+    if any(isinstance(item, ssl.SSLError) and not isinstance(item, (ssl.SSLWantReadError, ssl.SSLWantWriteError)) for item in causes):
         return NetworkFailure("tls_handshake", "TLS 握手失败，请管理员检查接口及代理的协议配置。")
     if isinstance(error, httpx.ProxyError):
         return NetworkFailure("proxy", "代理连接失败，请管理员检查代理地址、端口和认证信息。")
@@ -38,8 +44,6 @@ def classify_error(error: httpx.HTTPError) -> NetworkFailure:
         return NetworkFailure("request_protocol", "请求格式无效，请管理员检查 API 密钥是否包含换行或异常字符。")
     if isinstance(error, httpx.UnsupportedProtocol):
         return NetworkFailure("url_protocol", "接口地址缺少或使用了不支持的协议，请填写完整的 http:// 或 https:// 地址。")
-    if isinstance(error, httpx.TimeoutException):
-        return NetworkFailure("timeout", "模型请求超时，请稍后重试；管理员可检查接口及代理是否可达。")
     refused = {errno.ECONNREFUSED, 10061}
     if any(isinstance(item, ConnectionRefusedError) or getattr(item, "errno", None) in refused or getattr(item, "winerror", None) in refused for item in causes):
         return NetworkFailure("connection_refused", "连接被拒绝，请管理员检查模型服务或代理是否运行、端口是否正确。")
