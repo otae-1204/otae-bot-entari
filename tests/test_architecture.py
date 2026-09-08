@@ -348,7 +348,8 @@ def quote_event(elements, *, group='100', author='quoted-user', inline=False):
     account = SimpleNamespace(platform='qq', self_id='test-bot',
                               protocol=SimpleNamespace(message_get=AsyncMock(return_value=quoted)))
     if inline:
-        elements = [Quote('quoted-id', content=[Author(author), *quote_body]), *elements[1:]]
+        authors = [] if inline == 'without-author' else [Author(author)]
+        elements = [Quote('quoted-id', content=[*authors, *quote_body]), *elements[1:]]
     origin = Event('message-created', datetime.now(timezone.utc),
                    Login(user=User('test-bot'), platform='qq'), channel=Channel(group, ChannelType.TEXT),
                    guild=Guild(group), user=User('sender'),
@@ -360,7 +361,7 @@ async def check_quoted_command_dispatch():
     with patch.object(hyw.HywConfig, 'from_env', return_value=SimpleNamespace(api_key='test', timeout=1)), \
          patch.dict(hyw.handle_hyw.__globals__, run_request=request):
         for alias in ('q', 'hyw', '何意味'):
-            for inline in (False, True):
+            for inline in (False, True, 'without-author'):
                 request.reset_mock()
                 event = quote_event([Quote('quoted-id'), Text(' '), At('quoted-user'),
                                      Text(' /' + alias + ' 解释 '), Image(src='https://example.com/current.png')],
@@ -370,6 +371,10 @@ async def check_quoted_command_dispatch():
                 assert '被引用的正文' in request.await_args.args[3], request.await_args
                 assert request.await_args.args[4] == ['https://example.com/current.png',
                                                      'https://example.com/quoted.png'], request.await_args
+                if inline == 'without-author':
+                    event.account.protocol.message_get.assert_awaited_once_with('100', 'quoted-id')
+                elif inline:
+                    event.account.protocol.message_get.assert_not_awaited()
                 # Quote normalization is local to the command dispatcher.
                 assert event.content.has(At)
         for elements, author in (
@@ -387,13 +392,21 @@ async def check_quoted_command_dispatch():
             request.reset_mock()
             await publish(quote_event(elements), scope='.commands')
             request.assert_not_awaited()
+        for text, mention in (('/q 解释', 'another-user'), ('普通回复', 'quoted-user')):
+            request.reset_mock()
+            event = quote_event([Quote('quoted-id'), At(mention), Text(' ' + text)], inline='without-author')
+            await publish(event, scope='.commands')
+            request.assert_not_awaited()
+            if text == '普通回复':
+                event.account.protocol.message_get.assert_not_awaited()
         request.reset_mock()
         with patch.object(command._commands.judge, 'need_notice_me', True):
-            await publish(quote_event([Quote('quoted-id'), At('quoted-user'), Text(' /q 解释')]), scope='.commands')
-            request.assert_not_awaited()
+            for inline in (False, 'without-author'):
+                await publish(quote_event([Quote('quoted-id'), At('quoted-user'), Text(' /q 解释')], inline=inline), scope='.commands')
+                request.assert_not_awaited()
         scope = GroupScope('qq', 'test-bot', '100')
         feature_store.set_enabled(scope, 'hyw', False)
-        await publish(quote_event([Quote('quoted-id'), At('quoted-user'), Text(' /q 解释')]), scope='.commands')
+        await publish(quote_event([Quote('quoted-id'), At('quoted-user'), Text(' /q 解释')], inline='without-author'), scope='.commands')
         request.assert_not_awaited()
         await publish(quote_event([Quote('quoted-id'), At('quoted-user'), Text(' /q 解释')], group='101'), scope='.commands')
         request.assert_awaited_once()
@@ -416,6 +429,11 @@ async def check_grok_quoted_dispatch():
             assert run.await_args.kwargs['images'] == ('https://cdn.example/current.png', 'https://cdn.example/quoted.png'), run.await_args
             assert run.await_args.kwargs['account'] is event.account
             assert send.await_args.kwargs['reply_to'] is True
+            run.reset_mock()
+            await publish(quote_event([Quote('quoted-id'), At('quoted-user'), Text(' /' + alias + ' 解释')], inline='without-author'), scope='.commands')
+            run.assert_awaited_once()
+            assert '被引用的正文' in run.await_args.args[1]
+            assert run.await_args.kwargs['images'] == ('https://example.com/quoted.png',)
         run.reset_mock()
         event = quote_event([Text(' /grok '), Image(src='https://cdn.example/only.png')])
         await publish(event, scope='.commands')
