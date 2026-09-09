@@ -15,6 +15,34 @@ def wants_card(text: str) -> bool:
     return len(text) > 200 or bool(re.search(r"(?m)^#{1,6} |```|\*\*|<summary>|\|.+\|", text))
 
 
+def _icon_script() -> str:
+    """Answer Iconify's icon requests from the bundled MDI subset, without any network access.
+
+    The card renders its section badges with ``@iconify/vue``, whose runtime fetches icon
+    data from api.iconify.design. The rendering CSP forbids all connections, so those
+    requests are refused and the icons vanish. Serving the bundled JSON from a patched
+    ``fetch`` keeps the strict CSP while restoring the icons offline.
+    """
+    payload = json.dumps(
+        json.loads((Path(__file__).parent / "assets/mdi_icons.json").read_text(encoding="utf-8")),
+        ensure_ascii=False, separators=(",", ":"),
+    ).replace("<", "\\u003c")
+    return (
+        "<script>(function(){"
+        f"var data={payload},native=window.fetch;"
+        "window.fetch=function(input,init){"
+        "var url=typeof input==='string'?input:(input&&input.url)||'';"
+        "var match=/^https:\\/\\/(?:api\\.iconify\\.design|api\\.simplesvg\\.com|api\\.unisvg\\.com)\\/([a-z0-9-]+)\\.json\\?icons=([^&]*)$/.exec(url);"
+        "if(!match)return native.call(this,input,init);"
+        "var icons={};"
+        "decodeURIComponent(match[2]).split(',').forEach(function(name){"
+        "if(data.icons[name])icons[name]=data.icons[name]});"
+        "var body=JSON.stringify({prefix:match[1],icons:icons,width:data.width,height:data.height});"
+        "return Promise.resolve(new Response(body,{status:200,headers:{'Content-Type':'application/json'}}))"
+        "}})()</script>"
+    )
+
+
 def prepare_html(answer: Answer) -> str:
     # The upstream component accepts raw HTML: permit only its plain summary marker.
     markdown = re.sub(
@@ -28,7 +56,10 @@ def prepare_html(answer: Answer) -> str:
     serialized = json.dumps(data, ensure_ascii=False).replace("<", "\\u003c").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
     # No remote images, scripts, favicons or model-supplied network requests during rendering.
     csp = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; base-uri 'none'; form-action 'none'"
-    injection = f'<meta http-equiv="Content-Security-Policy" content="{csp}"><style>img[src^="http"]{{display:none}}</style>'
+    # The card wrapper carries a page margin (my-10); the screenshot viewport is sized to the
+    # element, so that offset used to clip the bottom of the last panel. Drop the page margin.
+    styles = '<style>img[src^="http"]{display:none}#app-wrapper>div{margin:0!important}</style>'
+    injection = f'<meta http-equiv="Content-Security-Policy" content="{csp}">{styles}{_icon_script()}'
     template = (Path(__file__).parent / "assets/card.html").read_text(encoding="utf-8")
     initial = "window.RENDER_DATA = {};"
     if template.count(initial) != 1:

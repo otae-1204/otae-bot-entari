@@ -101,6 +101,17 @@ class ProtocolTests(unittest.TestCase):
         self.assertNotIn("<img src=x", document)
         self.assertIn("default-src 'none'", document)
 
+    def test_render_injection_bundles_icons_and_drops_page_margin(self):
+        # Iconify badges and the bottom panel were broken by the strict CSP and the card's
+        # page margin; the injection must keep serving icons offline and reset the margin.
+        answer = agent.Answer("# 标题", [], [], 1)
+        document = rendering.prepare_html(answer)
+        self.assertIn("default-src 'none'", document)
+        self.assertNotIn("connect-src", document)
+        self.assertIn("window.fetch=function(input,init)", document)
+        self.assertIn("M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5", document)  # bundled mdi:table body
+        self.assertIn("#app-wrapper>div{margin:0!important}", document)
+
 
 class HistoryTests(unittest.TestCase):
     def test_history_isolated_for_every_scope_component_and_copied(self):
