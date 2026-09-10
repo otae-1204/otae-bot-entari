@@ -99,6 +99,8 @@ from .catalog.commands import (
 )
 from .rendering.cards import (
     clear_render_asset_caches,
+    draw_archive_progress_card,
+    draw_archive_stats_card,
     draw_equipment_card,
     draw_equipment_catalog_card,
     draw_loadout_card_with_status,
@@ -172,6 +174,7 @@ from .catalog.service import (
     format_status_quick_calc,
 )
 from .medals.store import MedalSnapshotStore
+from .archives.store import ArchiveSnapshotStore
 from .ownership.service import (
     GroupMemberListError,
     OwnershipRefreshResult,
@@ -200,10 +203,12 @@ calendar_source = AkeDataVersionCalendarSource(client)
 official_calendar_source = OfficialVersionCalendarSource()
 medal_store = MedalSnapshotStore()
 _MEDAL_LOCK = asyncio.Lock()
+archive_store = ArchiveSnapshotStore()
+_ARCHIVE_LOCK = asyncio.Lock()
 _FORWARD_SENDER_NAME = "Endfield"
 CARD_CACHE_TTL_SECONDS = 600.0
 CARD_CACHE_MAX_BYTES = 48 * 1024 * 1024
-CARD_RENDER_VERSION = "endfield-card-v44"
+CARD_RENDER_VERSION = "endfield-card-v49"
 CardCacheKey = tuple[str, str, str, str, str, str, str]
 _CARD_CACHE: AsyncTTLCache[CardCacheKey, tuple[bytes, ...]] = AsyncTTLCache(
     ttl_seconds=CARD_CACHE_TTL_SECONDS,
@@ -375,9 +380,11 @@ async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand,
         )
     if command.action in {"medal_view", "medal_refresh"}:
         return await _handle_medal(matcher, command)
+    if command.action in {"archive_view", "archive_refresh"}:
+        return await _handle_archive(matcher, command)
     if command.action in {"ownership_stats", "ownership_refresh"}:
         return await _handle_ownership_stats(matcher, event, command, bot=bot)
-    if command.action in {"bind", "accounts", "account_base", "account_investment", "currency_log", "primary", "unbind", "attendance", "gacha", "gacha_history", "gacha_sync", "gacha_import", "medal_missing", "challenge"}:
+    if command.action in {"bind", "accounts", "account_base", "account_investment", "currency_log", "primary", "unbind", "attendance", "gacha", "gacha_history", "gacha_sync", "gacha_import", "medal_missing", "archive_progress", "challenge"}:
         return await _handle_personal_command(matcher, event, command, bot=bot)
     if command.action == "loadout":
         return await _handle_loadout(matcher, command)
@@ -522,6 +529,57 @@ async def _handle_medal(matcher, command: ParsedEndfieldCommand) -> None:
     return await _finish_pngs(matcher, pngs)
 
 
+async def _handle_archive(matcher, command: ParsedEndfieldCommand) -> None:
+    """档案库版本统计/新增；刷新时重抓 AKEData 档案表 + 上一版本基线（源和源对比）。"""
+    if command.action == "archive_refresh":
+        async with _ARCHIVE_LOCK:
+            await matcher.send("正在抓取 AKEData 档案库数据…")
+            started = perf_counter()
+            try:
+                snapshot = await service.fetch_archive_snapshot_akedata()
+            except Exception as exc:
+                logger.warning(f"[endfield] archive refresh failed: {exc}")
+                return await matcher.finish("AKEData 数据源暂时不可用，请稍后重试。")
+            # 先抓基线，再成对写盘；基线暂时不可用时保留旧基线，避免丢失版本对比。
+            try:
+                baseline = await service.fetch_archive_baseline()
+            except Exception as exc:
+                logger.warning(f"[endfield] archive baseline unavailable; keeping previous: {exc}")
+                baseline = None
+                baseline_available = False
+            else:
+                baseline_available = True
+            try:
+                if baseline_available:
+                    await archive_store.replace_current_and_baseline(snapshot, baseline)
+                else:
+                    await archive_store.replace_current(snapshot)
+            except Exception as exc:
+                logger.exception(f"[endfield] archive snapshot persistence failed: {exc}")
+                return await matcher.finish("档案库数据保存失败，请稍后重试。")
+            stored_baseline = archive_store.load_baseline_view()
+            baseline_info = (
+                f"{stored_baseline.version}({len(stored_baseline.ids)} ids)"
+                if stored_baseline else "none"
+            )
+            logger.info(
+                f"[endfield] archive snapshot refreshed items={snapshot.total_count} "
+                f"baseline={baseline_info} time={perf_counter() - started:.1f}s"
+            )
+
+    current = archive_store.load_current_view()
+    if current is None:
+        return await matcher.finish("暂无档案库数据，请先发送「/ef 档案 刷新」。")
+    baseline = archive_store.load_baseline_view()
+    try:
+        diff = service.build_archive_diff(current, baseline)
+        pngs = await draw_archive_stats_card(diff)
+    except Exception as exc:
+        logger.exception(f"[endfield] archive card failed: {exc}")
+        return await matcher.finish("档案库图片生成失败")
+    return await _finish_pngs(matcher, pngs)
+
+
 async def _handle_ownership_stats(
     matcher,
     event: Event,
@@ -663,6 +721,40 @@ async def _handle_medal_missing(
     return await _finish_pngs(matcher, pngs)
 
 
+async def _handle_archive_progress(
+    matcher, qq_user_id: str, command: ParsedEndfieldCommand, cipher: CredentialCipher, *, group: bool
+) -> None:
+    """查询绑定账号的档案收集进度。森空岛只给 docNum 总数、无逐条明细，仅展示已获得/总数。"""
+    role = account_store.resolve_role(qq_user_id, command.account_selector)
+    if role is None:
+        return await matcher.finish("未找到对应账号，请先私聊使用 /ef 绑定。")
+    snapshot = archive_store.load_current_view()
+    if snapshot is None:
+        return await matcher.finish("暂无档案库数据，请先发送「/ef 档案 刷新」建立快照。")
+    try:
+        async with ROLE_TASKS.claim(role):
+            token = account_store.decrypt_token(role, cipher)
+            raw_detail = await official_client.endfield_card_detail(token, role)
+    except EndfieldAPIError as exc:
+        logger.warning(f"[endfield-archive] player progress API failed: {exc}")
+        return await matcher.finish("档案进度查询失败，请稍后重试。")
+    except CredentialKeyError as exc:
+        return await matcher.finish(str(exc))
+    except Exception as exc:
+        logger.exception(f"[endfield-archive] progress query failed: {exc}")
+        return await matcher.finish("档案进度查询失败。")
+    view = service.build_archive_progress_view(
+        raw_detail, snapshot,
+        nickname=role.nickname, uid=role.masked_uid, server_name=server_label(role.server_name or role.server_id),
+    )
+    try:
+        pngs = await draw_archive_progress_card(view)
+    except Exception as exc:
+        logger.exception(f"[endfield-archive] progress card failed: {exc}")
+        return await matcher.finish("档案进度图片生成失败")
+    return await _finish_pngs(matcher, pngs)
+
+
 async def _handle_personal_command(matcher, event: Event, command: ParsedEndfieldCommand, bot=None) -> None:
     private_only = {"bind", "primary", "unbind", "gacha_import"}
     if command.action in private_only and is_group(event):
@@ -704,6 +796,9 @@ async def _handle_personal_command(matcher, event: Event, command: ParsedEndfiel
         if command.action == "medal_missing":
             cipher = CredentialCipher.from_env()
             return await _handle_medal_missing(matcher, qq_user_id, command, cipher, group=is_group(event))
+        if command.action == "archive_progress":
+            cipher = CredentialCipher.from_env()
+            return await _handle_archive_progress(matcher, qq_user_id, command, cipher, group=is_group(event))
         if command.action in {"gacha", "gacha_sync"}:
             cipher = CredentialCipher.from_env()
             return await _handle_gacha(matcher, qq_user_id, command, cipher, group=is_group(event))
