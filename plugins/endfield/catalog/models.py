@@ -476,3 +476,74 @@ class MedalMissingView:
     truncated: bool = False
     shown_count: int = 0
     level_counts: dict[int, int] = field(default_factory=dict)
+
+
+# ----- 档案库（archive）模块 -----
+# 有效范围 = PrtsPage 三大页签（中枢档案/见闻辑录/音像存档）下的 PrtsAllItem 条目；
+# 任务文本/地图文本（DialogTextTable/LevelDescTable 合成的虚拟分类）不计入。
+
+@dataclass(slots=True)
+class ArchiveItemView:
+    item_id: str                       # nar_* id
+    name: str = ""
+    page_id: str = ""                  # PrtsPage pageType：document|multi_media|text（=条目 type）
+    page_name: str = ""                # 中枢档案/音像存档/见闻辑录
+    category_id: str = ""              # PrtsCategory categoryId
+    category_name: str = ""            # 中枢档案/调查报告/纸质记录/电子档案/藏品/多媒体
+    group_id: str = ""                 # PrtsFirstLv firstLvId
+    group_name: str = ""
+    group_sub_name: str = ""
+    item_type: str = ""                # PrtsAllItem type（与 page_id 同值，保留原始字段）
+    order: int = 0
+    icon_url: str = ""                 # 组图标（PrtsFirstLv.icon → AKEData sprites）
+
+
+@dataclass(slots=True)
+class ArchiveSnapshotView:
+    """档案库全量快照：既是版本对比的 current 方，也是命令读取的性能缓存。"""
+    items: list[ArchiveItemView] = field(default_factory=list)
+    version: str = ""                  # 游戏版本 major.minor 标签（如「1.5」）
+    fetched_at: int = 0
+    source: str = "akedata"
+    total_count: int = 0
+    page_counts: dict[str, int] = field(default_factory=dict)      # {page_name: 数量}
+    category_counts: dict[str, int] = field(default_factory=dict)  # {category_name: 数量}
+    group_count: int = 0               # 有条目归属的档案组数
+
+
+@dataclass(slots=True)
+class ArchiveBaselineView:
+    """版本对比基线：akedata 上一游戏版本的 nar_ id 集合。
+
+    只存 diff 所需的 id 黑名单；新增档案的展示信息取自 current（2026-09-10 实测
+    1.4.4→1.5.3 id 重叠 100%，跨版本稳定）。
+    """
+    version: str = ""
+    version_id: str = ""
+    ids: list[str] = field(default_factory=list)
+    fetched_at: int = 0
+
+
+@dataclass(slots=True)
+class ArchiveDiffView:
+    """版本对比视图：当前快照 + 相较上一版本的新增档案。"""
+    current: ArchiveSnapshotView = field(default_factory=ArchiveSnapshotView)
+    previous_version: str = ""
+    new_items: list[ArchiveItemView] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class ArchiveProgressView:
+    """个人档案收集进度。森空岛 card/detail 只给 ``base.docNum`` 总数、无逐条明细，
+    故仅做「已获得/总数」展示；``over_total`` 标记 docNum 超过快照总数的口径异常。
+    """
+    nickname: str = ""
+    uid: str = ""
+    server_name: str = ""
+    snapshot_version: str = ""
+    collected: int = 0                 # 森空岛 docNum
+    total_count: int = 0
+    missing: int = 0
+    over_total: bool = False
+    page_counts: dict[str, int] = field(default_factory=dict)  # 参考用各页签总数
+    category_counts: dict[str, int] = field(default_factory=dict)
