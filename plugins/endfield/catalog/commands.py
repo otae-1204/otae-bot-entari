@@ -37,6 +37,7 @@ ACCOUNT_BASE_ALIASES = {"基建", "帝江号", "base", "infrastructure"}
 PRIMARY_ALIASES = {"主账号", "主账户", "primary"}
 UNBIND_ALIASES = {"解绑", "unbind"}
 ATTENDANCE_ALIASES = {"签到", "checkin", "attendance"}
+DASHBOARD_ALIASES = {"日常", "每日", "仪表盘", "实时数据", "dashboard", "daily"}
 GACHA_ALIASES = {"抽卡", "gacha"}
 GACHA_HISTORY_ALIASES = {"抽卡记录", "历史抽卡", "gacha-history", "history"}
 GACHA_SYNC_ALIASES = {"抽卡同步", "同步抽卡", "gacha-sync", "sync"}
@@ -318,6 +319,8 @@ def _parse_personal_command(parts: list[str]) -> ParsedEndfieldCommand | None:
         return ParsedEndfieldCommand("unbind", account_selector=selector, error="请指定账号编号" if not selector else "")
     if head in ATTENDANCE_ALIASES:
         return ParsedEndfieldCommand("attendance", account_selector=" ".join(parts[1:]).strip() or "全部")
+    if head in DASHBOARD_ALIASES:
+        return ParsedEndfieldCommand("daily", account_selector=" ".join(parts[1:]).strip() or "全部")
     if head in GACHA_SYNC_ALIASES:
         remaining, full, error = _parse_full_option(parts[1:])
         return ParsedEndfieldCommand(
@@ -833,6 +836,7 @@ def format_help() -> str:
             "  /ef 账号 基建 [账号]（据点存票、增长速度与帝江号心情）",
             "  /ef 主账号 <编号> | /ef 解绑 <编号>（仅私聊）",
             "  /ef 签到 [全部|编号|昵称|UID后四位]",
+            "  /ef 日常 [全部|编号|昵称|UID后四位]（理智、活跃度、每周事务、通行证仪表盘）",
             "  /ef 抽卡 [账号] | /ef 抽卡同步 [账号] [--full]",
             "  /ef 抽卡导入 [账号]（仅私聊，手机号验证码导入小黑盒历史统计）",
             "  /ef 抽卡记录 [账号] [页码] [--池 <名称>]",
