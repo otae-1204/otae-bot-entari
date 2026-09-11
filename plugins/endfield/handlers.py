@@ -387,7 +387,7 @@ async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand,
         return await _handle_archive(matcher, command)
     if command.action in {"ownership_stats", "ownership_refresh"}:
         return await _handle_ownership_stats(matcher, event, command, bot=bot)
-    if command.action in {"bind", "accounts", "account_base", "account_investment", "currency_log", "primary", "unbind", "attendance", "gacha", "gacha_history", "gacha_sync", "gacha_import", "medal_missing", "archive_progress", "challenge"}:
+    if command.action in {"bind", "accounts", "account_base", "account_investment", "currency_log", "primary", "unbind", "attendance", "daily", "gacha", "gacha_history", "gacha_sync", "gacha_import", "medal_missing", "archive_progress", "challenge"}:
         return await _handle_personal_command(matcher, event, command, bot=bot)
     if command.action == "loadout":
         return await _handle_loadout(matcher, command)

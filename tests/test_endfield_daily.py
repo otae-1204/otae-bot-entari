@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import importlib.util
 import sys
 import types
@@ -60,6 +61,77 @@ class DailyCommandParseTests(unittest.TestCase):
 
     def test_daily_help_mentions_command(self):
         self.assertIn("/ef 日常", commands_module.format_help())
+
+
+class EndfieldActionDispatchTests(unittest.TestCase):
+    """Guard the dispatch gate in ``_handle_command`` against silent dead branches.
+
+    ``/ef 日常`` regressed because ``_handle_daily`` was implemented but ``"daily"``
+    was never added to the dispatcher's action set, so the parser produced a valid
+    command that fell through to ``format_unknown()``.  Any action the parser can
+    emit must either be handled by the dispatcher or be an explicit fallback.
+    """
+
+    # Actions the dispatcher resolves without a dedicated branch: they are matched
+    # by the early help/source/calendar/dev/alias/quick_calc/loadout checks, by the
+    # query/search tail, or handled as an error before dispatch.
+    FALLBACK_ACTIONS = {
+        "invalid", "help", "source", "calendar", "dev", "alias",
+        "quick_calc", "query", "search", "loadout",
+    }
+
+    @staticmethod
+    def _emitted_actions() -> set[str]:
+        tree = ast.parse((ROOT / "plugins/endfield/catalog/commands.py").read_text(encoding="utf-8"))
+        actions: set[str] = set()
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+                continue
+            if node.func.id != "ParsedEndfieldCommand":
+                continue
+            for keyword in node.keywords:
+                if keyword.arg != "action":
+                    continue
+                if isinstance(keyword.value, ast.Constant):
+                    actions.add(keyword.value.value)
+                elif isinstance(keyword.value, ast.IfExp):
+                    for branch in (keyword.value.body, keyword.value.orelse):
+                        if isinstance(branch, ast.Constant):
+                            actions.add(branch.value)
+            if node.args and isinstance(node.args[0], ast.Constant):
+                actions.add(node.args[0].value)
+        return actions
+
+    @staticmethod
+    def _dispatched_actions() -> set[str]:
+        tree = ast.parse((ROOT / "plugins/endfield/handlers.py").read_text(encoding="utf-8"))
+        func = next(
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.AsyncFunctionDef) and node.name == "_handle_command"
+        )
+        actions: set[str] = set()
+        for node in ast.walk(func):
+            if not isinstance(node, ast.Compare):
+                continue
+            for op, comparator in zip(node.ops, node.comparators):
+                if isinstance(comparator, ast.Constant) and isinstance(comparator.value, str):
+                    if isinstance(op, (ast.In, ast.Eq, ast.NotIn, ast.NotEq)):
+                        actions.add(comparator.value)
+                elif isinstance(comparator, ast.Set):
+                    for element in comparator.elts:
+                        if isinstance(element, ast.Constant):
+                            actions.add(element.value)
+        return actions
+
+    def test_every_parsed_action_is_dispatchable(self):
+        unreachable = sorted(
+            self._emitted_actions() - self._dispatched_actions() - self.FALLBACK_ACTIONS
+        )
+        self.assertEqual(unreachable, [], f"parsed but never dispatched: {unreachable}")
+
+    def test_daily_action_is_dispatched(self):
+        self.assertIn("daily", self._dispatched_actions())
 
 
 class DailyAccountViewTests(unittest.TestCase):
