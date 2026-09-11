@@ -30,6 +30,9 @@ from otae_bot.infrastructure.rendering.browser import BrowserResource, screensho
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
 
 from ..catalog.models import (
+    ArchiveDiffView,
+    ArchiveItemView,
+    ArchiveProgressView,
     DailyAccountView,
     DailyDashboardView,
     EffectView,
@@ -66,6 +69,7 @@ from ..gacha.service import (
     format_timestamp,
 )
 from ..account.i18n import server_label
+from ..providers.akedata import AKEDATA_PRTS_ICON_BASE
 from ..providers.assets import (
     element_icon_urls,
     item_icon_urls,
@@ -1367,6 +1371,289 @@ def _medal_section_html(
         f'<section class="medal-section"><h2>{esc(title)}（{shown}）</h2>'
         f'<div class="medal-list{double}">{items}</div></section>'
     )
+
+
+# ===== 档案库（三大页签：中枢档案/见闻辑录/音像存档）渲染 =====
+
+# 仅限制图片预览，不影响全库计数或版本差集。跨分类轮流选取，避免小分类被截掉。
+ARCHIVE_PREVIEW_LIMIT = 24
+ARCHIVE_GRID_COLUMNS = 6
+ARCHIVE_PAGE_BUDGETS: tuple[int, ...] = (24, 18, 12, 6)
+_ARCHIVE_PAGE_LAYOUT = (
+    ("见闻辑录", "icon_entrance_knowledge", ("纸质记录", "电子档案", "藏品")),
+    ("音像存档", "icon_entrance_audio", ("多媒体",)),
+    ("中枢档案", "icon_entrance_pivot", ("中枢档案", "调查报告")),
+)
+_ARCHIVE_PAGE_ICON_BASE = AKEDATA_PRTS_ICON_BASE.rsplit("/", 1)[0]
+# 游戏参考图的淡测量底纹：只在背景层绘制刻度与大框线，物品图放在其上。
+_ARCHIVE_ART_GUIDES = (
+    '<svg class="archive-art-guides" viewBox="0 0 200 160" preserveAspectRatio="none" aria-hidden="true">'
+    '<g fill="none" stroke="#fff" stroke-width=".6" opacity=".065">'
+    '<path d="M18 18H194M18 18V144M18 60H194M18 102H194M60 18V144M102 18V144M144 18V144M18 18L144 144"/>'
+    + "".join(f'<path d="M{x} 18v{7 if index % 5 == 0 else 3}"/>' for index, x in enumerate(range(18, 195, 3)))
+    + '</g><g fill="#fff" opacity=".09" font-family="Arial,sans-serif" font-size="3">'
+    '<text x="2" y="19">01</text><text x="2" y="61">02</text><text x="2" y="103">03</text>'
+    '<text x="29" y="14">40</text><text x="62" y="14">50</text><text x="95" y="14">60</text>'
+    '<text x="128" y="14">70</text><text x="161" y="14">80</text></g></svg>'
+)
+ARCHIVE_CARD_CSS = """
+.archive-stats-card header,.archive-progress-card header{border-bottom:5px solid #dfec32;padding:24px 26px}
+header p{margin:10px 0 0;font-size:15px;color:#c8c8c8}
+.archive-head-counts{display:flex;gap:28px;align-items:center}
+.archive-head-count{border-left:1px solid #626262;padding-left:26px;min-width:144px}
+.archive-head-count span{display:block;font-size:14px;color:#d1d1d1}
+.archive-head-count strong{display:inline-block;font-size:62px;line-height:1.15;font-weight:900;font-variant-numeric:tabular-nums}
+.archive-head-count em{font-size:14px;color:#ccc;margin-left:8px;font-style:normal}
+.archive-head-count.new strong{color:#e7f344;font-size:44px}
+.archive-overview{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:22px}
+.archive-page-tile{position:relative;overflow:hidden;border:1px solid #a6a6a6;background:linear-gradient(125deg,#fff,#e7e7e7);padding:16px 18px}
+.archive-page-top{display:flex;align-items:center;gap:12px;min-height:76px}
+.archive-page-icon{width:78px;height:76px;object-fit:contain;flex:none;filter:brightness(.3)}
+.archive-page-top h2{margin:0;font-size:18px}.archive-page-top strong{font-size:36px;line-height:1.25;font-weight:900}
+.archive-page-top small{margin-left:7px;color:#777;font-size:12px}
+.archive-cat-list{display:flex;flex-wrap:wrap;gap:6px 15px;margin-top:12px;padding-top:10px;border-top:1px solid #bebebe;min-height:28px}
+.archive-cat-list span{font-size:13px;color:#595959}.archive-cat-list b{margin-left:7px;color:#202020;font-variant-numeric:tabular-nums}
+.archive-preview-head{display:flex;justify-content:space-between;align-items:baseline;gap:16px;margin:4px 0 18px;border-bottom:2px solid #282828;padding-bottom:10px}
+.archive-preview-head h2{font-size:23px;margin:0}.archive-preview-head span{color:#666;font-size:13px}
+.archive-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px}
+.archive-stats .tile{display:flex;align-items:center;justify-content:center;gap:10px;padding:14px;border:1px solid #999;background:#fff}
+.archive-stats .tile span{color:#1f1f1f;font-size:16px;font-weight:700}
+.archive-stats .tile strong{font-size:26px;line-height:1;font-weight:900;color:#222}
+.archive-stats .tile.primary{border:3px solid #222}
+.archive-sections{display:grid;grid-template-columns:repeat(var(--archive-columns),minmax(0,1fr));gap:22px 12px}
+.archive-section{grid-column:1/-1;min-width:0}.archive-section h3{display:flex;align-items:center;gap:10px;margin:0 0 12px;font-size:18px}
+.archive-section--compact{grid-column:span var(--section-columns)}
+.archive-section--compact .archive-list{grid-template-columns:repeat(var(--section-columns),minmax(0,1fr))}
+.archive-section--compact h3{flex-wrap:wrap}.archive-section--compact h3 span{font-size:11px}
+.archive-section h3:before{content:'';width:5px;height:19px;background:#252525}
+.archive-section h3 span{margin-left:auto;font-size:12px;color:#727272;font-weight:400}
+.archive-list{display:grid;grid-template-columns:repeat(var(--archive-columns),minmax(0,1fr));gap:12px}
+.archive-item{min-width:0;position:relative;padding-top:7px}
+.archive-item:before{position:absolute;top:0;left:0;content:'━━━━━━  ≡01';width:58px;height:7px;padding:0 4px;background:#151515;color:#bbb;font:5px/7px Arial,sans-serif;white-space:pre}
+.archive-art{height:148px;display:grid;place-items:center;position:relative;isolation:isolate;overflow:hidden;border-radius:0 5px 0 0;background:linear-gradient(180deg,#626061 0%,#aaa8a9 52%,#e9e7e8 100%)}
+.archive-art-guides{position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-events:none}
+.archive-art img{position:relative;z-index:1;width:94%;height:94%;object-fit:contain;filter:drop-shadow(2px 5px 3px #0003)}
+.archive-art .no-icon{position:relative;z-index:1;color:#fafafa;font-size:13px;border:1px solid #eee8;padding:14px}
+.archive-item strong{display:flex;align-items:center;justify-content:center;min-height:48px;margin-top:6px;padding:7px 8px;background:#e1dfe0;border-left:2px solid #d3d1d2;border-right:2px solid #d3d1d2;text-align:center;font-size:14px;line-height:1.4;overflow-wrap:anywhere;font-weight:700}
+.archive-preview-note{margin-top:18px;background:#eeeeea;border-left:3px solid #bac42b;padding:12px 14px;color:#656565;font-size:13px}
+.archive-source{display:flex;justify-content:space-between;gap:16px;margin-top:14px;padding-top:10px;border-top:2px solid #222;color:#777;font-size:12px;font-weight:800}
+.archive-progressbar{margin:14px 0;padding:14px;border:1px solid #999;background:#fff}
+.archive-progressbar .bar{position:relative;height:26px;background:#e2e2e2;border:1px solid #888}
+.archive-progressbar .bar i{position:absolute;inset:0 auto 0 0;display:block;background:#dce748}
+.archive-progressbar .bar span{position:absolute;inset:0;display:grid;place-items:center;font-size:14px;font-weight:900;color:#111}
+.archive-notice{margin:-4px 2px 12px;padding:2px 2px;color:#8a5a00;font-size:12px;font-weight:700}
+"""
+
+
+async def draw_archive_stats_card(view: ArchiveDiffView) -> tuple[bytes, ...]:
+    """档案库总数 + 游戏分类 + 限量图标预览；预览过高时再分页。"""
+    new_items = _archive_preview_items(view.new_items, ARCHIVE_PREVIEW_LIMIT)
+    urls = [item.icon_url for item in new_items if item.icon_url]
+    urls.extend(f"{_ARCHIVE_PAGE_ICON_BASE}/{icon}.png" for _, icon, _ in _ARCHIVE_PAGE_LAYOUT)
+    icon_map = await _image_data_urls(urls)
+    if not new_items:
+        return (await _draw_archive_stats_page(view, [], 1, 1, icon_map, 0),)
+
+    try:
+        return (await _draw_archive_stats_page(view, new_items, 1, 1, icon_map, len(new_items)),)
+    except RuntimeError as exc:
+        if not is_height_limit_error(exc):
+            raise
+
+    last_error: RuntimeError | None = None
+    for budget in ARCHIVE_PAGE_BUDGETS:
+        chunks = [new_items[i:i + budget] for i in range(0, len(new_items), budget)]
+        pages: list[bytes] = []
+        try:
+            for index, chunk in enumerate(chunks):
+                pages.append(await _draw_archive_stats_page(view, chunk, index + 1, len(chunks), icon_map, len(new_items)))
+        except RuntimeError as exc:
+            if not is_height_limit_error(exc):
+                raise
+            last_error = exc
+            continue
+        logger.info(f"[endfield] archive stats paginated pages={len(pages)} budget={budget}")
+        return tuple(pages)
+    raise last_error or RuntimeError("档案库统计分页失败")
+
+
+def _archive_preview_items(items: list[ArchiveItemView], limit: int) -> list[ArchiveItemView]:
+    """按分类分配预算；被截取的大页签只展示整行，完整页签保留全部条目。"""
+    groups: dict[tuple[str, str], list[int]] = {}
+    for index, item in enumerate(items):
+        groups.setdefault((item.page_id or item.page_name, item.category_id or item.category_name), []).append(index)
+    chosen = _archive_sample_indices(list(groups.values()), max(0, min(limit, len(items))))
+    pages: dict[str, list[list[int]]] = {}
+    for (page, _category), indices in groups.items():
+        pages.setdefault(page, []).append(indices)
+    columns = max(1, ARCHIVE_GRID_COLUMNS)
+    for category_groups in pages.values():
+        page_indices = {index for indices in category_groups for index in indices}
+        shown = len(chosen & page_indices)
+        if columns <= shown < len(page_indices) and shown % columns:
+            # 重新按子分类抽取，不能直接删掉尾部，否则电子档案/藏品等小分类会消失。
+            chosen.difference_update(page_indices)
+            chosen.update(_archive_sample_indices(category_groups, shown // columns * columns))
+    # 整行裁减腾出的预算优先补齐其他页签的短行，例如 1.2 的音像 5/6 可补至 6/6。
+    remaining = max(0, min(limit, len(items))) - len(chosen)
+    while remaining:
+        candidates = []
+        for order, category_groups in enumerate(pages.values()):
+            page_indices = {index for indices in category_groups for index in indices}
+            shown = len(chosen & page_indices)
+            needed = min(columns - shown % columns, len(page_indices) - shown)
+            if 0 < needed <= remaining:
+                candidates.append((needed, order, shown, category_groups))
+        if not candidates:
+            break
+        needed, _order, shown, category_groups = min(candidates, key=lambda row: (row[0], row[1]))
+        chosen.update(_archive_sample_indices(category_groups, shown + needed))
+        remaining -= needed
+    return [item for index, item in enumerate(items) if index in chosen]
+
+
+def _archive_sample_indices(groups: list[list[int]], limit: int) -> set[int]:
+    """在已知容量内按分类轮流取条目。"""
+    chosen: set[int] = set()
+    depth = 0
+    while len(chosen) < limit:
+        for indices in groups:
+            if depth < len(indices):
+                chosen.add(indices[depth])
+                if len(chosen) == limit:
+                    break
+        depth += 1
+    return chosen
+
+
+def _archive_overview_html(
+    page_counts: dict[str, int], category_counts: dict[str, int], icon_map: dict[str, str],
+) -> str:
+    tiles: list[str] = []
+    for name, icon, categories in _ARCHIVE_PAGE_LAYOUT:
+        url = icon_map.get(f"{_ARCHIVE_PAGE_ICON_BASE}/{icon}.png", "")
+        art = f'<img class="archive-page-icon" src="{esc(url)}" alt="">' if url else ""
+        cats = "".join(
+            f'<span>{esc(cat)}<b>{category_counts.get(cat, 0)}</b></span>' for cat in categories
+        )
+        tiles.append(
+            f'<section class="archive-page-tile"><div class="archive-page-top">{art}'
+            f'<div><h2>{esc(name)}</h2><strong>{page_counts.get(name, 0)}</strong><small>条</small></div></div>'
+            f'<div class="archive-cat-list">{cats}</div></section>'
+        )
+    return f'<div class="archive-overview">{"".join(tiles)}</div>'
+
+
+async def _draw_archive_stats_page(
+    view: ArchiveDiffView,
+    items: list[ArchiveItemView],
+    page_number: int,
+    page_count: int,
+    icon_map: dict[str, str],
+    shown_count: int,
+) -> bytes:
+    current = view.current
+    new_total = len(view.new_items)
+    overview = _archive_overview_html(current.page_counts, current.category_counts, icon_map)
+    page_tag = f" · 第 {page_number}/{page_count} 页" if page_count > 1 else ""
+    comparison = f"相较 {view.previous_version} 版本" if view.previous_version else "暂无版本对比基线"
+    preview_label = f"本页展示 {len(items)} 条 · 预览共 {shown_count} / {new_total} 条" if page_count > 1 else f"展示 {shown_count} / {new_total} 条"
+    section_html = _archive_new_section_html(items, icon_map, view.new_items)
+    if not items:
+        section_html = (
+            '<div class="empty">'
+            + ("暂无版本对比基线，暂不能判断新增档案。" if not view.previous_version else
+               "已关闭新增档案预览。" if new_total else "本版本暂无新增档案。")
+            + '</div>'
+        )
+    note = (
+        f'<div class="archive-preview-note">本版本共新增 {new_total} 条，选取 {shown_count} 条预览；其余 {new_total - shown_count} 条未展示，已计入上方总数。</div>'
+        if shown_count < new_total else ""
+    )
+    new_label = str(new_total) if view.previous_version else "—"
+    body = f"""
+    <header><div><small>ENDFIELD / FILE ARCHIVE</small><h1>情报档案库</h1><p>游戏版本 {esc(current.version)} · {esc(comparison)}{page_tag}</p></div>
+      <div class="archive-head-counts"><div class="archive-head-count"><span>档案总数</span><strong>{current.total_count}</strong><em>条</em></div>
+      <div class="archive-head-count new"><span>本版本新增</span><strong>{new_label}</strong><em>条</em></div></div></header>
+    <main>
+      {overview}
+      <div class="archive-preview-head"><h2>新增档案</h2><span>{preview_label if view.previous_version else '等待版本基线'}</span></div>
+      {section_html}
+      {note}
+      <footer class="archive-source"><span>数据来源 AKEData</span><span>版本 {esc(current.version)} · 共 {current.total_count} 条 · 档案组 {current.group_count}</span></footer>
+    </main>
+    """
+    return await _draw_neutral_card("archive-stats-card", body, extra_css=ARCHIVE_CARD_CSS + f":root{{--archive-columns:{ARCHIVE_GRID_COLUMNS}}}")
+
+
+def _archive_new_section_html(
+    items: list[ArchiveItemView], icon_map: dict[str, str], all_items: list[ArchiveItemView],
+) -> str:
+    """新增清单按游戏页签分节，只展示物品图与一次名称。"""
+    by_page: dict[str, list[ArchiveItemView]] = {}
+    for item in items:
+        by_page.setdefault(item.page_name or "未归属", []).append(item)
+    sections: list[str] = []
+    ordered_pages = [name for name, _, _ in _ARCHIVE_PAGE_LAYOUT if name in by_page]
+    ordered_pages.extend(name for name in by_page if name not in ordered_pages)
+    for page_name in ordered_pages:
+        page_items = by_page[page_name]
+        rows: list[str] = []
+        for item in page_items:
+            url = icon_map.get(item.icon_url, "")
+            art = f'<img src="{esc(url)}" alt="">' if url else '<span class="no-icon">暂无图像</span>'
+            rows.append(f'<div class="archive-item"><div class="archive-art">{_ARCHIVE_ART_GUIDES}{art}</div><strong>{esc(item.name)}</strong></div>')
+        total = sum(1 for item in all_items if (item.page_name or "未归属") == page_name)
+        columns = max(2, len(page_items))
+        compact = ' archive-section--compact' if columns < ARCHIVE_GRID_COLUMNS else ''
+        sections.append(
+            f'<section class="archive-section{compact}" style="--section-columns:{columns}"><h3>{esc(page_name)}<span>新增 {total} 条 · 展示 {len(page_items)} 条</span></h3>'
+            f'<div class="archive-list">{"".join(rows)}</div></section>'
+        )
+    return f'<div class="archive-sections">{"".join(sections)}</div>'
+
+
+async def draw_archive_progress_card(view: ArchiveProgressView) -> tuple[bytes, ...]:
+    """个人档案收集进度：森空岛只给 docNum 总数、无逐条明细，仅展示已获得/总数 + 页签参考。"""
+    server_name = server_label(view.server_name) or "默认服务器"
+    percent = (
+        min(view.collected * 100 // view.total_count, 100)
+        if view.total_count > 0 else 0
+    )
+    bar = (
+        f'<div class="bar"><i style="width:{percent}%"></i>'
+        f'<span>{view.collected} / {view.total_count}（{percent}%）</span></div>'
+    )
+    missing_tile = (
+        '<div class="tile"><span>全收集</span><strong>✓</strong></div>'
+        if not view.missing and not view.over_total
+        else f'<div class="tile"><span>尚缺</span><strong>{view.missing}</strong></div>'
+    )
+    notice = (
+        '<div class="archive-notice">森空岛档案数已超过快照总数，口径可能不一致（快照或未含全部计数项），进度仅供参考。</div>'
+        if view.over_total else ""
+    )
+    icon_map = await _image_data_urls(
+        f"{_ARCHIVE_PAGE_ICON_BASE}/{icon}.png" for _, icon, _ in _ARCHIVE_PAGE_LAYOUT
+    )
+    overview = _archive_overview_html(view.page_counts, view.category_counts, icon_map)
+    body = f"""
+    <header><div><small>ENDFIELD / FILE PROGRESS</small><h1>档案收集进度</h1><p>{esc(view.nickname)} · {esc(server_name)} · {esc(view.uid)}</p></div></header>
+    <main>
+      <section class="archive-stats">
+        <div class="tile primary"><span>已获得</span><strong>{view.collected}</strong></div>
+        <div class="tile"><span>全库总数</span><strong>{view.total_count}</strong></div>
+        {missing_tile}
+        <div class="tile"><span>完成率</span><strong>{percent}%</strong></div>
+      </section>
+      <div class="archive-progressbar">{bar}</div>
+      {notice}
+      <div class="archive-preview-head"><h2>全库分类</h2><span>以下为全库数量，非个人分类进度</span></div>
+      {overview}
+      <footer class="archive-source"><span>已获得：森空岛 · 全库参考：AKEData</span><span>快照版本 {esc(view.snapshot_version)}</span></footer>
+    </main>
+    """
+    return (await _draw_neutral_card("archive-progress-card", body, extra_css=ARCHIVE_CARD_CSS),)
 
 
 async def draw_equipment_catalog_card(view: EquipmentCatalogView) -> bytes:
