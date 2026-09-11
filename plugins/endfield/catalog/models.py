@@ -365,6 +365,32 @@ class AttendanceCardView:
 
 
 @dataclass(slots=True)
+class DailyAccountView:
+    nickname: str
+    uid: str
+    server_name: str
+    avatar_url: str = ""
+    account_level: int | None = None
+    stamina_current: int | None = None
+    stamina_max: int | None = None
+    stamina_recover_text: str = ""
+    daily_current: int | None = None
+    daily_max: int | None = None
+    weekly_current: int | None = None
+    weekly_max: int | None = None
+    bp_level: int | None = None
+    bp_max: int | None = None
+    status: str = "ok"
+    message: str = ""
+
+
+@dataclass(slots=True)
+class DailyDashboardView:
+    accounts: list[DailyAccountView] = field(default_factory=list)
+    generated_at: str = ""
+
+
+@dataclass(slots=True)
 class GachaHistoryItemView:
     time: str
     pool_name: str

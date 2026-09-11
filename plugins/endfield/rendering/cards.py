@@ -30,6 +30,8 @@ from otae_bot.infrastructure.rendering.browser import BrowserResource, screensho
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
 
 from ..catalog.models import (
+    DailyAccountView,
+    DailyDashboardView,
     EffectView,
     EquipmentCatalogAttributeView,
     EquipmentCatalogGroupView,
@@ -317,6 +319,205 @@ async def draw_attendance_card(view: AttendanceCardView) -> bytes:
         .attendance-meta{min-width:118px;padding:10px 14px;border-left:4px solid #222;background:#ededed}.attendance-meta span,.attendance-meta b{display:block;margin:0}.attendance-meta span{color:#666;font-size:13px;font-weight:800}.attendance-meta b{margin-top:4px;font-size:22px;white-space:nowrap}
         """,
     )
+
+
+async def draw_daily_dashboard_card(view: DailyDashboardView) -> bytes:
+    """森空岛式亮色日常卡；图标随项目打包，头像失败时回退到昵称首字。"""
+    avatar_urls = tuple(account.avatar_url for account in view.accounts if account.avatar_url)
+    avatars = await _image_data_urls(avatar_urls) if avatar_urls else {}
+    panels = "".join(
+        _daily_account_panel(account, avatars, index=index)
+        for index, account in enumerate(view.accounts, 1)
+    )
+    body = f"""
+    <header class="daily-header">
+      <div class="daily-brand"><span>ENDFIELD INDUSTRIES</span><span>PERSONAL TERMINAL / 日常终端</span></div>
+      <div class="daily-title-line">
+        <div class="daily-title"><span class="daily-title-mark" aria-hidden="true"></span><h1>日常数据</h1><span class="daily-count">{len(view.accounts):02d} 个账号</span></div>
+        <div class="daily-updated"><span>数据更新</span><time>{esc(view.generated_at or '--')}</time></div>
+      </div>
+    </header>
+    <main class="daily-stack">{panels or '<div class="empty">没有可展示的角色</div>'}</main>
+    <footer class="daily-footer"><span>数据来源 · 森空岛</span><span>ENDFIELD / DAILY STATUS</span></footer>
+    """
+    return await _draw_daily_card(
+        "daily-dashboard-card",
+        body,
+        extra_css="""
+        .daily-stack{display:grid;gap:18px}
+        .daily-panel{min-width:0;border:1px solid #d0d0d0;border-radius:10px;background:#fdfdfd;box-shadow:0 4px 12px #0000000a;overflow:hidden}
+        .daily-head{display:flex;align-items:center;gap:14px;padding:16px 22px;border-bottom:1px solid #e2e2e2}
+        .daily-index{align-self:stretch;display:flex;align-items:center;padding-right:15px;border-right:1px solid #dedede;color:#8b8b8b;font:600 15px Arial,sans-serif;letter-spacing:.08em}
+        .daily-avatar{width:48px;height:48px;flex:none;display:grid;place-items:center;overflow:hidden;border:1px solid #d2d2d2;border-radius:5px;background:#eeeeee;color:#555555;font-size:23px;font-weight:700}
+        .daily-avatar img{width:100%;height:100%;object-fit:cover}
+        .daily-id{flex:1;min-width:0}.daily-id strong{display:block;font-size:24px;line-height:1.3;overflow-wrap:anywhere}
+        .daily-id span{display:block;margin-top:5px;color:#737373;font-size:13px;overflow-wrap:anywhere}
+        .daily-level{flex:none;display:flex;align-items:baseline;gap:10px;padding-left:20px;border-left:1px solid #dedede}.daily-level span{color:#767676;font-size:13px}.daily-level b{font:700 23px Arial,sans-serif}
+        .daily-body{display:grid;grid-template-columns:360px minmax(0,1fr);gap:28px;padding:18px 22px 22px}
+        .daily-sanity{position:relative;isolation:isolate;display:flex;flex-direction:column;min-width:0;padding:20px 24px;border:1px solid #dedede;border-radius:6px;background:repeating-linear-gradient(135deg,transparent 0 5px,#00000004 5px 7px),#eeeeee}
+        .daily-sanity-label{display:flex;align-items:center;gap:10px;font-size:21px;font-weight:700}.daily-sanity-label small{color:#818181;font:11px Arial,sans-serif;letter-spacing:.13em}
+        .daily-sanity-art{position:absolute;z-index:-1;right:14px;top:35px;width:145px;height:145px;opacity:.10;transform:rotate(-8deg);pointer-events:none}
+        .daily-sanity-art .daily-icon{width:100%;height:100%}
+        .daily-sanity-value{display:flex;align-items:baseline;gap:8px;margin-top:10px;font-family:Arial,sans-serif;white-space:nowrap}
+        .daily-sanity-value b{font-size:82px;line-height:1.05;letter-spacing:-.055em;font-weight:700}
+        .daily-sanity-value span{color:#777777;font-size:27px;font-weight:400}
+        .daily-recover-label{margin-top:auto;padding-top:18px;color:#777777;font-size:12px}
+        .daily-recover{display:flex;align-items:center;gap:9px;margin-top:7px;color:#444444;font-size:17px;line-height:1.4;font-weight:600;overflow-wrap:anywhere}
+        .daily-recover i{flex:none;width:8px;height:8px;border-radius:50%;background:#777777}
+        .daily-metrics{display:grid;align-content:center;min-width:0}
+        .daily-row{display:grid;grid-template-columns:48px minmax(0,1fr);gap:16px;align-items:center;min-height:78px;padding:12px 0;border-bottom:1px solid #e3e3e3}
+        .daily-row:first-child{padding-top:0}.daily-row:last-child{border-bottom:0;padding-bottom:0}
+        .daily-icon{display:block;width:44px;height:44px;object-fit:contain}
+        .daily-icon-sanity{filter:brightness(0)}
+        .daily-icon-activity,.daily-icon-weekly,.daily-icon-pass{mix-blend-mode:multiply;filter:grayscale(1) contrast(1.1)}
+        .daily-icon-fallback{display:grid;place-items:center;filter:none;border:1px solid currentColor;border-radius:4px;font-size:20px}
+        .daily-row-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+        .daily-row-label{display:flex;align-items:center;gap:12px;font-size:20px;font-weight:700}
+        .daily-row-state{font-size:12px;font-weight:400;color:#777777;white-space:nowrap}
+        .daily-row-state.done{display:inline-flex;align-items:center;gap:5px}
+        .daily-check{width:10px;height:6px;border-left:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(-45deg) translateY(-2px)}
+        .daily-row-value{font-family:Arial,sans-serif;font-size:32px;font-weight:600;white-space:nowrap;line-height:1.1}
+        .daily-row-value span{color:#898989;font-size:22px;font-weight:400}
+        .daily-bar{margin-top:11px;height:6px;background:#e2e2e2;border-radius:3px;overflow:hidden}
+        .daily-bar i{display:block;height:100%;border-radius:inherit;background:var(--daily-accent)}
+        .daily-row.is-unknown .daily-bar{background:repeating-linear-gradient(135deg,#dedede 0 4px,#f3f3f3 4px 8px)}
+        .daily-panel.status-failed{background:#f8f8f8;border-color:#d6d6d6}.status-failed .daily-head{border-bottom-color:#e1e1e1}
+        .daily-failed-label{flex:none;color:#666666;font-size:13px}
+        .daily-error{display:flex;align-items:center;gap:14px;padding:20px 24px;color:#555555;font-size:16px;line-height:1.6;overflow-wrap:anywhere}
+        .daily-error-icon{display:grid;place-items:center;flex:none;width:28px;height:28px;border:1px solid #929292;border-radius:50%;font:18px Arial,sans-serif}
+        """,
+    )
+
+
+def _daily_account_panel(account: DailyAccountView, avatars: dict[str, str], *, index: int = 1) -> str:
+    server_name = server_label(account.server_name) or "默认服务器"
+    if account.status != "ok":
+        return f"""
+        <section class="daily-panel status-failed">
+          <div class="daily-head">
+            <span class="daily-index">{index:02d}</span>
+            <div class="daily-avatar"><span>{esc(account.nickname[:1] or '?')}</span></div>
+            <div class="daily-id"><strong>{esc(account.nickname or '未命名账号')}</strong><span>{esc(server_name)} · UID {esc(account.uid)}</span></div>
+            <span class="daily-failed-label">查询失败</span>
+          </div>
+          <div class="daily-error"><span class="daily-error-icon" aria-hidden="true">!</span><span>{esc(account.message or "查询失败，请稍后重试")}</span></div>
+        </section>
+        """
+    avatar_src = avatars.get(account.avatar_url, "")
+    avatar = (
+        f'<img src="{esc_attr(avatar_src)}" alt="{esc_attr(account.nickname)}">'
+        if avatar_src
+        else f"<span>{esc(account.nickname[:1] or '?')}</span>"
+    )
+    level = (
+        f'<div class="daily-level"><span>账号等级</span><b>Lv {account.account_level}</b></div>'
+        if account.account_level is not None
+        else ""
+    )
+    recover_text = account.stamina_recover_text or "暂无数据"
+    recover_state = "full" if recover_text == "已回满" else "recovering" if account.stamina_recover_text else "unknown"
+    return f"""
+    <section class="daily-panel">
+      <div class="daily-head">
+        <span class="daily-index">{index:02d}</span>
+        <div class="daily-avatar">{avatar}</div>
+        <div class="daily-id"><strong>{esc(account.nickname or '未命名账号')}</strong><span>{esc(server_name)} · UID {esc(account.uid)}</span></div>
+        {level}
+      </div>
+      <div class="daily-body">
+        <div class="daily-sanity {recover_state}">
+          <div class="daily-sanity-art" aria-hidden="true">{_daily_icon('sanity')}</div>
+          <span class="daily-sanity-label">理智<small>SANITY</small></span>
+          <div class="daily-sanity-value"><b>{esc(_daily_value(account.stamina_current))}</b><span>/ {esc(_daily_value(account.stamina_max))}</span></div>
+          <span class="daily-recover-label">{'理智状态' if recover_state == 'full' else '回满时间'}</span>
+          <span class="daily-recover {recover_state}"><i></i>{esc(recover_text)}</span>
+        </div>
+        <div class="daily-metrics">
+          {_daily_progress_row("活跃度", account.daily_current, account.daily_max, done_text="已满", icon="activity")}
+          {_daily_progress_row("每周事务", account.weekly_current, account.weekly_max, done_text="已完成", icon="weekly")}
+          {_daily_progress_row("通行证等级", account.bp_level, account.bp_max, done_text="已满级", icon="pass")}
+        </div>
+      </div>
+    </section>
+    """
+
+
+def _daily_icon(name: str) -> str:
+    """Use the user's Skland screenshot crops and the bundled AKEData sanity art."""
+    fallback = {"sanity": "理", "activity": "日", "weekly": "周", "pass": "证"}
+    if name not in fallback:
+        return ""
+    src = _local_image_data_url(ASSET_DIR / "daily" / f"{name}.png")
+    if not src:
+        return f'<span class="daily-icon daily-icon-fallback" aria-hidden="true">{fallback[name]}</span>'
+    return f'<img class="daily-icon daily-icon-{name}" src="{esc_attr(src)}" alt="" aria-hidden="true">'
+
+
+def _daily_progress_row(label: str, current: int | None, total: int | None, *, done_text: str, icon: str = "") -> str:
+    known = current is not None and total is not None and total > 0
+    complete = known and current >= total
+    percent = max(0.0, min(100.0, current / total * 100)) if known else 0.0
+    state_class = "is-done" if complete else "" if known else "is-unknown"
+    state_text = done_text if complete else "进行中" if known else "暂无数据" if current is None and total is None else "数据不全"
+    state_icon = '<i class="daily-check" aria-hidden="true"></i>' if complete else ""
+    return f"""
+    <div class="daily-row {state_class}">
+      <div aria-hidden="true">{_daily_icon(icon)}</div>
+      <div>
+        <div class="daily-row-head">
+          <span class="daily-row-label">{esc(label)}<span class="daily-row-state {'done' if complete else ''}">{state_icon}{esc(state_text)}</span></span>
+          <b class="daily-row-value">{esc(_daily_value(current))}<span> / {esc(_daily_value(total))}</span></b>
+        </div>
+        <div class="daily-bar"><i style="width:{percent:.1f}%"></i></div>
+      </div>
+    </div>
+    """
+
+
+def _daily_value(value: int | None) -> str:
+    return "--" if value is None else str(value)
+
+
+def _daily_pair(current: int | None, total: int | None) -> str:
+    if current is None and total is None:
+        return "--"
+    if total is None:
+        return str(current)
+    return f"{'--' if current is None else current} / {total}"
+
+
+async def _draw_daily_card(selector: str, body: str, *, extra_css: str = "") -> bytes:
+    """独立亮色外壳，保留其他 bot 卡片的共享样式与截图参数。"""
+    width = 1280
+    css = f"""
+    *{{box-sizing:border-box}}html,body{{margin:0;width:{width}px;background:#ededed;color:#262626;font-family:'Microsoft YaHei','PingFang SC','Noto Sans SC',Arial,sans-serif;font-variant-numeric:tabular-nums}}
+    .{selector}{{--daily-accent:#ffe600;width:{width}px;min-height:420px;padding:26px 32px 20px;background:
+      linear-gradient(90deg,#00000004 1px,transparent 1px) 0 0/32px 32px,
+      linear-gradient(0deg,#00000004 1px,transparent 1px) 0 0/32px 32px,#ededed}}
+    .daily-header{{margin-bottom:22px;border-bottom:2px solid #3e3e3e}}
+    .daily-brand{{display:flex;align-items:center;justify-content:space-between;color:#777777;font-size:10px;letter-spacing:.15em}}
+    .daily-brand>span:first-child{{font-weight:700;letter-spacing:.21em}}
+    .daily-title-line{{display:flex;align-items:center;justify-content:space-between;gap:24px;padding:20px 0 21px}}
+    .daily-title{{display:flex;align-items:center;gap:16px}}.daily-title h1{{margin:0;font-size:42px;line-height:1.2;letter-spacing:.04em;font-weight:800}}
+    .daily-title-mark{{width:8px;height:36px;background:var(--daily-accent)}}
+    .daily-count{{align-self:flex-end;margin-bottom:3px;padding:5px 10px;border:1px solid #c9c9c9;border-radius:3px;color:#737373;font-size:12px;white-space:nowrap}}
+    .daily-updated{{text-align:right;flex:none}}.daily-updated span{{display:block;margin-bottom:6px;color:#858585;font-size:11px}}.daily-updated time{{font:15px Arial,sans-serif;letter-spacing:.05em;color:#555555}}
+    .daily-footer{{display:flex;justify-content:space-between;align-items:center;margin-top:19px;color:#858585;font-size:11px;letter-spacing:.05em}}
+    .daily-footer>span:last-child{{font:10px Arial,sans-serif;letter-spacing:.14em}}
+    .empty{{padding:60px 28px;text-align:center;color:#777777;background:#f8f8f8;border:1px dashed #c5c5c5;border-radius:8px}}
+    {extra_css}
+    """
+    document = f"<!doctype html><html><head><meta charset='utf-8'><style>{css}</style></head><body><div class='{selector}'>{body}</div></body></html>"
+    html_path = _write_temp_html(document)
+    try:
+        output = await screenshot_web_element(
+            html_path.resolve().as_uri(), f".{selector}", viewport=(width, 1), timeout_ms=15000,
+            max_height=CARD_MAX_HEIGHT, device_scale_factor=2.0, settle_ms=30,
+            wait_for_images=True, strict_max_height=True,
+        )
+        return await run_image_render(optimize_png_container, output)
+    finally:
+        schedule_temp_file_cleanup(html_path, delay_seconds=30)
 
 
 async def draw_gacha_analysis_cards(view: GachaAnalysis, *, uid: str) -> tuple[bytes, ...]:

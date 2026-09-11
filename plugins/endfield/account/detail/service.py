@@ -11,6 +11,7 @@ from .models import (
     AccountStatView,
     AccountWeaponView,
 )
+from ...catalog.models import DailyAccountView
 from ..i18n import localized_text, semantic_key, semantic_label, server_label
 from .names import AccountDetailNameMap
 from ...gacha.service import format_timestamp
@@ -75,6 +76,45 @@ def build_account_detail_view(
         saved_at=format_timestamp(_int_or_none(base.get("saveTime")) or 0),
         stats=_build_stats(detail, base, currency_balances or {}),
         operators=_build_operators(detail, name_map),
+    )
+
+
+def build_daily_account_view(
+    detail: Mapping[str, Any],
+    *,
+    nickname: str,
+    uid: str,
+    server_name: str,
+) -> DailyAccountView:
+    """Extract the daily-dashboard metrics (理智/活跃度/每周事务/通行证) from a Skland ``data.detail`` payload.
+
+    Same tolerance rules as :func:`build_account_detail_view`: missing or oddly
+    typed fields stay ``None`` so the renderer can show ``--`` placeholders.
+    """
+    detail = detail or {}
+    base = _mapping(detail.get("base"))
+    dungeon = _mapping(detail.get("dungeon"))
+    daily = _mapping(detail.get("dailyMission"))
+    weekly = _mapping(detail.get("weeklyMission"))
+    bp_system = _mapping(detail.get("bpSystem"))
+    stamina_current = _int_or_none(dungeon.get("curStamina"))
+    return DailyAccountView(
+        nickname=_text(base.get("name")) or nickname or "未知管理员",
+        uid=uid,
+        server_name=server_label(server_name or _text(base.get("serverName"))),
+        avatar_url=_text(base.get("avatarUrl")),
+        account_level=_int_or_none(base.get("level")),
+        stamina_current=stamina_current,
+        stamina_max=_int_or_none(dungeon.get("maxStamina")),
+        stamina_recover_text=(
+            _stamina_note(dungeon, detail.get("currentTs")) if stamina_current is not None else ""
+        ),
+        daily_current=_int_or_none(daily.get("dailyActivation")),
+        daily_max=_int_or_none(daily.get("maxDailyActivation")),
+        weekly_current=_int_or_none(weekly.get("score")),
+        weekly_max=_int_or_none(weekly.get("total")),
+        bp_level=_int_or_none(bp_system.get("curLevel")),
+        bp_max=_int_or_none(bp_system.get("maxLevel")),
     )
 
 

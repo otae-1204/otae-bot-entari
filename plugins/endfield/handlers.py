@@ -109,6 +109,7 @@ from .rendering.cards import (
     draw_weapon_card,
     draw_weapon_catalog_card,
     draw_attendance_card,
+    draw_daily_dashboard_card,
     draw_gacha_analysis_cards,
     draw_gacha_history_card,
 )
@@ -116,7 +117,7 @@ from .calendar.draw import draw_version_calendar
 from .calendar.official import OfficialVersionCalendarSource
 from .calendar.official_draw import draw_official_version_calendar
 from .account.detail.draw import draw_account_detail_cards
-from .account.detail.service import build_account_detail_view
+from .account.detail.service import build_account_detail_view, build_daily_account_view
 from .account.detail.names import fetch_account_detail_name_map
 from .account.base.draw import draw_account_base_card
 from .account.base.service import build_account_base_view
@@ -161,6 +162,8 @@ from .catalog.models import (
     AttendanceCardView,
     AttendanceRewardView,
     AttendanceRoleView,
+    DailyAccountView,
+    DailyDashboardView,
     GachaHistoryItemView,
     GachaHistoryView,
     LoadoutView,
@@ -701,6 +704,9 @@ async def _handle_personal_command(matcher, event: Event, command: ParsedEndfiel
         if command.action == "attendance":
             cipher = CredentialCipher.from_env()
             return await _handle_attendance(matcher, qq_user_id, command, cipher, group=is_group(event))
+        if command.action == "daily":
+            cipher = CredentialCipher.from_env()
+            return await _handle_daily(matcher, qq_user_id, command, cipher, group=is_group(event))
         if command.action == "medal_missing":
             cipher = CredentialCipher.from_env()
             return await _handle_medal_missing(matcher, qq_user_id, command, cipher, group=is_group(event))
@@ -1675,6 +1681,52 @@ async def _handle_attendance(
             views.append(AttendanceRoleView(role.nickname, role.masked_uid, role.server_name, "failed", "签到失败，请稍后重试"))
     png = await draw_attendance_card(
         AttendanceCardView(views, format_timestamp(int(__import__("time").time())))
+    )
+    return await _finish_png(matcher, png)
+
+
+async def _handle_daily(
+    matcher,
+    qq_user_id: str,
+    command: ParsedEndfieldCommand,
+    cipher: CredentialCipher,
+    *,
+    group: bool,
+) -> None:
+    """日常仪表盘：逐账号读取森空岛 card/detail，展示理智/活跃度/每周事务/通行证。"""
+    roles = account_store.resolve_roles(qq_user_id, command.account_selector)
+    if not roles:
+        return await matcher.finish("未找到对应账号，请先私聊使用 /ef 绑定。")
+    accounts: list[DailyAccountView] = []
+    for role in roles:
+        try:
+            async with ROLE_TASKS.claim(role):
+                token = account_store.decrypt_token(role, cipher)
+                # card_detail 返回已解包的 data.detail；endfield_card_detail 是完整响应，
+                # 仅供奖章/档案等自行解包的视图使用。
+                detail = await official_client.card_detail(token, role)
+            accounts.append(build_daily_account_view(
+                detail,
+                nickname=role.nickname, uid=role.masked_uid,
+                server_name=server_label(role.server_name or role.server_id),
+            ))
+        except TaskAlreadyRunning:
+            accounts.append(DailyAccountView(
+                role.nickname, role.masked_uid, role.server_name, status="failed", message="任务正在进行"))
+        except EndfieldAPIError as exc:
+            accounts.append(DailyAccountView(
+                role.nickname, role.masked_uid, role.server_name, status="failed", message=str(exc)))
+        except CredentialKeyError as exc:
+            accounts.append(DailyAccountView(
+                role.nickname, role.masked_uid, role.server_name, status="failed", message=str(exc)))
+        except Exception as exc:
+            logger.error(
+                f"[endfield-account] daily dashboard failed: stored_role={role.id} error_type={type(exc).__name__}"
+            )
+            accounts.append(DailyAccountView(
+                role.nickname, role.masked_uid, role.server_name, status="failed", message="查询失败，请稍后重试"))
+    png = await draw_daily_dashboard_card(
+        DailyDashboardView(accounts, format_timestamp(int(__import__("time").time())))
     )
     return await _finish_png(matcher, png)
 
