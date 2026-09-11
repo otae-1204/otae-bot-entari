@@ -14,7 +14,8 @@ from pathlib import Path
 import httpx
 
 from .config import HywConfig, HywError
-from .network_errors import report_error
+from .google_auth import Secret, bearer_for
+from .network_errors import classify_auth_error, report_error
 from .web import fetch_page, search
 
 SYSTEM_PROMPT = (Path(__file__).parent / "assets/system_prompt.txt").read_text(encoding="utf-8")
@@ -65,33 +66,80 @@ def parse_response(content: str) -> tuple[str, list[tuple[str, dict[str, str]]],
     raise HywError("模型回复格式不正确，请重试或更换支持指令遵循的模型。")
 
 
-async def complete(client: httpx.AsyncClient, config: HywConfig, messages: list[dict]) -> str:
+class _TokenRejected(HywError):
+    """Access token refused upstream; one forced refresh is worth trying."""
+
+
+async def _read_bounded(response: httpx.Response, limit: int) -> bytes:
+    body = bytearray()
+    async for chunk in response.aiter_bytes():
+        body.extend(chunk)
+        if len(body) >= limit:
+            break
+    return bytes(body[:limit])
+
+
+def _http_error(config: HywConfig, status: int, body: bytes) -> HywError:
+    """Map a non-200 model response to a chat-safe message.
+
+    The upstream body is only matched against fixed markers and never echoed,
+    logged or stored: it can contain account identifiers.
+    """
+    if config.auth_mode == "service_account":
+        failure = classify_auth_error(status, body.decode("utf-8", "replace"))
+        error = HywError(f"{failure.message}（HTTP {status} / {failure.code}）")
+        return _TokenRejected(str(error)) if status == 401 else error
+    if status in {401, 403}:
+        return HywError("模型鉴权失败，请管理员检查 HYW 的 API 密钥和模型权限。")
+    if status == 429:
+        return HywError("模型请求过于频繁或额度不足，请稍后重试。")
+    return HywError(f"模型服务请求失败（HTTP {status}），请检查模型名称及接口地址。")
+
+
+async def _request(client: httpx.AsyncClient, config: HywConfig, messages: list[dict], token: Secret) -> str:
+    # token 只以 Secret 形式持有：entari 的 loguru 处理器带 diagnose=True，
+    # traceback 会渲染本帧当前执行行上的变量值，裸令牌会因此进日志。
+    async with client.stream(
+        "POST", config.base_url + "/chat/completions",
+        headers=token.bearer_headers(),
+        json={"model": config.model, "messages": messages, "temperature": 0.5, "max_tokens": 4096, "stream": False},
+        timeout=60,
+    ) as response:
+        if response.status_code != 200:
+            raise _http_error(config, response.status_code, await _read_bounded(response, 4096))
+        body = bytearray()
+        async for chunk in response.aiter_bytes():
+            body.extend(chunk)
+            if len(body) > 2_000_000:
+                raise HywError("模型响应超过大小限制。")
     try:
-        async with client.stream(
-            "POST", config.base_url + "/chat/completions",
-            headers={"Authorization": f"Bearer {config.api_key}"},
-            json={"model": config.model, "messages": messages, "temperature": 0.5, "max_tokens": 4096, "stream": False},
-            timeout=60,
-        ) as response:
-            if response.status_code in {401, 403}:
-                raise HywError("模型鉴权失败，请管理员检查 HYW 的 API 密钥和模型权限。")
-            if response.status_code == 429:
-                raise HywError("模型请求过于频繁或额度不足，请稍后重试。")
-            if response.status_code != 200:
-                raise HywError(f"模型服务请求失败（HTTP {response.status_code}），请检查模型名称及接口地址。")
-            body = bytearray()
-            async for chunk in response.aiter_bytes():
-                body.extend(chunk)
-                if len(body) > 2_000_000:
-                    raise HywError("模型响应超过大小限制。")
-        result = json.loads(body)["choices"][0]["message"]["content"]
-        if not isinstance(result, str) or not result.strip():
-            raise ValueError("empty response")
-        return result[:40000]
-    except httpx.HTTPError as error:
-        raise HywError(report_error(error, config)) from None
+        message = json.loads(body)["choices"][0]["message"]
     except (KeyError, IndexError, TypeError, ValueError):
         raise HywError("模型服务返回了无法识别的响应。") from None
+    # Vertex can answer 200 with no content when reasoning tokens exhaust max_tokens.
+    content = message.get("content") if isinstance(message, dict) else None
+    if not isinstance(content, str) or not content.strip():
+        raise HywError("模型返回了空内容，请重试或更换模型。")
+    return content[:40000]
+
+
+async def _bearer(client: httpx.AsyncClient, config: HywConfig, *, force: bool = False) -> Secret:
+    try:
+        return await bearer_for(client, config, force=force)
+    except httpx.HTTPError as error:
+        raise HywError(report_error(error, config)) from None
+
+
+async def complete(client: httpx.AsyncClient, config: HywConfig, messages: list[dict]) -> str:
+    try:
+        token = await _bearer(client, config)
+        try:
+            return await _request(client, config, messages, token)
+        except _TokenRejected:
+            # The cached token may have been revoked; exchange a fresh one before giving up.
+            return await _request(client, config, messages, await _bearer(client, config, force=True))
+    except httpx.HTTPError as error:
+        raise HywError(report_error(error, config)) from None
 
 
 async def ask(

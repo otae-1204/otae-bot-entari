@@ -54,6 +54,38 @@ def classify_error(error: httpx.HTTPError) -> NetworkFailure:
     return NetworkFailure("connection", "无法建立模型连接，请管理员检查运行机器到接口或代理的网络。")
 
 
+def classify_auth_error(status: int, payload: str) -> NetworkFailure:
+    """把 Google 凭据/Vertex 的 HTTP 错误映射成可操作的中文提示。
+
+    payload 只用于匹配固定的错误标记，从不回显，也不写入日志。
+    """
+    body = (payload or "").lower()
+    if status == 429:
+        return NetworkFailure("quota", "模型请求过于频繁或额度不足，请稍后重试。")
+    if status == 401:
+        return NetworkFailure("sa_token", "模型访问令牌被拒绝，已尝试自动刷新，请重试或检查服务账号状态。")
+    if status == 403:
+        if "consumer_invalid" in body or "consumer invalid" in body:
+            return NetworkFailure("sa_project", "该服务账号无权访问此项目（凭据中的项目与实际请求的项目不一致），请管理员核对。")
+        return NetworkFailure("sa_project", "该服务账号无权访问此项目，或项目未启用 Vertex AI，请管理员检查 IAM 权限与 API 启用状态。")
+    if status == 404:
+        return NetworkFailure("sa_model", "模型或区域不可用，请管理员检查模型名称与 HYW_VERTEX_LOCATION 是否匹配。")
+    if status == 400:
+        if "invalid jwt signature" in body or "jwt signature" in body:
+            return NetworkFailure("sa_signature", "服务账号私钥与凭据不匹配，请重新下载凭据 JSON。")
+        if "account not found" in body:
+            return NetworkFailure("sa_account", "服务账号不存在或已被删除，请管理员重新创建服务账号。")
+        if "short-lived token" in body or "short lived token" in body:
+            return NetworkFailure("sa_clock", "运行机器的系统时间偏差过大，请校准系统时间后重试。")
+        if "malformed publisher model" in body:
+            return NetworkFailure("sa_model_prefix", "模型名缺少发布者前缀，请填写形如 google/gemini-3.8-flash 的名称。")
+        if "provided image is not valid" in body or "image is not valid" in body:
+            return NetworkFailure("sa_image", "图片无法被模型接受，请改用 JPEG 或 PNG 重新发送。")
+        if "invalid_grant" in body or "invalid_request" in body or "invalid json payload" in body:
+            return NetworkFailure("sa_assertion", "凭据文件内容不完整或格式不正确，请重新下载凭据 JSON。")
+    return NetworkFailure("sa_unknown", "模型服务拒绝了该凭据，请管理员检查服务账号凭据与项目配置。")
+
+
 def report_error(error: httpx.HTTPError, config: HywConfig) -> str:
     failure = classify_error(error)
     route = "proxy" if config.proxy else "direct"

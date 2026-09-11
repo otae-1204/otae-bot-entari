@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import os
+import ssl
 from contextlib import AsyncExitStack
 from io import BytesIO
 
@@ -32,6 +34,30 @@ HELP = """HYW / 何意味
 输入和引用内容会发送给配置的模型服务；搜索词会发送给 DuckDuckGo。"""
 history_store = HistoryStore()
 _active: dict[Scope, int] = {}
+_ssl_contexts: dict[tuple[str | None, str | None], ssl.SSLContext] = {}
+
+
+def shared_ssl_context() -> ssl.SSLContext:
+    """进程内复用一个 TLS 上下文。
+
+    httpx 的 ``AsyncHTTPTransport`` 在 ``verify=True`` 时每次都会读 certifi 的
+    CA 包（本机实测约 1.0s，裸 ``ssl.create_default_context()`` 只要 0.03s），而
+    ``run_request`` 每个请求都要新建 transport。把上下文交给 ``verify=`` 后
+    ``create_ssl_context`` 直接原样返回，单次开销降到 0。
+
+    键含 ``SSL_CERT_FILE`` / ``SSL_CERT_DIR``，与 httpx 的 ``trust_env`` 语义一致，
+    环境变量变化时不会复用错误的上下文。
+    """
+    key = (os.environ.get("SSL_CERT_FILE"), os.environ.get("SSL_CERT_DIR"))
+    context = _ssl_contexts.get(key)
+    if context is None:
+        context = httpx.create_ssl_context(verify=True, trust_env=True)
+        _ssl_contexts[key] = context
+    return context
+
+
+def make_transport(proxy: str | None) -> httpx.AsyncHTTPTransport:
+    return httpx.AsyncHTTPTransport(proxy=proxy or None, verify=shared_ssl_context())
 
 
 def scope_for(session: Session) -> Scope:
@@ -106,7 +132,7 @@ async def send_text(session: Session, text: str) -> list:
 
 async def run_request(session: Session, config: HywConfig, scope: Scope, text: str, images: list[str], prior: list[dict]):
     # Credentials are attached only to POST /chat/completions, never to search/image GETs.
-    transport = httpx.AsyncHTTPTransport(proxy=config.proxy or None)
+    transport = make_transport(config.proxy)
     async with (
         httpx.AsyncClient(transport=transport, trust_env=False, headers={"User-Agent": "Mozilla/5.0"}) as client,
         AsyncExitStack() as stack,
@@ -115,10 +141,15 @@ async def run_request(session: Session, config: HywConfig, scope: Scope, text: s
         tool_client = client
         if search_proxy != config.proxy:
             tool_client = await stack.enter_async_context(httpx.AsyncClient(
-                transport=httpx.AsyncHTTPTransport(proxy=search_proxy or None),
+                transport=make_transport(search_proxy),
                 trust_env=False, headers={"User-Agent": "Mozilla/5.0"},
             ))
-        logger.info("[hyw] request routes: model={} search={}", "proxy" if config.proxy else "direct", "proxy" if search_proxy else "direct")
+        logger.info(
+            "[hyw] request routes: model={} search={} auth={}",
+            "proxy" if config.proxy else "direct",
+            "proxy" if search_proxy else "direct",
+            config.auth_mode,
+        )
         content = await model_content(client, text, images)
 
         async def progress(message: str):
@@ -165,8 +196,13 @@ async def handle_hyw(session: Session, result: Arparma):
     except ValueError as error:
         await send_text(session, str(error))
         return
-    if not config.api_key:
-        await send_text(session, "HYW 尚未配置模型密钥。请管理员填写 HYW_API_KEY、HYW_BASE_URL、HYW_MODEL，或设置 HYW_CONFIG_SOURCE 复用现有模型配置。")
+    if not config.configured:
+        if config.auth_mode == "none" and config.auth_error:
+            await send_text(session, f"{config.auth_error}请管理员检查 HYW_CREDENTIALS_FILE 指向的服务账号 JSON。")
+        elif config.credentials_file:
+            await send_text(session, "HYW 尚未配置模型密钥。请管理员填写 HYW_API_KEY、HYW_BASE_URL、HYW_MODEL，或设置 HYW_CONFIG_SOURCE 复用现有模型配置。")
+        else:
+            await send_text(session, "HYW 尚未配置模型密钥。请管理员填写 HYW_API_KEY，或把 Google 服务账号 JSON 放到 HYW_CREDENTIALS_FILE 指向的路径。")
         return
     prior = []
     if session.reply and session.reply.origin:

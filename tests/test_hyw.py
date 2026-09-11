@@ -1,22 +1,32 @@
 from __future__ import annotations
 
 import asyncio
+import atexit
 import base64
 import json
+import os
+import shutil
 import socket
 import ssl
+import tempfile
 import unittest
 from dataclasses import replace
+from functools import lru_cache
 from io import BytesIO
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import httpx
 from arclet.entari import MessageChain
+from Crypto.Hash import SHA256
+from Crypto.PublicKey import RSA
+from Crypto.Signature import pkcs1_15
 from PIL import Image as PILImage
 from satori import Image, Text
 
-from plugins.hyw import agent, handlers, network_errors, rendering, web
+from plugins.hyw import agent, google_auth, handlers, network_errors, rendering, web
+from plugins.hyw import config as hyw_config
 from plugins.hyw.config import HywConfig, HywError
 from plugins.hyw.history import HistoryStore
 
@@ -41,6 +51,44 @@ def session(user="user", channel="channel", bot="bot", receipt_prefix=""):
 
 def command_result(text):
     return SimpleNamespace(all_matched_args={"content": [Text(text)]})
+
+
+# --- Google 服务账号测试夹具：临时目录中的一次性密钥，测试结束即删除 ---
+#
+# 这里刻意使用合成标识符（example-project / *.example.com），而不是任何真实项目的
+# 项目号、client_email 或 private_key_id：真实凭据只应存在于部署机器的仓库之外，
+# 不应因为测试夹具而进入版本库。私钥由本进程即时生成，测试结束随临时目录删除。
+
+SA_DIR = Path(tempfile.mkdtemp(prefix="hyw-sa-"))
+atexit.register(shutil.rmtree, SA_DIR, True)
+SA_KEY = RSA.generate(2048)
+SA_PUBLIC_KEY = SA_KEY.publickey()
+SA_PROJECT = "example-project-123456"
+SA_EMAIL = "otaebot@example-project-123456.iam.gserviceaccount.com"
+SA_KEY_ID = "0123456789abcdef0123456789abcdef01234567"
+
+
+def write_credentials(directory: Path, name: str, *, raw: str | None = None, **overrides) -> Path:
+    """写出一份服务账号 JSON（或原始文本），字段可用 overrides 覆盖以构造异常用例。"""
+    path = directory / name
+    if raw is not None:
+        path.write_text(raw, encoding="utf-8")
+        return path
+    document = {
+        "type": "service_account",
+        "project_id": SA_PROJECT,
+        "private_key_id": SA_KEY_ID,
+        "private_key": SA_KEY.export_key().decode(),
+        "client_email": SA_EMAIL,
+        "client_id": "111633939774036951322",
+        "token_uri": "https://oauth2.googleapis.com/token",
+    }
+    document.update(overrides)
+    path.write_text(json.dumps(document), encoding="utf-8")
+    return path
+
+
+SA_FILE = write_credentials(SA_DIR, "service-account.json")
 
 
 class ProtocolTests(unittest.TestCase):
@@ -345,6 +393,345 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaises(HywError) as error:
                     await agent.complete(client, HywConfig(), [])
             self.assertNotIn("private", str(error.exception))
+
+
+class ServiceAccountTests(unittest.TestCase):
+    """Google 服务账号模式：断言签名、凭据校验与配置优先级。"""
+
+    def setUp(self):
+        google_auth._providers.clear()
+        hyw_config._warned.clear()
+
+    def test_assertion_is_verifiable_rs256_with_google_claims(self):
+        account = google_auth.load_service_account(str(SA_FILE))
+        assertion = google_auth.build_assertion(account, now=1_700_000_000)
+        header_b64, claims_b64, signature_b64 = assertion.split(".")
+        header = json.loads(base64.urlsafe_b64decode(header_b64 + "=="))
+        claims = json.loads(base64.urlsafe_b64decode(claims_b64 + "=="))
+        self.assertEqual((header["alg"], header["typ"]), ("RS256", "JWT"))
+        self.assertEqual(header["kid"], SA_KEY_ID)
+        self.assertEqual(claims["iss"], SA_EMAIL)
+        self.assertEqual(claims["aud"], "https://oauth2.googleapis.com/token")
+        self.assertEqual(claims["scope"], "https://www.googleapis.com/auth/cloud-platform")
+        self.assertEqual(claims["exp"] - claims["iat"], 3600)
+        self.assertLess(claims["iat"], 1_700_000_000)  # clock skew is subtracted
+        pkcs1_15.new(SA_PUBLIC_KEY).verify(
+            SHA256.new(f"{header_b64}.{claims_b64}".encode("ascii")),
+            base64.urlsafe_b64decode(signature_b64 + "=="),
+        )
+
+    def test_credentials_errors_are_fixed_text_without_path_or_key(self):
+        cases = {
+            "missing": str(SA_DIR / "absent.json"),
+            "bad_json": str(write_credentials(SA_DIR, "broken.json", raw="{not json")),
+            "wrong_type": str(write_credentials(SA_DIR, "type.json", type="authorized_user")),
+            "no_project": str(write_credentials(SA_DIR, "noproject.json", project_id="")),
+            "no_key": str(write_credentials(SA_DIR, "nokey.json", private_key="not-a-pem")),
+            "bad_pem": str(write_credentials(SA_DIR, "badpem.json", private_key="-----BEGIN PRIVATE KEY-----\nnope\n-----END PRIVATE KEY-----\n")),
+        }
+        for name, path in cases.items():
+            with self.subTest(case=name), self.assertRaises(HywError) as error:
+                google_auth.load_service_account(path)
+            message = str(error.exception)
+            self.assertIn("HYW 服务账号凭据不可用", message)
+            self.assertNotIn("PRIVATE KEY", message)
+            self.assertNotIn(SA_DIR.name, message)
+            self.assertNotIn(path, message)
+
+    def test_credentials_path_expands_home_and_resolves_against_cwd(self):
+        self.assertEqual(google_auth.resolve_credentials_path("~/x.json"), Path.home() / "x.json")
+        original = Path.cwd()
+        try:
+            os.chdir(SA_DIR)
+            self.assertEqual(google_auth.resolve_credentials_path("data/key.json"), SA_DIR / "data" / "key.json")
+        finally:
+            os.chdir(original)
+        self.assertTrue(google_auth.resolve_credentials_path(str(SA_FILE)).is_file())
+
+    def test_service_account_ignores_relay_base_url_and_prefixes_model(self):
+        values = {
+            "HYW_CREDENTIALS_FILE": str(SA_FILE),
+            "HYW_BASE_URL": "https://llm.hyw.mom/v1",
+            "HYW_MODEL": "gemini-3.8-flash",
+        }
+        with patch("plugins.hyw.config._env", side_effect=lambda key, default=None: values.get(key, default)):
+            config = HywConfig.from_env()
+        # 关键回归：只加 HYW_CREDENTIALS_FILE 时不得把服务账号令牌发往中转。
+        self.assertEqual(config.auth_mode, "service_account")
+        self.assertEqual(
+            config.base_url,
+            f"https://aiplatform.googleapis.com/v1/projects/{SA_PROJECT}/locations/global/endpoints/openapi",
+        )
+        self.assertNotIn("llm.hyw.mom", config.base_url)
+        self.assertEqual(config.model, "google/gemini-3.8-flash")
+        self.assertTrue(config.configured)
+        self.assertNotIn("PRIVATE KEY", repr(config))
+
+    def test_vertex_base_url_and_location_override_and_model_prefix_is_kept(self):
+        values = {
+            "HYW_CREDENTIALS_FILE": str(SA_FILE),
+            "HYW_VERTEX_BASE_URL": "https://vertex.example/v1/",
+            "HYW_VERTEX_LOCATION": "us-central1",
+            "HYW_MODEL": "google/gemini-2.5-pro",
+        }
+        with patch("plugins.hyw.config._env", side_effect=lambda key, default=None: values.get(key, default)):
+            config = HywConfig.from_env()
+        self.assertEqual(config.base_url, "https://vertex.example/v1")
+        self.assertEqual(config.model, "google/gemini-2.5-pro")
+        self.assertEqual(config.vertex_location, "us-central1")
+
+    def test_unusable_credentials_degrade_to_none_without_raising(self):
+        values = {"HYW_CREDENTIALS_FILE": str(SA_DIR / "absent.json"), "HYW_API_KEY": "relay-secret"}
+        with patch("plugins.hyw.config._env", side_effect=lambda key, default=None: values.get(key, default)):
+            config = HywConfig.from_env()
+        self.assertEqual(config.auth_mode, "none")
+        self.assertFalse(config.configured)
+        self.assertIn("HYW 服务账号凭据不可用", config.auth_error)
+
+    def test_api_key_mode_is_unchanged_by_the_new_fields(self):
+        values = {"HYW_API_KEY": "relay-secret", "HYW_BASE_URL": "https://llm.hyw.mom/v1", "HYW_MODEL": "gemini-3.8-flash"}
+        with patch("plugins.hyw.config._env", side_effect=lambda key, default=None: values.get(key, default)):
+            config = HywConfig.from_env()
+        self.assertEqual(config.auth_mode, "api_key")
+        self.assertEqual((config.base_url, config.model, config.api_key), ("https://llm.hyw.mom/v1", "gemini-3.8-flash", "relay-secret"))
+        self.assertTrue(config.configured)
+
+    def test_no_credentials_anywhere_is_reported_as_none(self):
+        with patch("plugins.hyw.config._env", side_effect=lambda key, default=None: default):
+            config = HywConfig.from_env()
+        self.assertEqual((config.auth_mode, config.configured, config.auth_error), ("none", False, ""))
+
+
+class AuthErrorTests(unittest.TestCase):
+    def test_google_failures_map_to_actionable_codes(self):
+        cases = [
+            (400, '{"error":"invalid_grant","error_description":"Invalid JWT Signature."}', "sa_signature"),
+            (400, '{"error":"invalid_grant","error_description":"Invalid grant: account not found"}', "sa_account"),
+            (400, '{"error":"invalid_grant","error_description":"Token must be a short-lived token (60 minutes)"}', "sa_clock"),
+            (400, '{"error":"invalid_request","error_description":"Bad Request"}', "sa_assertion"),
+            (400, '{"error":{"status":"INVALID_ARGUMENT","message":"Malformed publisher model"}}', "sa_model_prefix"),
+            (400, '{"error":{"message":"Provided image is not valid"}}', "sa_image"),
+            (401, '{"error":{"status":"UNAUTHENTICATED"}}', "sa_token"),
+            (403, '{"error":{"status":"PERMISSION_DENIED"}}', "sa_project"),
+            (403, '{"error":{"status":"CONSUMER_INVALID"}}', "sa_project"),
+            (404, '{"error":{"status":"NOT_FOUND"}}', "sa_model"),
+            (429, "{}", "quota"),
+            (500, '{"error":{"message":"boom"}}', "sa_unknown"),
+        ]
+        for status, payload, code in cases:
+            with self.subTest(status=status, code=code):
+                failure = network_errors.classify_auth_error(status, payload)
+                self.assertEqual(failure.code, code)
+                self.assertTrue(failure.message)
+
+    def test_upstream_payload_never_reaches_the_message(self):
+        failure = network_errors.classify_auth_error(403, '{"error":{"message":"leaked-project-123456"}}')
+        self.assertNotIn("leaked-project-123456", failure.message)
+
+
+class TokenProviderTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        google_auth._providers.clear()
+        self.account = google_auth.load_service_account(str(SA_FILE))
+        self.requests: list[httpx.Request] = []
+
+    def token_transport(self, *, status=200, body=None, delay=0.0):
+        async def handler(request):
+            self.requests.append(request)
+            if delay:
+                await asyncio.sleep(delay)
+            return httpx.Response(status, json=body if body is not None else {"access_token": "sa-token", "expires_in": 3599})
+
+        return httpx.MockTransport(handler)
+
+    async def test_exchange_is_form_encoded_and_carries_no_authorization(self):
+        async with httpx.AsyncClient(transport=self.token_transport()) as client:
+            token = await google_auth.bearer_for(client, replace(HywConfig(), auth_mode="service_account", credentials_file=str(SA_FILE)))
+        self.assertEqual(token.reveal(), "sa-token")
+        request = self.requests[0]
+        self.assertEqual(str(request.url), "https://oauth2.googleapis.com/token")
+        self.assertEqual(request.headers["content-type"], "application/x-www-form-urlencoded")
+        self.assertNotIn("authorization", request.headers)
+        form = dict(httpx.QueryParams(request.content.decode()))
+        self.assertEqual(form["grant_type"], "urn:ietf:params:oauth:grant-type:jwt-bearer")
+        self.assertEqual(form["assertion"].count("."), 2)
+
+    async def test_token_is_cached_and_refreshed_only_near_expiry(self):
+        clock = [1_700_000_000.0]
+        config = replace(HywConfig(), auth_mode="service_account", credentials_file=str(SA_FILE))
+        with patch.object(google_auth, "_now", lambda: clock[0]):
+            async with httpx.AsyncClient(transport=self.token_transport()) as client:
+                first = await google_auth.bearer_for(client, config)
+                clock[0] += 3000  # 3599 - 3000 > 300s margin: still valid
+                second = await google_auth.bearer_for(client, config)
+                clock[0] += 400  # now inside the margin: refresh
+                third = await google_auth.bearer_for(client, config)
+        self.assertEqual([item.reveal() for item in (first, second, third)], ["sa-token"] * 3)
+        self.assertEqual(len(self.requests), 2)
+
+    async def test_forced_refresh_bypasses_a_cached_token(self):
+        clock = [1_700_000_000.0]
+        config = replace(HywConfig(), auth_mode="service_account", credentials_file=str(SA_FILE))
+        with patch.object(google_auth, "_now", lambda: clock[0]):
+            async with httpx.AsyncClient(transport=self.token_transport()) as client:
+                await google_auth.bearer_for(client, config)
+                await google_auth.bearer_for(client, config, force=True)
+        self.assertEqual(len(self.requests), 2)
+
+    async def test_concurrent_requests_exchange_only_once(self):
+        config = replace(HywConfig(), auth_mode="service_account", credentials_file=str(SA_FILE))
+        async with httpx.AsyncClient(transport=self.token_transport(delay=0.05)) as client:
+            tokens = await asyncio.gather(*(google_auth.bearer_for(client, config) for _ in range(4)))
+        self.assertEqual([item.reveal() for item in tokens], ["sa-token"] * 4)
+        self.assertEqual(len(self.requests), 1)
+
+    async def test_implausible_lifetime_falls_back_to_one_hour(self):
+        clock = [1_700_000_000.0]
+        config = replace(HywConfig(), auth_mode="service_account", credentials_file=str(SA_FILE))
+        with patch.object(google_auth, "_now", lambda: clock[0]):
+            async with httpx.AsyncClient(transport=self.token_transport(body={"access_token": "sa-token", "expires_in": 5})) as client:
+                await google_auth.bearer_for(client, config)
+                clock[0] += 300
+                await google_auth.bearer_for(client, config)
+        self.assertEqual(len(self.requests), 1)
+
+    async def test_exchange_failures_are_chat_safe(self):
+        config = replace(HywConfig(), auth_mode="service_account", credentials_file=str(SA_FILE))
+        for status, body, expected in [
+            (400, {"error": "invalid_grant", "error_description": "Invalid JWT Signature."}, "sa_signature"),
+            (401, {"error": {"status": "UNAUTHENTICATED"}}, "sa_token"),
+            (403, {"error": {"status": "PERMISSION_DENIED"}}, "sa_project"),
+            (200, {"expires_in": 3599}, "凭据交换未返回访问令牌"),
+        ]:
+            with self.subTest(status=status):
+                self.requests.clear()
+                async with httpx.AsyncClient(transport=self.token_transport(status=status, body=body)) as client:
+                    with self.assertRaises(HywError) as error:
+                        await google_auth.bearer_for(client, config, force=True)
+                message = str(error.exception)
+                self.assertNotIn("PRIVATE KEY", message)
+                self.assertNotIn(SA_EMAIL, message)
+                self.assertNotIn(str(SA_FILE), message)
+                if expected.startswith("sa_"):
+                    self.assertIn(expected, message)
+                else:
+                    self.assertIn(expected, message)
+
+    async def test_api_key_mode_returns_the_configured_key_untouched(self):
+        async with httpx.AsyncClient(transport=self.token_transport()) as client:
+            token = await google_auth.bearer_for(client, replace(HywConfig(), api_key="relay-secret"))
+        self.assertEqual(token.reveal(), "relay-secret")
+        self.assertEqual(self.requests, [])
+
+    def test_secrets_never_appear_in_repr(self):
+        """entari 以 diagnose=True 安装 loguru 处理器，traceback 会渲染变量值。
+
+        因此任何可能出现在失败路径上的凭据对象，其 repr 都必须是打码的。
+        """
+        token = google_auth.Secret("sa-token")
+        self.assertEqual(repr(token), "<hidden>")
+        self.assertNotIn("sa-token", repr(token))
+        self.assertEqual(token.bearer_headers()["Authorization"], "Bearer sa-token")
+        self.assertNotIn("sa-token", repr(token.bearer_headers()))
+        form = google_auth.Secret("assertion-value").form_data()
+        self.assertEqual(form["assertion"], "assertion-value")
+        self.assertNotIn("assertion-value", repr(form))
+        # 凭据对象本身也不得暴露私钥。
+        account = google_auth.load_service_account(str(SA_FILE))
+        self.assertNotIn("PRIVATE KEY", repr(account))
+        self.assertNotIn(SA_KEY_ID, repr(account))
+
+    def test_signing_failure_is_chat_safe_and_keeps_key_out_of_the_frame(self):
+        """签名失败时私钥不得出现在异常帧里（RsaKey 的 repr 含 d/p/q）。"""
+        account = google_auth.load_service_account(str(SA_FILE))
+        with patch.object(google_auth.pkcs1_15, "new", side_effect=ValueError("simulated signer failure")):
+            with self.assertRaises(HywError) as error:
+                google_auth.build_assertion(account)
+        message = str(error.exception)
+        self.assertIn("private_key", message)
+        self.assertNotIn("PRIVATE KEY", message)
+        # 失败发生在 _sign 内部；_sign 吞掉异常，调用行只引用 account/signing_input。
+        self.assertIsNone(error.exception.__cause__)
+
+
+class ServiceAccountModelCallTests(unittest.IsolatedAsyncioTestCase):
+    """模型调用路径：令牌注入、401 重试与空正文容错。"""
+
+    def setUp(self):
+        google_auth._providers.clear()
+        self.calls: list[httpx.Request] = []
+
+    def setUpConfig(self):
+        return replace(HywConfig(), auth_mode="service_account", credentials_file=str(SA_FILE), base_url="https://aiplatform.googleapis.com/v1/projects/p/locations/global/endpoints/openapi", model="google/gemini-3.8-flash")
+
+    def transport(self, *, model_status=200, model_body=None):
+        async def handler(request):
+            self.calls.append(request)
+            if request.url.host == "oauth2.googleapis.com":
+                return httpx.Response(200, json={"access_token": "sa-token", "expires_in": 3599})
+            return httpx.Response(model_status, json=model_body if model_body is not None else {"choices": [{"message": {"content": FINAL}}]})
+
+        return httpx.MockTransport(handler)
+
+    async def test_model_call_uses_exchanged_token_and_derived_endpoint(self):
+        config = self.setUpConfig()
+        async with httpx.AsyncClient(transport=self.transport()) as client:
+            output = await agent.complete(client, config, [{"role": "user", "content": "问题"}])
+        self.assertEqual(output, FINAL)
+        model_call = self.calls[-1]
+        self.assertEqual(str(model_call.url), config.base_url + "/chat/completions")
+        self.assertEqual(model_call.headers["authorization"], "Bearer sa-token")
+        self.assertNotIn("sa-token", self.calls[0].headers.get("authorization", ""))
+
+    async def test_rejected_token_is_refreshed_once_and_retried(self):
+        config = self.setUpConfig()
+        attempts = []
+
+        async def handler(request):
+            self.calls.append(request)
+            if request.url.host == "oauth2.googleapis.com":
+                return httpx.Response(200, json={"access_token": f"token-{len([c for c in self.calls if c.url.host == 'oauth2.googleapis.com'])}", "expires_in": 3599})
+            attempts.append(request.headers["authorization"])
+            if len(attempts) == 1:
+                return httpx.Response(401, json={"error": {"status": "UNAUTHENTICATED"}})
+            return httpx.Response(200, json={"choices": [{"message": {"content": FINAL}}]})
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            output = await agent.complete(client, config, [{"role": "user", "content": "问题"}])
+        self.assertEqual(output, FINAL)
+        self.assertEqual(attempts, ["Bearer token-1", "Bearer token-2"])
+
+    async def test_persistent_401_does_not_loop_and_stays_chat_safe(self):
+        config = self.setUpConfig()
+        async with httpx.AsyncClient(transport=self.transport(model_status=401, model_body={"error": {"status": "UNAUTHENTICATED"}})) as client:
+            with self.assertRaises(HywError) as error:
+                await agent.complete(client, config, [{"role": "user", "content": "问题"}])
+        self.assertIn("sa_token", str(error.exception))
+        self.assertEqual(len([call for call in self.calls if call.url.host != "oauth2.googleapis.com"]), 2)
+
+    async def test_service_account_failures_map_to_actionable_text(self):
+        config = self.setUpConfig()
+        for status, body, expected in [
+            (400, {"error": {"status": "INVALID_ARGUMENT", "message": "Malformed publisher model"}}, "发布者前缀"),
+            (403, {"error": {"status": "PERMISSION_DENIED"}}, "项目"),
+            (404, {"error": {"status": "NOT_FOUND"}}, "模型"),
+            (429, {}, "稍后重试"),
+        ]:
+            with self.subTest(status=status):
+                self.calls.clear()
+                async with httpx.AsyncClient(transport=self.transport(model_status=status, model_body=body)) as client:
+                    with self.assertRaises(HywError) as error:
+                        await agent.complete(client, config, [{"role": "user", "content": "问题"}])
+                self.assertIn(expected, str(error.exception))
+
+    async def test_missing_content_is_tolerated(self):
+        config = self.setUpConfig()
+        for body in ({"choices": [{"message": {}}]}, {"choices": [{"message": {"content": "   "}}]}, {"choices": []}, {}):
+            with self.subTest(body=body):
+                async with httpx.AsyncClient(transport=self.transport(model_body=body)) as client:
+                    with self.assertRaises(HywError) as error:
+                        await agent.complete(client, config, [{"role": "user", "content": "问题"}])
+                self.assertNotIn("private", str(error.exception))
 
 
 class WebTests(unittest.IsolatedAsyncioTestCase):

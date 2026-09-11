@@ -54,6 +54,67 @@ HTTP 代理通常填写 `http://` 地址，即使目标网页是 HTTPS。
 
 `HYW_RENDER=false` 可关闭卡片。渲染失败或卡片过长时回退为分段文字。
 
+## 使用 Google 服务账号凭据（Vertex AI）
+
+除静态密钥外，插件也能直接使用 Google Cloud 服务账号密钥 JSON，走 Vertex AI 的
+OpenAI 兼容端点。只需在 `.env` 增加一行，其余键保持原样：
+
+```dotenv
+HYW_CREDENTIALS_FILE=data/hyw-service-account.json
+HYW_MODEL=gemini-3.8-flash
+```
+
+- 路径支持 `~`，相对路径按启动目录（仓库根）解析；也可用标准变量
+  `GOOGLE_APPLICATION_CREDENTIALS`。建议放在已被 `.gitignore` 忽略的 `data/` 下，
+  **不要提交进 Git**，并限制文件权限。
+- 原理：用凭据中的 `private_key` 自签一个 RS256 的 JWT assertion，以
+  `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer` 表单 POST 到 `token_uri`
+  换取短期 access token，再作为 `Authorization: Bearer` 调用模型。凭据不等于密钥，
+  不能直接当作 Bearer 使用。
+- 令牌在内存中缓存，剩余寿命不足 5 分钟时自动重新交换；并发请求只会触发一次交换。
+  私钥只存在于内存中，不写入日志、不进入配置对象、不出现在聊天回复里。
+- 无需额外依赖：签名使用项目已有的 `pycryptodome`，不引入 `google-auth`。
+
+服务账号模式下的固定规则：
+
+| 项 | 行为 |
+| --- | --- |
+| `HYW_BASE_URL` | **被忽略**（避免把凭据发给 OpenAI 中转站），基址由凭据里的 `project_id` 推导为 `https://aiplatform.googleapis.com/v1/projects/<project_id>/locations/<location>/endpoints/openapi`；被忽略时日志只记一次警告，不记录该值 |
+| `HYW_VERTEX_LOCATION` | 区域段，默认 `global` |
+| `HYW_VERTEX_BASE_URL` | 需要私有域名或测试替身时用它覆盖推导结果 |
+| `HYW_MODEL` | 不带 `/` 时自动补 `google/` 前缀（`gemini-3.8-flash` → `google/gemini-3.8-flash`）；Vertex 要求发布者前缀，缺前缀会返回 400 `Malformed publisher model` |
+| 图片 | 远程图片 URL 会被 Vertex 拒绝，插件仍按原有方式先下载再以内联 base64 发送 |
+| 代理 | **必须能直连 Google**，见下 |
+
+代理注意：`googleapis.com`、搜索引擎与 OpenAI 中转站的连通性可能各不相同（本机实测：
+中转站只有直连可达，Google 与 DuckDuckGo 只有经代理可达）。切换凭据方式时如果报
+`ConnectTimeout` / `timeout`，需同步调整 `HYW_PROXY`（模型与用户图片下载）**和
+`HYW_SEARCH_PROXY`**（联网搜索）。例如：
+
+```dotenv
+HYW_CREDENTIALS_FILE=data/hyw-service-account.json
+HYW_PROXY=http://127.0.0.1:7890
+HYW_SEARCH_PROXY=http://127.0.0.1:7890
+```
+
+代理地址要写 `http://`，即使目标是 HTTPS。若把 `HYW_PROXY` 留空去继承全局
+`HTTPS_PROXY=https://127.0.0.1:7890`，httpx 会尝试对代理本身做 TLS 握手，
+表现为 `tls_handshake` 失败——这种写法需要改成 `http://`。
+
+回退很简单：删掉 `HYW_CREDENTIALS_FILE` 这一行即回到静态密钥方式，`HYW_API_KEY` 无需改动。
+未配置任何凭据时插件仍能加载，调用时提示管理员配置。
+
+服务账号模式下的错误提示（聊天中可见，均不含上游响应正文与凭据）：
+
+- `sa_signature`：私钥与凭据不匹配，需重新下载凭据 JSON。
+- `sa_account`：服务账号不存在或已被删除。
+- `sa_clock`：运行机器系统时间偏差过大，需校准系统时间（JWT 有效期窗口为 60 分钟）。
+- `sa_assertion`：凭据文件内容不完整或格式不正确。
+- `sa_token`：访问令牌被拒绝，已自动刷新一次，仍失败则检查服务账号状态。
+- `sa_project`：该服务账号无权访问此项目，或项目未启用 Vertex AI（检查 IAM 与 API 启用状态）。
+- `sa_model` / `sa_model_prefix`：模型名或区域不可用，需 `google/<model>` 形式且区域支持。
+- `sa_image`：图片无法被模型接受，改用 JPEG/PNG 重新发送。
+
 ## 排查模型连接失败
 
 接口地址和模型参数填写正确，也可能因运行机器的 DNS、TLS、代理或连接中断而失败。
@@ -80,6 +141,48 @@ curl.exe --noproxy "*" --connect-timeout 10 --max-time 20 -i https://llm.hyw.mom
 未带密钥返回 HTTP 401 表示此次直连已到达接口；它不验证密钥、模型是否可用，
 也不能代替机器人使用相同 Python 环境和代理路径时的连接测试。
 修改 `.env` 后需重启，且进程已有的环境变量优先于 `.env` 文件。
+
+## 运行机器上装了「连接改写类」代理软件会连机器人一起拖垮
+
+这不是本插件的功能，但会伪装成插件故障，务必先排除。
+
+某些透明代理软件（如 **Proxifier**）会挂钩 Winsock 并**重新发起**连接，包括到 `127.0.0.1` 的回环连接。
+后果是：客户端 `getsockname()` 报告的源端口，与服务端 `accept()` 看到的对端端口**不一致**
+（实测恒定 +1）。CPython 的 `socket.socketpair()` 在没有 `_socket.socketpair` 的 Windows 上
+走 `_fallback_socketpair`，它有一条对端认证：
+
+```python
+if (ssock.getsockname() != csock.getpeername()
+        or csock.getsockname() != ssock.getpeername()):
+    raise ConnectionError("Unexpected peer connection")
+```
+
+源端口被改写后这个条件必然不成立，于是 `socket.socketpair()` 直接抛 `ConnectionError`。
+Windows 上 asyncio 的事件循环**每个都**用 socketpair 做自管道，所以：
+
+- `asyncio.run(...)` 在裸 Python 里就失败；
+- `import arclet.entari` 失败（它在导入期创建事件循环）；
+- **`python bot.py` 起不来**，报 `ConnectionError: Unexpected peer connection`；
+- `tests/test_hyw.py` 连收集阶段都过不去。
+
+判断方法（不需要项目代码）：
+
+```powershell
+python -c "import socket; socket.socketpair()"
+```
+
+抛 `ConnectionError: Unexpected peer connection` 即命中。已验证与 Python 版本、虚拟环境无关：
+.NET 独立程序同样出现 +1 偏移，三个解释器（3.13 / 3.14 / `.venv`）与独立进程全部复现。
+
+处理办法（任选其一）：
+
+1. 退出该代理软件，或在其配置里**把回环地址加入直连/排除列表**
+   （Proxifier 是 `Profile → 规则`：给 `localhost; 127.0.0.1; ::1` 建一条 `Direct` 规则并**启用**；
+   注意默认配置里这条规则往往是「已存在但被禁用」的，而通配规则会兜住全部连接）；
+2. 若必须在它运行时做验证，可临时用 `PYTHONPATH` 指向一个只覆盖 `socket.socketpair`
+   （去掉上述对端认证、其余算法不变）的 `sitecustomize.py`——**仅用于本机验证，不要提交进仓库**。
+
+这类故障与 `HYW_*` 配置无关：改 `HYW_PROXY` 无法绕过它，因为 socketpair 走的是回环、不经过代理设置。
 
 ## 排查“外部网络检索服务不可用”
 
@@ -136,4 +239,28 @@ HTTP 组件仍可能按应用日志配置记录请求 URL（包括搜索词）�
 多人并发隔离、引用追问及来源编号、图片输入、超限与错误回退。
 实际浏览器截图确认中文、Markdown 表格、代码、KaTeX 公式和引用正常显示；
 实际网络请求验证 DuckDuckGo 搜索及公开网页正文读取。
-工作区没有模型密钥，因此模型请求使用模拟 HTTP 响应验证，尚未进行真实模型或 QQ 消息联调。
+
+服务账号模式已用真实凭据做过端到端验证（2026-09-11）：经真实命令处理器跑通
+纯文本 `/q`、带图 `/q`（正确识别颜色）、工具循环与坏模型名的错误话术，
+并确认日志中没有私钥、访问令牌或 `client_email`。
+静态密钥方式未改动，且已与改动前的实现逐字段对拍（请求方法、地址、请求头、
+请求体与返回结果在成功/401/403/429/500/异常响应下全部一致）。
+尚未在真实 QQ 会话中联调（模型与搜索需要可用的代理出口，见上文代理注意）。
+
+## 维护者注意：不要把秘密写进可能抛错的那一行
+
+Entari 把 loguru 的 handler 配成 `diagnose=True`（`arclet/entari/logger.py`），
+并把 `sys.excepthook` 接到 loguru，因此 traceback 会**渲染每一帧抛错行上被引用变量的值**——
+局部变量、属性、关键字参数、f-string、字典字面量都会原样打进日志。
+在插件里新增涉及密钥/令牌的代码时：
+
+- 秘密一律包成 `google_auth.Secret`（`repr` 为 `<hidden>`），
+  请求头/表单用 `bearer_headers()`、`form_data()` 这类打码结构；
+- 危险操作（如 `RSA.import_key`、签名）放进会吞掉异常的独立函数并返回 `None`/`Secret`，
+  由调用方在**只引用安全名字**的行上抛错——只写 `raise … from None` 不够，
+  调用方那一帧仍会被记录；
+- 凭据对象的敏感字段用 `field(repr=False)`，`pycryptodome` 的 `RsaKey.__repr__`
+  会打印含私钥指数的 `n/e/d/p/q/u`。
+
+对应的回归测试是 `test_secrets_never_appear_in_repr` 与
+`test_signing_failure_is_chat_safe_and_keeps_key_out_of_the_frame`。
