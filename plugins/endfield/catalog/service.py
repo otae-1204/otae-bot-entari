@@ -31,7 +31,9 @@ from ..providers.warfarin import (
 from ..providers.akedata import (
     AKEDATA_ICON_BASE,
     fetch_akedata_achievement_table,
+    fetch_akedata_archive_tables,
     fetch_akedata_manifest,
+    fetch_akedata_prts_all_item,
     game_version_label,
     pick_previous_game_version,
 )
@@ -49,6 +51,10 @@ from .commands import (
     score_candidate,
 )
 from .models import (
+    ArchiveBaselineView,
+    ArchiveDiffView,
+    ArchiveProgressView,
+    ArchiveSnapshotView,
     EquipmentCatalogView,
     EquipmentView,
     LoadoutView,
@@ -66,6 +72,7 @@ from ..providers.registry import (
     source_order,
 )
 from .views.constants import (
+    _MIN_AKEDATA_ARCHIVE_COMPLETENESS,
     _MIN_AKEDATA_MEDAL_COMPLETENESS,
 )
 from .views.common import (
@@ -166,6 +173,9 @@ from .views.medals import (
     build_akedata_medal_snapshot as build_akedata_medal_snapshot,
     build_fz_medal_item as build_fz_medal_item,
     build_fz_medal_snapshot_view as build_fz_medal_snapshot_view,
+)
+from .views.archives import (
+    build_akedata_archive_snapshot as build_akedata_archive_snapshot,
 )
 from .views.operators import (
     _all_skill_records_for_group as _all_skill_records_for_group,
@@ -880,6 +890,121 @@ class EndfieldService:
             truncated=truncated,
             shown_count=len(not_obtained) + len(not_maxed) + len(not_plated),
             level_counts=owned_level_counts,
+        )
+
+    async def fetch_archive_snapshot_akedata(self, *, fetched_at: int | None = None) -> ArchiveSnapshotView:
+        """抓取 AKEData 档案库全量快照（三大页签口径：中枢档案/见闻辑录/音像存档）。
+
+        manifest → latest 版本 → PrtsPage + PrtsCategory + PrtsFirstLv + PrtsAllItem +
+        I18nTextTable_CN，聚合成快照。条目 ``type`` ↔ 页签 ``pageType`` 一一对应，
+        不在三大页签内的条目（任务文本/地图文本等虚拟分类残留）天然被排除。
+        """
+        page, category, first_lv, all_item, i18n, version = await fetch_akedata_archive_tables()
+        if not isinstance(all_item, dict) or not all_item:
+            raise ValueError("AKEData PrtsAllItem 为空")
+        if not isinstance(i18n, dict) or not i18n:
+            raise ValueError("AKEData I18nTextTable_CN 为空")
+
+        expected_count = sum(1 for entry in all_item.values() if isinstance(entry, dict))
+        snapshot = build_akedata_archive_snapshot(
+            page,
+            category,
+            first_lv,
+            all_item,
+            i18n,
+            fetched_at=fetched_at or int(time.time()),
+            version_label=game_version_label(version),
+        )
+        if snapshot.total_count <= 0:
+            raise ValueError("AKEData 档案库快照为空")
+        # 同奖章：manifest 先于表文件可见时可能抓到残缺数据，拒绝用截断快照覆盖已知好快照。
+        if expected_count and snapshot.total_count < math.ceil(
+            expected_count * _MIN_AKEDATA_ARCHIVE_COMPLETENESS
+        ):
+            raise ValueError(
+                f"AKEData 档案库快照不完整：{snapshot.total_count}/{expected_count}"
+            )
+        return snapshot
+
+    async def fetch_archive_baseline(self, *, fetched_at: int | None = None) -> ArchiveBaselineView | None:
+        """抓 akedata「上一游戏版本」档案库基线（版本对比的 previous 方，源和源）。
+
+        manifest → pick_previous_game_version → 抓其 PrtsAllItem（仅取 nar_ id 集合）。
+        无更早游戏版本时返回 None；抓取失败会抛出异常，由调用方保留已有基线。
+        nar_ id 跨版本稳定（2026-09-10 实测 1.4.4→1.5.3 重叠 100%）。
+        """
+        try:
+            manifest = await fetch_akedata_manifest()
+            prev = pick_previous_game_version(manifest)
+            if not prev or not prev.get("tableCfgPath"):
+                return None
+            table = await fetch_akedata_prts_all_item(str(prev["tableCfgPath"]).lstrip("/"))
+            if not isinstance(table, dict) or not table:
+                raise ValueError("AKEData 历史 PrtsAllItem 为空")
+            ids = [iid for iid, entry in table.items() if isinstance(entry, dict)]
+            if not ids:
+                raise ValueError("AKEData 历史档案库基线为空")
+            return ArchiveBaselineView(
+                version=game_version_label(str(prev.get("id") or "")),
+                version_id=str(prev.get("id") or ""),
+                ids=ids,
+                fetched_at=fetched_at or int(time.time()),
+            )
+        except Exception as exc:
+            logger.warning(f"[endfield] archive baseline fetch failed: {exc}")
+            raise
+
+    def build_archive_diff(
+        self,
+        current: ArchiveSnapshotView,
+        baseline: ArchiveBaselineView | None,
+    ) -> ArchiveDiffView:
+        """对比 current 快照与上一版本基线筛出新增档案（id 集合差集）。
+
+        baseline 为 None（无更早版本）时无对比基线，new_items 为空。
+        双方同为 akedata 源数据，口径一致；previous_version 用 baseline 的 major.minor。
+        """
+        if baseline is None:
+            return ArchiveDiffView(current=current, previous_version="", new_items=[])
+        baseline_ids = set(baseline.ids)
+        new_items = [
+            item
+            for item in current.items
+            if item.item_id and item.item_id not in baseline_ids
+        ]
+        return ArchiveDiffView(
+            current=current,
+            previous_version=baseline.version,
+            new_items=new_items,
+        )
+
+    def build_archive_progress_view(
+        self,
+        raw_detail: dict[str, Any],
+        snapshot: ArchiveSnapshotView,
+        *,
+        nickname: str,
+        uid: str,
+        server_name: str,
+    ) -> ArchiveProgressView:
+        """个人档案收集进度：森空岛 card/detail 只给 ``data.detail.base.docNum`` 总数，
+        无逐条明细（见 docs/skland_endfield_ui_data_inventory.md §11），故仅做
+        已获得/总数展示。docNum 超过快照总数时标记 ``over_total`` 供卡片提示口径异常。
+        """
+        base = (((raw_detail.get("data") or {}).get("detail") or {}).get("base") or {})
+        doc_num = _to_int(base.get("docNum")) or 0
+        total = snapshot.total_count
+        return ArchiveProgressView(
+            nickname=nickname,
+            uid=uid,
+            server_name=server_name,
+            snapshot_version=snapshot.version,
+            collected=doc_num,
+            total_count=total,
+            missing=max(total - doc_num, 0),
+            over_total=doc_num > total,
+            page_counts=dict(snapshot.page_counts),
+            category_counts=dict(snapshot.category_counts),
         )
 
     async def find_weapon_operator_names(self, view: WeaponView) -> list[str]:

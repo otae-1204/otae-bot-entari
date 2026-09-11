@@ -55,6 +55,8 @@ CURRENCY_LOG_ALIASES = {
 MEDAL_ALIASES = {"奖章", "蚀刻章", "medal", "medals"}
 MEDAL_REFRESH_ALIASES = {"刷新", "refresh", "update"}
 MEDAL_MISSING_ALIASES = {"缺章", "未获得", "missing"}
+ARCHIVE_ALIASES = {"档案", "档案库", "报告", "report", "reports"}
+ARCHIVE_PROGRESS_ALIASES = {"收集", "进度", "progress", "collected"}
 OWNERSHIP_ALIASES = {"持有率", "干员占比", "干员统计", "ownership", "ownership-rate"}
 OWNERSHIP_GROUP_ALIASES = {"群内", "本群", "当前群", "group", "guild"}
 OWNERSHIP_GLOBAL_ALIASES = {"全局", "全部", "global", "all"}
@@ -350,6 +352,16 @@ def _parse_personal_command(parts: list[str]) -> ParsedEndfieldCommand | None:
                 account_selector=" ".join(parts[2:]).strip() or "主账号",
             )
         return ParsedEndfieldCommand("medal_view")
+    if head in ARCHIVE_ALIASES:
+        sub = parts[1].lower() if len(parts) > 1 else ""
+        if sub in MEDAL_REFRESH_ALIASES:
+            return ParsedEndfieldCommand("archive_refresh")
+        if sub in ARCHIVE_PROGRESS_ALIASES:
+            return ParsedEndfieldCommand(
+                "archive_progress",
+                account_selector=" ".join(parts[2:]).strip() or "主账号",
+            )
+        return ParsedEndfieldCommand("archive_view")
     return None
 
 
@@ -827,6 +839,9 @@ def format_help() -> str:
             "  /ef 奖章（查看蚀刻章总数与本版本新增）",
             "  /ef 奖章 刷新（重新抓取 AKEData 数据并更新上一游戏版本基线）",
             "  /ef 奖章 缺章 [账号]（查询自己未获得/未升满/未镀层）",
+            "  /ef 档案（查看档案库三大页签总数与本版本新增）",
+            "  /ef 档案 刷新（重新抓取 AKEData 数据并更新上一游戏版本基线）",
+            "  /ef 档案 收集 [账号]（查询已获得档案数/全库总数）",
             "  /ef 持有率 [群内|全局]（匿名干员持有率；群聊默认群内，私聊默认全局）",
             "  /ef 持有率 刷新 [群内|全局]（群管理员可刷新本群，SUPERUSER 可刷新全局）",
             "  /ef 速算 2腐蚀 200（效果可替换为导电或碎甲）",

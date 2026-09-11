@@ -30,6 +30,12 @@ AKEDATA_ICON_BASE = (
     f"{AKEDATA_DATA_BASE}/public/images/assets/beyond/dynamicassets/"
     "gameplay/ui/sprites/medaliconbig"
 )
+# 档案库组图标（PrtsFirstLv.icon，如 prts_002_settlement_sns）；站点 v3-archive.js 的
+# assetUrl('prts/icon', name) 同模板，2026-09-10 实测 447/447 组均有图。
+AKEDATA_PRTS_ICON_BASE = (
+    f"{AKEDATA_DATA_BASE}/public/images/assets/beyond/dynamicassets/"
+    "gameplay/ui/sprites/prts/icon"
+)
 AKEDATA_HEADERS = {
     "User-Agent": "otae-bot-entari/1.0 (+https://github.com/otae-1204/otae-bot-entari)",
     "Accept": "application/json, text/plain, */*",
@@ -127,6 +133,47 @@ async def fetch_akedata_achievement_table(
     """
     table = await _get(
         f"/{str(table_cfg).strip('/')}/AchievementTable.json",
+        ttl_seconds=ttl_seconds,
+    )
+    return table if isinstance(table, dict) else {}
+
+
+async def fetch_akedata_archive_tables() -> tuple[
+    dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any], str
+]:
+    """返回 ``(PrtsPage, PrtsCategory, PrtsFirstLv, PrtsAllItem, I18nTextTable_CN, version_id)``。
+
+    档案库（情报档案库）表层级：PrtsPage（三大页签 document/multi_media/text）→
+    PrtsCategory（6 子分类）→ PrtsFirstLv（档案组，itemIds[]）→ PrtsAllItem（条目，``nar_*``
+    id）。条目 ``type`` 与页签 ``pageType`` 一一对应（2026-09-10 实测 1.5.3：495 条全部可归属，
+    无混合类型组）。AKEData 站上「任务文本/地图文本」由 DialogTextTable/LevelDescTable 合成的
+    虚拟分类不在 PrtsAllItem 内，本功能不抓这两张表，天然排除。
+    """
+    manifest = await fetch_akedata_manifest()
+    latest = manifest["latest"]
+    entry = next((v for v in manifest.get("versions") or [] if v.get("id") == latest), None)
+    if not entry or not entry.get("tableCfgPath"):
+        raise RuntimeError(f"AKEData manifest 缺少版本 {latest} 的 tableCfgPath")
+    table_cfg = str(entry["tableCfgPath"]).lstrip("/")
+    page, category, first_lv, all_item, i18n = await asyncio.gather(
+        _get(f"/{table_cfg}/PrtsPage.json"),
+        _get(f"/{table_cfg}/PrtsCategory.json"),
+        _get(f"/{table_cfg}/PrtsFirstLv.json"),
+        _get(f"/{table_cfg}/PrtsAllItem.json"),
+        _get(f"/{table_cfg}/I18nTextTable_CN.json", max_bytes=_I18N_MAX_BYTES),
+    )
+    return page, category, first_lv, all_item, i18n, latest
+
+
+async def fetch_akedata_prts_all_item(
+    table_cfg: str, *, ttl_seconds: float | None = HISTORICAL_TABLE_TTL_SECONDS
+) -> dict[str, Any]:
+    """抓指定版本的 ``PrtsAllItem.json``（按 nar_ id 索引，~165KB）。
+
+    历史版本内容恒定，默认长 TTL；latest 版本调用方可传 None 走默认 600s。
+    """
+    table = await _get(
+        f"/{str(table_cfg).strip('/')}/PrtsAllItem.json",
         ttl_seconds=ttl_seconds,
     )
     return table if isinstance(table, dict) else {}
