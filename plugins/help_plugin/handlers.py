@@ -16,6 +16,8 @@ GROUP_FEATURE_HELP = "群内插件开关：/功能 列表、/功能 关闭 hyw�
 TEXT_TOPICS.update({name: GROUP_FEATURE_HELP for name in ("功能", "插件", "plugin")})
 
 # 子指令 → 图片文件名（不含扩展名）映射
+# 每个目标都必须有对应的 assets/image/help/<name>.png，否则该主题无法解析；
+# tests/test_help_plugin.py 会校验这张表与磁盘一致，避免登记了却没有图。
 TOPIC_MAP: dict[str, str] = {
     "main":      "main",
     "home":      "main",
@@ -30,14 +32,7 @@ TOPIC_MAP: dict[str, str] = {
     "ef":        "endfield",
     "zmd":       "endfield",
     "终末地":    "endfield",
-    "mcping":    "mcping",
-    "ping":      "mcping",
-    "p":         "mcping",
     "mcsm":      "mcsm",
-    "online":    "online",
-    "ol":        "online",
-    "broadcast": "broadcast",
-    "bc":        "broadcast",
 }
 
 

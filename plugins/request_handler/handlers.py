@@ -39,7 +39,7 @@ def _result_data(result: Any) -> Any:
 
 
 async def _try_internal(bot: Bot, action: str, **params) -> Any:
-    logger.debug(f"[request_handler] 灏濊瘯 API {action}: {params}")
+    logger.debug(f"[request_handler] 尝试 API {action}: {params}")
     return await bot.internal(action=action, **params)
 
 
@@ -104,7 +104,7 @@ async def _try_onebot_http(action: str, **params) -> Any:
                             data = resp.text
                         if isinstance(data, dict) and data.get("status") == "failed":
                             raise RuntimeError(data.get("wording") or data.get("message") or data)
-                        logger.debug(f"[request_handler] OneBot HTTP {action} 鎴愬姛: {method} {base}{path}")
+                        logger.debug(f"[request_handler] OneBot HTTP {action} 成功: {method} {base}{path}")
                         return data
                     except Exception as e:
                         errors.append(f"{method} {base}{path}: {e}")

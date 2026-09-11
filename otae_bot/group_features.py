@@ -19,7 +19,6 @@ PLUGIN_NAMES = {
     "McModQuery": ("MC 百科", "mod", "模组", "mcmod"),
     "McWikiQuery": ("MC Wiki", "wiki"),
     "bilibilibot": ("B站", "bili", "bilibili"),
-    "eft_helper": ("塔科夫", "eft"),
     "endfield": ("终末地", "ef", "zmd"),
     "forkout": ("叉出去", "fork"),
     "grok_bot": ("Grok Bot", "grok", "grokbot"),

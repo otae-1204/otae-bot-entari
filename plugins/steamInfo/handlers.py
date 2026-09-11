@@ -1231,7 +1231,7 @@ async def update_parent_info_handle(
         await update_parent_info.finish("文本中应包含图片和文字")
 
     parent_data.update(parent_id, info["avatar"], info["name"])
-    await update_parent_info.finish("鏇存柊鎴愬姛")
+    await update_parent_info.finish("更新成功")
 
 
 @enable.handle()

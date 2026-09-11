@@ -28,7 +28,6 @@
 | `tibo_radar` | `tibo`、`雷达` |
 | `McModQuery` | `mod`、`模组` |
 | `McWikiQuery` | `wiki` |
-| `eft_helper` | `eft`、`塔科夫` |
 | `forkout` | `fork`、`叉出去` |
 | `peek` | `窥视` |
 | `help_plugin` | `help`、`帮助` |

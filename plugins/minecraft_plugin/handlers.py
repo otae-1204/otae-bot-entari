@@ -149,7 +149,7 @@ online_rank = _cmd("online", aliases={"Online", "ol", "在线", "排行榜", "ra
 
 
 
-# 鍛戒护澶勭悊
+# 命令处理
 
 # helpers
 

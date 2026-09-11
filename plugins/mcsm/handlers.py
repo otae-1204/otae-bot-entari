@@ -1453,6 +1453,7 @@ async def handle_mcsm(bot: Bot, event: Event, rest: ArgVal):
         return await _cmd_list(bot, event, group_id, user_id)
 
     # help
+    if subcmd in ("help", "帮助"):
         await mcsm.finish(_help_tip())
         return
 
@@ -1484,7 +1485,7 @@ async def handle_mcsm(bot: Bot, event: Event, rest: ArgVal):
 
     # list
     if subcmd in ("list", "列表"):
-        show_all = any(p in ("-a", "--all", "all", "鍏ㄩ儴") for p in parts[1:])
+        show_all = any(p in ("-a", "--all", "all", "全部") for p in parts[1:])
         return await _cmd_list(bot, event, group_id, user_id, show_all=show_all)
 
     # status
@@ -1503,17 +1504,17 @@ async def handle_mcsm(bot: Bot, event: Event, rest: ArgVal):
         return await _cmd_instance_action(bot, event, group_id, user_id, "stop", alias)
 
     # start
-    if subcmd in ("restart", "閲嶅惎"):
+    if subcmd in ("restart", "重启"):
         alias = parts[1] if len(parts) > 1 else ""
         return await _cmd_instance_action(bot, event, group_id, user_id, "restart", alias)
 
     # kill
-    if subcmd in ("kill", "寮哄埗缁撴潫", "寮烘潃"):
+    if subcmd in ("kill", "强制结束", "强杀"):
         alias = parts[1] if len(parts) > 1 else ""
         return await _cmd_instance_action(bot, event, group_id, user_id, "kill", alias)
 
     # cmd
-    if subcmd in ("cmd", "鍛戒护", "exec"):
+    if subcmd in ("cmd", "命令", "exec"):
         cmd_parts = text.split(None, 2)
         alias = cmd_parts[1] if len(cmd_parts) > 1 else ""
         command = cmd_parts[2] if len(cmd_parts) > 2 else ""
@@ -1571,7 +1572,7 @@ async def handle_mcsm(bot: Bot, event: Event, rest: ArgVal):
     )
 
 
-#  鍛戒护瀹炵幇
+#  命令实现
 
 # bind panel
 
