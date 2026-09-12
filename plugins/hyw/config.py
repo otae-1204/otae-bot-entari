@@ -10,6 +10,32 @@ VERTEX_ENDPOINT = "https://aiplatform.googleapis.com/v1/projects/{project}/locat
 _warned: set[str] = set()
 
 
+def _env_int(name: str, default: int) -> int:
+    """Read an integer setting; missing or malformed values fall back to the default.
+
+    ``_env`` runs values through ``json.loads``, so a legitimate ``0`` arrives as the
+    falsy int ``0``: compare against None rather than testing truthiness, or ``0``
+    would be indistinguishable from "unset".
+    """
+    raw = _env(name, None)
+    if raw is None:
+        return default
+    try:
+        return int(str(raw).strip())
+    except (TypeError, ValueError):
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = _env(name, None)
+    if raw is None:
+        return default
+    try:
+        return float(str(raw).strip())
+    except (TypeError, ValueError):
+        return default
+
+
 @dataclass(frozen=True)
 class HywConfig:
     api_key: str = field(default="", repr=False)
@@ -27,6 +53,11 @@ class HywConfig:
     vertex_location: str = "global"
     vertex_base_url: str = ""
     auth_error: str = ""
+    # 瞬时失败（429/5xx/超时/连接中断）的退避重试；attempts<=1 或 budget<=0 表示关闭。
+    retry_attempts: int = 3
+    retry_base_delay: float = 0.5
+    retry_max_delay: float = 8.0
+    retry_budget: float = 20.0
 
     @property
     def configured(self) -> bool:
@@ -83,6 +114,22 @@ class HywConfig:
             vertex_location=vertex_location,
             vertex_base_url=vertex_base_url,
             auth_error=auth_error,
+            retry_attempts=max(1, _env_int("HYW_RETRY_ATTEMPTS", cls.retry_attempts)),
+            retry_base_delay=max(0.0, _env_float("HYW_RETRY_BASE_DELAY", cls.retry_base_delay)),
+            retry_max_delay=max(0.0, _env_float("HYW_RETRY_MAX_DELAY", cls.retry_max_delay)),
+            retry_budget=max(0.0, _env_float("HYW_RETRY_BUDGET", cls.retry_budget)),
+        )
+
+    @property
+    def retry(self) -> RetryPolicy:
+        """本次配置对应的退避重试策略。"""
+        from .retry import RetryPolicy
+
+        return RetryPolicy(
+            attempts=self.retry_attempts,
+            base_delay=self.retry_base_delay,
+            max_delay=self.retry_max_delay,
+            budget=self.retry_budget,
         )
 
     @staticmethod

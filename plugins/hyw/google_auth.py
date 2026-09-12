@@ -21,6 +21,7 @@ from loguru import logger
 
 from .config import HywConfig, HywError
 from .network_errors import classify_auth_error
+from .retry import RETRYABLE_STATUSES, parse_retry_after
 
 GRANT_TYPE = "urn:ietf:params:oauth:grant-type:jwt-bearer"
 CLOUD_PLATFORM_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
@@ -29,6 +30,30 @@ CLOCK_SKEW = 60
 REFRESH_MARGIN = 300
 TOKEN_TIMEOUT = 20
 MAX_ERROR_BYTES = 4096
+
+
+class TransientTokenError(HywError):
+    """令牌交换遇到可重试的瞬时失败：传输层超时/断流，或上游 429/5xx。
+
+    取令牌与调模型是两个独立的网络跳，各有自己的超时（TOKEN_TIMEOUT=20s 对模型侧 60s），
+    所以令牌跳的瞬时失败必须单独表达：否则会被压成普通 HywError 而绕过 agent 的重试循环
+    （实测表现为一次问答在 20.8s 处直接失败，恰是令牌跳超时）。
+    ``error`` 保存耗尽重试后要报出的文案，保持与单次尝试完全一致。
+    """
+
+    def __init__(
+        self,
+        error: HywError,
+        *,
+        cause: httpx.HTTPError | None = None,
+        status: int | None = None,
+        retry_after: float | None = None,
+    ) -> None:
+        super().__init__(str(error))
+        self.error = error
+        self.cause = cause
+        self.status = status
+        self.retry_after = retry_after
 
 
 class _MaskedHeaders(dict):
@@ -256,7 +281,13 @@ class TokenProvider:
         if response.status_code != 200:
             failure = classify_auth_error(response.status_code, response.text[:MAX_ERROR_BYTES])
             logger.warning("[hyw] token exchange failed: status={} code={}", response.status_code, failure.code)
-            raise HywError(f"{failure.message}（HTTP {response.status_code} / {failure.code}）")
+            error = HywError(f"{failure.message}（HTTP {response.status_code} / {failure.code}）")
+            # 429/5xx 属上游瞬时故障，交给 agent 的退避重试；其余（签名/账号/项目等）重试无意义。
+            if response.status_code in RETRYABLE_STATUSES:
+                raise TransientTokenError(
+                    error, status=response.status_code, retry_after=parse_retry_after(response.headers.get("retry-after"))
+                )
+            raise error
         return _parse_token(response)
 
 

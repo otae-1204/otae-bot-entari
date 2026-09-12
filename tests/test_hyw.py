@@ -315,7 +315,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         results = {"results": [{"title": "A", "url": "https://example.com/a"}, {"title": "B", "url": "https://example.com/b"}]}
         requests = []
 
-        async def complete(client, config, messages):
+        async def complete(client, config, messages, budget=None):
             requests.append(list(messages))
             return outputs[len(requests) - 1]
 
@@ -348,7 +348,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
     async def test_search_failure_is_feedback_to_model(self):
         payloads = []
 
-        async def complete(client, config, messages):
+        async def complete(client, config, messages, budget=None):
             payloads.append(list(messages))
             return CALL if len(payloads) == 1 else '<final_response>搜索不可用，请稍后重试。</final_response>'
 
@@ -358,7 +358,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.sources, [])
 
     async def test_concurrent_requests_keep_callbacks_and_sources_separate(self):
-        async def complete(client, config, messages):
+        async def complete(client, config, messages, budget=None):
             if len(messages) == 2:
                 return '<progress_hint>' + config.model + '</progress_hint>' + CALL.replace("Entari", config.model)
             return '<final_response>答案[1]</final_response>'
@@ -732,6 +732,342 @@ class ServiceAccountModelCallTests(unittest.IsolatedAsyncioTestCase):
                     with self.assertRaises(HywError) as error:
                         await agent.complete(client, config, [{"role": "user", "content": "问题"}])
                 self.assertNotIn("private", str(error.exception))
+
+
+class RetryBackoffTests(unittest.IsolatedAsyncioTestCase):
+    """瞬时失败（429/5xx/超时/连接中断）的退避重试。
+
+    两种凭据模式共用同一套策略：api_key 中转与 service_account（Vertex）都只按
+    HTTP 契约判定，不依赖任何上游响应体形状。
+    """
+
+    def setUp(self):
+        google_auth._providers.clear()
+        hyw_config._warned.clear()
+        self.calls: list[httpx.Request] = []
+
+    def config(self, **overrides):
+        # 固定小延迟，让断言只关心“是否重试/等待多久”，不依赖真实退避时间。
+        base = replace(HywConfig(), api_key="test-key", retry_base_delay=0.01, retry_max_delay=0.02, retry_budget=5.0)
+        return replace(base, **overrides)
+
+    def sa_config(self, **overrides):
+        return self.config(
+            auth_mode="service_account", credentials_file=str(SA_FILE),
+            base_url="https://aiplatform.googleapis.com/v1/projects/p/locations/global/endpoints/openapi",
+            model="google/gemini-3.8-flash", **overrides,
+        )
+
+    def transport(self, outcomes, *, headers=None):
+        """Answer with ``outcomes`` in order (int status or exception), then 200 forever."""
+
+        async def handler(request):
+            self.calls.append(request)
+            if request.url.host == "oauth2.googleapis.com":
+                return httpx.Response(200, json={"access_token": "sa-token", "expires_in": 3599})
+            index = self.model_calls - 1
+            outcome = outcomes[index] if index < len(outcomes) else 200
+            if isinstance(outcome, Exception):
+                raise outcome
+            if outcome == 200:
+                return httpx.Response(200, json={"choices": [{"message": {"content": FINAL}}]})
+            return httpx.Response(outcome, json={"error": {"status": "RESOURCE_EXHAUSTED"}}, headers=(headers or {}).get(index, {}))
+
+        return httpx.MockTransport(handler)
+
+    @property
+    def model_calls(self) -> int:
+        return len([call for call in self.calls if call.url.host != "oauth2.googleapis.com"])
+
+    async def test_rate_limited_request_is_retried_then_succeeds(self):
+        """429 后重试成功：这正是“经常 429”场景下要恢复的路径。"""
+        with patch.object(agent, "sleep", AsyncMock()) as sleep:
+            async with httpx.AsyncClient(transport=self.transport([429, 429])) as client:
+                output = await agent.complete(client, self.config(retry_attempts=3), [{"role": "user", "content": "问题"}])
+        self.assertEqual(output, FINAL)
+        self.assertEqual(self.model_calls, 3)
+        self.assertEqual(sleep.await_count, 2)
+
+    async def test_service_account_mode_retries_too(self):
+        """服务账号模式走同一条重试路径（Vertex 并发争用会返回裸 RESOURCE_EXHAUSTED）。"""
+        with patch.object(agent, "sleep", AsyncMock()) as sleep:
+            async with httpx.AsyncClient(transport=self.transport([429])) as client:
+                output = await agent.complete(client, self.sa_config(retry_attempts=3), [{"role": "user", "content": "问题"}])
+        self.assertEqual(output, FINAL)
+        self.assertEqual(self.model_calls, 2)
+        self.assertEqual(sleep.await_count, 1)
+
+    async def test_server_errors_are_retried(self):
+        """5xx 属网关/服务瞬时故障，同样重试。"""
+        for status in (500, 502, 503, 504, 408):
+            with self.subTest(status=status):
+                self.calls.clear()
+                with patch.object(agent, "sleep", AsyncMock()) as sleep:
+                    async with httpx.AsyncClient(transport=self.transport([status])) as client:
+                        output = await agent.complete(client, self.config(), [{"role": "user", "content": "问题"}])
+                self.assertEqual(output, FINAL)
+                self.assertEqual(self.model_calls, 2)
+                self.assertEqual(sleep.await_count, 1)
+
+    async def test_exhausted_retries_keep_the_single_attempt_wording(self):
+        """重试耗尽后必须报出与单次尝试完全相同的文案（不泄漏上游响应体）。"""
+        async with httpx.AsyncClient(transport=self.transport([429])) as client:
+            with self.assertRaises(HywError) as single:
+                await agent.complete(client, self.config(retry_attempts=1), [{"role": "user", "content": "问题"}])
+        self.calls.clear()
+        with patch.object(agent, "sleep", AsyncMock()):
+            async with httpx.AsyncClient(transport=self.transport([429] * 3)) as client:
+                with self.assertRaises(HywError) as retried:
+                    await agent.complete(client, self.config(retry_attempts=3), [{"role": "user", "content": "问题"}])
+        self.assertEqual(str(retried.exception), str(single.exception))
+        self.assertIn("稍后重试", str(retried.exception))
+        self.assertNotIn("RESOURCE_EXHAUSTED", str(retried.exception))
+        self.assertNotIn("private", str(retried.exception))
+        self.assertEqual(self.model_calls, 3)
+
+    async def test_non_retryable_status_is_not_retried(self):
+        """鉴权/参数类错误重试无意义，只发一次。"""
+        for status in (400, 401, 403, 404, 422):
+            with self.subTest(status=status):
+                self.calls.clear()
+                with patch.object(agent, "sleep", AsyncMock()) as sleep:
+                    async with httpx.AsyncClient(transport=self.transport([status])) as client:
+                        with self.assertRaises(HywError):
+                            await agent.complete(client, self.config(), [{"role": "user", "content": "问题"}])
+                self.assertEqual(self.model_calls, 1)
+                self.assertEqual(sleep.await_count, 0)
+
+    async def test_retry_after_header_wins_over_computed_backoff(self):
+        """Retry-After 是上游唯一说明“限流何时解除”的信号，优先采用。"""
+        with patch.object(agent, "sleep", AsyncMock()) as sleep:
+            async with httpx.AsyncClient(transport=self.transport([429], headers={0: {"retry-after": "3"}})) as client:
+                output = await agent.complete(client, self.config(retry_max_delay=8.0, retry_budget=60.0), [{"role": "user", "content": "问题"}])
+        self.assertEqual(output, FINAL)
+        self.assertEqual([call.args[0] for call in sleep.await_args_list], [3.0])
+
+    async def test_retry_after_is_clamped_to_max_delay(self):
+        """上游给的值可能不切实际，按 max_delay 截断。"""
+        with patch.object(agent, "sleep", AsyncMock()) as sleep:
+            async with httpx.AsyncClient(transport=self.transport([429], headers={0: {"retry-after": "600"}})) as client:
+                await agent.complete(client, self.config(retry_max_delay=8.0, retry_budget=60.0), [{"role": "user", "content": "问题"}])
+        self.assertEqual([call.args[0] for call in sleep.await_args_list], [8.0])
+
+    async def test_computed_backoff_stays_within_its_window(self):
+        """无 Retry-After 时用截断指数退避 + 抖动，且带下限（不会立刻重打）。"""
+        policy = agent.RetryPolicy(attempts=4, base_delay=0.5, max_delay=8.0, budget=60.0)
+        for attempt, window in ((1, 0.5), (2, 1.0), (3, 2.0), (4, 4.0)):
+            for _ in range(20):
+                delay = agent.delay_for(attempt, policy)
+                self.assertGreaterEqual(delay, window / 2)
+                self.assertLessEqual(delay, window)
+
+    async def test_total_sleep_budget_stops_retrying(self):
+        """一次问答的累计等待有上限，避免退避吃掉 handler 的 120s 超时。"""
+        self.calls.clear()
+        with patch.object(agent, "sleep", AsyncMock()) as sleep:
+            async with httpx.AsyncClient(transport=self.transport([429] * 8, headers={i: {"retry-after": "1"} for i in range(8)})) as client:
+                with self.assertRaises(HywError) as error:
+                    await agent.complete(
+                        client, self.config(retry_attempts=8, retry_max_delay=8.0, retry_budget=2.0),
+                        [{"role": "user", "content": "问题"}],
+                    )
+        self.assertIn("稍后重试", str(error.exception))
+        # 预算 2.0s、每次等 1.0s → 只允许两次退避，第三次预算不足即放弃。
+        self.assertEqual(sleep.await_count, 2)
+        self.assertEqual(self.model_calls, 3)
+
+    async def test_retry_can_be_disabled_by_configuration(self):
+        for overrides in ({"retry_attempts": 1}, {"retry_budget": 0.0}):
+            with self.subTest(**overrides):
+                self.calls.clear()
+                with patch.object(agent, "sleep", AsyncMock()) as sleep:
+                    async with httpx.AsyncClient(transport=self.transport([429])) as client:
+                        with self.assertRaises(HywError):
+                            await agent.complete(client, self.config(**overrides), [{"role": "user", "content": "问题"}])
+                self.assertEqual(self.model_calls, 1)
+                self.assertEqual(sleep.await_count, 0)
+
+    async def test_transient_transport_failure_is_retried(self):
+        """读超时与连接中断会自行恢复，值得重试。"""
+        for outcome in (httpx.ReadTimeout("slow"), httpx.RemoteProtocolError("dropped")):
+            with self.subTest(outcome=type(outcome).__name__):
+                self.calls.clear()
+                with patch.object(agent, "sleep", AsyncMock()) as sleep:
+                    async with httpx.AsyncClient(transport=self.transport([outcome])) as client:
+                        output = await agent.complete(client, self.config(), [{"role": "user", "content": "问题"}])
+                self.assertEqual(output, FINAL)
+                self.assertEqual(self.model_calls, 2)
+                self.assertEqual(sleep.await_count, 1)
+
+    async def test_configuration_transport_failure_is_not_retried(self):
+        """DNS/证书/代理类属配置或信任故障，重试只会拖慢诊断。"""
+        for outcome, expected in ((httpx.ProxyError("bad proxy"), "代理连接失败"), (httpx.UnsupportedProtocol("bad url"), "协议")):
+            with self.subTest(outcome=type(outcome).__name__):
+                self.calls.clear()
+                with patch.object(agent, "sleep", AsyncMock()) as sleep:
+                    async with httpx.AsyncClient(transport=self.transport([outcome])) as client:
+                        with self.assertRaises(HywError) as error:
+                            await agent.complete(client, self.config(), [{"role": "user", "content": "问题"}])
+                self.assertIn(expected, str(error.exception))
+                self.assertEqual(self.model_calls, 1)
+                self.assertEqual(sleep.await_count, 0)
+
+    async def test_exhausted_transport_retries_report_the_transport_diagnostic(self):
+        """传输类重试耗尽后仍是原来的可操作诊断，而不是被退避层改写。"""
+        with patch.object(agent, "sleep", AsyncMock()):
+            async with httpx.AsyncClient(transport=self.transport([httpx.ReadTimeout("slow")] * 3)) as client:
+                with self.assertRaises(HywError) as error:
+                    await agent.complete(client, self.config(retry_attempts=3), [{"role": "user", "content": "问题"}])
+        self.assertIn("timeout", str(error.exception))
+        self.assertEqual(self.model_calls, 3)
+
+    def token_transport(self, outcomes, *, headers=None):
+        """令牌端点按 ``outcomes`` 依次应答（状态码或异常），其后一直成功；模型端点始终 200。
+
+        取令牌与调模型是两个独立网络跳，所以这里必须能单独让前者失败。
+        """
+
+        async def handler(request):
+            self.calls.append(request)
+            if request.url.host != "oauth2.googleapis.com":
+                return httpx.Response(200, json={"choices": [{"message": {"content": FINAL}}]})
+            index = self.token_calls - 1
+            outcome = outcomes[index] if index < len(outcomes) else 200
+            if isinstance(outcome, Exception):
+                raise outcome
+            if outcome == 200:
+                return httpx.Response(200, json={"access_token": "sa-token", "expires_in": 3599})
+            return httpx.Response(
+                outcome, json={"error": {"status": "RESOURCE_EXHAUSTED"}}, headers=(headers or {}).get(index, {})
+            )
+
+        return httpx.MockTransport(handler)
+
+    @property
+    def token_calls(self) -> int:
+        return len([call for call in self.calls if call.url.host == "oauth2.googleapis.com"])
+
+    async def test_transient_token_exchange_failure_is_retried(self):
+        """令牌跳的瞬时传输失败（自身 20s 超时）必须重试，否则整问直接失败。
+
+        实测形态：一次问答在 20.8s 处失败 = TOKEN_TIMEOUT，而不是模型侧 60s 读超时。
+        """
+        for outcome in (httpx.ReadTimeout("oauth slow"), httpx.RemoteProtocolError("oauth dropped")):
+            with self.subTest(outcome=type(outcome).__name__):
+                self.calls.clear()
+                # 令牌有模块级缓存：不清掉的话第二轮会复用上一轮换到的令牌，根本不再发起交换。
+                google_auth._providers.clear()
+                with patch.object(agent, "sleep", AsyncMock()) as sleep:
+                    async with httpx.AsyncClient(transport=self.token_transport([outcome])) as client:
+                        output = await agent.complete(client, self.sa_config(), [{"role": "user", "content": "问题"}])
+                self.assertEqual(output, FINAL)
+                self.assertEqual(self.token_calls, 2)
+                self.assertEqual(self.model_calls, 1)
+                self.assertEqual(sleep.await_count, 1)
+
+    async def test_retryable_token_exchange_status_is_retried(self):
+        """令牌跳返回 429/5xx 同样重试（OAuth 端点也会限流）。"""
+        for status in (429, 500, 503):
+            with self.subTest(status=status):
+                self.calls.clear()
+                google_auth._providers.clear()
+                with patch.object(agent, "sleep", AsyncMock()) as sleep:
+                    async with httpx.AsyncClient(transport=self.token_transport([status])) as client:
+                        output = await agent.complete(client, self.sa_config(), [{"role": "user", "content": "问题"}])
+                self.assertEqual(output, FINAL)
+                self.assertEqual(self.token_calls, 2)
+                self.assertEqual(self.model_calls, 1)
+                self.assertEqual(sleep.await_count, 1)
+
+    async def test_token_exchange_honours_retry_after(self):
+        """令牌跳的 Retry-After 与模型侧同等对待。"""
+        with patch.object(agent, "sleep", AsyncMock()) as sleep:
+            async with httpx.AsyncClient(
+                transport=self.token_transport([429], headers={0: {"retry-after": "3"}})
+            ) as client:
+                output = await agent.complete(
+                    client, self.sa_config(retry_max_delay=8.0, retry_budget=60.0), [{"role": "user", "content": "问题"}]
+                )
+        self.assertEqual(output, FINAL)
+        self.assertEqual([call.args[0] for call in sleep.await_args_list], [3.0])
+
+    async def test_non_retryable_token_exchange_failure_is_not_retried(self):
+        """凭据类失败（签名/账号/项目）重试无意义，只换一次令牌。"""
+        for status in (400, 401, 403, 404):
+            with self.subTest(status=status):
+                self.calls.clear()
+                google_auth._providers.clear()
+                with patch.object(agent, "sleep", AsyncMock()) as sleep:
+                    async with httpx.AsyncClient(transport=self.token_transport([status])) as client:
+                        with self.assertRaises(HywError):
+                            await agent.complete(client, self.sa_config(), [{"role": "user", "content": "问题"}])
+                self.assertEqual(self.token_calls, 1)
+                self.assertEqual(self.model_calls, 0)
+                self.assertEqual(sleep.await_count, 0)
+
+    async def test_exhausted_token_exchange_retries_stay_chat_safe(self):
+        """令牌跳重试耗尽后仍报可操作文案，且不泄漏凭据或响应体。"""
+        with patch.object(agent, "sleep", AsyncMock()):
+            async with httpx.AsyncClient(
+                transport=self.token_transport([httpx.ReadTimeout("oauth slow")] * 3)
+            ) as client:
+                with self.assertRaises(HywError) as error:
+                    await agent.complete(client, self.sa_config(retry_attempts=3), [{"role": "user", "content": "问题"}])
+        message = str(error.exception)
+        self.assertIn("timeout", message)
+        self.assertNotIn("PRIVATE KEY", message)
+        self.assertNotIn(SA_EMAIL, message)
+        self.assertEqual(self.token_calls, 3)
+        self.assertEqual(self.model_calls, 0)
+
+    async def test_retry_log_names_the_upstream_not_only_the_model(self):
+        """重试日志同时覆盖两跳，措辞须与文档一致（曾写作 model request 后改正）。
+
+        日志本身是排障依据：只写 model 会让人误判失败发生在模型调用，而实测的 20.8s
+        失败其实在令牌跳。
+        """
+        with patch.object(agent, "sleep", AsyncMock()), patch.object(agent.logger, "warning") as warning:
+            async with httpx.AsyncClient(transport=self.transport([429])) as client:
+                await agent.complete(client, self.config(), [{"role": "user", "content": "问题"}])
+        self.assertEqual(warning.call_count, 1)
+        rendered = warning.call_args.args[0]
+        self.assertIn("retrying upstream request", rendered)
+        self.assertNotIn("model request", rendered)
+
+    async def test_one_question_shares_a_single_retry_budget(self):
+        """预算按“一次问答”共享：单次调用各自计数会撑爆 120s 超时。"""
+        with patch.object(agent, "complete", AsyncMock(side_effect=[CALL, FINAL])) as complete, patch.object(
+            agent, "search", AsyncMock(return_value={"results": []})
+        ):
+            await agent.ask(None, self.config(), "问题")
+        budgets = [call.args[3] for call in complete.await_args_list]
+        self.assertEqual(len(budgets), 2)
+        self.assertIsInstance(budgets[0], agent.RetryBudget)
+        self.assertIs(budgets[0], budgets[1])
+
+    def test_config_reads_retry_knobs_and_falls_back_on_garbage(self):
+        """HYW_RETRY_* 由环境变量读取；非法值回落默认，且下限受保护。"""
+        for name, value, attribute, expected in [
+            ("HYW_RETRY_ATTEMPTS", "5", "retry_attempts", 5),
+            ("HYW_RETRY_ATTEMPTS", "0", "retry_attempts", 1),
+            ("HYW_RETRY_ATTEMPTS", "abc", "retry_attempts", 3),
+            ("HYW_RETRY_BASE_DELAY", "1.5", "retry_base_delay", 1.5),
+            ("HYW_RETRY_BASE_DELAY", "-2", "retry_base_delay", 0.0),
+            ("HYW_RETRY_BASE_DELAY", "x", "retry_base_delay", 0.5),
+            ("HYW_RETRY_MAX_DELAY", "12", "retry_max_delay", 12.0),
+            ("HYW_RETRY_MAX_DELAY", "x", "retry_max_delay", 8.0),
+            ("HYW_RETRY_BUDGET", "0", "retry_budget", 0.0),
+            ("HYW_RETRY_BUDGET", "x", "retry_budget", 20.0),
+        ]:
+            with self.subTest(name=name, value=value):
+                with patch.dict(os.environ, {name: value}, clear=False):
+                    self.assertEqual(getattr(HywConfig.from_env(), attribute), expected)
+
+    def test_retry_policy_is_disabled_when_ineffective(self):
+        """attempts=1 或 budget=0 都等价于关闭重试。"""
+        self.assertFalse(agent.RetryPolicy(attempts=1).enabled)
+        self.assertFalse(agent.RetryPolicy(budget=0.0).enabled)
+        self.assertTrue(agent.RetryPolicy().enabled)
 
 
 class WebTests(unittest.IsolatedAsyncioTestCase):

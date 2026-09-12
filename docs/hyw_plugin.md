@@ -17,6 +17,10 @@ HYW_MODEL=gpt-4o
 HYW_RENDER=true
 HYW_PROXY=
 HYW_SEARCH_PROXY=
+HYW_RETRY_ATTEMPTS=3
+HYW_RETRY_BASE_DELAY=0.5
+HYW_RETRY_MAX_DELAY=8.0
+HYW_RETRY_BUDGET=20.0
 ```
 
 接口需兼容 OpenAI Chat Completions，`HYW_BASE_URL` 填 API 根地址，
@@ -114,6 +118,49 @@ HYW_SEARCH_PROXY=http://127.0.0.1:7890
 - `sa_project`：该服务账号无权访问此项目，或项目未启用 Vertex AI（检查 IAM 与 API 启用状态）。
 - `sa_model` / `sa_model_prefix`：模型名或区域不可用，需 `google/<model>` 形式且区域支持。
 - `sa_image`：图片无法被模型接受，改用 JPEG/PNG 重新发送。
+
+## 上游限流与自动重试
+
+模型接口（无论走中转还是 Google Vertex）都可能返回 HTTP 429。本机实测：service_account
+（Vertex）模式在 12 并发下每 12 次请求会遇到 1~2 次 429；中转 `llm.hyw.mom` 在低并发下
+未复现（24 次串行 + 10 并发 × 3 轮全为 200），但用户实际使用中会出现，故重试按 HTTP 契约
+（状态码 + `Retry-After`）判定，不依赖任何上游响应体形状。插件曾对 429 一次即弃，回复
+“模型请求过于频繁或额度不足”，而一次问答最多发起 `max_turns`（默认 10）次模型调用，
+任何一次撞上 429 都会中断整轮问答，故偶发限流会被放大成很高的问答失败率。
+
+现在 `plugins/hyw/agent.py` 的 `complete()` 会对**可重试失败**做截断指数退避：
+
+- 可重试：HTTP `408/429/500/502/503/504`，以及传输层的 `timeout`、`connection_interrupted`。
+- 不重试：`400/401/403/404/422` 等确定性错误，以及 `dns`、`tls_certificate`、`tls_handshake`、
+  `proxy`、`url_protocol`、`request_protocol`、`response_encoding`——这些是配置或信任问题，
+  重试只会拖延诊断。
+- 退避：第 n 次等待 `min(base_delay × 2^(n-1), max_delay)`，取等抖动（实际等待落在窗口的
+  一半到全长之间），避免多个请求同时恢复再次撞限流。
+- 上游若给出 `Retry-After`（秒数或 HTTP 日期），以它为准，但仍被 `max_delay` 截断。
+- 401 的“令牌被吊销”路径不变：强制刷新一次令牌后重试一次，且**不计入**重试次数，永不循环。
+
+重试同时覆盖**取令牌**与**调模型**两段网络。服务账号模式下二者是两个独立的网络跳，
+各有自己的超时（令牌交换 20 秒、模型调用 60 秒），所以令牌跳的瞬时失败会单独表达为
+`TransientTokenError` 并进入同一套退避：令牌端点返回 429/5xx 或传输层超时/断流都会重试，
+且尊重它的 `Retry-After`；而签名错误、账号不存在等确定性失败仍只换一次令牌就报错。
+若把令牌跳的异常压平成面向用户的 `HywError`，它就会静默失去可重试性——这是实测踩到的
+真实缺陷（表现为一次问答在 20.8 秒处直接失败，恰是令牌跳的 20 秒超时，而非模型侧的 60 秒）。
+
+配置项（`.env`，重启生效）：
+
+| 键 | 默认 | 说明 |
+| --- | --- | --- |
+| `HYW_RETRY_ATTEMPTS` | `3` | 单次模型调用最多尝试次数（含首次）；填 `1` 关闭重试。 |
+| `HYW_RETRY_BASE_DELAY` | `0.5` | 指数退避基准秒数。 |
+| `HYW_RETRY_MAX_DELAY` | `8.0` | 单次等待上限，也用于截断上游 `Retry-After`。 |
+| `HYW_RETRY_BUDGET` | `20.0` | **一次问答**（含全部轮次）累计等待上限；填 `0` 关闭重试。 |
+
+预算按“一次问答”而非“单次调用”计算：`ask()` 在进入轮次循环前创建一份预算并传给每轮
+`complete()`。否则每轮各自退避，最坏情况会叠加到超出 `handlers.py` 对整个问答施加的
+120 秒总时限（`HywConfig.timeout`，当前为固定值，不可用环境变量调整）。
+预算耗尽时立即报出最后一次真实失败，文案与不重试时逐字相同，
+不会泄漏上游响应正文。日志会记录 `[hyw] retrying upstream request: attempt=N wait=X.Xs`
+（`upstream` 同时涵盖取令牌与调模型两跳，见下节）。
 
 ## 排查模型连接失败
 

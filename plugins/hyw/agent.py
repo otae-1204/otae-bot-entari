@@ -12,10 +12,12 @@ from html import unescape
 from pathlib import Path
 
 import httpx
+from loguru import logger
 
 from .config import HywConfig, HywError
-from .google_auth import Secret, bearer_for
-from .network_errors import classify_auth_error, report_error
+from .google_auth import Secret, TransientTokenError, bearer_for
+from .network_errors import classify_auth_error, classify_error, report_error
+from .retry import RETRYABLE_CODES, RETRYABLE_STATUSES, RetryBudget, RetryPolicy, delay_for, parse_retry_after, sleep
 from .web import fetch_page, search
 
 SYSTEM_PROMPT = (Path(__file__).parent / "assets/system_prompt.txt").read_text(encoding="utf-8")
@@ -70,6 +72,20 @@ class _TokenRejected(HywError):
     """Access token refused upstream; one forced refresh is worth trying."""
 
 
+class _TransientResponse(HywError):
+    """A retryable status (429/5xx) that carries the error to raise if retries run out.
+
+    The message is the one ``_http_error`` already produced, so exhausting retries
+    reports exactly what a single attempt used to report.
+    """
+
+    def __init__(self, error: HywError, status: int, retry_after: float | None) -> None:
+        super().__init__(str(error))
+        self.error = error
+        self.status = status
+        self.retry_after = retry_after
+
+
 async def _read_bounded(response: httpx.Response, limit: int) -> bytes:
     body = bytearray()
     async for chunk in response.aiter_bytes():
@@ -106,7 +122,12 @@ async def _request(client: httpx.AsyncClient, config: HywConfig, messages: list[
         timeout=60,
     ) as response:
         if response.status_code != 200:
-            raise _http_error(config, response.status_code, await _read_bounded(response, 4096))
+            error = _http_error(config, response.status_code, await _read_bounded(response, 4096))
+            # Retryable statuses travel as _TransientResponse so complete() can back off;
+            # 401 keeps its own forced-refresh path and everything else fails immediately.
+            if response.status_code in RETRYABLE_STATUSES and not isinstance(error, _TokenRejected):
+                raise _TransientResponse(error, response.status_code, parse_retry_after(response.headers.get("retry-after")))
+            raise error
         body = bytearray()
         async for chunk in response.aiter_bytes():
             body.extend(chunk)
@@ -127,19 +148,55 @@ async def _bearer(client: httpx.AsyncClient, config: HywConfig, *, force: bool =
     try:
         return await bearer_for(client, config, force=force)
     except httpx.HTTPError as error:
-        raise HywError(report_error(error, config)) from None
+        # Keep the transport error reachable so complete() can classify and retry it,
+        # while report_error() still decides the chat-safe wording.
+        raise TransientTokenError(HywError(report_error(error, config)), cause=error) from None
 
 
-async def complete(client: httpx.AsyncClient, config: HywConfig, messages: list[dict]) -> str:
-    try:
-        token = await _bearer(client, config)
+async def complete(
+    client: httpx.AsyncClient, config: HywConfig, messages: list[dict],
+    budget: RetryBudget | None = None,
+) -> str:
+    """One model call, retrying transient upstream failures with backoff.
+
+    ``budget`` is shared by every call of one question (see ``RetryBudget``), so a
+    long tool loop cannot sleep its way past the handler's own timeout.
+    """
+    policy = config.retry
+    reserve = budget if budget is not None else policy.new_budget()
+    attempt = 0
+    while True:
+        attempt += 1
         try:
-            return await _request(client, config, messages, token)
-        except _TokenRejected:
-            # The cached token may have been revoked; exchange a fresh one before giving up.
-            return await _request(client, config, messages, await _bearer(client, config, force=True))
-    except httpx.HTTPError as error:
-        raise HywError(report_error(error, config)) from None
+            token = await _bearer(client, config)
+            try:
+                return await _request(client, config, messages, token)
+            except _TokenRejected:
+                # The cached token may have been revoked; exchange a fresh one before giving up.
+                # Deliberately outside the retry counter: this is credential recovery, and the
+                # contract is one refresh plus one retry, never a loop.
+                return await _request(client, config, messages, await _bearer(client, config, force=True))
+        except httpx.HTTPError as error:
+            wait = delay_for(attempt, policy) if classify_error(error).code in RETRYABLE_CODES and attempt < policy.attempts else None
+            if wait is None or not reserve.take(wait):
+                raise HywError(report_error(error, config)) from None
+        except TransientTokenError as error:
+            # The token exchange is a separate hop with its own timeout, so it needs its
+            # own retryable branch; a fresh attempt re-exchanges the token.
+            if error.cause is not None:
+                retryable = classify_error(error.cause).code in RETRYABLE_CODES
+            else:
+                retryable = error.status in RETRYABLE_STATUSES
+            wait = delay_for(attempt, policy, error.retry_after) if retryable and attempt < policy.attempts else None
+            if wait is None or not reserve.take(wait):
+                raise error.error from None
+        except _TransientResponse as error:
+            wait = delay_for(attempt, policy, error.retry_after) if attempt < policy.attempts else None
+            if wait is None or not reserve.take(wait):
+                raise error.error from None
+        # Covers both hops: a token-exchange retry and a model-call retry land here.
+        logger.warning("[hyw] retrying upstream request: attempt={} wait={:.1f}s", attempt + 1, wait)
+        await sleep(wait)
 
 
 async def ask(
@@ -158,12 +215,15 @@ async def ask(
         messages.insert(1, {"role": "system", "content": "你正在继续上一轮对话。紧扣当前追问，需要时补充检索，最终回复仍用 final_response 标签。"})
     sources: list[dict] = [dict(item) for item in prior[-1].get("_sources", [])] if prior else []
     tools_used = retries = 0
+    # One sleep budget for the whole question: this loop may issue max_turns model
+    # calls, all of them inside the handler's single timeout.
+    budget = config.retry.new_budget()
     for turn in range(config.max_turns):
         must_finish = turn == config.max_turns - 1 or tools_used >= config.max_tools
         request_messages = messages
         if must_finish:
             request_messages = [*messages, {"role": "system", "content": "工具预算已用尽。这一轮只能输出 final_response；资料不足时明确说明。"}]
-        output = await complete(client, config, request_messages)
+        output = await complete(client, config, request_messages, budget)
         try:
             final, calls, hint = parse_response(output)
         except HywError:
