@@ -30,11 +30,16 @@ from plugins.endfield.stages.models import (
 from plugins.endfield.stages.akedata import (
     AkeDataStageSource,
     AkeDataVersion,
+    _applicable_spawner_configs,
     _enemy_metrics,
     _enemy_modifiers,
     _enemy_poise,
     _enemy_instance_config,
+    _enemy_template_id,
+    _matching_script_buffs,
+    _matching_spawner_buffs,
     _translated,
+    _wave_library_entries,
     parse_akedata_catalog,
     parse_akedata_stage,
 )
@@ -785,11 +790,17 @@ class EndfieldAkeDataStageSourceTests(unittest.TestCase):
                 ],
             },
         }
+        # Mirrors a real SpawnerConfig export: every library entry carries a `key`, and
+        # the wave actions reference it. AkeData only applies the bornBuffList of library
+        # entries the waves actually place, so a config without a waveMap contributes no
+        # library buffs.
         spawners = {
             "indie_hdg011": (
                 {
+                    "configId": "sc_indie_hdg011_fixture",
                     "enemyLibrary": [
                         {
+                            "key": "FIXTURE90",
                             "enemyId": "eny_monument_fixture",
                             "enemyLevel": 90,
                             "bornBuffList": [
@@ -799,7 +810,23 @@ class EndfieldAkeDataStageSourceTests(unittest.TestCase):
                                 }
                             ],
                         }
-                    ]
+                    ],
+                    "waveMap": {
+                        "1": {
+                            "groupMap": {
+                                "1": {
+                                    "actionMap": {
+                                        "1": {
+                                            "$type": "Beyond.Gameplay.SpawnerActions"
+                                            "+SpawnMonsterFromTemplateV2, Gameplay.Beyond",
+                                            "libraryKey": "FIXTURE90",
+                                            "spawnCount": 1,
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
                 },
             )
         }
@@ -930,6 +957,146 @@ class EndfieldAkeDataStageSourceTests(unittest.TestCase):
 
         self.assertEqual(_enemy_metrics(attributes, 90, modifiers), (2950974, 3097, 100))
         self.assertEqual(_enemy_poise(attributes, modifiers).recover_seconds, 4.0)
+
+
+class EndfieldAkeDataSpawnerSemanticsTests(unittest.TestCase):
+    """Locks the AkeData spawner semantics the site itself implements.
+
+    These rules decide which ``bornBuffList`` reach an enemy's HP.  Getting them wrong
+    is exactly the "HP does not match akedata.wiki" bug: the plugin used to join on the
+    variant ``enemyId`` and merge every per-difficulty config of a scene.
+    """
+
+    #: base monster -> variant, as in real exports
+    ENEMY_TABLE = {
+        "eny_base": {"enemyId": "eny_base", "templateId": "eny_base"},
+        "eny_base_dungeon": {"enemyId": "eny_base_dungeon", "templateId": "eny_base"},
+    }
+
+    @staticmethod
+    def _config(config_id: str, enemy_id: str, level: int, ratio: float,
+                library_key: str = "KEY", pause: bool = False) -> dict:
+        return {
+            "configId": config_id,
+            "enemyLibrary": [
+                {
+                    "key": library_key,
+                    "enemyId": enemy_id,
+                    "enemyLevel": level,
+                    "bornBuffList": [
+                        {"buffId": "buff_dung_maxhp_01",
+                         "blackboard": [{"key": "ratio", "valueFloat": ratio}]}
+                    ],
+                }
+            ],
+            "waveMap": {
+                "1": {
+                    "groupMap": {
+                        "1": {
+                            "actionMap": {
+                                "1": {
+                                    "$type": "SpawnerActions+Pause, Gameplay" if pause
+                                    else "SpawnerActions+SpawnMonsterFromTemplateV2, Gameplay",
+                                    "libraryKey": library_key,
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+        }
+
+    def test_library_buffs_join_on_template_id_not_variant_id(self):
+        """A base id in DungeonTable must still pick up its variant's library buffs."""
+        configs = (self._config("sc_a", "eny_base_dungeon", 60, 0.8),)
+        buffs = _matching_spawner_buffs(configs, "eny_base", self.ENEMY_TABLE)
+        self.assertEqual([b["buffId"] for b in buffs], ["buff_dung_maxhp_01"])
+
+    def test_library_buffs_ignore_the_entry_level(self):
+        """The site buckets buffs per spawned instance, so levels must not filter."""
+        configs = (self._config("sc_a", "eny_base_dungeon", 90, 0.8),)
+        buffs = _matching_spawner_buffs(configs, "eny_base", self.ENEMY_TABLE)
+        self.assertEqual(len(buffs), 1)
+
+    def test_duplicate_buff_ids_resolve_first_wins(self):
+        configs = (
+            self._config("sc_a", "eny_base_dungeon", 60, 0.1),
+            self._config("sc_b", "eny_base_dungeon", 60, 0.9),
+        )
+        buffs = _matching_spawner_buffs(configs, "eny_base", self.ENEMY_TABLE)
+        self.assertEqual(len(buffs), 1)
+        self.assertEqual(buffs[0]["blackboard"][0]["valueFloat"], 0.1)
+
+    def test_unreferenced_and_paused_library_entries_contribute_nothing(self):
+        """Only library entries a wave action actually places carry their buffs."""
+        config = self._config("sc_a", "eny_base_dungeon", 60, 0.8)
+        config["enemyLibrary"].append(
+            {
+                "key": "UNUSED",
+                "enemyId": "eny_base_dungeon",
+                "enemyLevel": 60,
+                "bornBuffList": [{"buffId": "buff_unused", "blackboard": []}],
+            }
+        )
+        self.assertEqual(_wave_library_entries(config)[0]["key"], "KEY")
+        buffs = _matching_spawner_buffs((config,), "eny_base", self.ENEMY_TABLE)
+        self.assertEqual([b["buffId"] for b in buffs], ["buff_dung_maxhp_01"])
+
+        paused = self._config("sc_p", "eny_base_dungeon", 60, 0.8, pause=True)
+        self.assertEqual(_wave_library_entries(paused), ())
+        self.assertEqual(_matching_spawner_buffs((paused,), "eny_base", self.ENEMY_TABLE), ())
+
+    def test_configs_are_filtered_by_recommend_level(self):
+        configs = (
+            self._config("sc_lv60", "eny_base_dungeon", 60, 0.1),
+            self._config("sc_lv90", "eny_base_dungeon", 90, 0.9),
+        )
+        kept = _applicable_spawner_configs(configs, {"recommendLv": 60})
+        self.assertEqual([c["configId"] for c in kept], ["sc_lv60"])
+        # recommendLv 0 keeps every config: cross-difficulty buffs legitimately stack.
+        kept = _applicable_spawner_configs(configs, {"recommendLv": 0})
+        self.assertEqual([c["configId"] for c in kept], ["sc_lv60", "sc_lv90"])
+
+    def test_zero_level_and_empty_library_configs_are_skipped(self):
+        zero = self._config("sc_zero", "eny_base_dungeon", 0, 0.5)
+        empty = {"configId": "sc_empty", "enemyLibrary": [], "waveMap": {}}
+        kept = _applicable_spawner_configs((zero, empty), {"recommendLv": 0})
+        self.assertEqual(kept, ())
+
+    def test_script_buffs_prefer_exact_level_then_single_match(self):
+        """``_matching_script_buffs`` consumes normalized LevelScriptData configs."""
+        scripts = (
+            {"scriptId": "47400010001", "enemyLibrary": [
+                {"enemyId": "eny_base_dungeon", "enemyLevel": 60,
+                 "bornBuffList": [{"buffId": "buff_lv60", "blackboard": []}]},
+            ]},
+            {"scriptId": "47400010002", "enemyLibrary": [
+                {"enemyId": "eny_base_dungeon", "enemyLevel": 90,
+                 "bornBuffList": [{"buffId": "buff_lv90", "blackboard": []}]},
+            ]},
+        )
+        self.assertEqual(
+            [b["buffId"] for b in
+             _matching_script_buffs(scripts, "eny_base", 90, self.ENEMY_TABLE)],
+            ["buff_lv90"],
+        )
+        # A level with no entry falls back to the single same-enemy match.
+        single = ({"scriptId": "47400010003", "enemyLibrary": [
+            {"enemyId": "eny_base_dungeon", "enemyLevel": 60,
+             "bornBuffList": [{"buffId": "buff_only", "blackboard": []}]},
+        ]},)
+        self.assertEqual(
+            [b["buffId"] for b in
+             _matching_script_buffs(single, "eny_base", 75, self.ENEMY_TABLE)],
+            ["buff_only"],
+        )
+        # Ambiguous levels with no exact match contribute nothing.
+        self.assertEqual(
+            _matching_script_buffs(scripts, "eny_base", 75, self.ENEMY_TABLE), ()
+        )
+
+    def test_template_id_falls_back_to_the_raw_id(self):
+        self.assertEqual(_enemy_template_id("eny_unknown", {}), "eny_unknown")
 
 
 class EndfieldAkeDataStageSourceAsyncTests(unittest.IsolatedAsyncioTestCase):
@@ -1231,21 +1398,15 @@ class EndfieldAkeDataStageSourceAsyncTests(unittest.IsolatedAsyncioTestCase):
             "EnemyAttributeTemplateTable",
         )
         table_map = dict(zip(names, tables))
+        # Faithful to a real export: one library entry per monster, carrying a `key`
+        # that a wave action references. Real SpawnerConfigs never list the same enemy
+        # at two levels, and only wave-referenced entries contribute their bornBuffList.
         resource_map = {
             "public/Json/SpawnerConfig/indie_hdg011/fixture.json": {
                 "configId": "sc_indie_hdg011_fixture",
                 "enemyLibrary": [
                     {
-                        "enemyId": "eny_monument_fixture",
-                        "enemyLevel": 60,
-                        "bornBuffList": [
-                            {
-                                "buffId": "buff_dung_maxhp_01",
-                                "blackboard": [{"key": "ratio", "valueFloat": 0.5}],
-                            }
-                        ],
-                    },
-                    {
+                        "key": "FIXTURE90",
                         "enemyId": "eny_monument_fixture",
                         "enemyLevel": 90,
                         "bornBuffList": [
@@ -1254,8 +1415,24 @@ class EndfieldAkeDataStageSourceAsyncTests(unittest.IsolatedAsyncioTestCase):
                                 "blackboard": [{"key": "ratio", "valueFloat": 0.8}],
                             }
                         ],
-                    },
+                    }
                 ],
+                "waveMap": {
+                    "1": {
+                        "groupMap": {
+                            "1": {
+                                "actionMap": {
+                                    "1": {
+                                        "$type": "Beyond.Gameplay.SpawnerActions"
+                                        "+SpawnMonsterFromTemplateV2, Gameplay.Beyond",
+                                        "libraryKey": "FIXTURE90",
+                                        "spawnCount": 1,
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
             },
             "public/Json/BuffData/buff_dung_maxhp_01.json": {
                 "attributeModifier": {

@@ -71,7 +71,11 @@ _DIFFICULTY_SUFFIX_RE = re.compile(r"[·・\s]*(?:普通|困难|困難|苦难|�
 _POISE_REC_TIME_SCALAR = "PoiseRecTimeScalar"
 _ATTRIBUTE_TYPES: dict[str, int | str] = {
     "MaxHp": 1,
+    # BuffData spells these "Atk"/"Def"; the long forms never occur in the data and are
+    # kept only so existing fixtures keep resolving.
+    "Atk": 2,
     "Attack": 2,
+    "Def": 3,
     "Defense": 3,
     "PoiseRecTime": 21,
     _POISE_REC_TIME_SCALAR: _POISE_REC_TIME_SCALAR,
@@ -148,14 +152,15 @@ class AkeDataStageSource:
         records, _series = _resolve_stage_records(key, tables[0], tables[1])
         if not records:
             raise StageDataIncomplete(f"AkeData 中没有关卡“{key}”。")
-        spawners_by_scene = await self._load_stage_spawners(records)
-        buff_ids = _stage_buff_ids(records, tables[5], spawners_by_scene)
+        spawners_by_scene, scripts_by_scene = await self._load_stage_spawners(records)
+        buff_ids = _stage_buff_ids(records, tables[5], spawners_by_scene, scripts_by_scene)
         buff_table = await self._load_buffs(buff_ids)
         stage = parse_akedata_stage(
             version,
             key,
             *tables,
             spawners_by_scene=spawners_by_scene,
+            scripts_by_scene=scripts_by_scene,
             buff_table=buff_table,
         )
         return stage, ()
@@ -202,7 +207,9 @@ class AkeDataStageSource:
 
     async def _load_stage_spawners(
         self, records: tuple[dict[str, Any], ...]
-    ) -> dict[str, tuple[dict[str, Any], ...]]:
+    ) -> tuple[
+        dict[str, tuple[dict[str, Any], ...]], dict[str, tuple[dict[str, Any], ...]]
+    ]:
         scene_ids = tuple(
             dict.fromkeys(str(row.get("sceneId") or "").strip() for row in records)
         )
@@ -212,6 +219,7 @@ class AkeDataStageSource:
             return_exceptions=True,
         )
         configs: dict[str, tuple[dict[str, Any], ...]] = {}
+        scripts: dict[str, tuple[dict[str, Any], ...]] = {}
         for scene_id, result in zip(scene_ids, results):
             if isinstance(result, BaseException):
                 # Spawner exports only enrich enemy panels with instance/born-buff
@@ -222,26 +230,45 @@ class AkeDataStageSource:
                     f"scene={scene_id} error={type(result).__name__}: {result}"
                 )
                 configs[scene_id] = ()
+                scripts[scene_id] = ()
             else:
-                configs[scene_id] = result
-        return configs
+                configs[scene_id], scripts[scene_id] = result
+        return configs, scripts
 
-    async def _load_scene_spawners(self, scene_id: str) -> tuple[dict[str, Any], ...]:
-        paths = (
-            *(await self._asset_json_paths(f"SpawnerConfig/{scene_id}")),
-            *(await self._asset_json_paths(f"LevelScriptData/{scene_id}")),
-        )
-        if not paths:
+    async def _load_scene_spawners(
+        self, scene_id: str
+    ) -> tuple[tuple[dict[str, Any], ...], tuple[dict[str, Any], ...]]:
+        """Load a scene's spawner configs and its level-script enemy placements.
+
+        The two are distinct layers on AkeData: ``SpawnerConfig`` carries the
+        ``enemyLibrary`` (with ``bornBuffList``) that waves spawn, while
+        ``LevelScriptData`` carries scripted per-enemy buffs that apply on top of it
+        (``AKECombatData.staticEnemyBuffs``).  Merging them into one library — as this
+        loader used to — both dropped the scripted buffs and invented spawner entries.
+        """
+        spawner_paths = await self._asset_json_paths(f"SpawnerConfig/{scene_id}")
+        script_paths = await self._asset_json_paths(f"LevelScriptData/{scene_id}")
+        if not spawner_paths and not script_paths:
             raise StageDataIncomplete(f"AkeData 场景 {scene_id} 缺少刷怪配置清单。")
         resources = await asyncio.gather(
-            *(self._load_resource(f"public/Json/{path}") for path in paths)
+            *(
+                self._load_resource(f"public/Json/{path}")
+                for path in (*spawner_paths, *script_paths)
+            )
         )
-        return tuple(
-            config
-            for resource in resources
+        spawner_count = len(spawner_paths)
+        configs = tuple(
+            resource
+            for resource in resources[:spawner_count]
+            if isinstance(resource, dict) and isinstance(resource.get("enemyLibrary"), list)
+        )
+        scripts = tuple(
+            script
+            for resource in resources[spawner_count:]
             if isinstance(resource, dict)
-            if (config := _enemy_instance_config(resource)) is not None
+            if (script := _level_script_enemies(resource)) is not None
         )
+        return configs, scripts
 
     async def _asset_json_paths(self, prefix: str) -> tuple[str, ...]:
         generation = self._generation
@@ -368,6 +395,7 @@ def parse_akedata_stage(
     enemy_attribute_table: dict[str, Any],
     *,
     spawners_by_scene: dict[str, tuple[dict[str, Any], ...]] | None = None,
+    scripts_by_scene: dict[str, tuple[dict[str, Any], ...]] | None = None,
     buff_table: dict[str, dict[str, Any]] | None = None,
 ) -> Stage:
     records, series = _resolve_stage_records(key, series_table, dungeon_table)
@@ -391,6 +419,7 @@ def parse_akedata_stage(
             enemy_display_table,
             enemy_attribute_table,
             spawners_by_scene or {},
+            scripts_by_scene or {},
             buff_table or {},
             label=_variant_label(row, index, len(records), text_table),
             sort_order=index,
@@ -459,6 +488,7 @@ def _variant(
     enemy_display_table: dict[str, Any],
     enemy_attribute_table: dict[str, Any],
     spawners_by_scene: dict[str, tuple[dict[str, Any], ...]],
+    scripts_by_scene: dict[str, tuple[dict[str, Any], ...]],
     buff_table: dict[str, dict[str, Any]],
     *,
     label: str = "",
@@ -487,6 +517,7 @@ def _variant(
             enemy_display_table,
             enemy_attribute_table,
             spawners_by_scene.get(str(row.get("sceneId") or ""), ()),
+            scripts_by_scene.get(str(row.get("sceneId") or ""), ()),
             buff_table,
         ),
         rewards=rewards,
@@ -691,9 +722,11 @@ def _enemies(
     enemy_display_table: dict[str, Any],
     enemy_attribute_table: dict[str, Any],
     spawner_configs: tuple[dict[str, Any], ...] = (),
+    level_script_enemies: tuple[dict[str, Any], ...] = (),
     buff_table: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[StageEnemy, ...]:
     buff_table = buff_table or {}
+    spawner_configs = _applicable_spawner_configs(spawner_configs, dungeon)
     result: list[StageEnemy] = []
     levels = dungeon.get("enemyLevels") or ()
     for index, enemy_id in enumerate(dungeon.get("enemyIds") or ()):
@@ -708,7 +741,10 @@ def _enemies(
         attributes = enemy_attribute_table.get(attr_id)
         attributes = attributes if isinstance(attributes, dict) else {}
         level = _optional_int(levels[index]) if index < len(levels) else None
-        library_buffs = _matching_spawner_buffs(spawner_configs, enemy_id, level)
+        library_buffs = _matching_spawner_buffs(spawner_configs, enemy_id, enemy_table)
+        library_buffs += _matching_script_buffs(
+            level_script_enemies, enemy_id, level, enemy_table
+        )
         modifiers = _enemy_modifiers(enemy, library_buffs, buff_table)
         hp, attack, defense = _enemy_metrics(attributes, level, modifiers)
         result.append(
@@ -761,29 +797,38 @@ def _stage_buff_ids(
     records: tuple[dict[str, Any], ...],
     enemy_table: dict[str, Any],
     spawners_by_scene: dict[str, tuple[dict[str, Any], ...]],
+    scripts_by_scene: dict[str, tuple[dict[str, Any], ...]] | None = None,
 ) -> set[str]:
     buff_ids: set[str] = set()
+    scripts_by_scene = scripts_by_scene or {}
     for row in records:
         levels = row.get("enemyLevels") or ()
-        configs = spawners_by_scene.get(str(row.get("sceneId") or ""), ())
+        scene_id = str(row.get("sceneId") or "")
+        configs = _applicable_spawner_configs(
+            spawners_by_scene.get(scene_id, ()), row
+        )
+        scripts = scripts_by_scene.get(scene_id, ())
         for index, raw_enemy_id in enumerate(row.get("enemyIds") or ()):
             enemy_id = str(raw_enemy_id or "")
             enemy = enemy_table.get(enemy_id)
             if isinstance(enemy, dict):
                 buff_ids.update(str(buff_id) for buff_id in enemy.get("bornBuffs") or () if buff_id)
             level = _optional_int(levels[index]) if index < len(levels) else None
-            buff_ids.update(
-                str(buff.get("buffId"))
-                for buff in _matching_spawner_buffs(configs, enemy_id, level)
-                if buff.get("buffId")
-            )
+            for buff in (
+                *_matching_spawner_buffs(configs, enemy_id, enemy_table),
+                *_matching_script_buffs(scripts, enemy_id, level, enemy_table),
+            ):
+                if buff.get("buffId"):
+                    buff_ids.add(str(buff["buffId"]))
     return buff_ids
 
 
-def _enemy_instance_config(resource: dict[str, Any]) -> dict[str, Any] | None:
-    """Normalize both scene export formats to the spawner ``enemyLibrary`` shape."""
-    if isinstance(resource.get("enemyLibrary"), list):
-        return resource
+def _level_script_enemies(resource: dict[str, Any]) -> dict[str, Any] | None:
+    """Normalize a ``LevelScriptData`` export to ``{scriptId, enemyLibrary}``.
+
+    These are scripted per-enemy buffs, not spawner wave data: AkeData applies them
+    through ``AKECombatData.staticEnemyBuffs``, keyed by enemy id and level.
+    """
     instances = resource.get("enemies")
     if not isinstance(instances, dict):
         return None
@@ -809,18 +854,109 @@ def _enemy_instance_config(resource: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
-def _matching_spawner_buffs(
-    configs: tuple[dict[str, Any], ...], enemy_id: str, level: int | None
+def _enemy_instance_config(resource: dict[str, Any]) -> dict[str, Any] | None:
+    """Normalize a spawner or level-script export to the ``enemyLibrary`` shape."""
+    if isinstance(resource.get("enemyLibrary"), list):
+        return resource
+    return _level_script_enemies(resource)
+
+
+def _enemy_template_id(enemy_id: str, enemy_table: dict[str, Any]) -> str:
+    """The monster identity that ``DungeonTable`` and spawner libraries agree on.
+
+    ``DungeonTable.enemyIds`` name the base monster, while a spawner's ``enemyLibrary``
+    names the concrete variant placed in that stage (``_dungeon``, ``_hdg019``,
+    ``_activityspecial_01``, ``_tower011`` ...).  Both sides share
+    ``EnemyTable.templateId``, so library entries are joined on it instead of on the
+    variant id — joining on the id silently dropped every variant's ``bornBuffList``.
+    """
+    row = enemy_table.get(str(enemy_id or ""))
+    if isinstance(row, dict):
+        template_id = str(row.get("templateId") or "").strip()
+        if template_id:
+            return template_id
+    return str(enemy_id or "")
+
+
+def _wave_library_entries(config: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+    """The ``enemyLibrary`` entries a spawner config's waves actually place.
+
+    Only entries referenced by an action's ``libraryKey`` count, and paused actions are
+    skipped — a library may list monsters the waves never place, and those must not
+    contribute their ``bornBuffList``.
+    """
+    library = [row for row in config.get("enemyLibrary") or () if isinstance(row, dict)]
+    by_key = {row.get("key"): row for row in library}
+    entries: list[dict[str, Any]] = []
+    for wave in (config.get("waveMap") or {}).values():
+        if not isinstance(wave, dict):
+            continue
+        for group in (wave.get("groupMap") or {}).values():
+            if not isinstance(group, dict):
+                continue
+            for action in (group.get("actionMap") or {}).values():
+                if not isinstance(action, dict):
+                    continue
+                if "Pause" in str(action.get("$type") or ""):
+                    continue
+                library_enemy = by_key.get(action.get("libraryKey"))
+                if library_enemy is not None:
+                    entries.append(library_enemy)
+    return tuple(entries)
+
+
+def _applicable_spawner_configs(
+    configs: tuple[dict[str, Any], ...],
+    row: dict[str, Any],
 ) -> tuple[dict[str, Any], ...]:
+    """Keep the spawner configs AkeData itself would use for this stage.
+
+    A scene holds one config per difficulty.  The site keeps a config only when its
+    ``enemyLibrary`` levels are not exactly ``{0}`` and, for a stage with a
+    ``recommendLv``, when those levels contain it; otherwise every config of the scene
+    applies, which is how cross-difficulty buffs legitimately stack on stages such as
+    ``dung01_takestwo*`` (``recommendLv`` 0).  When nothing qualifies the caller falls
+    back to ``DungeonTable.enemyIds`` with no library buffs at all.
+    """
+    if not configs:
+        return ()
+    recommend_level = _optional_int(row.get("recommendLv")) or 0
+    applicable: list[dict[str, Any]] = []
+    for config in configs:
+        library = [e for e in config.get("enemyLibrary") or () if isinstance(e, dict)]
+        if not library:
+            continue
+        levels = {_optional_int(entry.get("enemyLevel")) for entry in library}
+        if levels == {0}:
+            continue
+        if recommend_level > 0 and recommend_level not in levels:
+            continue
+        applicable.append(config)
+    return tuple(applicable)
+
+
+def _matching_spawner_buffs(
+    configs: tuple[dict[str, Any], ...],
+    enemy_id: str,
+    enemy_table: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], ...]:
+    """Union the ``bornBuffList`` a stage's applicable configs give one enemy.
+
+    Buffs are joined on ``EnemyTable.templateId`` (the monster identity both
+    ``DungeonTable`` and the libraries agree on) and deliberately not on the entry's
+    level: the site buckets them per spawned enemy instance, so the same monster's
+    entries across a scene's configs all apply.  Duplicates are resolved first-wins by
+    ``buffId``, matching the site's own dedup over its alphabetically ordered configs.
+    """
+    enemy_table = enemy_table or {}
+    target_template = _enemy_template_id(enemy_id, enemy_table)
     buffs: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
     for config in configs:
-        for library_enemy in config.get("enemyLibrary") or ():
-            if not isinstance(library_enemy, dict):
-                continue
-            if str(library_enemy.get("enemyId") or "") != enemy_id:
-                continue
-            if level is not None and _optional_int(library_enemy.get("enemyLevel")) != level:
+        for library_enemy in _wave_library_entries(config):
+            if _enemy_template_id(
+                str(library_enemy.get("enemyId") or ""), enemy_table
+            ) != target_template:
                 continue
             for buff in library_enemy.get("bornBuffList") or ():
                 if not isinstance(buff, dict):
@@ -831,6 +967,40 @@ def _matching_spawner_buffs(
                 seen_ids.add(buff_id)
                 buffs.append(buff)
     return tuple(buffs)
+
+
+def _matching_script_buffs(
+    level_script_enemies: tuple[dict[str, Any], ...],
+    enemy_id: str,
+    level: int | None,
+    enemy_table: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], ...]:
+    """Scripted buffs for one enemy, mirroring ``AKECombatData.staticEnemyBuffs``.
+
+    Entries match on enemy id (variant or base) at the exact level; when no entry
+    matches the level, a single same-enemy entry still applies, as on the site.
+    """
+    enemy_table = enemy_table or {}
+    target_template = _enemy_template_id(enemy_id, enemy_table)
+    matches = [
+        entry
+        for script in level_script_enemies
+        for entry in script.get("enemyLibrary") or ()
+        if isinstance(entry, dict)
+        and (
+            str(entry.get("enemyId") or "") == enemy_id
+            or _enemy_template_id(str(entry.get("enemyId") or ""), enemy_table)
+            == target_template
+        )
+    ]
+    exact = [entry for entry in matches if _optional_int(entry.get("enemyLevel")) == level]
+    selected = exact or (matches if len(matches) == 1 else [])
+    return tuple(
+        buff
+        for entry in selected
+        for buff in entry.get("bornBuffList") or ()
+        if isinstance(buff, dict)
+    )
 
 
 def _enemy_modifiers(
