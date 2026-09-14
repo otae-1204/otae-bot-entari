@@ -27,6 +27,7 @@ PLUGIN_NAMES = {
     "mcsm": ("MCSManager",),
     "minecraft_plugin": ("Minecraft", "mc", "我的世界"),
     "peek": ("窥视",),
+    "radar": ("AI 智商雷达", "radar", "智商雷达"),
     "steamInfo": ("Steam", "steam"),
     "tibo_radar": ("Tibo 雷达", "tibo", "雷达"),
 }
