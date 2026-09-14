@@ -1,0 +1,567 @@
+{
+  "baseline_generated_at": "2026-09-13T09:16:19.380020+00:00",
+  "benchmark_id": "deep-swe",
+  "benchmark_policy_version": "deepswe-equal-iq-v2",
+  "benchmarks": [
+    {
+      "id": "deep-swe",
+      "title": "代码修复 · DeepSWE",
+      "short_title": "DeepSWE",
+      "description": "真实开源仓库任务，恢复代码行为并由容器测试判分。",
+      "task_count": 112,
+      "scoring_mode": "binary-majority",
+      "score_label": "Pass rate",
+      "rolling_window": 3,
+      "model_config_count": 67,
+      "reference_task_id": null,
+      "reference_url": null,
+      "task_bundle": null,
+      "default": true
+    },
+    {
+      "id": "pompeii-adjacency",
+      "title": "视觉恢复 · 庞贝壁画",
+      "short_title": "庞贝壁画邻接恢复",
+      "description": "从无旋转壁画碎片中恢复直接邻接拓扑；不评绝对坐标、画布尺度或旋转。",
+      "task_count": 86,
+      "scoring_mode": "continuous-macro",
+      "score_label": "Adjacency F1",
+      "rolling_window": 3,
+      "model_config_count": 40,
+      "reference_task_id": "RP-group-1-public-example",
+      "reference_url": "/assets/pompeii-reference/reference_question.png",
+      "task_bundle": {
+        "url": "/api/v1/benchmark-bundles/pompeii-adjacency",
+        "sha256": "e969b5321a541245e81e2e6ae5315c279382867f5966441336f3bd9ec51fa898",
+        "bytes": 63775935,
+        "format": "tar.gz"
+      },
+      "default": false
+    }
+  ],
+  "cells": {
+    "abs-module-cache-flags|gpt-5.6-sol|low": {
+      "st": "open",
+      "n": 3,
+      "p": 3,
+      "score_sum": 3.0,
+      "rate": 1.0,
+      "total_n": 23,
+      "total_p": 22,
+      "total_score": 22.0,
+      "base_mult": 2.0,
+      "wasteland": false,
+      "wasteland_multiplier": 1.0,
+      "mult": 2.0,
+      "last_graded_at": "2026-08-29T16:05:20+00:00",
+      "last_points": 1.6,
+      "ran_by": [
+        {
+          "login": "volunteer-01",
+          "avatar_url": null,
+          "passed": true,
+          "score": 1.0,
+          "graded_at": "2026-08-29T16:05:20+00:00",
+          "points_base": 0.8,
+          "points_multiplier": 2.0,
+          "duration_sec": 373.1,
+          "actual_cost_usd": 0.775488,
+          "cost_source": "tokens",
+          "token_pricing_version": "official-api-equivalent-gemini-3.7-flash-2026-08-28-v12",
+          "cost_complete": true
+        },
+        {
+          "nickname": "volunteer-02",
+          "avatar_seed": "seed-02",
+          "passed": true,
+          "score": 1.0,
+          "graded_at": "2026-08-26T14:20:55+00:00",
+          "points_base": 0.8,
+          "points_multiplier": 2.0,
+          "duration_sec": 559.5,
+          "actual_cost_usd": 1.197468,
+          "cost_source": "tokens",
+          "token_pricing_version": "official-api-equivalent-subscription-bands-2026-08-25-v7",
+          "cost_complete": true
+        },
+        {
+          "login": "volunteer-03",
+          "avatar_url": null,
+          "passed": true,
+          "score": 1.0,
+          "graded_at": "2026-08-23T08:17:51+00:00",
+          "points_base": 1.0,
+          "points_multiplier": 2.0,
+          "duration_sec": 355.5,
+          "actual_cost_usd": 0.955072,
+          "cost_source": "tokens",
+          "token_pricing_version": "official-api-equivalent-subscription-bands-2026-08-21-v5",
+          "cost_complete": true
+        }
+      ],
+      "cost": 0.73,
+      "min": 5,
+      "src": "measured",
+      "ns": 25,
+      "base": [
+        35,
+        31
+      ]
+    },
+    "abs-stepped-slices|gpt-5.5|high": {
+      "st": "open",
+      "n": 3,
+      "p": 3,
+      "score_sum": 3.0,
+      "rate": 1.0,
+      "total_n": 11,
+      "total_p": 9,
+      "total_score": 9.0,
+      "base_mult": 2.0,
+      "wasteland": false,
+      "wasteland_multiplier": 1.0,
+      "mult": 2.0,
+      "last_graded_at": "2026-08-29T16:20:50+00:00",
+      "last_points": 4.6,
+      "ran_by": [
+        {
+          "login": "volunteer-01",
+          "avatar_url": null,
+          "passed": true,
+          "score": 1.0,
+          "graded_at": "2026-08-29T16:20:50+00:00",
+          "points_base": 2.3,
+          "points_multiplier": 2.0,
+          "duration_sec": 425.1,
+          "actual_cost_usd": 1.622859,
+          "cost_source": "tokens",
+          "token_pricing_version": "official-api-equivalent-gemini-3.7-flash-2026-08-28-v12",
+          "cost_complete": true
+        },
+        {
+          "login": "volunteer-01",
+          "avatar_url": null,
+          "passed": true,
+          "score": 1.0,
+          "graded_at": "2026-08-23T20:44:38+00:00",
+          "points_base": 2.3,
+          "points_multiplier": 2.0,
+          "duration_sec": 474.3,
+          "actual_cost_usd": 1.916095,
+          "cost_source": "tokens",
+          "token_pricing_version": "official-api-equivalent-subscription-bands-2026-08-23-v6",
+          "cost_complete": true
+        },
+        {
+          "nickname": "volunteer-04",
+          "avatar_seed": "seed-04",
+          "passed": true,
+          "score": 1.0,
+          "graded_at": "2026-08-14T02:07:00+00:00",
+          "points_base": 2.5,
+          "points_multiplier": 2.0,
+          "duration_sec": 602.3,
+          "actual_cost_usd": 1.609216,
+          "cost_source": "tokens",
+          "token_pricing_version": "openai-deepseek-api-standard-2026-08-13",
+          "cost_complete": true
+        }
+      ],
+      "cost": 1.85,
+      "min": 9,
+      "src": "measured",
+      "ns": 9
+    },
+    "adaptix-name-mapping-aliases|gpt-5.6-sol|low": {
+      "st": "open",
+      "n": 3,
+      "p": 1,
+      "score_sum": 1.0,
+      "rate": 0.333,
+      "total_n": 18,
+      "total_p": 7,
+      "total_score": 7.0,
+      "base_mult": 2.0,
+      "wasteland": false,
+      "wasteland_multiplier": 1.0,
+      "mult": 2.0,
+      "last_graded_at": "2026-08-29T19:42:14+00:00",
+      "last_points": 5.4,
+      "ran_by": [
+        {
+          "login": "volunteer-01",
+          "avatar_url": null,
+          "passed": false,
+          "score": 0.0,
+          "graded_at": "2026-08-29T19:42:14+00:00",
+          "points_base": 2.7,
+          "points_multiplier": 2.0,
+          "duration_sec": 467.4,
+          "actual_cost_usd": 1.967471,
+          "cost_source": "tokens",
+          "token_pricing_version": "official-api-equivalent-gemini-3.7-flash-2026-08-28-v12",
+          "cost_complete": true
+        },
+        {
+          "nickname": "volunteer-02",
+          "avatar_seed": "seed-02",
+          "passed": false,
+          "score": 0.0,
+          "graded_at": "2026-08-26T14:11:55+00:00",
+          "points_base": 2.7,
+          "points_multiplier": 2.0,
+          "duration_sec": 520.7,
+          "actual_cost_usd": 1.96875,
+          "cost_source": "tokens",
+          "token_pricing_version": "official-api-equivalent-subscription-bands-2026-08-25-v7",
+          "cost_complete": true
+        },
+        {
+          "login": "volunteer-05",
+          "avatar_url": null,
+          "passed": true,
+          "score": 1.0,
+          "graded_at": "2026-08-12T13:54:57+00:00",
+          "points_base": 3.3,
+          "points_multiplier": 2.0,
+          "duration_sec": 618.2,
+          "actual_cost_usd": 2.356679,
+          "cost_source": "tokens",
+          "token_pricing_version": "openai-deepseek-api-standard-2026-07-31",
+          "cost_complete": true
+        }
+      ],
+      "cost": 2.12,
+      "min": 9,
+      "src": "measured",
+      "ns": 12,
+      "base": [
+        18,
+        7
+      ]
+    },
+    "abs-module-cache-flags|gpt-6-astra|low": {
+      "st": "cooldown",
+      "n": 2,
+      "p": 1,
+      "score_sum": 1.0,
+      "rate": 0.5,
+      "total_n": 2,
+      "total_p": 1,
+      "total_score": 1.0,
+      "base_mult": 1.0,
+      "wasteland": false,
+      "wasteland_multiplier": 1.0,
+      "mult": 1.0,
+      "last_graded_at": "2026-09-11T05:13:50+00:00",
+      "last_points": 2.0,
+      "ran_by": [
+        {
+          "login": "volunteer-06",
+          "avatar_url": null,
+          "passed": false,
+          "score": 0.0,
+          "graded_at": "2026-09-11T05:13:50+00:00",
+          "points_base": 1.0,
+          "points_multiplier": 2.0,
+          "duration_sec": 285.6,
+          "actual_cost_usd": 1.185964,
+          "cost_source": "tokens",
+          "token_pricing_version": "official-api-equivalent-gemini38-2026-09-10-v16",
+          "cost_complete": true
+        },
+        {
+          "nickname": "volunteer-07",
+          "avatar_seed": "seed-07",
+          "passed": true,
+          "score": 1.0,
+          "graded_at": "2026-09-05T02:55:08+00:00",
+          "points_base": 1.0,
+          "points_multiplier": 3.0,
+          "duration_sec": 295.1,
+          "actual_cost_usd": 1.086528,
+          "cost_source": "tokens",
+          "token_pricing_version": "official-api-equivalent-astra-2026-09-05-v15",
+          "cost_complete": true
+        }
+      ],
+      "cost": 0.82,
+      "min": 10,
+      "src": "task-level-fallback"
+    },
+    "adaptix-name-mapping-aliases|gpt-6-astra|max": {
+      "st": "open",
+      "n": 1,
+      "p": 1,
+      "score_sum": 1.0,
+      "rate": 1.0,
+      "total_n": 1,
+      "total_p": 1,
+      "total_score": 1.0,
+      "base_mult": 2.0,
+      "wasteland": false,
+      "wasteland_multiplier": 1.0,
+      "mult": 2.0,
+      "last_graded_at": "2026-09-05T01:35:36+00:00",
+      "last_points": 6.0,
+      "ran_by": [
+        {
+          "nickname": "volunteer-08",
+          "avatar_seed": "seed-08",
+          "passed": true,
+          "score": 1.0,
+          "graded_at": "2026-09-05T01:35:36+00:00",
+          "points_base": 2.0,
+          "points_multiplier": 3.0,
+          "duration_sec": 1120.9,
+          "actual_cost_usd": 4.5895,
+          "cost_source": "tokens",
+          "token_pricing_version": "official-api-equivalent-astra-2026-09-05-v15",
+          "cost_complete": true
+        }
+      ],
+      "cost": 1.65,
+      "min": 15,
+      "src": "task-level-fallback"
+    },
+    "abs-module-cache-flags|gemini-3.8-flash|low": {
+      "st": "open",
+      "n": 0,
+      "p": 0,
+      "score_sum": 0,
+      "rate": null,
+      "total_n": 0,
+      "total_p": 0,
+      "total_score": 0.0,
+      "base_mult": 6.0,
+      "wasteland": true,
+      "wasteland_multiplier": 1.5,
+      "mult": 9.0,
+      "provider": "google-antigravity-subscription",
+      "agent": "antigravity",
+      "agent_version": "1.1.27",
+      "manual_only": true,
+      "billing_mode": "subscription",
+      "cost_status": "subscription-unpriced",
+      "src": null,
+      "ran_by": []
+    },
+    "abs-module-cache-flags|gemini-3.8-flash|medium": {
+      "st": "open",
+      "n": 0,
+      "p": 0,
+      "score_sum": 0,
+      "rate": null,
+      "total_n": 0,
+      "total_p": 0,
+      "total_score": 0.0,
+      "base_mult": 6.0,
+      "wasteland": true,
+      "wasteland_multiplier": 1.5,
+      "mult": 9.0,
+      "provider": "google-antigravity-subscription",
+      "agent": "antigravity",
+      "agent_version": "1.1.27",
+      "manual_only": true,
+      "billing_mode": "subscription",
+      "cost_status": "subscription-unpriced"
+    },
+    "abs-module-cache-flags|deepseek-v4.1-flash|max": {
+      "st": "open",
+      "n": 0,
+      "p": 0,
+      "score_sum": 0,
+      "rate": null,
+      "total_n": 0,
+      "total_p": 0,
+      "total_score": 0.0,
+      "base_mult": 150.0,
+      "wasteland": true,
+      "wasteland_multiplier": 1.5,
+      "mult": 225.0,
+      "provider": "deepseek",
+      "manual_only": true,
+      "billing_mode": "api",
+      "reopen_after_hours": 12.0,
+      "cost": 0.41243,
+      "min": 10,
+      "src": "task-level-fallback",
+      "cost_is_estimate": true,
+      "pricing_band": "off_peak",
+      "cost_by_band": {
+        "off_peak": 0.41243,
+        "peak": 0.82486
+      },
+      "ran_by": []
+    }
+  },
+  "client_contract": {
+    "schema": "dradar-client-contract-v1",
+    "harness_capabilities": {
+      "dsh": [
+        "dsh-minimal-deepseek-v4-flash-artifact-v6",
+        "dsh-minimal-deepseek-v4-pro-artifact-v6"
+      ],
+      "claude-code": [
+        "claude-code-5-subscription-oauth-sandbox-v1"
+      ],
+      "grok": [
+        "grok-build-4.6-subscription-oauth-concurrent-v5"
+      ]
+    }
+  },
+  "combos": [
+    {
+      "model": "gpt-6-astra",
+      "effort": "low"
+    },
+    {
+      "model": "gpt-6-astra",
+      "effort": "medium"
+    },
+    {
+      "model": "gpt-6-astra",
+      "effort": "high"
+    },
+    {
+      "model": "gpt-6-astra",
+      "effort": "xhigh"
+    },
+    {
+      "model": "gpt-6-astra",
+      "effort": "max"
+    },
+    {
+      "model": "gpt-6-astra",
+      "effort": "ultra"
+    }
+  ],
+  "discrimination_generated_at": "2026-09-12T20:10:55+00:00",
+  "discrimination_method": "task-discrimination-v2",
+  "idle_mult_credit_before": "2026-07-26T17:03:52+00:00",
+  "idle_mult_credit_hours": 6.0,
+  "k": 1,
+  "online_volunteers": 2,
+  "pass_threshold": 1.0,
+  "reopen_after_hours": 60.0,
+  "rolling_window": 3,
+  "schema": 1,
+  "score_label": "Pass rate",
+  "scoring_mode": "binary-majority",
+  "tasks": [
+    {
+      "id": "abs-module-cache-flags",
+      "title": "Harden module loading, cache introspection, and script flags",
+      "language": "go",
+      "repo": "https://github.com/abs-lang/abs",
+      "category": "enhancement",
+      "discrimination": {
+        "raw_score": 0.110518,
+        "model": 10.0,
+        "effort": 7.4,
+        "monotonic": 3.0,
+        "config": 11.1,
+        "threshold": 21.3,
+        "confidence": 0.693,
+        "cells": 56,
+        "samples": 138,
+        "score": 79.7
+      }
+    },
+    {
+      "id": "abs-stepped-slices",
+      "title": "Add stepped slices for arrays and strings",
+      "language": "go",
+      "repo": "https://github.com/abs-lang/abs",
+      "category": "feature_request",
+      "discrimination": {
+        "raw_score": 0.083166,
+        "model": 7.9,
+        "effort": 4.0,
+        "monotonic": 1.6,
+        "config": 9.5,
+        "threshold": 16.8,
+        "confidence": 0.715,
+        "cells": 58,
+        "samples": 137,
+        "score": 59.9
+      }
+    },
+    {
+      "id": "adaptix-name-mapping-aliases",
+      "title": "Add input key aliases to name mapping",
+      "language": "python",
+      "repo": "https://github.com/reagento/adaptix",
+      "category": "feature_request",
+      "discrimination": {
+        "raw_score": 0.071077,
+        "model": 6.8,
+        "effort": 3.9,
+        "monotonic": 1.7,
+        "config": 7.7,
+        "threshold": 13.8,
+        "confidence": 0.627,
+        "cells": 52,
+        "samples": 131,
+        "score": 51.2
+      }
+    }
+  ],
+  "tier_windows_usd": {
+    "plus": 82.486,
+    "pro-5x": 412.43,
+    "pro-20x": 1649.72
+  },
+  "token_pricing": {
+    "version": "official-api-equivalent-gemini38-2026-09-10-v16",
+    "observed_at": "2026-09-10T00:00:00Z",
+    "effective_at": "2026-08-31T08:00:00+08:00",
+    "basis": "Official API-equivalent USD per 1M tokens; Claude Sonnet 5 and Opus 5 use Anthropic's official current list prices and Claude Code subscription charges are not represented as provider spend; GPT-5.6 Sol uses the current promotional short-context Standard rates; DeepSeek V4 retains its separately declared API price bands; GLM-5.3 and GLM-5.3-Flash use the official Z.AI standard USD list prices; Coding Plan quota-consumption bands and the Flash 50% API promotion ending 2026-09-09 are intentionally excluded from GLM API-equivalent dollars; Grok 4.6 uses the explicitly named current public Grok 4.5 tariff until xAI publishes a 4.6 price row; Gemini 3.7 Flash and Gemini 3.8 Flash use Google's current Standard promotional tariff through 2026-12-31 and their output prices already include thinking tokens; HY4 Preview uses Tencent's official public API rates and CodeBuddy subscription charges are not represented as provider spend; GPT-6 Astra uses current Standard API-equivalent short/long-context rates with separately verified cache writes; not Codex subscription payments or Fast/Batch/Flex spend",
+    "source": "https://www.anthropic.com/news/claude-sonnet-5; https://www.anthropic.com/news/claude-opus-5; https://developers.openai.com/api/docs/pricing; https://api-docs.deepseek.com/zh-cn/quick_start/pricing/; https://docs.z.ai/guides/overview/pricing; https://www.kimi.com/resources/kimi-k3-pricing; https://docs.x.ai/developers/pricing; https://ai.google.dev/gemini-api/docs/pricing; https://www.tencent.com/tencent-releases-and-open-sources-tencent-hy4-preview/",
+    "usd_per_million": {
+      "gpt-6-astra": {
+        "reference_reason": "Official GPT-6 Astra current Standard API-equivalent tariff; request input >272000 uses long-context rates. Requires complete server-derived cache-write counters. https://developers.openai.com/api/docs/models/gpt-6-astra; https://developers.openai.com/api/docs/guides/prompt-caching",
+        "requires_cache_write_usage": true,
+        "context_threshold_input_tokens": 272000,
+        "reference_band": "short_context",
+        "bands": {
+          "short_context": {
+            "input": 10.0,
+            "cached_input": 1.0,
+            "output": 50.0,
+            "cache_write": 12.5
+          },
+          "long_context": {
+            "input": 20.0,
+            "cached_input": 2.0,
+            "output": 75.0,
+            "cache_write": 25.0
+          }
+        }
+      },
+      "gpt-5.6-sol": {
+        "input": 4.0,
+        "cached_input": 0.4,
+        "output": 20.0
+      }
+    },
+    "current": {
+      "gpt-6-astra": {
+        "band": "standard",
+        "usd_per_million": {
+          "input": 10.0,
+          "cached_input": 1.0,
+          "output": 50.0
+        }
+      },
+      "gpt-5.6-sol": {
+        "band": "standard",
+        "usd_per_million": {
+          "input": 4.0,
+          "cached_input": 0.4,
+          "output": 20.0
+        }
+      }
+    }
+  }
+}

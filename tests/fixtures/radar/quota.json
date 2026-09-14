@@ -1,0 +1,16 @@
+{
+  "quota_window": "7d",
+  "tier_windows_usd": {
+    "plus": 82.486,
+    "pro-5x": 412.43,
+    "pro-20x": 1649.72
+  },
+  "source": "super-account-app-server-measurement",
+  "measured_at": "2026-08-09T11:49:26.993173+00:00",
+  "updated_at": "2026-08-09T11:49:26.993189+00:00",
+  "evidence": {
+    "cost_usd": 560.9064,
+    "delta_used_pct": 34.0,
+    "task_count": 711
+  }
+}

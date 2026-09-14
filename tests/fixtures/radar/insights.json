@@ -1,0 +1,300 @@
+{
+  "schema": 1,
+  "mode": "rolling_equal_per_task",
+  "recommendation_mode": "comprehensive_weighted_mean",
+  "generated_at": "2026-09-13T09:09:40+00:00",
+  "source_updated_at": "2026-09-12T16:37:23+00:00",
+  "software_source_updated_at": "2026-09-13T09:03:10+00:00",
+  "visual_source_updated_at": "2026-09-12T16:37:23+00:00",
+  "comprehensive_points": [
+    {
+      "model": "gpt-6-astra",
+      "effort": "low",
+      "iq": 109.19,
+      "software_iq": 98.51,
+      "visual_iq": 135.71,
+      "samples": 188
+    },
+    {
+      "model": "gpt-6-astra",
+      "effort": "medium",
+      "iq": 115.48,
+      "software_iq": 106.15,
+      "visual_iq": 132.79,
+      "samples": 200
+    },
+    {
+      "model": "gpt-6-astra",
+      "effort": "high",
+      "iq": 115.9,
+      "software_iq": 108.2,
+      "visual_iq": 135.5,
+      "samples": 170
+    }
+  ],
+  "recommendations": [
+    {
+      "key": "daily_development",
+      "title": "日常开发",
+      "rule": "原始 IQ ≥90，不再分档；在同一候选池中分别以平均耗时和费用与耗时综合成本为基准；更高 IQ 至少领先 1.5 IQ，且每领先 1 IQ 可接受最多 2% 对应指标溢价；去重后取 2 个。",
+      "items": [
+        {
+          "model": "gpt-6-astra",
+          "effort": "low",
+          "iq": 109.19,
+          "passed": 136.85726418227966,
+          "samples": 188,
+          "average_cost_usd": 1.921132,
+          "cost_samples": 188,
+          "average_duration_minutes": 8.76,
+          "duration_samples": 188,
+          "combined_cost_index": 128.016,
+          "rule": "原始 IQ ≥90，不再分档；在同一候选池中分别以平均耗时和费用与耗时综合成本为基准；更高 IQ 至少领先 1.5 IQ，且每领先 1 IQ 可接受最多 2% 对应指标溢价；去重后取 2 个。",
+          "trend_48h": [
+            {
+              "timestamp": "2026-09-11T10:00:18+00:00",
+              "iq": 99.6,
+              "samples": 131
+            },
+            {
+              "timestamp": "2026-09-11T11:00:41+00:00",
+              "iq": 99.6,
+              "samples": 131
+            },
+            {
+              "timestamp": "2026-09-11T12:00:54+00:00",
+              "iq": 99.6,
+              "samples": 131
+            }
+          ]
+        },
+        {
+          "model": "gpt-6-astra",
+          "effort": "medium",
+          "iq": 115.48,
+          "passed": 153.9695138566841,
+          "samples": 200,
+          "average_cost_usd": 2.357065,
+          "cost_samples": 200,
+          "average_duration_minutes": 10.52,
+          "duration_samples": 200,
+          "combined_cost_index": 275.466,
+          "rule": "原始 IQ ≥90，不再分档；在同一候选池中分别以平均耗时和费用与耗时综合成本为基准；更高 IQ 至少领先 1.5 IQ，且每领先 1 IQ 可接受最多 2% 对应指标溢价；去重后取 2 个。",
+          "trend_48h": [
+            {
+              "timestamp": "2026-09-11T10:00:18+00:00",
+              "iq": 107.8,
+              "samples": 128
+            },
+            {
+              "timestamp": "2026-09-11T11:00:41+00:00",
+              "iq": 107.8,
+              "samples": 128
+            },
+            {
+              "timestamp": "2026-09-11T12:00:54+00:00",
+              "iq": 107.8,
+              "samples": 128
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "hard_problems",
+      "title": "难题攻坚",
+      "rule": "所有有实测数据的档位中，按 IQ 从高到低取 2 个；IQ 相同时按模型顺序与综合成本排序。",
+      "items": [
+        {
+          "model": "gpt-6-astra",
+          "effort": "high",
+          "iq": 115.9,
+          "passed": 131.35882727008115,
+          "samples": 170,
+          "average_cost_usd": 2.759277,
+          "cost_samples": 170,
+          "average_duration_minutes": 11.82,
+          "duration_samples": 170,
+          "combined_cost_index": 459.844,
+          "rule": "所有有实测数据的档位中，按 IQ 从高到低取 2 个；IQ 相同时按模型顺序与综合成本排序。",
+          "trend_48h": [
+            {
+              "timestamp": "2026-09-11T10:00:18+00:00",
+              "iq": 107.5,
+              "samples": 120
+            },
+            {
+              "timestamp": "2026-09-11T11:00:41+00:00",
+              "iq": 107.5,
+              "samples": 120
+            },
+            {
+              "timestamp": "2026-09-11T12:00:54+00:00",
+              "iq": 107.5,
+              "samples": 120
+            }
+          ]
+        },
+        {
+          "model": "gpt-6-astra",
+          "effort": "medium",
+          "iq": 115.48,
+          "passed": 153.9695138566841,
+          "samples": 200,
+          "average_cost_usd": 2.357065,
+          "cost_samples": 200,
+          "average_duration_minutes": 10.52,
+          "duration_samples": 200,
+          "combined_cost_index": 275.466,
+          "rule": "所有有实测数据的档位中，按 IQ 从高到低取 2 个；IQ 相同时按模型顺序与综合成本排序。",
+          "trend_48h": [
+            {
+              "timestamp": "2026-09-11T10:00:18+00:00",
+              "iq": 107.8,
+              "samples": 128
+            },
+            {
+              "timestamp": "2026-09-11T11:00:41+00:00",
+              "iq": 107.8,
+              "samples": 128
+            },
+            {
+              "timestamp": "2026-09-11T12:00:54+00:00",
+              "iq": 107.8,
+              "samples": 128
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "background_automation",
+      "title": "后台自动化",
+      "rule": "成本优先：整数 IQ ≥80，不设上限，以平均费用最低者为基准；更高 IQ 至少领先 1.5 IQ，且每领先 1 IQ 可接受最多 2% 费用溢价；符合时优先 IQ 最高，依次取 2 个。",
+      "items": [
+        {
+          "model": "glm-5.3-flash",
+          "effort": "max",
+          "iq": 87.14,
+          "passed": 160.91237099084933,
+          "samples": 277,
+          "average_cost_usd": 0.336522,
+          "cost_samples": 265,
+          "average_duration_minutes": 48.08,
+          "duration_samples": 277,
+          "combined_cost_index": 4066.198,
+          "rule": "成本优先：整数 IQ ≥80，不设上限，以平均费用最低者为基准；更高 IQ 至少领先 1.5 IQ，且每领先 1 IQ 可接受最多 2% 费用溢价；符合时优先 IQ 最高，依次取 2 个。",
+          "trend_48h": [
+            {
+              "timestamp": "2026-09-13T09:09:40+00:00",
+              "iq": 87.0,
+              "samples": 277
+            }
+          ]
+        },
+        {
+          "model": "gpt-5.6-luna",
+          "effort": "xhigh",
+          "iq": 87.59,
+          "passed": 246.42719560937175,
+          "samples": 422,
+          "average_cost_usd": 0.373029,
+          "cost_samples": 422,
+          "average_duration_minutes": 30.93,
+          "duration_samples": 419,
+          "combined_cost_index": 1172.313,
+          "rule": "成本优先：整数 IQ ≥80，不设上限，以平均费用最低者为基准；更高 IQ 至少领先 1.5 IQ，且每领先 1 IQ 可接受最多 2% 费用溢价；符合时优先 IQ 最高，依次取 2 个。",
+          "trend_48h": [
+            {
+              "timestamp": "2026-09-11T10:00:18+00:00",
+              "iq": 87.1,
+              "samples": 336
+            },
+            {
+              "timestamp": "2026-09-11T11:00:41+00:00",
+              "iq": 87.1,
+              "samples": 336
+            },
+            {
+              "timestamp": "2026-09-11T12:00:54+00:00",
+              "iq": 87.1,
+              "samples": 336
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "lobster_tasks",
+      "title": "跑龙虾类任务",
+      "rule": "IQ ≥55，不设上限，按费用与耗时综合成本最低取 2 个。",
+      "items": [
+        {
+          "model": "gpt-5.6-terra",
+          "effort": "low",
+          "iq": 55.61,
+          "passed": 156.44253530646958,
+          "samples": 422,
+          "average_cost_usd": 0.464653,
+          "cost_samples": 421,
+          "average_duration_minutes": 8.17,
+          "duration_samples": 420,
+          "combined_cost_index": 25.027,
+          "rule": "IQ ≥55，不设上限，按费用与耗时综合成本最低取 2 个。",
+          "trend_48h": [
+            {
+              "timestamp": "2026-09-11T10:00:18+00:00",
+              "iq": 50.9,
+              "samples": 336
+            },
+            {
+              "timestamp": "2026-09-11T11:00:41+00:00",
+              "iq": 50.9,
+              "samples": 336
+            },
+            {
+              "timestamp": "2026-09-11T12:00:54+00:00",
+              "iq": 50.9,
+              "samples": 336
+            }
+          ]
+        },
+        {
+          "model": "gpt-5.6-terra",
+          "effort": "medium",
+          "iq": 62.26,
+          "passed": 175.1594748869083,
+          "samples": 422,
+          "average_cost_usd": 0.600176,
+          "cost_samples": 421,
+          "average_duration_minutes": 9.55,
+          "duration_samples": 422,
+          "combined_cost_index": 52.223,
+          "rule": "IQ ≥55，不设上限，按费用与耗时综合成本最低取 2 个。",
+          "trend_48h": [
+            {
+              "timestamp": "2026-09-11T10:00:18+00:00",
+              "iq": 58.5,
+              "samples": 336
+            },
+            {
+              "timestamp": "2026-09-11T11:00:41+00:00",
+              "iq": 58.5,
+              "samples": 336
+            },
+            {
+              "timestamp": "2026-09-11T12:00:54+00:00",
+              "iq": 58.5,
+              "samples": 336
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "degradation_alerts": {
+    "rule": "不含 DeepSeek；每个模型档位只与自身历史比较：每格最近三次结果必须达到以下任一固定阈值：当前 IQ 低于 24 小时均值至少 7 IQ，或低于 48 小时均值至少 9 IQ；同时最近 12 小时仍在下降。按相对门槛的均值差严重度排序，最多返回 4 个，不足 4 个不补位。",
+    "items": []
+  },
+  "benchmark_id": "deep-swe"
+}

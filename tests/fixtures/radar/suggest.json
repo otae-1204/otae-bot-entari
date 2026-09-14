@@ -1,0 +1,38 @@
+{
+  "benchmark_id": "deep-swe",
+  "cells": [
+    {
+      "task_id": "yaegi-go-embed-directives",
+      "benchmark_id": "deep-swe",
+      "model": "gpt-5.6-sol",
+      "effort": "medium",
+      "agent": "codex",
+      "agent_version": "0.154.0",
+      "est_minutes": 18,
+      "est_quota_pct": 3.7,
+      "tier_windows_usd": {
+        "plus": 82.486,
+        "pro-5x": 412.43,
+        "pro-20x": 1649.72
+      }
+    },
+    {
+      "task_id": "meriyah-explicit-resource-declarations",
+      "benchmark_id": "deep-swe",
+      "model": "gpt-5.5",
+      "effort": "xhigh",
+      "agent": "codex",
+      "agent_version": "0.154.0",
+      "est_minutes": 16,
+      "est_quota_pct": 7.6,
+      "tier_windows_usd": {
+        "plus": 82.486,
+        "pro-5x": 412.43,
+        "pro-20x": 1649.72
+      }
+    }
+  ],
+  "holding": 0,
+  "replaceable_unstarted": 0,
+  "protected_started": 0
+}

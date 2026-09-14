@@ -1,0 +1,40 @@
+{
+  "default_benchmark": "deep-swe",
+  "benchmarks": [
+    {
+      "id": "deep-swe",
+      "title": "代码修复 · DeepSWE",
+      "short_title": "DeepSWE",
+      "description": "真实开源仓库任务，恢复代码行为并由容器测试判分。",
+      "task_count": 112,
+      "scoring_mode": "binary-majority",
+      "score_label": "Pass rate",
+      "rolling_window": 3,
+      "model_config_count": 67,
+      "reference_task_id": null,
+      "reference_url": null,
+      "task_bundle": null,
+      "default": true
+    },
+    {
+      "id": "pompeii-adjacency",
+      "title": "视觉恢复 · 庞贝壁画",
+      "short_title": "庞贝壁画邻接恢复",
+      "description": "从无旋转壁画碎片中恢复直接邻接拓扑；不评绝对坐标、画布尺度或旋转。",
+      "task_count": 86,
+      "scoring_mode": "continuous-macro",
+      "score_label": "Adjacency F1",
+      "rolling_window": 3,
+      "model_config_count": 40,
+      "reference_task_id": "RP-group-1-public-example",
+      "reference_url": "/assets/pompeii-reference/reference_question.png",
+      "task_bundle": {
+        "url": "/api/v1/benchmark-bundles/pompeii-adjacency",
+        "sha256": "e969b5321a541245e81e2e6ae5315c279382867f5966441336f3bd9ec51fa898",
+        "bytes": 63775935,
+        "format": "tar.gz"
+      },
+      "default": false
+    }
+  ]
+}

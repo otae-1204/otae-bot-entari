@@ -1,0 +1,9 @@
+{
+  "items": [
+    {
+      "model": "gpt-6-astra",
+      "effort": "max",
+      "iq": 71.4
+    }
+  ]
+}

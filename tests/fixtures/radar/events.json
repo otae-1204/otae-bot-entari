@@ -1,0 +1,62 @@
+{
+  "benchmark_id": "deep-swe",
+  "scoring_mode": "binary-majority",
+  "score_label": "Pass rate",
+  "pass_threshold": 1.0,
+  "events": [
+    {
+      "graded_at": "2026-09-13T09:12:43+00:00",
+      "passed": false,
+      "score": 0.0,
+      "task_id": "pest-character-class-coalescing",
+      "model": "grok-4.6",
+      "effort": "high",
+      "harness": "grok-build",
+      "cost_usd": 2.83,
+      "cost_source": "api_equivalent_tokens",
+      "cost_is_estimate": false,
+      "cost_is_fallback_estimate": false,
+      "cost_is_api_equivalent": true,
+      "points": 16.97,
+      "points_deferred": false,
+      "login": "volunteer-01",
+      "avatar_url": null
+    },
+    {
+      "graded_at": "2026-09-13T08:54:31+00:00",
+      "passed": true,
+      "score": 1.0,
+      "task_id": "scc-bounded-memory-spilling",
+      "model": "grok-4.6",
+      "effort": "medium",
+      "harness": "grok-build",
+      "cost_usd": 1.49,
+      "cost_source": "api_equivalent_tokens",
+      "cost_is_estimate": false,
+      "cost_is_fallback_estimate": false,
+      "cost_is_api_equivalent": true,
+      "points": 8.96,
+      "points_deferred": false,
+      "login": "volunteer-01",
+      "avatar_url": null
+    },
+    {
+      "graded_at": "2026-09-13T08:43:32+00:00",
+      "passed": true,
+      "score": 1.0,
+      "task_id": "koota-composite-trait-aspects",
+      "model": "grok-4.6",
+      "effort": "medium",
+      "harness": "grok-build",
+      "cost_usd": null,
+      "cost_source": "unavailable",
+      "cost_is_estimate": false,
+      "cost_is_fallback_estimate": false,
+      "cost_is_api_equivalent": false,
+      "points": null,
+      "points_deferred": true,
+      "login": "volunteer-01",
+      "avatar_url": null
+    }
+  ]
+}

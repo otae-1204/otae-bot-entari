@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "mode": "latest_valid_per_task",
+  "source_updated_at": "2026-09-12T03:58:59+00:00",
+  "runs_24h_total": 0,
+  "runs_48h_total": 3,
+  "runs_total": 135,
+  "points": [
+    {
+      "model": "gpt-6-astra",
+      "effort": "low",
+      "average_agent_steps": 27.256880733944953,
+      "agent_steps_samples": 109,
+      "average_total_tokens": 1078396.7181818183,
+      "token_samples": 110,
+      "cache_hit_rate": 0.9475937143209523,
+      "cache_token_samples": 110,
+      "runs_24h": 0,
+      "runs_48h": 3,
+      "runs_total": 135
+    }
+  ],
+  "benchmark_id": "deep-swe",
+  "scoring_mode": "binary-majority",
+  "score_label": "Pass rate"
+}

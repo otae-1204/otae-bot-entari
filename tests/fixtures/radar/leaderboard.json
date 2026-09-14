@@ -1,0 +1,576 @@
+{
+  "tasks": [
+    "abs-module-cache-flags",
+    "abs-stepped-slices",
+    "actionlint-action-pinning-lint",
+    "adaptix-name-mapping-aliases",
+    "aiomonitor-task-snapshots-diff"
+  ],
+  "models": [
+    {
+      "model": "gpt-6-astra",
+      "effort": "low",
+      "graded": 135,
+      "passed": 88,
+      "score_sum": 88.0,
+      "cells": 110,
+      "cells_passed": 75,
+      "pass_rate": 0.682,
+      "score_label": "Pass rate",
+      "scoring_mode": "binary-majority",
+      "pass_threshold": 1.0,
+      "tasks": {
+        "abs-module-cache-flags": {
+          "votes": 2,
+          "pass_votes": 1,
+          "majority_pass": false,
+          "score_sum": 1.0,
+          "score_rate": 0.5
+        },
+        "abs-stepped-slices": {
+          "votes": 2,
+          "pass_votes": 2,
+          "majority_pass": true,
+          "score_sum": 2.0,
+          "score_rate": 1.0
+        },
+        "actionlint-action-pinning-lint": {
+          "votes": 2,
+          "pass_votes": 2,
+          "majority_pass": true,
+          "score_sum": 2.0,
+          "score_rate": 1.0
+        },
+        "adaptix-name-mapping-aliases": {
+          "votes": 2,
+          "pass_votes": 2,
+          "majority_pass": true,
+          "score_sum": 2.0,
+          "score_rate": 1.0
+        },
+        "aiomonitor-task-snapshots-diff": {
+          "votes": 3,
+          "pass_votes": 2,
+          "majority_pass": true,
+          "score_sum": 2.0,
+          "score_rate": 0.6666666666666666
+        }
+      }
+    },
+    {
+      "model": "gpt-6-astra",
+      "effort": "ultra",
+      "graded": 147,
+      "passed": 105,
+      "score_sum": 105.0,
+      "cells": 112,
+      "cells_passed": 77,
+      "pass_rate": 0.688,
+      "score_label": "Pass rate",
+      "scoring_mode": "binary-majority",
+      "pass_threshold": 1.0,
+      "tasks": {
+        "abs-module-cache-flags": {
+          "votes": 2,
+          "pass_votes": 2,
+          "majority_pass": true,
+          "score_sum": 2.0,
+          "score_rate": 1.0
+        },
+        "abs-stepped-slices": {
+          "votes": 2,
+          "pass_votes": 2,
+          "majority_pass": true,
+          "score_sum": 2.0,
+          "score_rate": 1.0
+        },
+        "actionlint-action-pinning-lint": {
+          "votes": 2,
+          "pass_votes": 2,
+          "majority_pass": true,
+          "score_sum": 2.0,
+          "score_rate": 1.0
+        },
+        "adaptix-name-mapping-aliases": {
+          "votes": 2,
+          "pass_votes": 2,
+          "majority_pass": true,
+          "score_sum": 2.0,
+          "score_rate": 1.0
+        },
+        "aiomonitor-task-snapshots-diff": {
+          "votes": 3,
+          "pass_votes": 3,
+          "majority_pass": true,
+          "score_sum": 3.0,
+          "score_rate": 1.0
+        }
+      }
+    },
+    {
+      "model": "gpt-5.6-sol",
+      "effort": "max",
+      "graded": 2177,
+      "passed": 1467,
+      "score_sum": 1467.0,
+      "cells": 112,
+      "cells_passed": 84,
+      "pass_rate": 0.75,
+      "score_label": "Pass rate",
+      "scoring_mode": "binary-majority",
+      "pass_threshold": 1.0,
+      "tasks": {
+        "abs-module-cache-flags": {
+          "votes": 3,
+          "pass_votes": 0,
+          "majority_pass": false,
+          "score_sum": 0.0,
+          "score_rate": 0.0
+        },
+        "abs-stepped-slices": {
+          "votes": 3,
+          "pass_votes": 3,
+          "majority_pass": true,
+          "score_sum": 3.0,
+          "score_rate": 1.0
+        },
+        "actionlint-action-pinning-lint": {
+          "votes": 3,
+          "pass_votes": 2,
+          "majority_pass": true,
+          "score_sum": 2.0,
+          "score_rate": 0.6666666666666666
+        },
+        "adaptix-name-mapping-aliases": {
+          "votes": 3,
+          "pass_votes": 3,
+          "majority_pass": true,
+          "score_sum": 3.0,
+          "score_rate": 1.0
+        },
+        "aiomonitor-task-snapshots-diff": {
+          "votes": 3,
+          "pass_votes": 2,
+          "majority_pass": true,
+          "score_sum": 2.0,
+          "score_rate": 0.6666666666666666
+        }
+      }
+    },
+    {
+      "model": "gpt-5.5",
+      "effort": "high",
+      "graded": 1745,
+      "passed": 988,
+      "score_sum": 988.0,
+      "cells": 112,
+      "cells_passed": 71,
+      "pass_rate": 0.634,
+      "score_label": "Pass rate",
+      "scoring_mode": "binary-majority",
+      "pass_threshold": 1.0,
+      "tasks": {
+        "abs-module-cache-flags": {
+          "votes": 3,
+          "pass_votes": 3,
+          "majority_pass": true,
+          "score_sum": 3.0,
+          "score_rate": 1.0
+        },
+        "abs-stepped-slices": {
+          "votes": 3,
+          "pass_votes": 3,
+          "majority_pass": true,
+          "score_sum": 3.0,
+          "score_rate": 1.0
+        },
+        "actionlint-action-pinning-lint": {
+          "votes": 3,
+          "pass_votes": 3,
+          "majority_pass": true,
+          "score_sum": 3.0,
+          "score_rate": 1.0
+        },
+        "adaptix-name-mapping-aliases": {
+          "votes": 3,
+          "pass_votes": 3,
+          "majority_pass": true,
+          "score_sum": 3.0,
+          "score_rate": 1.0
+        },
+        "aiomonitor-task-snapshots-diff": {
+          "votes": 3,
+          "pass_votes": 2,
+          "majority_pass": true,
+          "score_sum": 2.0,
+          "score_rate": 0.6666666666666666
+        }
+      }
+    }
+  ],
+  "contributors": [
+    {
+      "nickname": "volunteer-01",
+      "submissions": 1772,
+      "graded": 1745,
+      "is_radar_admin": false,
+      "flag_race_winner": true,
+      "points": 64813.1,
+      "points_by_harness": {
+        "codex": 59132.4,
+        "other": 5680.7
+      },
+      "github_login": "volunteer-01",
+      "month_points": 2296.5,
+      "month_points_by_harness": {
+        "codex": 2261.5,
+        "other": 35.0
+      },
+      "month_graded": 20,
+      "month_submissions": 20,
+      "tokens": 33983024324,
+      "folded_usd": 17762.97,
+      "deepseek_api_usd": 91.32,
+      "deepseek_api_runs": 195,
+      "deepseek_api_unpriced_runs": 0,
+      "usd": 17854.29,
+      "month_tokens": 508558757,
+      "month_folded_usd": 135.36,
+      "month_deepseek_api_usd": 11.33,
+      "month_deepseek_api_runs": 6,
+      "month_deepseek_api_unpriced_runs": 0,
+      "month_usd": 146.69,
+      "avatar_url": null,
+      "avatar_seed": null,
+      "contribution_streak": {
+        "daily_reward_points": 5.0,
+        "current_days": 0,
+        "longest_days": 8,
+        "active_days": 41,
+        "active_today": false,
+        "today_points": 0.0,
+        "reward_points": 175.0,
+        "month_reward_points": 35.0,
+        "next_milestone_days": 3,
+        "next_milestone_bonus": 5.0
+      },
+      "rank_change_24h": 0,
+      "month_rank_change_24h": 0
+    },
+    {
+      "nickname": "volunteer-02",
+      "submissions": 1494,
+      "graded": 1276,
+      "is_radar_admin": false,
+      "flag_race_winner": false,
+      "points": 59243.8,
+      "points_by_harness": {
+        "dsh": 16101.8,
+        "codex": 11094.8,
+        "kimi-code": 29689.5,
+        "other": 2357.7
+      },
+      "github_login": null,
+      "month_points": 20183.8,
+      "month_points_by_harness": {
+        "kimi-code": 20153.8,
+        "other": 30.0
+      },
+      "month_graded": 122,
+      "month_submissions": 165,
+      "tokens": 11682527343,
+      "folded_usd": 5363.47,
+      "deepseek_api_usd": 80.07,
+      "deepseek_api_runs": 36,
+      "deepseek_api_unpriced_runs": 0,
+      "usd": 5443.54,
+      "month_tokens": 1690172025,
+      "month_folded_usd": 0.0,
+      "month_deepseek_api_usd": 0.0,
+      "month_deepseek_api_runs": 0,
+      "month_deepseek_api_unpriced_runs": 0,
+      "month_usd": 0.0,
+      "avatar_url": null,
+      "avatar_seed": "seed-02",
+      "contribution_streak": {
+        "daily_reward_points": 5.0,
+        "current_days": 0,
+        "longest_days": 5,
+        "active_days": 19,
+        "active_today": false,
+        "today_points": 0.0,
+        "reward_points": 85.0,
+        "month_reward_points": 30.0,
+        "next_milestone_days": 3,
+        "next_milestone_bonus": 5.0
+      },
+      "rank_change_24h": 0,
+      "month_rank_change_24h": 0
+    },
+    {
+      "nickname": "volunteer-03",
+      "submissions": 651,
+      "graded": 635,
+      "is_radar_admin": false,
+      "flag_race_winner": false,
+      "points": 9624.2,
+      "points_by_harness": {
+        "grok-build": 9569.2,
+        "other": 55.0
+      },
+      "github_login": "volunteer-03",
+      "month_points": 9624.2,
+      "month_points_by_harness": {
+        "grok-build": 9569.2,
+        "other": 55.0
+      },
+      "month_graded": 635,
+      "month_submissions": 651,
+      "tokens": 3305739301,
+      "folded_usd": 839.71,
+      "deepseek_api_usd": 0.0,
+      "deepseek_api_runs": 0,
+      "deepseek_api_unpriced_runs": 0,
+      "usd": 839.71,
+      "month_tokens": 3305739301,
+      "month_folded_usd": 839.71,
+      "month_deepseek_api_usd": 0.0,
+      "month_deepseek_api_runs": 0,
+      "month_deepseek_api_unpriced_runs": 0,
+      "month_usd": 839.71,
+      "avatar_url": null,
+      "avatar_seed": null,
+      "contribution_streak": {
+        "daily_reward_points": 5.0,
+        "current_days": 4,
+        "longest_days": 5,
+        "active_days": 9,
+        "active_today": true,
+        "today_points": 5.0,
+        "reward_points": 55.0,
+        "month_reward_points": 55.0,
+        "next_milestone_days": 7,
+        "next_milestone_bonus": 15.0
+      },
+      "riding_since": "2026-09-13T07:16:55+00:00",
+      "riding_points": 279.51,
+      "riding_graded": 22,
+      "riding_submissions": 22,
+      "riding_last_activity_at": "2026-09-13T09:10:17+00:00",
+      "riding_open": true,
+      "riding_workers": 1,
+      "riding_pedaling_workers": 1,
+      "riding_finishing_workers": 0,
+      "riding_target_workers": 10,
+      "riding_access_types": [
+        "api"
+      ],
+      "riding_harnesses": [
+        "grok"
+      ],
+      "riding_active_seconds": 6801.2,
+      "riding_scored_seconds": 6800.2,
+      "riding_scored_worker_seconds": 41047.6,
+      "riding_speed_workers": 0,
+      "riding_speed_points_per_hour": 0,
+      "rank_change_24h": 0,
+      "month_rank_change_24h": 0
+    }
+  ],
+  "benchmark_id": "deep-swe",
+  "benchmarks": [
+    {
+      "id": "deep-swe",
+      "title": "代码修复 · DeepSWE",
+      "short_title": "DeepSWE",
+      "description": "真实开源仓库任务，恢复代码行为并由容器测试判分。",
+      "task_count": 112,
+      "scoring_mode": "binary-majority",
+      "score_label": "Pass rate",
+      "rolling_window": 3,
+      "model_config_count": 67,
+      "reference_task_id": null,
+      "reference_url": null,
+      "task_bundle": null,
+      "default": true
+    },
+    {
+      "id": "pompeii-adjacency",
+      "title": "视觉恢复 · 庞贝壁画",
+      "short_title": "庞贝壁画邻接恢复",
+      "description": "从无旋转壁画碎片中恢复直接邻接拓扑；不评绝对坐标、画布尺度或旋转。",
+      "task_count": 86,
+      "scoring_mode": "continuous-macro",
+      "score_label": "Adjacency F1",
+      "rolling_window": 3,
+      "model_config_count": 40,
+      "reference_task_id": "RP-group-1-public-example",
+      "reference_url": "/assets/pompeii-reference/reference_question.png",
+      "task_bundle": {
+        "url": "/api/v1/benchmark-bundles/pompeii-adjacency",
+        "sha256": "e969b5321a541245e81e2e6ae5315c279382867f5966441336f3bd9ec51fa898",
+        "bytes": 63775935,
+        "format": "tar.gz"
+      },
+      "default": false
+    }
+  ],
+  "scoring_mode": "binary-majority",
+  "score_label": "Pass rate",
+  "pass_threshold": 1.0,
+  "pending_grades": 0,
+  "error_grades": 458,
+  "k": 1,
+  "online_volunteers": 2,
+  "pedal_speed": {
+    "window_minutes": 60,
+    "scope": "fleet_submitted",
+    "submitted_runs": 10,
+    "token_runs": 10,
+    "tokens_per_hour": 61950772,
+    "input_tokens_per_hour": 61250392,
+    "cached_input_tokens_per_hour": 57668224,
+    "output_tokens_per_hour": 700380,
+    "cache_hit_ratio": 0.9415,
+    "api_equivalent_runs": 9,
+    "api_equivalent_usd_per_hour": 25.07,
+    "paid_api_runs": 0,
+    "paid_api_usd_per_hour": 0.0,
+    "estimated_runs": 1,
+    "unpriced_runs": 0,
+    "actual_runs": 10,
+    "usd_per_hour": 27.55
+  },
+  "latest_burn": {
+    "tokens": 6953719,
+    "usd": 0.82,
+    "cost_kind": "folded",
+    "cost_pending": false,
+    "submitted_at": "2026-09-13T09:10:16+00:00"
+  },
+  "flag_race": {
+    "status": "won",
+    "target_usd": 150000.0,
+    "reward_points": 1500.0,
+    "current_usd": 170335.57,
+    "winner": {
+      "nickname": "volunteer-06",
+      "github_login": null
+    },
+    "submission": {
+      "task_id": "psd-tools-blend-range-api",
+      "model": "gpt-5.6-sol",
+      "effort": "medium",
+      "submitted_at": "2026-08-26T14:42:14+00:00"
+    },
+    "cumulative_usd": 150001.57,
+    "awarded_at": "2026-08-26T14:55:48+00:00",
+    "announcement_until": "2026-09-02T14:55:48+00:00"
+  },
+  "month": {
+    "label": "2026-09",
+    "settles_at": "2026-10-01T00:00:00+08:00"
+  },
+  "history": {
+    "starts_at": "2026-07",
+    "top": 10,
+    "seasons": [
+      {
+        "label": "2026-08",
+        "top10": [
+          {
+            "nickname": "volunteer-01",
+            "github_login": "volunteer-01",
+            "avatar_url": null,
+            "avatar_seed": null,
+            "points": 47160.7,
+            "tokens": 21864469353,
+            "folded_usd": 9978.86,
+            "deepseek_api_usd": 79.99,
+            "deepseek_api_runs": 189,
+            "deepseek_api_unpriced_runs": 0,
+            "usd": 10058.85,
+            "rank": 1
+          },
+          {
+            "nickname": "volunteer-04",
+            "github_login": null,
+            "avatar_url": null,
+            "avatar_seed": "seed-04",
+            "points": 41413.4,
+            "tokens": 27914929730,
+            "folded_usd": 14185.97,
+            "deepseek_api_usd": 0.0,
+            "deepseek_api_runs": 0,
+            "deepseek_api_unpriced_runs": 0,
+            "usd": 14185.97,
+            "rank": 2
+          },
+          {
+            "nickname": "volunteer-02",
+            "github_login": null,
+            "avatar_url": null,
+            "avatar_seed": "seed-02",
+            "points": 27967.2,
+            "tokens": 1647497790,
+            "folded_usd": 370.89,
+            "deepseek_api_usd": 80.07,
+            "deepseek_api_runs": 36,
+            "deepseek_api_unpriced_runs": 0,
+            "usd": 450.96,
+            "rank": 3
+          }
+        ]
+      },
+      {
+        "label": "2026-07",
+        "top10": [
+          {
+            "nickname": "volunteer-05",
+            "github_login": null,
+            "avatar_url": null,
+            "avatar_seed": "seed-05",
+            "points": 19183.7,
+            "tokens": 8383512956,
+            "folded_usd": 9598.01,
+            "deepseek_api_usd": 0.0,
+            "deepseek_api_runs": 0,
+            "deepseek_api_unpriced_runs": 0,
+            "usd": 9598.01,
+            "rank": 1
+          },
+          {
+            "nickname": "volunteer-01",
+            "github_login": "volunteer-01",
+            "avatar_url": null,
+            "avatar_seed": null,
+            "points": 15355.9,
+            "tokens": 11609996214,
+            "folded_usd": 7648.75,
+            "deepseek_api_usd": 0.0,
+            "deepseek_api_runs": 0,
+            "deepseek_api_unpriced_runs": 0,
+            "usd": 7648.75,
+            "rank": 2
+          },
+          {
+            "nickname": "volunteer-02",
+            "github_login": null,
+            "avatar_url": null,
+            "avatar_seed": "seed-02",
+            "points": 11092.8,
+            "tokens": 8344857528,
+            "folded_usd": 4992.58,
+            "deepseek_api_usd": 0.0,
+            "deepseek_api_runs": 0,
+            "deepseek_api_unpriced_runs": 0,
+            "usd": 4992.58,
+            "rank": 3
+          }
+        ]
+      }
+    ]
+  },
+  "site_name": "DRadar",
+  "site_url": ""
+}
