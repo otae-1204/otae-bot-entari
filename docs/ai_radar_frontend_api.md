@@ -76,14 +76,16 @@
 | 端点 | 实测体积量级 | 是否适合前端首屏直接拉 |
 | --- | --- | --- |
 | `/benchmarks` | 几 KB | ✅ |
-| `/radar-insights` | 31–45 KB | ✅ |
-| `/intelligence-efficiency` | 20–32 KB | ✅ |
+| `/radar-insights` | **34.2 KB**（实测 deep-swe 录制） | ✅ |
+| `/intelligence-efficiency` | **34.3 KB**（实测；旧文档写 20–32 KB，偏小） | ✅ |
 | `/model-metrics` | ~0.6–18 KB | ✅ |
 | `/events` | 几 KB | ✅ |
 | `/quota` / `/suggest` | 几 KB | ✅ |
-| `/leaderboard` | **1.3–1.6 MB** | ⚠️ 建议后端缓存后下发 |
-| `/iq-history` | **0.7–1.3 MB** | ⚠️ 同上 |
-| `/table` | **3.7–8.6 MB**（deep-swe 7504 格） | ❌ 绝不要前端首屏直接拉 |
+| `/leaderboard` | **1.75 MB**（deep-swe）/ **1.42 MB**（pompeii） | ⚠️ 建议后端缓存后下发 |
+| `/iq-history` | **1.44 MB**（实测；旧文档写 0.7–1.3 MB，偏小） | ⚠️ 同上 |
+| `/table` | **9.30 MB**（deep-swe 7504 格）/ **3.97 MB**（pompeii） | ❌ 绝不要前端首屏直接拉 |
+
+> 上表为**录制实测**值（2026-09-13 全量录制，字节数直接取自文件大小）；`/table` 的 9.30 MB 与 `provider.py` 的 docstring 一致。
 
 ---
 
@@ -150,14 +152,16 @@ low → medium → high → xhigh → max → ultra
 | `gpt-5.6-sol@max` | 0.75 | 112.5 | 2177 | 112 |
 | `gpt-5.5@high` | 0.634 | 95.1 | 1745 | 112 |
 
-同一模型跨档位的真实 IQ 差距（实测 2026-09-14，`/iq-history`）：
+同一模型跨档位的真实 IQ 差距（实测 2026-09-13 录制，`/iq-history`）：
 
 | 序列 | 末点 IQ | `n` |
 | --- | --- | --- |
 | `gpt-5.6-sol@low` | 81.7 | 336 |
-| `gpt-5.6-sol@max` | 107.1 | 336 |
+| `gpt-5.6-sol@max` | 107.6 | 336 |
 
-→ 差 **25.4 IQ**。`service.py` 的模块 docstring 写「差 25 IQ 以上」，与实测一致。
+→ 差 **25.9 IQ**。`service.py` 的模块 docstring 写「差 25 IQ 以上」，与实测一致。
+
+> ⚠️ **同档位的两个端点口径不同**：`/radar-insights` 对 `gpt-5.6-sol` 全档位都给 `samples=422`（`@max iq=106.46`），而 `/iq-history` 给 `@max 107.6 (n=336)`。两者不可混用（见 §4）。
 
 ### 3.3 各模型支持的档位不同（**不能假设对称**）
 
@@ -165,7 +169,7 @@ low → medium → high → xhigh → max → ultra
 
 - 6 档全开：`gpt-6-astra`、`gpt-5.6-sol`、`gpt-5.6-terra`（`gpt-5.6-luna` 缺 `ultra`）。
 - **`gpt-5.5` 只有 `high` / `xhigh`** —— 站点刻意的「上一代对照」。
-- 视觉频道只覆盖 10 个档位（含 `dsh-deepseek-v4-flash-vision-exp`）。
+- 视觉频道 `pompeii-adjacency` 覆盖 **40 个档位**（`model_config_count=40`；deep-swe 为 67），其中含 `dsh-deepseek-v4-flash-vision-exp`。
 - **档位清单的唯一事实源是 `/table` 的 `combos`，不是价格表**：实测 `deepseek-v4-pro` 在 `token_pricing` 里有价却在任何频道的 `combos` 里都不出现。插件对应方法 `RadarService.model_catalog()`。
 
 > ⚠️ 设计文档写 `combos` 表，实现里 `model_catalog()` **确实**读 `/table` 的 `combos`（`service.py:263`），一致。但**价格表 ≠ 已评测模型**这一点前端也要知道：不要用价格表的键去生成模型下拉框。
@@ -219,7 +223,7 @@ else:
 | `ModelRow.iq` | `float \| None` | 上面算出的值 |
 | `ModelRow.iq_derived` | `bool` | **`True` = 本地兜底换算，不是上游综合 IQ** |
 
-- 只有 insights 里**没有该档位**时才兜底。实测 `deep-swe` 的 `/leaderboard` 有 67 行，而 insights 的 `comprehensive_points` 只有 40 点 → **大部分行都会 `iq_derived=True`**（实测 `top_models()` 默认返回 15 行里 5 行是 derived）。
+- 只有 insights 里**没有该档位**时才兜底。实测 `deep-swe` 的 `/leaderboard` 有 67 行，而 insights 的 `comprehensive_points` 有 40 点 → **27 行（40%）会 `iq_derived=True`，是少数**（另外 40 行用的是上游综合 IQ）。按 `top_models()` 默认排序取前 15 行时，其中 5 行是 derived（`claude-sonnet-5@high` / `dsh-deepseek-v4.1-flash@high` / `claude-opus-5@low` / `hy4-preview@high` / `glm-5.3@max`）。
 - 纯文本层把 derived 标成 `IQ 112.5*`，并在末尾加一行 `* 本地换算 pass_rate×150，非上游综合 IQ`。
 
 ### 4.4 前端必须做什么
@@ -266,14 +270,14 @@ else:
 | `latest:gpt-6-astra` | 106.8 / n=424 | 107.3 / n=502 |
 | `latest:gpt-6-astra@low` | 104.6 / n=76 | 103.6 / n=84 |
 
-设计文档记录的实测（`gpt-5.6-sol`，2026-09-13）：裸名 **96.7（n=2016）** vs `latest:` **97.3（n=672）** —— **样本量明显更小、分数不同**。实测 2026-09-14 复现同一现象：96.9（n=2016）vs 98.2（n=672）。
+设计文档记录的实测（`gpt-5.6-sol`，2026-09-06 采样）：裸名 **96.7（n=2016）** vs `latest:` **97.3（n=672）** —— **样本量明显更小、分数不同**。本机 2026-09-13 录制复现同一现象：**96.9（n=2016）vs 98.4（n=672）**。
 
 ### 5.3 前端规则
 
 1. **`latest=True` 的序列必须单独标注**（例如图例写 `gpt-5.6-sol（latest 窗口）`），**不得与裸名序列画在同一坐标系**。
 2. `service.trend()` **已显式跳过** `latest:` 前缀的序列（`service._series_points` / `service.trend`），并在 `meta.note` 里写「跨档位合并口径」或「单档位 <effort>」。前端应把 `meta.note` 显示在图标题旁。
-3. 裸名与 `@effort` 也不能混：实测 `gpt-6-astra` 末点 105.3（n=806）vs `gpt-6-astra@low` 末点 97.9 量级 —— 口径不同。
-4. 序列规模：deep-swe **124 条**（62 裸 + 62 `latest:`），pompeii **76 条**（38 + 38）；每条 **168 点**（逐小时）。
+3. 裸名与 `@effort` 也不能混：实测 2026-09-13 录制 `gpt-6-astra` 末点 105.4（n=804）vs `gpt-6-astra@low` 末点 98.5（n=134）—— 口径不同。
+4. 序列规模：deep-swe **124 条** = **13 裸名 + 49 `模型@effort` + 62 `latest:`**（62 条非 `latest:` 里只有 13 条是裸名 —— **前端做模型选择器时要按裸名去重，得到 13 个模型，不是 62 个**）；pompeii **76 条**；每条 **168 点**（逐小时）。
 
 ---
 
@@ -312,7 +316,9 @@ else:
 | `passed` | **`49.79059751561299`** |
 | `total` | `55` |
 | `iq` | `135.79` |
-| 其余（`average_price_usd` / `average_minutes` / `combined_cost_index` / `average_agent_steps` / `average_total_tokens` / `cache_hit_rate` / `runs_*` / `source_updated_at`） | 全部 `null` |
+| 其余（`average_price_usd` / `average_minutes` / `combined_cost_index` / `average_agent_steps` / `average_total_tokens` / `cache_hit_rate` / `runs_*` / `source_updated_at`） | 上游原文**全部 `null`** |
+
+> ⚠️ **`runs_*` 解析后不是 `None`，而是 `0`**：`parse_efficiency` 对 `runs_24h` / `runs_48h` / `runs_total` 走「缺键/`null` → `0`」的整型归一（见 §12.9）。实测全量 deep-swe efficiency 67 个点里 **44 个 `runs_24h == 0`**，`is None` 的 **0 个**。**`0` 在这里表示「没有测到运行数」，不是「实测为 0」** —— 前端必须按 `0` 显示 `—`（§15 红线 6：不得把缺失渲染成 `0`），不要画成「零次运行」。
 
 第二条 point：`gpt-6-astra@medium`，`passed = 75.681635`，`total = 85`，`iq = 133.56`。
 
@@ -465,8 +471,8 @@ else:
 | 端点 | `scoring_mode` | `score_label` | `mode` | `rolling_window` | `pass_threshold` | `source_updated_at` |
 | --- | --- | --- | --- | --- | --- | --- |
 | `/benchmarks` | — | — | — | — | — | —（返回 `tuple[BenchmarkInfo,...]`，**无 meta**） |
-| `/leaderboard` | `binary-majority` | `Pass rate` | `None` | `None` | `1.0` | `None` |
-| `/table` | `binary-majority` | `Pass rate` | `None` | `3` | `1.0` | `None` |
+| `/leaderboard` | `binary-majority` | `Pass rate` | `None` | `3`（**回退自内嵌 `benchmarks[]`**） | `1.0` | `2026-09-13T09:10:16+00:00`（**回退自 `latest_burn.submitted_at`**） |
+| `/table` | `binary-majority` | `Pass rate` | `None` | `3` | `1.0` | `2026-09-13T09:01:19.582518+00:00` |
 | `/iq-history` | — | — | — | — | — | —（返回 `tuple[HistorySeries,...]`，**无 meta**） |
 | `/radar-insights` | `""` | `""` | `rolling_equal_per_task` | `None` | `None` | `2026-09-12T16:37:23+00:00` |
 | `/intelligence-efficiency` | `binary-majority` | `Pass rate` | `equal_latest_3` | `None` | `None` | `2026-09-14T04:59:08+00:00` |
@@ -516,7 +522,11 @@ service = RadarService(RadarClient(RadarConfig.from_env()), RadarConfig.from_env
 
 > ⚠️ `by="cost"` 的排序用的是 `/intelligence-efficiency` 的 `average_price_usd`，**不是** `ModelRow` 上的字段。返回的仍是 `ModelRow`，**成本不在行里** —— 前端要显示成本得另外调 `value_picks()` 或直接读 `EfficiencyPoint`。
 
-**`model_profile` 的一个坑（实测）**：`variants` 是**请求档位过滤后的**结果，而 `efficiency` / `metrics` / `insight` 都只取 **`variants[0]`（最低档）** 的那个。实测 `model_profile("astra")`（不带 effort）：
+**`model_profile` 的一个坑（实测）**：`variants` 是**请求档位过滤后的**结果，而 `efficiency` / `metrics` / `insight` / `trend` / `recent` 都只取 **`variants[0]`** 的那个 —— `variants[0]` 是**上游 `/table` combos 里该模型的第一行，不是「最低档」**（代码不排序，`service.py` 只按 model/effort 过滤）。
+
+⚠️ **不要把 `variants[0]` 当成最低档**：实测 19 个模型里有 **7 个** `combos[0]` 不是最低档 —— `grok-4.6`（首行 `high`，档位 `high/medium/low/xhigh`）、`hy4-preview`（首行 `max`，档位 `max/high/low`）、`deepseek-v4-flash`、`deepseek-v4.1-flash`、`dsh-deepseek-v4-flash`、`dsh-deepseek-v4.1-flash`、`dsh-deepseek-v4-flash-vision-exp`（首行均为 `max`，档位 `max/high`）。实测 `model_profile("grok")` 得到 `insight=high` / `efficiency=high` / `metrics=low` —— **三个字段甚至互不同档**。
+
+`gpt-6-astra` 恰好首行就是 `low`，所以下面这个例子会掩盖上述陷阱：
 
 | 字段 | 值 |
 | --- | --- |
@@ -527,7 +537,7 @@ service = RadarService(RadarClient(RadarConfig.from_env()), RadarConfig.from_env
 | `efficiency.effort` | **`low`** |
 | `metrics.effort` | **`low`** |
 
-→ **`insight` / `efficiency` / `metrics` 说的是最低档（`low`），而 `best` 说的是最高档。** 前端必须用各自的 `.effort` 字段标注，不要假定它们和 `best` 同档。要精确数据请**显式传 `effort=`**。
+→ **`insight` / `efficiency` / `metrics` 取的是 `variants[0]`，而 `best` 取的是最高档。** 前端必须读各自的 `.effort` 字段来标注，**绝不要假定它们与 `best` 同档，也不要假定它们是「最低档」**。要精确数据请**显式传 `effort=`**。
 
 另外 `trend_hours` 参数**当前未生效**（实测传 2 与 72 都返回 168 点）—— 见 §19。
 
@@ -809,7 +819,7 @@ service = RadarService(RadarClient(RadarConfig.from_env()), RadarConfig.from_env
 | `average_cost_usd` | `float \| None` | USD | **是** | `average_cost_usd` | `1.921132` |
 | `average_duration_minutes` | `float \| None` | 分钟 | **是** | `average_duration_minutes` | `8.76` |
 | `combined_cost_index` | `float \| None` | 越小越省 | **是** | `combined_cost_index` | `128.016` |
-| `trend_48h` | `tuple[TrendPoint, ...]` | 48 小时趋势 | 否（可为空） | `trend_48h` | 夹具裁剪成 3 点；**实测 48 点** |
+| `trend_48h` | `tuple[TrendPoint, ...]` | 48 小时趋势 | 否（可为空） | `trend_48h` | 夹具裁剪成 3 点；⚠️ **实测长度不固定**：recommendation item 通常 48 点，但 deep-swe 的 `glm-5.3-flash@max` 只有 1 点 —— 一律按 `len()` 渲染 |
 
 **⚠️ 插件丢弃了上游 item 的两个样本量字段**：`cost_samples`（188）与 `duration_samples`（188）**未建模**。如果前端要显示「这个平均成本基于多少样本」，需要走路径 B 或改后端。
 
@@ -837,7 +847,7 @@ service = RadarService(RadarClient(RadarConfig.from_env()), RadarConfig.from_env
 | `rank_change_24h` | `int \| None` | 正 = 上升 | **是** | `rank_change_24h` | `0` |
 
 > **`usd` 直接用上游值，插件不自行加总**（避免与上游口径漂移）。校验：`17762.97 + 91.32 = 17854.29` ✓。
-> **插件丢弃的贡献者字段**（上游有 34 字段，插件只建模 14）：`avatar_seed`、`points_by_harness`、`month_points_by_harness`、`month_graded`、`month_submissions`、`month_tokens`、`month_folded_usd`、`month_usd`、`month_deepseek_api_*`、`contribution_streak`（连击体系）、`month_rank_change_24h`、以及 `riding_*`（骑行中）系列。**要显示连击/分工具积分必须走路径 B 或改后端。**
+> **插件丢弃的贡献者字段**（实测上游每行 **29 键**，984 行键并集 **46 键**；插件只建模 14）：`avatar_seed`、`points_by_harness`、`month_points_by_harness`、`month_graded`、`month_submissions`、`month_tokens`、`month_folded_usd`、`month_usd`、`month_deepseek_api_*`、`contribution_streak`（连击体系）、`month_rank_change_24h`、`deepseek_api_runs`、`deepseek_api_unpriced_runs`、`nickname`、以及 `riding_*`（骑行中）系列。**要显示连击/分工具积分必须走路径 B 或改后端。**
 >
 > `display_name` 与 `github_login` **语义不同**：`display_name` 是 `nickname` 优先，`github_login` 是 GitHub 登录名（可能 `null`）。前端用 `display_name` 做主显示。
 
@@ -918,7 +928,7 @@ service = RadarService(RadarClient(RadarConfig.from_env()), RadarConfig.from_env
 | `model` | `str` | 解析后的上游 id | 否 | `gpt-6-astra` |
 | `variants` | `tuple[ModelRow, ...]` | **请求档位过滤后的**档位行 | 否（至少 1 个，否则抛错） | 6 个（`low`…`ultra`） |
 | `best` | `ModelRow \| None` | 最高档那行 | **是** | `ultra` |
-| `efficiency` | `EfficiencyPoint \| None` | **`variants[0]`（最低档）**的效率点 | **是** | `low`，`average_price_usd=1.978303` |
+| `efficiency` | `EfficiencyPoint \| None` | **`variants[0]`** 的效率点（**不是「最低档」**，见 §11.2） | **是** | `low`，`average_price_usd=1.978303` |
 | `metrics` | `MetricPoint \| None` | **`variants[0]`** 的运行特征 | **是** | `low` |
 | `insight` | `InsightPoint \| None` | **`variants[0]`** 的综合 IQ | **是** | `low`，`iq=108.62` |
 | `trend` | `tuple[TrendPoint, ...]` | `variants[0]` 的单档位趋势（**跳过 `latest:`**） | 否（可为空） | 168 点 |
@@ -926,7 +936,7 @@ service = RadarService(RadarClient(RadarConfig.from_env()), RadarConfig.from_env
 | `meta` | `RadarMeta \| None` | | **是** | `note="含全部档位"` |
 | `effort`（property） | `str \| None` | `best.effort`，无 `best` 时 `variants[0].effort` | **是** | `ultra` |
 
-**⚠️ 见 §11.2 的坑**：`best` 是最高档，而 `efficiency` / `metrics` / `insight` / `trend` 都是**最低档**。
+**⚠️ 见 §11.2 的坑**：`best` 是最高档，而 `efficiency` / `metrics` / `insight` / `trend` 取的都是 **`variants[0]`** —— 它**不是「最低档」**（19 个模型里 7 个的首行并非最低档）。请一律读各自的 `.effort`。
 
 **容错**：`efficiency` / `metrics` / `trend` / `recent` 任一上游失败都**不致命**（`service` 用 `try/except` 降级为 `None` / 空元组），主查询仍成功。前端必须处理这些字段为 `None` 的情况。
 
@@ -964,13 +974,13 @@ service = RadarService(RadarClient(RadarConfig.from_env()), RadarConfig.from_env
 
 | 类型 | 字段 | 备注 |
 | --- | --- | --- |
-| `LeaderboardPayload` | `meta` / `models` / `tasks`(题 id 字符串元组) / `contributors` / `pulse` / `flag_race` / `pending_grades` / `error_grades` / `online_volunteers` | 实测 `pending_grades=0`、`error_grades=458`、`online_volunteers=2`。**未建模**：`history`（赛季）、`month`、`latest_burn`、`k`、`site_name`、`site_url` |
+| `LeaderboardPayload` | `meta` / `models` / `tasks`(题 id 字符串元组) / `contributors` / `pulse` / `flag_race` / `pending_grades` / `error_grades` / `online_volunteers` | 实测 `pending_grades=0`、`error_grades=458`、`online_volunteers=2`。**未建模 8 键**（上游 19 个顶层键中 `LeaderboardPayload` 与 `RadarMeta` 都没覆盖的）：`benchmarks`、`history`（赛季）、`k`、`latest_burn`、`month`、`pedal_speed`、`site_name`、`site_url` |
 | `TablePayload` | `meta` / `tasks` / `cells`(dict) / `combos` / `baseline_generated_at` / `discrimination_generated_at` | 实测 `baseline_generated_at="2026-09-13T09:16:19.380020+00:00"`、`discrimination_generated_at="2026-09-12T20:10:55+00:00"`。**未建模**（上游 22 个顶层键中，`TablePayload` 与 `RadarMeta` 都没覆盖的 12 个）：`token_pricing`（价表）、`client_contract`、`benchmark_policy_version`、`idle_mult_credit_before` / `idle_mult_credit_hours`、`reopen_after_hours`、`tier_windows_usd`、`online_volunteers`、`k`、`benchmarks`、`discrimination_method`、`schema` |
 | `InsightsPayload` | `meta` / `comprehensive_points` / `recommendations` / `degradation_alerts` / `degradation_rule` / `generated_at` | **未建模**：`software_source_updated_at`、`visual_source_updated_at`、`schema` |
 | `EfficiencyPayload` | `meta` / `points` | **未建模**：`runs_24h_total` / `runs_48h_total` / `runs_total`（顶层总计）、`schema` |
 | `MetricsPayload` | `meta` / `points` | 同上 |
 | `EventsPayload` | `meta` / `events` | — |
-| `QuotaPayload` | `meta` / `quota_window` / `source` / `measured_at` / `updated_at` / `tier_windows_usd` | 夹具：`quota_window="7d"`、`source="super-account-app-server-measurement"`、`measured_at="2026-08-09T11:49:26.993173+00:00"`、`tier_windows_usd={"plus":82.486,"pro-5x":412.43,"pro-20x":1649.72}`。⚠️ **时间戳比其它端点旧一个多月**，是低频标定端点，不是实时额度 |
+| `QuotaPayload` | `meta` / `quota_window` / `source` / `measured_at` / `updated_at` / `tier_windows_usd` | **未建模 1 键**：`evidence`。夹具：`quota_window="7d"`、`source="super-account-app-server-measurement"`、`measured_at="2026-08-09T11:49:26.993173+00:00"`、`tier_windows_usd={"plus":82.486,"pro-5x":412.43,"pro-20x":1649.72}`。⚠️ **时间戳比其它端点旧一个多月**，是低频标定端点，不是实时额度 |
 | `SuggestPayload` | `meta` / `cells`(`SuggestCell`) / `holding` / `replaceable_unstarted` / `protected_started` | 夹具：`holding=0`、`replaceable_unstarted=0`、`protected_started=0`。⚠️ 这是**待认领格子**，不是成绩 |
 | `SuggestCell` | `task_id` / `model` / `effort` / `agent` / `agent_version` / `est_minutes` / `est_quota_pct` / `tier_windows_usd` | 夹具：`{task_id:"yaegi-go-embed-directives", model:"gpt-5.6-sol", effort:"medium", agent:"codex", agent_version:"0.154.0", est_minutes:18, est_quota_pct:3.7}` |
 | `ModelConfig` | `model` / `effort` | `model_catalog()` 的返回元素 |
@@ -1028,7 +1038,7 @@ iq, model, smooth_degradation_24h_iq, trend_48h
 | `smooth_delta_24h` | `float \| None` | 平滑后 24h 变化 | **是** | `-0.1` |
 | `peak_24h_iq` | `float \| None` | 上游 `from_24h_high_iq` | **是** | `30.3` |
 | `peak_48h_iq` | `float \| None` | 上游 `from_48h_high_iq` | **是** | `30.3` |
-| `trend_48h` | `tuple[TrendPoint, ...]` | 48 小时趋势（**实测 48 点**） | 否（可为空） | 48 点 |
+| `trend_48h` | `tuple[TrendPoint, ...]` | 48 小时趋势（⚠️ **长度不固定**，实测 `k3@max` 只有 4 点） | 否（可为空） | 4 点 |
 | `raw_keys` | `tuple[str, ...]` | 上游原始键名（17 个） | 否 | 见 §13.1 |
 | `key`（property） | `str` | `"model@effort"` | 否 | `k3@max` |
 
@@ -1050,7 +1060,7 @@ iq, model, smooth_degradation_24h_iq, trend_48h
    > 不含 DeepSeek；每个模型档位只与自身历史比较：每格最近三次结果必须达到以下任一固定阈值：当前 IQ 低于 24 小时均值至少 7 IQ，或低于 48 小时均值至少 9 IQ；同时最近 12 小时仍在下降。按相对门槛的均值差严重度排序，最多返回 4 个，不足 4 个不补位。
 
 5. **`degradation_rule` 也要显示**（它解释了为什么这些模型上榜、为什么 DeepSeek 不在）。
-6. **`trend_48h` 的最后一个点就是「当前」**：实测 `k3@max` 的趋势末点 `{timestamp: "2026-09-14T05:36:36+00:00", iq: 74.0, samples: 47}` 与 `current_iq` 一致，`samples` 从 199 掉到 47 —— 可以直接画「断崖」。
+6. **`trend_48h` 的最后一个点就是「当前」**：实测 `k3@max` 的趋势末点 `{timestamp: "2026-09-14T05:36:36+00:00", iq: 74.0, samples: 47}` 与 `current_iq` 一致，`samples` 从 **196** 掉到 **47** —— 可以直接画「断崖」。⚠️ 实测这条 `trend_48h` 只有 **4 个点**（不是 48 个），**不要按「固定 48 点」写代码**，一律按 `len(trend_48h)` 渲染。
 7. 夹具 `insights_alert_item.json` 是**纯合成**样本（上游采集时 items 始终为空），只用于证明解析器容忍字段不全：`{model: "gpt-6-astra", effort: "max", iq: 71.4}` → `current_iq=71.4`，其余字段全 `None`，`raw_keys=("effort","iq","model")`。**不要把它当上游真实行为的证据。**
 
 ---
@@ -1098,7 +1108,7 @@ RadarError
 | `task_detail("rp", benchmark="pompeii-adjacency")` | `invalid_argument` / `detail="ambiguous task"` / `「rp」匹配多道题：pompeii-adjacency-rp-002、…-006、…-015` |
 | `model_profile("nope")` | `unknown_model` / `detail="unknown model: nope"` / `没有该模型档位的实测数据。` |
 | `compare("astra","sol", effort="low")` | `unknown_model` / `detail="no variant"` / `gpt-5.6-sol 在当前频道没有该档位的实测数据。` |
-| `resolve_model("gpt-5.6", known)` | `unknown_model` / `detail="ambiguous"` / `「gpt-5.6」对应多个候选：gpt-5.6-sol、gpt-5.6-terra` |
+| `resolve_model("gpt-5.6", known)` | `unknown_model` / `detail="ambiguous"` / `「gpt-5.6」对应多个候选：gpt-5.6-luna、gpt-5.6-sol、gpt-5.6-terra`（对真实 19 模型集合是 **3 个**候选；夹具只有 3 个模型时会**直接解析成 `gpt-5.6-sol` 而不报错**） |
 | `resolve_model("", known)` | `invalid_argument` / `detail="empty model"` / `参数不合法。` |
 
 > ⚠️ **`detail` 字段**是给开发者/日志用的（英文小写短串），**不是给用户看的**。前端展示请用 `str(exc)`（即 `message`）。
@@ -1322,12 +1332,15 @@ asyncio.run(main())
 ```json
 {
   "benchmark_id": "deep-swe", "scoring_mode": "binary-majority",
-  "score_label": "Pass rate", "mode": null, "rolling_window": null,
-  "pass_threshold": 1.0, "source_updated_at": null, "stale": false,
+  "score_label": "Pass rate", "mode": null, "rolling_window": 3,
+  "pass_threshold": 1.0, "source_updated_at": "2026-09-13T09:10:16+00:00",
+  "stale": false,
   "fetched_at": "2026-09-14T05:56:18+00:00", "recommendation_mode": null,
   "note": "已取各模型最高档", "samples": null
 }
 ```
+
+> ⚠️ **不要假定 `rolling_window` / `source_updated_at` 是 `None`**：`/leaderboard` 与 `/table` 的**响应体里没有**这两个顶层键，但 `provider._meta_for` 有显式回退 —— `rolling_window` 取内嵌 `benchmarks[].rolling_window`（=3），`source_updated_at` 依次回退 `source_updated_at` → `baseline_generated_at` → `discrimination_generated_at` → `latest_burn.submitted_at`。实测主榜得到 `rolling_window=3`、`source_updated_at="2026-09-13T09:10:16+00:00"`（`/table` 为 `3` 与 `2026-09-13T09:01:19.582518+00:00`）。**前端应无条件显示 `meta.source_updated_at`**（这是 §9.2 与 §15 的硬要求），只在它真的为 `None` 时才显示 `—`。
 
 `model_profile("gpt-6-astra", effort="low")` 的形状（同一批实测）：
 
@@ -1359,7 +1372,7 @@ asyncio.run(main())
 }
 ```
 
-**注意 `trend` 的末点 `97.8`**：这里 `effort="low"` 被显式指定，所以 `_series_points()` 取到的是 `gpt-6-astra@low` 单档位序列（末点 `iq=97.8`、`samples=135`），**不是**裸模型名序列（同批裸名末点是 `iq=105.3`、`samples=806`）。若**不**指定 `effort`，`variants[0]` 是 `low`，行为相同，但 `variants` 会含全部 6 档、`meta.note` 变成「含全部档位」。
+**注意 `trend` 的末点 `98.5`**：这里 `effort="low"` 被显式指定，所以 `_series_points()` 取到的是 `gpt-6-astra@low` 单档位序列（2026-09-13 录制末点 `iq=98.5`、`samples=134`），**不是**裸模型名序列（同批裸名末点是 `iq=105.4`、`samples=804`）。若**不**指定 `effort`，`variants[0]` 恰好是 `low`（astra 首行即最低档，但**别的模型未必**，见 §11.2），行为相同，但 `variants` 会含全部 6 档、`meta.note` 变成「含全部档位」。
 
 **同一批数据里 `insight.iq`(108.62) / `efficiency.iq`(97.78) / `pass_rate×150`(101.4) 三个数都不同** —— 前端必须分别标注来源，不要试图统一。
 
@@ -1405,9 +1418,9 @@ asyncio.run(main())
 | 9 | `plugin_api.md` §3 的 `CellState` 没有 `cost_is_estimate` | 有 **`cost_is_estimate`** property | 前端用它判断「是否要加 `~`」 |
 | 10 | `plugin_api.md` §3 的 `FleetPulse` 字段是 `{window_minutes, submitted_runs, tokens_per_hour, cache_hit_ratio, api_equivalent_usd_per_hour}` | 多了 **`usd_per_hour: float \| None`** | 合计口径的每小时成本 |
 | 11 | `plugin_api.md` §3 的 `RunRecord.points_base` / `points_multiplier` / `duration_sec` 是 `float`（无 `None`） | 全部是 **`float \| None`** | 需要 `None` 分支 |
-| 12 | `data_dictionary.md` §5 的 `ran_by` 有 `avatar_seed`；§2 的 `Cell` 有 `ns` / `base` / `provider` / `agent` / `manual_only` / `billing_mode` 等 | **插件未建模**这些键（`CellState` 22 字段里没有） | 要显示必须走路径 B 或改后端 |
+| 12 | `data_dictionary.md` §5 的 `ran_by` 有 `avatar_seed`；§2 的 `Cell` 有 `ns` / `base` / `provider` / `agent` / `manual_only` / `billing_mode` 等 | **插件未建模**这些键（`CellState` 22 字段里没有）。⚠️ **出处订正**：`avatar_seed` 确实在 `data_dictionary.md`（L150）与 `interface.md`（L234/346）；但 `ns` / `base` / `manual_only` / `billing_mode` 在该文件里 **0 命中**，它们是**上游实测**的 cell 键（全量 `/table` 7504 格里：`ns` 5936 格、`provider` 4704、`manual_only` 4704、`billing_mode` 4704、`agent` 4256、`base` 1904） | 要显示必须走路径 B 或改后端 |
 | 13 | `plugin_api.md` §3 的 `ContributorRow` 14 字段（与实现一致），但数据字典 §7 说上游有 **34 字段** | 实现只建模 14 个（实测夹具里上游是 **29 键**），**丢弃** `avatar_seed` / `points_by_harness` / `contribution_streak` / `nickname` / `month_*` 系列里的 `month_graded` / `month_submissions` / `month_tokens` / `month_usd` / `month_folded_usd` / `month_points_by_harness` / `month_rank_change_24h` / `month_deepseek_api_*` / `deepseek_api_runs` / `deepseek_api_unpriced_runs` 等 **16 键**；**但 `month_points` 是建模的**（14 字段里有它）。另：模型里的 `display_name` 是**派生字段**，上游没有同名键（由 `nickname` 映射而来） | 连击体系、分工具积分、按月运行数**前端拿不到**；`display_name` 不要当作上游原名去路径 B 里找 |
-| 14 | `plugin_api.md` §3 的 `DegradationAlert` 字段名是 `current_iq` / `avg_24h` / `avg_48h` / `delta_24h` / `delta_48h` / `severity`，且暗示这就是上游字段名（设计文档说「按存在性解析，不能假定字段名」） | 上游**实际字段名不同**（`iq` / `average_iq_24h` / … / `degradation_severity_score`），实现**做了映射**并保留 `raw_keys`；还多建了 6 个字段（`average_cost_usd` / `average_duration_minutes` / `smooth_delta_24h` / `peak_24h_iq` / `peak_48h_iq` / `trend_48h` / `raw_keys`） | §13 已按实测更新 |
+| 14 | `plugin_api.md` §3 的 `DegradationAlert` 字段名是 `current_iq` / `avg_24h` / `avg_48h` / `delta_24h` / `delta_48h` / `severity`，且暗示这就是上游字段名（设计文档说「按存在性解析，不能假定字段名」） | 上游**实际字段名不同**（`iq` / `average_iq_24h` / … / `degradation_severity_score`），实现**做了映射**并保留 `raw_keys`；还多建了 **7 个**字段（`average_cost_usd` / `average_duration_minutes` / `smooth_delta_24h` / `peak_24h_iq` / `peak_48h_iq` / `trend_48h` / `raw_keys`；`DegradationAlert` 共 15 字段） | §13 已按实测更新 |
 | 15 | `open_items.md` §B4 说「实测 `items: []`，**从未见过一个真实的预警条目**」 | **2026-09-14 实测 pompeii 返回 4 条**，每条 17 键 | 该未决项已部分解决 |
 | 16 | `plugin_api.md` §5.2 说 `TaskDetail.solved_by` 是「**`rate>0`** 的」 | 实现是 **`cell.p > 0`** | 连续制频道下两者不同：`rate` 是 `score_sum/n` 浮点，`p` 是整数计数。以 `p > 0` 为准 |
 | 17 | `plugin_api.md` §5 的 `trend` docstring 与 `data_dictionary.md` §12 都强调三种键形态不可混 | 实现**显式跳过** `latest:` 前缀，并在 `meta.note` 标注用的是哪种 | 一致（实现比文档更严格） |
@@ -1418,7 +1431,7 @@ asyncio.run(main())
 | 22 | `plugin_api.md` §6 说 `format_meta_footer` 形如「`—— DeepSWE · Pass rate 口径 · 最近 3 次有效运行 · 数据 2026-09-13 17:12 · 样本 135`」 | 一致，但实现把 `mode` / `recommendation_mode` / `rolling_window` / `note` 放在**可丢弃的补充段**（装不下就整段丢） | 前端若复用文案需知道可能被截断 |
 | 23 | 设计文档多处说主榜口径是 `equal_latest_3` | `/leaderboard` 响应**不含 `mode`** → `RadarMeta.mode` 为 `None`；`equal_latest_3` 出现在 `/intelligence-efficiency` | 前端不能从主榜 `meta.mode` 拿到口径名，要用 `rolling_window` / `score_label` |
 | 24 | `.env.example` 计划写入 `RADAR_*` 组 | **已写入**（2026-09-14）：9 个键全在 `.env.example` 末尾，且由 `tests/test_radar.py::ConfigContractTests` 强制「模板 ↔ `config.py` 的 `_env_*` 读取点」双向零差集 | 部署时全部可留空，走默认值 |
-| 25 | `plugin_api.md` §7 的 `handlers.py` 命令面列 **15 个子命令**（含 题 / 好题 / 贡献者 / 流水 / 实时） | **命令面按用户要求收窄为「只看智商相关」**（2026-09-14）：只保留 10 个（榜 / 模型 / 对比 / 推荐 / 预警 / 性价比 / 趋势 + 频道 / 档位 / 帮助）。被摘的 5 个**只摘命令面**，`RadarService` / `RadarClient` / `formatters` 里的对应能力**原样保留**（`task_detail` / `task_ranking` / `top_contributors` / `recent_events` / `fleet_pulse` / `flag_race` / `who_solved` 都还在，由 `tests/test_radar.py::test_dropped_commands_still_work_at_the_service_layer` 守住） | **前端不受影响**：本文档描述的是 service 层取数面，被摘命令的数据仍可经路径 A 取到；`/radar 题` 等现在回「未知子命令」 |
+| 25 | `plugin_api.md` §7 的 `handlers.py` 命令面列 **15 行**（含裸 `/radar` 一行，即 **14 个子命令**，其中有 题 / 好题 / 贡献者 / 流水 / 实时） | **命令面按用户要求收窄为「只看智商相关」**（2026-09-14）：只保留 10 个（榜 / 模型 / 对比 / 推荐 / 预警 / 性价比 / 趋势 + 频道 / 档位 / 帮助）。被摘的 5 个**只摘命令面**，`RadarService` / `RadarClient` / `formatters` 里的对应能力**原样保留**（`task_detail` / `task_ranking` / `top_contributors` / `recent_events` / `fleet_pulse` / `flag_race` / `who_solved` 都还在，由 `tests/test_radar.py::test_dropped_commands_still_work_at_the_service_layer` 守住） | **前端不受影响**：本文档描述的是 service 层取数面，被摘命令的数据仍可经路径 A 取到；`/radar 题` 等现在回「未知子命令」 |
 
 ---
 
