@@ -358,7 +358,7 @@ def quote_event(elements, *, group='100', author='quoted-user', inline=False):
 
 async def check_quoted_command_dispatch():
     request = AsyncMock()
-    with patch.object(hyw.HywConfig, 'from_env', return_value=SimpleNamespace(api_key='test', timeout=1)), \
+    with patch.object(hyw.HywConfig, 'from_env', return_value=hyw.HywConfig(api_key='test', timeout=1)), \
          patch.dict(hyw.handle_hyw.__globals__, run_request=request):
         for alias in ('q', 'hyw', '何意味'):
             for inline in (False, True, 'without-author'):

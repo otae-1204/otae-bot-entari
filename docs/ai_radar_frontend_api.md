@@ -1,5 +1,7 @@
 # AI 智商雷达 · 前端数据接口文档
 
+> **前端实现更新（2026-09-14）**：QQ 回复卡片已接入，默认入口使用[模型档位矩阵](ai_radar_matrix_ui.md)，另有[细分查询卡片](ai_radar_ui.md)。本文下方“不含前端”等描述记录的是数据接口交付时的状态；字段口径仍适用。本次没有新增 Web 服务。
+
 > **读者**：负责为「AI 智商雷达」写**前端**的 AI（页面 / 卡片 / 图表 / 榜单渲染）。
 > **本文档的来源**：`plugins/radar/` 的**实际实现代码**（以代码为最终事实）+ `tests/fixtures/radar/*.json` 的**真实上游响应裁剪样本**。
 > 设计文档（`ai_radar_interface.md` / `ai_radar_data_dictionary.md` / `ai_radar_plugin_api.md` / `ai_radar_plugin_framework.md` / `ai_radar_open_items.md`）是权威的口径说明，但**与代码冲突时以代码为准**，差异集中在本文 §19。

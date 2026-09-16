@@ -4,8 +4,8 @@
 
 1. 解析参数（命令词 → service 调用）；
 2. 调 service；
-3. 调 formatters；
-4. ``session.send``（与 ``plugins/hyw`` 一致的分段发送）。
+3. 调 presentation / formatters；
+4. 发送图片卡片，渲染或图片发送失败时回退到分段文本。
 
 **不做**：不缓存结果（缓存在 provider）、不注册任何定时推送、不直接碰 provider、
 不在 import 期读 ``.env`` / 发网络请求（``tests/test_architecture.py`` 会在无 ``.env``
@@ -32,8 +32,9 @@ from arclet.entari import Event, Session
 from loguru import logger
 from nepattern import AnyString
 
-from otae_bot.adapters.entari import ArgVal, get_rest, on_alconna, send
+from otae_bot.adapters.entari import ArgVal, Image, get_rest, on_alconna, send
 
+from . import presentation as views
 from .config import RadarConfig
 from .errors import InvalidArgument, RadarError
 from .formatters import (
@@ -50,7 +51,9 @@ from .formatters import (
     format_trend,
     format_value_picks,
 )
+from .matrix import matrix_pages, matrix_text
 from .provider import RadarClient
+from .rendering import render_page
 from .service import RadarService
 
 #: 单段回复上限（与 hyw 一致：上游客户端对超长消息不友好）。
@@ -70,6 +73,8 @@ _TABLE_COMMANDS = {"档位", "combos"}
 #: ``service.py`` / ``provider.py`` / ``formatters.py`` 里的对应能力原样保留，
 #: 前端 AI 仍可经 ``RadarService`` 取到这些数据（见 docs/ai_radar_frontend_api.md §19）。
 _SUBCOMMANDS: dict[str, str] = {
+    "总览": "overview",
+    "overview": "overview",
     "榜": "rank",
     "rank": "rank",
     "模型": "model",
@@ -118,7 +123,19 @@ def _chunks(text: str, size: int = CHUNK_SIZE) -> list[str]:
 
 
 async def _reply(session: Session, lines: list[str]) -> None:
-    """把 ``list[str]`` 分段发出。"""
+    """Send prepared cards; retain full text if rendering or delivery fails."""
+    if isinstance(lines, views.RadarReply) and lines.pages:
+        try:
+            # Prepare all pages before sending, so rendering failures never leave
+            # a partial image reply. This only renders local assets and data.
+            images = [await render_page(page) for page in lines.pages]
+            for png in images:
+                await send(session, [Image(raw=png)])
+            return
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:  # noqa: BLE001 - image boundary keeps text available
+            logger.warning("[radar] card delivery fell back to text: {}", type(error).__name__)
     for chunk in _chunks("\n".join(lines)):
         await send(session, chunk)
 
@@ -127,12 +144,19 @@ async def _run(session: Session, coro, *, timeout: float) -> None:
     """统一执行外壳：并发闸门 → 超时 → 错误转文案 → 分段发送。"""
     key = "radar"
     if sum(_active.values()) >= max(1, _config.concurrency):
+        # _dispatch() is constructed by the caller before admission.
+        coro.close()
         await send(session, "雷达当前较忙，请稍后再试。")
         return
     # 准入与占位之间不得 await，否则计数会被并发穿透。
     _active[key] = _active.get(key, 0) + 1
     try:
-        lines = await asyncio.wait_for(coro, timeout=timeout)
+        async def execute():
+            lines = await coro
+            if lines:
+                await _reply(session, lines)
+
+        await asyncio.wait_for(execute(), timeout=timeout)
     except asyncio.TimeoutError:
         logger.warning("[radar] command timed out after {:.0f}s", timeout)
         await send(session, "雷达查询超时，请稍后重试或改用更轻的命令。")
@@ -149,8 +173,6 @@ async def _run(session: Session, coro, *, timeout: float) -> None:
         return
     finally:
         _active[key] = max(0, _active.get(key, 1) - 1)
-    if lines:
-        await _reply(session, lines)
 
 
 def _tokens(rest: ArgVal | None) -> list[str]:
@@ -175,7 +197,7 @@ async def handle_radar(event: Event, rest: ArgVal, session: Session) -> None:
     """``/radar`` 总入口：按第一个词分派。"""
     tokens = _tokens(rest)
     if not tokens:
-        await _reply(session, format_help())
+        await _run(session, _dispatch("overview", []), timeout=max(30.0, _config.timeout * 1.5))
         return
     sub, *args = tokens
     key = _SUBCOMMANDS.get(sub) or _SUBCOMMANDS.get(sub.casefold())
@@ -190,34 +212,38 @@ async def _dispatch(key: str, args: list[str]) -> list[str]:
     """把子命令翻译成 service 调用 + formatter。"""
     args, benchmark = _split_benchmark(args)
 
+    if key == "overview":
+        snapshot = await _service.model_matrix(benchmark=benchmark)
+        return views.RadarReply(matrix_text(snapshot), matrix_pages(snapshot))
+
     if key == "rank":
-        rows, meta = await _service.top_models(benchmark=benchmark)
-        return format_model_list(rows, meta)
+        rows, meta = await _service.top_models(by="pass_rate", benchmark=benchmark)
+        return views.RadarReply(format_model_list(rows, meta), views.ranking_pages(rows, meta))
 
     if key == "model":
         name, effort = _model_and_effort(args, "用法：/radar 模型 <名> [档位]")
         profile = await _service.model_profile(name, effort=effort, benchmark=benchmark)
-        return format_model_profile(profile)
+        return views.RadarReply(format_model_profile(profile), views.profile_pages(profile))
 
     if key == "compare":
         if len(args) < 2:
             raise InvalidArgument("用法：/radar 对比 <A> <B> [档位]", detail="missing models")
         effort = args[2] if len(args) > 2 else None
         cmp = await _service.compare(args[0], args[1], effort=effort, benchmark=benchmark)
-        return format_comparison(cmp)
+        return views.RadarReply(format_comparison(cmp), views.comparison_pages(cmp))
 
     if key == "recommend":
         recs = await _service.recommendations(benchmark=benchmark)
         meta = await _service.recommendations_meta(benchmark=benchmark)
-        return format_recommendations(recs, meta)
+        return views.RadarReply(format_recommendations(recs, meta), views.recommendation_pages(recs, meta))
 
     if key == "alert":
         alerts, meta = await _service.degradation_alerts(benchmark=benchmark)
-        return format_alerts(alerts, meta)
+        return views.RadarReply(format_alerts(alerts, meta), views.alert_pages(alerts, meta))
 
     if key == "value":
         points, meta = await _service.value_picks(benchmark=benchmark)
-        return format_value_picks(points, meta)
+        return views.RadarReply(format_value_picks(points, meta), views.value_pages(points, meta))
 
     if key == "trend":
         name, effort = _model_and_effort(args, "用法：/radar 趋势 <名> [档位]")
@@ -226,18 +252,18 @@ async def _dispatch(key: str, args: list[str]) -> list[str]:
         lines = format_trend(points, label=label)
         # format_trend 不接 meta，脚注在这里补（口径红线：必须有数据时间与频道）。
         lines.append(format_meta_footer(meta))
-        return lines
+        return views.RadarReply(lines, views.trend_pages(points, label, meta))
 
     if key == "bench":
         items = await _service.benchmarks()
-        return format_benchmark_list(items)
+        return views.RadarReply(format_benchmark_list(items), views.benchmark_pages(items))
 
     if key == "combos":
         combos = await _service.model_catalog(benchmark=benchmark)
         table = await _service.table(benchmark=benchmark)
-        return format_model_catalog(combos, table.meta)
+        return views.RadarReply(format_model_catalog(combos, table.meta), views.catalog_pages(combos, table.meta))
 
-    return format_help()
+    return views.RadarReply(format_help(), views.help_pages())
 
 
 def _model_and_effort(args: list[str], usage: str) -> tuple[str, str | None]:

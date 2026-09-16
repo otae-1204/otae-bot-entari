@@ -13,9 +13,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Mapping
 
 #: 上游 ``scoring_mode``：二值多数 / 连续宏平均。两者分数不可比（数据字典 §2）。
 SCORING_BINARY = "binary-majority"
@@ -542,6 +542,22 @@ class ModelProfile:
     @property
     def effort(self) -> str | None:
         return self.best.effort if self.best else (self.variants[0].effort if self.variants else None)
+
+
+@dataclass(frozen=True, slots=True)
+class MatrixModel:
+    """One family and every measured effort, with its separate aggregate history."""
+
+    model: str
+    tiers: tuple[EfficiencyPoint, ...] = ()
+    history: tuple[TrendPoint, ...] = ()
+    history_stale: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class RadarMatrix:
+    meta: RadarMeta
+    models: tuple[MatrixModel, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

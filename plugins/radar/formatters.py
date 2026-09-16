@@ -641,6 +641,7 @@ def format_help() -> list[str]:
     """帮助文本。"""
     return [
         "AI 智商雷达 · 命令",
+        "· /radar 总览 — 模型与档位矩阵",
         "· /radar 榜 [频道] — 档位排行",
         "· /radar 模型 <名> [档位] — 模型档案",
         "· /radar 对比 <A> <B> [档位] — 对比",

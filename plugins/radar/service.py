@@ -22,11 +22,11 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import replace
-from typing import Iterable, Mapping, Sequence
 
 from .config import EFFORT_TIERS, RadarConfig
-from .errors import InvalidArgument, UnknownModel
+from .errors import InvalidArgument, RadarSourceError, UnknownModel
 from .models import (
     BenchmarkInfo,
     CellState,
@@ -38,11 +38,12 @@ from .models import (
     FleetPulse,
     HistorySeries,
     InsightPoint,
-    MetricPoint,
+    MatrixModel,
     ModelConfig,
     ModelProfile,
     ModelRow,
     RadarEvent,
+    RadarMatrix,
     RadarMeta,
     Recommendation,
     TablePayload,
@@ -265,6 +266,34 @@ class RadarService:
 
     async def table(self, *, benchmark: str | None = None) -> TablePayload:
         return await self.client.table(benchmark)
+
+    async def model_matrix(self, *, benchmark: str | None = None) -> RadarMatrix:
+        """All measured model/effort pairs for the compact overview.
+
+        Two cached endpoints, independent of the heavier leaderboard/table.
+        The family headline is only the upstream cross-effort history; never
+        average the effort scores or substitute a highest-effort score for it.
+        """
+        target = benchmark or self.config.default_benchmark
+        efficiency = await self.client.efficiency(target)
+        try:
+            history = await self.client.history(target)
+        except RadarSourceError:
+            history = ()
+        series = {item.model: item for item in history if not item.latest and item.effort is None}
+        groups: dict[str, dict[str, EfficiencyPoint]] = {}
+        for point in efficiency.points:
+            groups.setdefault(point.model, {}).setdefault(point.effort, point)
+        models = []
+        for model, points in groups.items():
+            item = series.get(model)
+            models.append(MatrixModel(
+                model=model,
+                tiers=tuple(sorted(points.values(), key=lambda point: (-_EFFORT_ORDER.get(point.effort, -1), point.effort))),
+                history=item.points if item else (),
+                history_stale=item.stale if item else False,
+            ))
+        return RadarMatrix(efficiency.meta, tuple(models))
 
     # ── 榜单 ──
 

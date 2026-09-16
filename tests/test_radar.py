@@ -1217,11 +1217,11 @@ class HandlerTests(unittest.TestCase):
         # 命令面按用户要求收窄为「只看智商相关」：7 个 IQ 命令 + 频道 + 档位 + 帮助。
         keys = {
             "rank", "model", "compare", "recommend", "alert", "value", "trend",
-            "bench", "combos", "help",
+            "bench", "combos", "help", "overview",
         }
         self.assertEqual(set(_SUBCOMMANDS.values()), keys)
         for alias in ("榜", "模型", "对比", "推荐", "预警", "性价比", "趋势",
-                      "频道", "档位", "帮助"):
+                      "频道", "档位", "帮助", "总览"):
             self.assertIn(alias, _SUBCOMMANDS)
 
     def test_the_dropped_commands_are_gone_from_the_command_surface(self):
@@ -1344,6 +1344,9 @@ async def http(url, *, namespace, params, headers, **kwargs):
 
 service = RadarService(RadarClient(replace(RadarConfig(), cache_ttl=RadarCacheTTL()), http=http), RadarConfig())
 handlers._service = service
+# This contract suite exercises command parsing, data and the text fallback.
+# Actual image delivery and layout are covered by test_radar_rendering.py.
+handlers.render_page = AsyncMock(side_effect=RuntimeError('renderer unavailable'))
 
 def session():
     s = object.__new__(Session)
@@ -1363,6 +1366,7 @@ async def drive(text):
 
 CASES = [
     ('/radar', 1, ['AI 智商雷达']),
+    ('/radar 总览', 1, ['AI 智商雷达', '跨档位 IQ']),
     ('/radar 帮助', 1, ['AI 智商雷达']),
     ('/智商雷达 帮助', 1, ['AI 智商雷达']),
     ('/radar 乱写', 1, ['未知子命令']),
@@ -1400,6 +1404,22 @@ async def main():
     # 频道参数必须真的传到上游。
     if ('/api/v1/leaderboard', {'benchmark': 'pompeii-adjacency'}) not in seen:
         failures.append(('pompeii switch', 'not seen', seen[-5:], None))
+    # Exercise the real Entari command/send path with typed image segments too.
+    # Rendering itself is checked separately against the shared Chromium renderer.
+    from io import BytesIO
+    from PIL import Image as PILImage
+    from satori import Image
+    png = BytesIO()
+    PILImage.new('RGB', (2, 2)).save(png, format='PNG')
+    handlers.render_page = AsyncMock(return_value=png.getvalue())
+    for command, pages in [('/radar', 1), ('/radar 榜', 1), ('/radar 推荐', 4)]:
+        s = await drive(command)
+        if s.send.await_count != pages:
+            failures.append((command, 'image pages', s.send.await_count, pages))
+        for call in s.send.await_args_list:
+            message = call.args[0]
+            if not isinstance(message, MessageChain) or not any(isinstance(part, Image) for part in message):
+                failures.append((command, 'missing image segment', str(message)[:100], None))
     if failures:
         print('DISPATCH-FAIL')
         for item in failures:
