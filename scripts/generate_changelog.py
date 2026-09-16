@@ -3,7 +3,8 @@
 数据文件：``plugins/changelog/changelog.json``，按版本号聚合的更新批次。
 本脚本把数据与仓库的 git 历史对齐，保证「不漏更新」：
 
-- 每个非 merge 提交必须恰好出现在一个版本的一条 highlight 里；
+- 每个非 merge 提交必须恰好出现在一个版本的一条 highlight 里
+  （只改动更新日志数据或本脚本的「记账」提交除外，见 ``bookkeeping_commits``）；
 - 数据里不允许出现仓库中不存在的提交；
 - 每条 highlight 的 ``date`` 必须等于它包含的提交的提交日期；
 - 该日期必须落在所在版本的 ``from``/``to`` 区间内；
@@ -31,6 +32,12 @@ ROOT = Path(__file__).resolve().parents[1]
 DATA_FILE = ROOT / "plugins/changelog/changelog.json"
 
 KINDS = ("feat", "fix", "perf", "refactor", "docs", "chore", "style", "test")
+
+#: 只改动这些文件的提交属于「收录更新」的记账动作，不要求被版本覆盖。
+BOOKKEEPING_FILES = (
+    "plugins/changelog/changelog.json",
+    "scripts/generate_changelog.py",
+)
 
 
 class GitError(RuntimeError):
@@ -64,6 +71,40 @@ def git_commits(root: Path = ROOT) -> dict[str, str]:
     return commits
 
 
+def bookkeeping_commits(root: Path = ROOT) -> set[str]:
+    """返回只改了更新日志数据文件或其校验脚本的提交（缩写哈希）。
+
+    这类提交就是「收录更新」这个动作本身，没法在自己的数据里描述自己，
+    所以不要求被任何版本覆盖。夹带了其他改动就不算。
+    """
+    allowed = set(BOOKKEEPING_FILES)
+    try:
+        result = subprocess.run(
+            ["git", "log", "--no-merges", "--name-only", "--pretty=format:%x00%h"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return set()
+
+    bookkeeping: set[str] = set()
+    short = ""
+    touched: list[str] = []
+    for line in result.stdout.splitlines():
+        if line.startswith("\x00"):
+            if short and touched and set(touched) <= allowed:
+                bookkeeping.add(short)
+            short, touched = line[1:].strip(), []
+        elif line.strip():
+            touched.append(line.strip())
+    if short and touched and set(touched) <= allowed:
+        bookkeeping.add(short)
+    return bookkeeping
+
+
 def load_data(path: Path = DATA_FILE) -> dict:
     if not path.exists():
         raise SystemExit(f"[ERROR] 找不到更新日志数据文件：{path}")
@@ -85,8 +126,9 @@ def release_commits(release: dict) -> list[str]:
     return hashes
 
 
-def problems(data: dict, commits: dict[str, str]) -> list[str]:
+def problems(data: dict, commits: dict[str, str], bookkeeping: set[str] | None = None) -> list[str]:
     """返回数据与 git 历史之间的全部不一致。"""
+    bookkeeping = bookkeeping or set()
     found: list[str] = []
     releases = data.get("releases")
     if not isinstance(releases, list) or not releases:
@@ -165,7 +207,12 @@ def problems(data: dict, commits: dict[str, str]) -> list[str]:
                 f"{cur_version}（至 {cur_end}）与 {prev_version}（起 {prev_start}）的日期区间重叠。"
             )
 
-    missing = [short for short in commits if not any(short.startswith(k) for k in seen)]
+    missing = [
+        short
+        for short in commits
+        if not any(short.startswith(k) for k in seen)
+        and not any(short.startswith(k) for k in bookkeeping)
+    ]
     if missing:
         found.append(
             f"有 {len(missing)} 个提交没有被任何版本覆盖："
@@ -241,7 +288,7 @@ def main(argv: list[str] | None = None) -> int:
         print(draft(commits, covered))
         return 0
 
-    found = problems(data, commits)
+    found = problems(data, commits, bookkeeping_commits())
     if found:
         print(f"[FAIL] {args.file} 与 git 历史不一致：", file=sys.stderr)
         for item in found:
