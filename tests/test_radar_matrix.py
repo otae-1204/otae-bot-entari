@@ -31,7 +31,7 @@ from plugins.radar.models import (
     RadarMeta,
     TrendPoint,
 )
-from plugins.radar.rendering import render_page
+from plugins.radar.rendering import DEVICE_SCALE_FACTOR, render_page
 from plugins.radar.service import RadarService
 
 META = RadarMeta("deep-swe", mode="equal_latest_3")
@@ -82,17 +82,78 @@ def test_history_outage_preserves_tiles_without_inventing_family_iq():
 def test_all_models_and_efforts_fit_one_long_image():
     models = tuple(
         MatrixModel(f"model-{i}", (replace(LOW, model=f"model-{i}"), HIGH), (POINT,))
-        for i in range(19)
+        for i in range(8)
     )
     pages = matrix_pages(RadarMatrix(META, models))
     docs = [html.fromstring(page.body) for page in pages]
     assert len(pages) == 1
     assert [
         len(doc.xpath('//section[starts-with(@class,"model-panel")]')) for doc in docs
-    ] == [19]
-    assert sum(len(doc.xpath('//section[@class="tier"]')) for doc in docs) == 38
+    ] == [8]
+    assert sum(len(doc.xpath('//section[@class="tier"]')) for doc in docs) == 16
     assert pages[0].number == pages[0].total == 1
     assert pages[0].layout == "matrix"
+
+
+def test_long_overview_splits_into_domestic_and_international_pages():
+    # Domestic and international vendors, enough models to exceed one page.
+    names = (
+        "gpt-6-astra",
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
+        "claude-sonnet-5",
+        "claude-opus-5",
+        "gemini-3.7-flash",
+        "gemini-3.8-flash",
+        "grok-4.6",
+        "deepseek-v4-flash",
+        "dsh-deepseek-v4-flash",
+        "glm-5.3",
+        "glm-5.3-flash",
+        "k3",
+        "hy4-preview",
+    )
+    models = tuple(
+        MatrixModel(name, (replace(HIGH, model=name),), (POINT,)) for name in names
+    )
+    pages = matrix_pages(RadarMatrix(META, models))
+    assert len(pages) == 2
+    assert [page.number for page in pages] == [1, 2]
+    assert all(page.total == 2 for page in pages)
+    assert [page.section for page in pages] == ["国外模型", "国内模型"]
+    docs = [html.fromstring(page.body) for page in pages]
+    assert [doc.xpath("//section/@data-region") for doc in docs] == [
+        ["international"],
+        ["domestic"],
+    ]
+    # Every model survives the split exactly once.
+    rendered = [
+        name for doc in docs for name in doc.xpath('//section[@data-model]/@data-model')
+    ]
+    assert sorted(rendered) == sorted(names)
+    assert "本页 01/02" in docs[0].text_content()
+    assert "本页 02/02" in docs[1].text_content()
+
+
+def test_region_larger_than_budget_splits_by_vendor_without_cutting_a_group():
+    names = tuple(f"gpt-{i}" for i in range(10)) + tuple(f"claude-{i}" for i in range(6))
+    models = tuple(MatrixModel(name, (LOW,), ()) for name in names)
+    pages = matrix_pages(RadarMatrix(META, models))
+    assert len(pages) > 1
+    docs = [html.fromstring(page.body) for page in pages]
+    assert all(
+        doc.xpath("//section/@data-region") == ["international"] for doc in docs
+    )
+    # A vendor group is never broken across pages.
+    for doc in docs:
+        for vendor in doc.xpath('//section[@data-vendor]'):
+            models_in_group = len(vendor.xpath(".//section[@data-model]"))
+            assert models_in_group in {10, 6}
+    rendered = [
+        name for doc in docs for name in doc.xpath('//section[@data-model]/@data-model')
+    ]
+    assert sorted(rendered) == sorted(names)
 
 
 def test_region_and_vendor_groups_reunite_shuffled_models_and_harness_variants():
@@ -206,7 +267,7 @@ def test_empty_matrix_is_explicit():
     assert page.number == page.total == 1
 
 
-def test_history_axes_show_iq_and_utc_time_with_proportional_coordinates():
+def test_history_axes_show_adaptive_iq_and_utc_time_with_proportional_coordinates():
     history = (
         TrendPoint("2026-09-14T08:00:00+08:00", 0, 40),
         TrendPoint("2026-09-14T01:00:00Z", 100, 50),
@@ -214,6 +275,7 @@ def test_history_axes_show_iq_and_utc_time_with_proportional_coordinates():
     )
     snapshot = RadarMatrix(META, (MatrixModel("astra", (LOW,), history),))
     document = html.fromstring(matrix_pages(snapshot)[0].body)
+    # The window spans the data (0–150) so it lands on the fixed full domain.
     assert document.xpath('//span[@class="spark-y-tick"]/text()') == [
         "0",
         "50",
@@ -232,8 +294,35 @@ def test_history_axes_show_iq_and_utc_time_with_proportional_coordinates():
     assert float(positions[1]["top"]) == pytest.approx(100 / 3, abs=0.0001)
     assert float(positions[2]["top"]) == 0
     assert "09-14 00:00 — 09-14 04:00 UTC" in document.text_content()
+    assert "纵轴 0–150" in document.text_content()
     assert "UTC" in document.xpath('//div[@class="history-label"]')[0].text_content()
     assert not document.xpath('//div[@class="model-warning"]')
+
+
+def test_narrow_history_zooms_the_axis_and_labels_the_real_range():
+    # A 2-IQ band would be invisible on a fixed 0–150 axis.
+    history = (
+        replace(POINT, timestamp="2026-09-14T00:00:00Z", iq=90.0),
+        replace(POINT, timestamp="2026-09-14T04:00:00Z", iq=92.0),
+    )
+    snapshot = RadarMatrix(META, (MatrixModel("astra", (LOW,), history),))
+    document = html.fromstring(matrix_pages(snapshot)[0].body)
+    ticks = [float(value) for value in document.xpath('//span[@class="spark-y-tick"]/text()')]
+    assert ticks == [90.0, 91.0, 92.0]
+    assert (max(ticks) - min(ticks)) < 150
+    # The real window is disclosed, never implied.
+    assert "纵轴 89.5–92.5" in document.text_content()
+    # A 2-IQ band now fills most of the plot instead of collapsing onto a
+    # single line: on a fixed 0–150 axis these two points differ by ~1.3%.
+    tops = [
+        float(dict(re.findall(r"(left|top):([\d.]+)%", dot.get("style")))["top"])
+        for dot in document.xpath('//span[@class="spark-point"]')
+    ]
+    assert tops[0] == pytest.approx(83.3333, abs=0.001)
+    assert tops[1] == pytest.approx(16.6667, abs=0.001)
+    assert abs(tops[0] - tops[1]) > 50
+    # Padding keeps the extremes off the frame rather than clipped to it.
+    assert 0 < min(tops) and max(tops) < 100
 
 
 def test_multiday_history_uses_utc_calendar_ticks_and_keeps_exact_range():
@@ -364,7 +453,7 @@ def test_iq_palette_runs_red_to_green_and_is_continuous():
     assert channels(90.1) != channels(90.4)
 
 
-def test_shared_renderer_keeps_all_models_in_one_long_png():
+def test_shared_renderer_keeps_each_page_in_one_png_at_2x():
     from otae_bot.infrastructure.rendering.browser import close_browser
 
     async def run():
@@ -372,14 +461,14 @@ def test_shared_renderer_keeps_all_models_in_one_long_png():
             models = tuple(
                 MatrixModel(name, (HIGH, LOW), (POINT,))
                 for name in ("gpt-6-astra", "gpt-5.6-sol", "gpt-5.5")
-                + tuple(f"model-{i}" for i in range(16))
+                + tuple(f"model-{i}" for i in range(8))
             )
             pages = matrix_pages(RadarMatrix(META, models))
             assert len(pages) == 1
             png = await render_page(pages[0])
             with Image.open(BytesIO(png)) as image:
-                assert image.width == MATRIX_WIDTH
-                assert 2000 < image.height <= MATRIX_MAX_HEIGHT
+                assert image.width == MATRIX_WIDTH * DEVICE_SCALE_FACTOR
+                assert 2000 < image.height <= MATRIX_MAX_HEIGHT * DEVICE_SCALE_FACTOR
         finally:
             await close_browser()
 

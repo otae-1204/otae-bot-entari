@@ -18,12 +18,25 @@ from .models import (
     RadarMatrix,
     TrendPoint,
 )
-from .presentation import RadarPage, number, percent, stamp, text
+from .presentation import (
+    RadarPage,
+    number,
+    percent,
+    stamp,
+    text,
+    trend_axis_ticks,
+    trend_scale,
+    trend_value,
+)
 
 MATRIX_WIDTH = 1960
 MATRIX_MAX_HEIGHT = 20000
 # A display reminder, not an upstream confidence or significance threshold.
 MATRIX_SAMPLE_REMINDER = 30
+#: Above this many models the single long image is split into one page per
+#: region, so each delivered PNG keeps a screen-friendly aspect ratio. This is
+#: a delivery budget, not an upstream or statistical limit.
+MATRIX_PAGE_MAX_MODELS = 12
 # Text-friendly adaptation of ColorBrewer's RdYlGn hue sequence.
 # Fixed IQ domain, shared by model headlines, effort scores and the legend.
 # Source: https://d3js.org/d3-scale-chromatic/diverging#interpolateRdYlGn
@@ -295,14 +308,16 @@ def _sparkline(points: tuple[tuple[float, TrendPoint] | None, ...]) -> str:
     if not valid:
         return '<div class="spark-empty"><svg class="empty-chart-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3 2"/></svg><div><b>暂无可绘制历史</b><span>收到有效历史记录后显示趋势</span></div></div>'
     start, end = min(point[0] for point in valid), max(point[0] for point in valid)
+    scale = trend_scale(point[1].iq for point in valid)
+    low, high = scale
+    span = high - low or 1.0
     y_labels, grid = [], []
-    for tick in (0, 50, 100, 150):
-        top = (150 - tick) / 150 * 100
+    for tick in trend_axis_ticks(scale):
+        top = (high - tick) / span * 100
         y_labels.append(
-            f'<span class="spark-y-tick" style="top:{top:.4f}%">{tick}</span>'
+            f'<span class="spark-y-tick" style="top:{top:.4f}%">{trend_value(tick)}</span>'
         )
-        if tick:
-            grid.append(f'<span class="spark-grid" style="top:{top:.4f}%"></span>')
+        grid.append(f'<span class="spark-grid" style="top:{top:.4f}%"></span>')
     x_labels = []
     for ts, label in _time_ticks(start, end):
         x = (ts - start) / (end - start) * 100 if end > start else 50
@@ -321,20 +336,20 @@ def _sparkline(points: tuple[tuple[float, TrendPoint] | None, ...]) -> str:
             continue
         ts, point = item
         x = (ts - start) / (end - start) * 1000 if end > start else 500
-        y = 150 - point.iq
+        y = (high - point.iq) / span * 150
         path.append(f"{'L' if connected else 'M'}{x:.2f},{y:.2f}")
         connected = True
         isolated = (index == 0 or points[index - 1] is None) and (
             index == len(points) - 1 or points[index + 1] is None
         )
         markers.append(
-            f'<span class="spark-point" data-isolated="{str(isolated).lower()}" style="left:{x / 10:.4f}%;top:{y / 150 * 100:.4f}%" title="{text(stamp(point.timestamp))} · IQ {number(point.iq)} · n={point.samples}"></span>'
+            f'<span class="spark-point" data-isolated="{str(isolated).lower()}" style="left:{x / 10:.4f}%;top:{(high - point.iq) / span * 100:.4f}%" title="{text(stamp(point.timestamp))} · IQ {number(point.iq)} · n={point.samples}"></span>'
         )
     if path:
         paths.append(" ".join(path))
     if points[-1] is not None:
         markers.append(
-            f'<span class="spark-last" style="left:{x / 10:.4f}%;top:{y / 150 * 100:.4f}%" title="最新历史点 · IQ {number(points[-1][1].iq)}"></span>'
+            f'<span class="spark-last" style="left:{x / 10:.4f}%;top:{(high - points[-1][1].iq) / span * 100:.4f}%" title="最新历史点 · IQ {number(points[-1][1].iq)}"></span>'
         )
     range_start = short_stamp(
         datetime.fromtimestamp(start, timezone.utc).isoformat()
@@ -343,8 +358,9 @@ def _sparkline(points: tuple[tuple[float, TrendPoint] | None, ...]) -> str:
         datetime.fromtimestamp(end, timezone.utc).isoformat()
     ).removesuffix(" UTC")
     range_label = range_start if start == end else f"{range_start} — {range_end}"
+    axis_label = f"跨档位历史 IQ；纵轴 {trend_value(low)}、{trend_value(high)}；横轴为实际 UTC 时间 {range_label}"
     return (
-        f'<div class="history-chart" role="img" aria-label="跨档位历史 IQ；纵轴 0、50、100、150；横轴为实际 UTC 时间 {range_label}">'
+        f'<div class="history-chart" role="img" aria-label="{text(axis_label)}">'
         + '<div class="chart-y-axis">'
         + "".join(y_labels)
         + "</div>"
@@ -357,7 +373,7 @@ def _sparkline(points: tuple[tuple[float, TrendPoint] | None, ...]) -> str:
         + '</div><div class="chart-x-axis">'
         + "".join(x_labels)
         + "</div></div>"
-        + f'<div class="chart-range">{range_label} UTC</div>'
+        + f'<div class="chart-range">纵轴 {trend_value(low)}–{trend_value(high)} · {range_label} UTC</div>'
     )
 
 
@@ -433,44 +449,135 @@ def _panel(model: MatrixModel, *, continuous: bool) -> str:
 </section>"""
 
 
+def _region_body(
+    region: str,
+    label: str,
+    english: str,
+    index: int,
+    vendors: tuple[_VendorGroup, ...],
+    *,
+    continuous: bool,
+) -> str:
+    model_count = sum(len(vendor.models) for vendor in vendors)
+    tier_count = sum(
+        len(model.tiers) for vendor in vendors for model in vendor.models
+    )
+    body = f'<section class="region-section" data-region="{region}"><header class="region-heading"><div><span class="region-index">{index:02}</span><h2>{label}<small>{english}</small></h2></div><p>{len(vendors)} 厂商 <span>/</span> {model_count} 模型 <span>/</span> {tier_count} 档位</p></header>'
+    body += '<div class="region-vendors">'
+    for vendor in vendors:
+        size = len(vendor.models)
+        body += f'<section class="vendor-group" data-vendor="{vendor.key}" style="--model-columns:{min(3, size)}"><header class="vendor-heading"><div><h3>{text(vendor.label)}</h3><span class="vendor-series">{text(vendor.series)}</span></div><span>{size:02} 模型 · {sum(len(model.tiers) for model in vendor.models):02} 档位</span></header><div class="model-grid">'
+        body += "".join(_panel(model, continuous=continuous) for model in vendor.models)
+        body += "</div></section>"
+    return body + "</div></section>"
+
+
+def _toolbar(meta: RadarMeta, models: int, tiers: int, scope: str) -> str:
+    return f'<div class="matrix-toolbar"><div><span class="benchmark-pill">{text(meta.benchmark_id)}</span><span class="matrix-scope">地区 / 厂商 / 模型 / 推理档位</span></div><div class="matrix-count"><b>{models:02}</b> 模型 <span>/</span> <b>{tiers:02}</b> 档位 <span>· {scope}</span></div></div>'
+
+
+def _split_vendors(
+    vendors: tuple[_VendorGroup, ...], budget: int
+) -> tuple[tuple[_VendorGroup, ...], ...]:
+    """Greedily pack vendors into pages of at most ``budget`` models.
+
+    A vendor group is never broken across pages, so a single oversized vendor
+    keeps its own page rather than being cut mid-group.
+    """
+    pages: list[tuple[_VendorGroup, ...]] = []
+    current: list[_VendorGroup] = []
+    size = 0
+    for vendor in vendors:
+        count = len(vendor.models)
+        if current and size + count > budget:
+            pages.append(tuple(current))
+            current, size = [], 0
+        current.append(vendor)
+        size += count
+    if current:
+        pages.append(tuple(current))
+    return tuple(pages)
+
+
 def matrix_pages(snapshot: RadarMatrix) -> tuple[RadarPage, ...]:
     count = len(snapshot.models)
     tiers = sum(len(model.tiers) for model in snapshot.models)
     continuous = snapshot.meta.scoring_mode == SCORING_CONTINUOUS
     groups = _group_models(snapshot.models)
-    body = f'<div class="matrix-toolbar"><div><span class="benchmark-pill">{text(snapshot.meta.benchmark_id)}</span><span class="matrix-scope">地区 / 厂商 / 模型 / 推理档位</span></div><div class="matrix-count"><b>{count:02}</b> 模型 <span>/</span> <b>{tiers:02}</b> 档位 <span>· 全量总览</span></div></div>'
-    body += _iq_legend()
-    for index, (region, label, english) in enumerate(_REGIONS, 1):
-        vendors = [group for group in groups if group.region == region]
-        if not vendors:
-            continue
-        model_count = sum(len(vendor.models) for vendor in vendors)
-        tier_count = sum(
+    why = "先按国内外与研发厂商定位模型，再用总分与趋势看整体变化；档位格给出 IQ、评测得分、样本、耗时和费用，方便比较推理投入。"
+    if not snapshot.models:
+        body = _toolbar(snapshot.meta, count, tiers, "全量总览")
+        body += _iq_legend()
+        body += '<div class="matrix-empty">该频道暂无模型档位数据</div>'
+        return (
+            RadarPage(
+                title="AI 智商雷达",
+                subtitle="模型与档位全量总览",
+                body=body,
+                why=why,
+                section="总览",
+                meta=snapshot.meta,
+                layout="matrix",
+            ),
+        )
+    regions = [
+        (index, region, label, english, tuple(g for g in groups if g.region == region))
+        for index, (region, label, english) in enumerate(_REGIONS, 1)
+    ]
+    regions = [item for item in regions if item[4]]
+    if count <= MATRIX_PAGE_MAX_MODELS:
+        # Fits one screen-friendly image: keep the single-page overview.
+        body = _toolbar(snapshot.meta, count, tiers, "全量总览") + _iq_legend()
+        for index, region, label, english, vendors in regions:
+            body += _region_body(
+                region, label, english, index, vendors, continuous=continuous
+            )
+        return (
+            RadarPage(
+                title="AI 智商雷达",
+                subtitle="模型与档位全量总览",
+                body=body,
+                why=why,
+                section="总览",
+                meta=snapshot.meta,
+                layout="matrix",
+            ),
+        )
+    # Too long for one image: split by region (国内 / 国外), and split a region
+    # further by vendor when it alone exceeds the budget.
+    planned: list[tuple[int, str, str, str, tuple[_VendorGroup, ...], int, int]] = []
+    for index, region, label, english, vendors in regions:
+        chunks = _split_vendors(vendors, MATRIX_PAGE_MAX_MODELS)
+        for part, chunk in enumerate(chunks, 1):
+            planned.append((index, region, label, english, chunk, part, len(chunks)))
+    pages = []
+    for position, (index, region, label, english, vendors, part, parts) in enumerate(
+        planned, 1
+    ):
+        page_models = sum(len(vendor.models) for vendor in vendors)
+        page_tiers = sum(
             len(model.tiers) for vendor in vendors for model in vendor.models
         )
-        body += f'<section class="region-section" data-region="{region}"><header class="region-heading"><div><span class="region-index">{index:02}</span><h2>{label}<small>{english}</small></h2></div><p>{len(vendors)} 厂商 <span>/</span> {model_count} 模型 <span>/</span> {tier_count} 档位</p></header>'
-        body += '<div class="region-vendors">'
-        for vendor in vendors:
-            size = len(vendor.models)
-            body += f'<section class="vendor-group" data-vendor="{vendor.key}" style="--model-columns:{min(3, size)}"><header class="vendor-heading"><div><h3>{text(vendor.label)}</h3><span class="vendor-series">{text(vendor.series)}</span></div><span>{size:02} 模型 · {sum(len(model.tiers) for model in vendor.models):02} 档位</span></header><div class="model-grid">'
-            body += "".join(
-                _panel(model, continuous=continuous) for model in vendor.models
+        name = label if parts == 1 else f"{label}（{part}/{parts}）"
+        scope = f"本页 {position:02}/{len(planned):02}"
+        body = _toolbar(snapshot.meta, page_models, page_tiers, scope) + _iq_legend()
+        body += _region_body(
+            region, name, english, index, vendors, continuous=continuous
+        )
+        pages.append(
+            RadarPage(
+                title="AI 智商雷达",
+                subtitle=f"{name} · 模型与档位总览",
+                body=body,
+                why="先按研发厂商定位模型，再用总分与趋势看整体变化；档位格给出 IQ、评测得分、样本、耗时和费用，方便比较推理投入。总览过长时按国内外分页，本页为其中一页。",
+                section=label,
+                meta=snapshot.meta,
+                number=position,
+                total=len(planned),
+                layout="matrix",
             )
-            body += "</div></section>"
-        body += "</div></section>"
-    if not snapshot.models:
-        body += '<div class="matrix-empty">该频道暂无模型档位数据</div>'
-    return (
-        RadarPage(
-            title="AI 智商雷达",
-            subtitle="模型与档位全量总览",
-            body=body,
-            why="先按国内外与研发厂商定位模型，再用总分与趋势看整体变化；档位格给出 IQ、评测得分、样本、耗时和费用，方便比较推理投入。",
-            section="总览",
-            meta=snapshot.meta,
-            layout="matrix",
-        ),
-    )
+        )
+    return tuple(pages)
 
 
 def matrix_text(snapshot: RadarMatrix) -> list[str]:

@@ -7,7 +7,7 @@ quantities. The existing text formatters remain the delivery fallback.
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from html import escape
@@ -186,8 +186,85 @@ def ranking_pages(rows: Sequence[ModelRow], meta: RadarMeta) -> tuple[RadarPage,
     return tuple(pages)
 
 
+#: Trend Y axis, mirroring the public radar site's ``trendScale`` so both
+#: front-ends zoom the same way. A minimum span keeps a flat line readable
+#: instead of collapsing onto one gridline.
+TREND_AXIS_MIN_IQ = 0.0
+TREND_AXIS_MAX_IQ = 150.0
+TREND_AXIS_MIN_SPAN = 3.0
+TREND_AXIS_PAD_RATIO = 0.2
+
+
+def trend_scale(values: Iterable[float | None]) -> tuple[float, float]:
+    """Adaptive Y range for one trend line, matching the public frontend.
+
+    The frontend's ``trendScale`` centres a padded window on the data and keeps
+    a minimum span, then clamps to the fixed 0–150 IQ domain. Callers must label
+    the resulting range so the zoom stays disclosed rather than implied.
+    """
+    finite = [
+        value
+        for value in values
+        if value is not None and math.isfinite(value) and value >= TREND_AXIS_MIN_IQ
+    ]
+    if not finite:
+        return (TREND_AXIS_MIN_IQ, TREND_AXIS_MAX_IQ)
+    low, high = min(finite), max(finite)
+    span = min(
+        TREND_AXIS_MAX_IQ,
+        max(TREND_AXIS_MIN_SPAN, (high - low) * (1 + 2 * TREND_AXIS_PAD_RATIO)),
+    )
+    center = (low + high) / 2
+    start, end = center - span / 2, center + span / 2
+    if start < TREND_AXIS_MIN_IQ:
+        end += TREND_AXIS_MIN_IQ - start
+        start = TREND_AXIS_MIN_IQ
+    if end > TREND_AXIS_MAX_IQ:
+        start -= end - TREND_AXIS_MAX_IQ
+        end = TREND_AXIS_MAX_IQ
+    return (
+        max(TREND_AXIS_MIN_IQ, start),
+        min(TREND_AXIS_MAX_IQ, end),
+    )
+
+
+def trend_axis_ticks(
+    scale: tuple[float, float], target: int = 4, limit: int = 8
+) -> tuple[float, ...]:
+    """Round gridline values inside an adaptive trend range.
+
+    The window itself comes from :func:`trend_scale`; ticks are snapped to
+    readable multiples so a zoomed axis stays legible. A step yielding more than
+    ``limit`` labels is rejected outright rather than truncated, so labels never
+    crowd into each other. Falls back to the window edges if no step fits.
+    """
+    start, end = scale
+    span = end - start
+    if span <= 0:
+        return (start,)
+    magnitude = 10 ** math.floor(math.log10(span / target))
+    best: tuple[tuple[int, float], tuple[float, ...]] | None = None
+    for factor in (1.0, 2.0, 2.5, 5.0, 10.0):
+        step = magnitude * factor
+        ticks, value = [], math.ceil(start / step) * step
+        while value <= end + step * 1e-9 and len(ticks) <= limit:
+            ticks.append(round(value, 6))
+            value += step
+        if len(ticks) < 3 or len(ticks) > limit:
+            continue
+        score = (abs(len(ticks) - target), step)
+        if best is None or score < best[0]:
+            best = (score, tuple(ticks))
+    return best[1] if best else (start, end)
+
+
+def trend_value(value: float) -> str:
+    """Axis value with one decimal, dropping a trailing ``.0``."""
+    return f"{value:.1f}".removesuffix(".0")
+
+
 def trend_chart(points: Sequence[TrendPoint]) -> str:
-    """Use actual UTC timestamps on X and a fixed 0–150 IQ scale on Y.
+    """Use actual UTC timestamps on X and an adaptive IQ scale on Y.
 
     Invalid points break the path, rather than interpolating missing evidence.
     Singletons are visible. SVG titles expose each point's timestamp and n.
@@ -208,13 +285,20 @@ def trend_chart(points: Sequence[TrendPoint]) -> str:
     if not samples:
         return empty("暂无趋势数据", "该模型与档位没有匹配的历史序列。")
     start, end = min(item[0] for item in samples), max(item[0] for item in samples)
+    scale = trend_scale(point.iq for _, point in samples)
+    low, high = scale
+    span = high - low or 1.0
+    axis_label = (
+        f"IQ 历史趋势，纵轴 {trend_value(low)} 至 {trend_value(high)}，横轴为 UTC 时间"
+    )
     svg = [
-        '<svg class="chart" viewBox="0 0 920 294" role="img" aria-label="IQ 历史趋势，纵轴 0 至 150，横轴为 UTC 时间">'
+        f'<svg class="chart" viewBox="0 0 920 294" role="img" aria-label="{text(axis_label)}">'
     ]
-    for iq in (0, 50, 100, 150):
-        y = 236 - iq / 150 * 212
+    for iq in trend_axis_ticks(scale):
+        y = 236 - (iq - low) / span * 212
         svg.append(
-            f'<line class="gridline" x1="52" y1="{y}" x2="884" y2="{y}"/><text x="36" y="{y + 5}" text-anchor="end">{iq}</text>'
+            f'<line class="gridline" x1="52" y1="{y:.2f}" x2="884" y2="{y:.2f}"/>'
+            f'<text x="36" y="{y + 5:.2f}" text-anchor="end">{trend_value(iq)}</text>'
         )
     path = []
     dots = []
@@ -225,7 +309,7 @@ def trend_chart(points: Sequence[TrendPoint]) -> str:
             continue
         ts, point = item
         x = 52 + (ts - start) / (end - start) * 832 if end > start else 468
-        y = 236 - point.iq / 150 * 212
+        y = 236 - (point.iq - low) / span * 212
         path.append(f"{'L' if connected else 'M'}{x:.2f},{y:.2f}")
         connected = True
         dots.append(
@@ -243,15 +327,22 @@ def trend_chart(points: Sequence[TrendPoint]) -> str:
 def trend_pages(
     points: Sequence[TrendPoint], label: str, meta: RadarMeta
 ) -> tuple[RadarPage, ...]:
-    body = f'<div class="section-heading"><h2>{text(label)}</h2><span>历史 IQ · 0–150</span></div>'
+    body = f'<div class="section-heading"><h2>{text(label)}</h2><span>历史 IQ · 自适应纵轴</span></div>'
     if points:
         last = points[-1]
+        low, high = trend_scale(point.iq for point in points)
         body += '<div class="metrics">' + metric(
             "最新历史 IQ", number(last.iq), "本序列末点"
         )
         body += metric("末点样本", number(last.samples, 0), "每个时刻样本量可能不同")
+        body += metric("数据点", number(len(points), 0), "按真实时间间隔绘制")
         body += (
-            metric("数据点", number(len(points), 0), "按真实时间间隔绘制") + "</div>"
+            metric(
+                "纵轴范围",
+                f"{trend_value(low)} – {trend_value(high)}",
+                "按本序列最小值/最大值自适应",
+            )
+            + "</div>"
         )
     body += trend_chart(points)
     if points:
@@ -267,7 +358,7 @@ def trend_pages(
             "IQ 趋势",
             meta.note or "历史序列",
             body,
-            "时间曲线用于观察同一模型口径的变化；固定纵轴避免放大轻微波动；起止时间和样本数用于识别旧数据与样本变化。",
+            "时间曲线用于观察同一模型口径的变化；纵轴按本序列范围自适应，与雷达站前端一致，轴上的实际范围已标出；起止时间和样本数用于识别旧数据与样本变化。",
             "趋势",
             meta,
         ),

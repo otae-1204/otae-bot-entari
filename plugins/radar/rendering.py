@@ -15,6 +15,12 @@ from .presentation import RadarPage, notice, stamp, text
 
 CARD_WIDTH = 1080
 CARD_MAX_HEIGHT = 5000
+#: Rasterise at 2x so the delivered PNG stays sharp after the chat client
+#: downscales it to a phone-width viewport. Matches the endfield cards.
+DEVICE_SCALE_FACTOR = 2.0
+#: Chromium caps one screenshot near 16384 device pixels per axis. At 2x the CSS
+#: budget must shrink by the same factor, or tall cards fail to render at all.
+DEVICE_PIXEL_LIMIT = 16384
 ASSETS = Path(__file__).parent / "assets"
 FONT = Path(__file__).resolve().parents[2] / "assets/font/steamInfo/MiSans-Regular.ttf"
 _MODEL_ICONS = {
@@ -145,17 +151,23 @@ async def render_page(page: RadarPage) -> bytes:
     ) as file:
         file.write(page_html(page))
         path = Path(file.name)
+    matrix = page.layout == "matrix"
+    # The CSS budget is in layout pixels; the rasteriser multiplies it by
+    # DEVICE_SCALE_FACTOR, so the device-pixel ceiling has to be divided back out.
+    budget = min(
+        MATRIX_MAX_HEIGHT if matrix else CARD_MAX_HEIGHT,
+        int(DEVICE_PIXEL_LIMIT / DEVICE_SCALE_FACTOR),
+    )
     try:
         return await screenshot_web_element(
             path.as_uri(),
             ".radar-card",
-            viewport=(MATRIX_WIDTH if page.layout == "matrix" else CARD_WIDTH, 900),
-            max_height=MATRIX_MAX_HEIGHT
-            if page.layout == "matrix"
-            else CARD_MAX_HEIGHT,
+            viewport=(MATRIX_WIDTH if matrix else CARD_WIDTH, 900),
+            max_height=budget,
+            device_scale_factor=DEVICE_SCALE_FACTOR,
             strict_max_height=True,
             wait_for_fonts=True,
-            wait_for_images=page.layout == "matrix",
+            wait_for_images=matrix,
             settle_ms=0,
         )
     finally:

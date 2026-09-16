@@ -32,7 +32,13 @@ from plugins.radar.presentation import (
     trend_chart,
     value_pages,
 )
-from plugins.radar.rendering import CARD_MAX_HEIGHT, CARD_WIDTH, page_html, render_page
+from plugins.radar.rendering import (
+    CARD_MAX_HEIGHT,
+    CARD_WIDTH,
+    DEVICE_SCALE_FACTOR,
+    page_html,
+    render_page,
+)
 
 META = RadarMeta(
     "deep-swe",
@@ -148,6 +154,7 @@ def test_chart_uses_elapsed_time_and_breaks_at_missing_points():
         )
     )
     dots = chart.xpath("//circle")
+    # X still follows real elapsed time, so the missing 02:00–04:00 gap shows.
     assert [float(dot.get("cx")) for dot in dots] == [52, 260, 884]
     assert chart.xpath("//path")[0].get("d").count("M") == 2
     assert "n=0" in dots[0].text_content()
@@ -155,6 +162,38 @@ def test_chart_uses_elapsed_time_and_breaks_at_missing_points():
         trend_chart((TrendPoint("2026-09-14T00:00:00Z", 0, 0),))
     )
     assert singleton.xpath("//circle")[0].get("cx") == "468.00"
+
+
+def test_chart_axis_follows_the_data_and_discloses_the_window():
+    chart = html.fromstring(
+        trend_chart(
+            (
+                TrendPoint("2026-09-14T00:00:00Z", 90.0, 10),
+                TrendPoint("2026-09-14T04:00:00Z", 92.0, 10),
+            )
+        )
+    )
+    # A 2-IQ band is stretched, so a small drift is actually visible.
+    labels = [node.text for node in chart.xpath("//text") if node.text]
+    assert ["90", "91", "92"] == [value for value in labels if value.isdigit()]
+    aria = chart.get("aria-label")
+    assert "纵轴 89.5 至 92.5" in aria
+    # A full-swing series keeps the fixed 0–150 domain.
+    wide = html.fromstring(
+        trend_chart(
+            (
+                TrendPoint("2026-09-14T00:00:00Z", 0.0, 10),
+                TrendPoint("2026-09-14T04:00:00Z", 150.0, 10),
+            )
+        )
+    )
+    assert "纵轴 0 至 150" in wide.get("aria-label")
+    assert [node.text for node in wide.xpath("//text") if node.text and node.text.isdigit()] == [
+        "0",
+        "50",
+        "100",
+        "150",
+    ]
 
 
 def test_untrusted_labels_cannot_inject_html_or_resources():
@@ -244,8 +283,9 @@ def test_real_shared_browser_renderer_produces_png():
             png = await render_page(ranking_pages((ROW,), META)[0])
             with PILImage.open(BytesIO(png)) as image:
                 assert image.format == "PNG"
-                assert image.width == CARD_WIDTH
-                assert 500 < image.height <= CARD_MAX_HEIGHT
+                # 2x rasterisation keeps glyph edges sharp after chat downscaling.
+                assert image.width == CARD_WIDTH * DEVICE_SCALE_FACTOR
+                assert 500 < image.height <= CARD_MAX_HEIGHT * DEVICE_SCALE_FACTOR
         finally:
             await close_browser()
 
