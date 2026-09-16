@@ -23,6 +23,7 @@
 | `endfield` | `ef`、`终末地` |
 | `steamInfo` | `steam` |
 | `bilibilibot` | `bili`、`bilibili` |
+| `changelog` | `更新日志`、`changelog`、`版本` |
 | `minecraft_plugin` | `mc`、`minecraft` |
 | `mcsm` | `mcsm` |
 | `tibo_radar` | `tibo`、`雷达` |

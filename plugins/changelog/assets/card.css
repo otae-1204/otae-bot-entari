@@ -1,0 +1,280 @@
+/* 更新日志卡片：与雷达卡片共用同一套纸色/墨绿视觉语言。 */
+
+:root {
+  --paper: #f4f3ed;
+  --ink: #172d2a;
+  --muted: #526760;
+  --line: #d4dbd0;
+  --accent: #c9f07b;
+  --forest: #286456;
+  --white: #fcfcf8;
+  --amber: #80572b;
+}
+
+* { box-sizing: border-box; }
+
+html, body { margin: 0; padding: 0; }
+
+body {
+  background: #e1e5dc;
+  color: var(--ink);
+  font-family: ChangeLogSans, "Microsoft YaHei", sans-serif;
+  font-size: 19px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+.cl-card {
+  width: 1080px;
+  margin: 0 auto;
+  background: var(--paper);
+  padding: 38px 48px 26px;
+  border-top: 7px solid var(--forest);
+}
+
+.cl-brand-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  border-bottom: 1px solid var(--ink);
+  padding-bottom: 18px;
+}
+
+.cl-brand {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: 3px;
+}
+
+.cl-mark {
+  width: 29px;
+  height: 29px;
+  border: 1.5px solid var(--forest);
+  border-radius: 50%;
+  position: relative;
+}
+
+.cl-mark::before {
+  content: "";
+  position: absolute;
+  inset: 6px;
+  border: 1px solid var(--forest);
+  border-radius: 50%;
+}
+
+.cl-mark::after {
+  content: "";
+  position: absolute;
+  left: 13px;
+  top: 13px;
+  width: 18px;
+  height: 1.5px;
+  background: var(--forest);
+  transform: rotate(-42deg);
+  transform-origin: left;
+}
+
+.cl-edition {
+  font-size: 14px;
+  color: var(--muted);
+  letter-spacing: 1px;
+  text-align: right;
+}
+
+.cl-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 24px;
+  padding: 28px 0 22px;
+}
+
+.cl-head h1 {
+  font-size: 40px;
+  line-height: 1.22;
+  letter-spacing: -1.2px;
+  margin: 0 0 9px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.cl-head p { color: var(--muted); margin: 0; font-size: 18px; }
+
+.cl-badge {
+  flex-shrink: 0;
+  text-align: right;
+  font-size: 15px;
+  color: var(--forest);
+  border: 1px solid var(--line);
+  padding: 8px 14px;
+  white-space: nowrap;
+}
+
+.cl-badge strong { display: block; font-size: 22px; letter-spacing: -0.5px; }
+
+.cl-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding: 0 0 20px;
+  font-size: 15px;
+  color: var(--muted);
+}
+
+.cl-tag {
+  border: 1px solid var(--line);
+  padding: 2px 9px;
+  color: var(--forest);
+  font-size: 14px;
+}
+
+.cl-summary {
+  background: var(--ink);
+  color: var(--paper);
+  padding: 22px 26px;
+  margin: 0 0 26px;
+  font-size: 20px;
+}
+
+.cl-summary .cl-eyebrow {
+  display: block;
+  font-size: 13px;
+  letter-spacing: 1.7px;
+  font-weight: 700;
+  color: var(--accent);
+  margin-bottom: 8px;
+}
+
+.cl-item {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 0 18px;
+  padding: 20px 0;
+  border-top: 1px solid var(--line);
+}
+
+.cl-kind {
+  font-size: 14px;
+  color: var(--white);
+  background: var(--forest);
+  text-align: center;
+  padding: 4px 0;
+  height: fit-content;
+  letter-spacing: 0.5px;
+}
+
+.cl-kind.fix { background: #8a5a2b; }
+.cl-kind.perf { background: #2f6f7a; }
+.cl-kind.docs { background: #5d6b5a; }
+.cl-kind.chore, .cl-kind.style, .cl-kind.test, .cl-kind.refactor { background: #55606b; }
+
+.cl-item p { margin: 0; overflow-wrap: anywhere; }
+
+.cl-item .cl-commits {
+  display: block;
+  margin-top: 9px;
+  font-family: monospace;
+  font-size: 13px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.cl-tally {
+  display: grid;
+  grid-template-columns: 108px minmax(0, 1fr) 76px;
+  gap: 0 18px;
+  align-items: center;
+  padding: 11px 0;
+  border-top: 1px solid var(--line);
+}
+
+.cl-tally-name { color: var(--ink); font-size: 16px; }
+
+.cl-tally-track {
+  display: block;
+  height: 12px;
+  background: #e3e7dc;
+}
+
+.cl-tally-bar {
+  display: block;
+  height: 100%;
+  background: var(--forest);
+}
+
+.cl-tally-count {
+  font-family: monospace;
+  font-size: 15px;
+  color: var(--muted);
+  text-align: right;
+}
+
+.cl-row {
+  display: grid;
+  grid-template-columns: 56px 118px minmax(0, 1fr);
+  gap: 0 16px;
+  align-items: baseline;
+  padding: 16px 0;
+  border-top: 1px solid var(--line);
+}
+
+/* 检索结果没有目录序号，省掉首列，避免出现空的占位横线。 */
+.cl-row.cl-row-ver {
+  grid-template-columns: 118px minmax(0, 1fr);
+}
+
+.cl-row .cl-no { font-family: monospace; color: var(--muted); font-size: 17px; }
+.cl-row .cl-date { font-family: monospace; font-size: 16px; color: var(--forest); }
+.cl-row .cl-title { font-weight: 700; overflow-wrap: anywhere; }
+.cl-row .cl-hint { display: block; font-weight: 400; font-size: 15px; color: var(--muted); margin-top: 5px; }
+
+.cl-note {
+  background: #e9ede3;
+  border-left: 3px solid #748c67;
+  padding: 13px 17px;
+  color: #42564b;
+  font-size: 15px;
+  line-height: 1.8;
+  margin: 22px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.cl-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+  background: var(--white);
+  border: 1px solid var(--line);
+  padding: 22px 25px;
+  margin: 0 0 8px;
+}
+
+.cl-stats span { display: block; font-size: 15px; color: var(--muted); }
+.cl-stats strong { display: block; font-size: 40px; font-weight: 400; letter-spacing: -1px; padding: 6px 0; }
+
+.cl-command { padding: 15px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+.cl-command code { font-family: monospace; font-size: 17px; color: var(--forest); }
+.cl-command span { display: block; color: var(--muted); font-size: 15px; margin-top: 5px; }
+
+.cl-foot {
+  margin-top: 26px;
+  border-top: 1px solid var(--ink);
+  padding-top: 16px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.cl-foot p { margin: 0 0 6px; }
+
+.cl-bottom {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  margin-top: 14px;
+  font-size: 13px;
+  color: var(--muted);
+}

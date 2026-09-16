@@ -14,6 +14,8 @@ GROK_HELP = "Grok Bot 问答：/grok 问题；引用消息后提问可附上引�
 TEXT_TOPICS.update({name: GROK_HELP for name in ("grok", "grokbot", "grok_bot")})
 GROUP_FEATURE_HELP = "群内插件开关：/功能 列表、/功能 关闭 hyw、/功能 开启 hyw。\n支持插件名和 ef、steam、bili、mc、tibo 等别名。\n仅 SuperUser、本群管理员或群主可执行，只影响当前群，重启后保留。\nGrok Bot 默认关闭，仅 SuperUser 可开启，管理员和群主可关闭。"
 TEXT_TOPICS.update({name: GROUP_FEATURE_HELP for name in ("功能", "插件", "plugin")})
+CHANGELOG_HELP = "更新日志：/更新日志 看最新版本，/更新日志 列表 看全部版本目录（每页 12 个）。\n按版本号、序号或关键词查看：/更新日志 v1.14.0、/更新日志 2、/更新日志 雷达；/更新日志 统计 看汇总。\n别名：/更新、/changelog、/版本。版本号按时间段划定；每条更新都对应仓库里的真实提交。"
+TEXT_TOPICS.update({name: CHANGELOG_HELP for name in ("更新", "更新日志", "changelog", "版本")})
 
 # 子指令 → 图片文件名（不含扩展名）映射
 # 每个目标都必须有对应的 assets/image/help/<name>.png，否则该主题无法解析；

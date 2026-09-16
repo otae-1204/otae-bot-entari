@@ -21,6 +21,10 @@ Windows 配置和连接检查见 [Grok Bot 配置与用法](docs/grok_bot_plugin
 群内插件开关：`/功能 列表`、`/功能 关闭 hyw`、`/功能 开启 hyw`。
 仅 SuperUser、本群管理员或群主可执行，详见 [群内功能管理](docs/group_features.md)。
 
+更新日志：`/更新日志` 用图片卡片展示历史版本更新了什么，
+支持目录、版本号、序号、关键词检索与统计；别名 `/更新`、`/changelog`、`/版本`。
+数据来自仓库提交历史，版本号按时间段划定，详见 [更新日志插件](docs/changelog_plugin.md)。
+
 ## 分支
 
 `main` 已于 2026-09-05 同步 `refactor/project-architecture` 的重构版本，
