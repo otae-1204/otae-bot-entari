@@ -430,7 +430,7 @@ class PresentationTests(unittest.TestCase):
         # 目录卡要保留序号列。
         self.assertIn('class="cl-no"', views.index_pages(self.changelog)[0].body)
 
-    def test_every_page_has_a_why_note_and_section(self):
+    def test_every_page_has_a_title_and_section(self):
         pages = (
             views.latest_pages(self.changelog)
             + views.index_pages(self.changelog)
@@ -443,7 +443,6 @@ class PresentationTests(unittest.TestCase):
             self.assertTrue(page.title)
             self.assertTrue(page.subtitle)
             self.assertTrue(page.body)
-            self.assertTrue(page.why)
             self.assertTrue(page.section)
 
     def test_index_pages_carry_page_identity(self):

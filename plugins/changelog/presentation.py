@@ -21,7 +21,6 @@ class ChangelogPage:
     title: str
     subtitle: str
     body: str
-    why: str
     section: str
     number: int = 1
     total: int = 1
@@ -63,7 +62,7 @@ def _items(release: Release) -> str:
 
 
 def release_pages(
-    release: Release, *, number: int, total: int, why: str | None = None
+    release: Release, *, number: int, total: int
 ) -> tuple[ChangelogPage, ...]:
     """单个版本的详情卡。"""
     body = _meta(release)
@@ -78,8 +77,6 @@ def release_pages(
             release.title,
             f"{release.version} · {release.date_range} / RELEASE NOTES",
             body,
-            why or "版本号按时间段划定（仓库没有打 tag）；每条更新都对应仓库里的真实提交，"
-            "合并提交不计入，所以这里的提交数总和等于非合并提交数。",
             "版本详情",
             number,
             total,
@@ -132,7 +129,6 @@ def index_pages(
             "更新日志目录",
             f"{text(changelog.first_date)} 至今 / ALL VERSIONS",
             body,
-            "先看目录再挑版本：目录只给版本号、日期与一句话概括，细节留在详情卡里。",
             "目录",
             page,
             pages,
@@ -172,7 +168,6 @@ def search_pages(
             "更新检索",
             f"关键词：{text(query)} / SEARCH",
             body,
-            "关键词会在版本号、日期、标题、概括、标签与每条更新正文里匹配。",
             "检索",
         ),
     )
@@ -200,15 +195,12 @@ def stats_pages(changelog: Changelog) -> tuple[ChangelogPage, ...]:
         "</div>"
         f'<div class="cl-meta"><span>{text(changelog.first_date)} ~ {text(changelog.last_date)}</span>'
         f"<span>当前提交 {text(changelog.head)}</span></div>" + rows
-        + '<div class="cl-note">scripts/generate_changelog.py --check 会校验'
-        "「每个非合并提交恰好出现一次」，所以这里的提交数不会多也不会少。</div>"
     )
     return (
         ChangelogPage(
             "更新统计",
             f"{text(changelog.first_date)} ~ {text(changelog.last_date)} / STATS",
             body,
-            "统计用来回答「我们一共做了多少事」，不改变任何一条更新的口径。",
             "统计",
         ),
     )
@@ -240,7 +232,6 @@ def help_pages() -> tuple[ChangelogPage, ...]:
             "更新日志用法",
             "命令一览 / COMMANDS",
             body,
-            "不确定看哪个版本时，先 /更新日志 看最近一次，或 /更新日志 列表 从目录里挑。",
             "帮助",
         ),
     )

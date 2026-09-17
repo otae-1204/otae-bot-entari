@@ -44,38 +44,9 @@ body {
 .cl-brand {
   display: flex;
   align-items: center;
-  gap: 13px;
   font-size: 21px;
   font-weight: 700;
   letter-spacing: 3px;
-}
-
-.cl-mark {
-  width: 29px;
-  height: 29px;
-  border: 1.5px solid var(--forest);
-  border-radius: 50%;
-  position: relative;
-}
-
-.cl-mark::before {
-  content: "";
-  position: absolute;
-  inset: 6px;
-  border: 1px solid var(--forest);
-  border-radius: 50%;
-}
-
-.cl-mark::after {
-  content: "";
-  position: absolute;
-  left: 13px;
-  top: 13px;
-  width: 18px;
-  height: 1.5px;
-  background: var(--forest);
-  transform: rotate(-42deg);
-  transform-origin: left;
 }
 
 .cl-edition {
@@ -268,13 +239,10 @@ body {
   color: var(--muted);
 }
 
-.cl-foot p { margin: 0 0 6px; }
-
 .cl-bottom {
   display: flex;
   justify-content: space-between;
   gap: 18px;
-  margin-top: 14px;
   font-size: 13px;
   color: var(--muted);
 }

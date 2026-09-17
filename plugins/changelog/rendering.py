@@ -41,15 +41,12 @@ def page_html(page: ChangelogPage) -> str:
 <meta http-equiv="Content-Security-Policy" content="{CSP}"><title>{text(page.title)} · 更新日志</title>
 <style>{_styles()}</style></head>
 <body><main class="cl-card">
-<header class="cl-brand-row"><div class="cl-brand"><span class="cl-mark" aria-hidden="true"></span>OTAE / CHANGELOG</div>
+<header class="cl-brand-row"><div class="cl-brand">OTAE / CHANGELOG</div>
 <div class="cl-edition">更新日志<br>RELEASE NOTES</div></header>
 <div class="cl-head"><div><h1>{text(page.title)}</h1><p>{text(page.subtitle)}</p></div>
 <div class="cl-badge"><strong>{page.number:02}</strong>{page.total:02} / {text(page.section)}</div></div>
 <article>{page.body}</article>
-<div class="cl-note">{text(page.why)}</div>
-<footer class="cl-foot"><p>数据来自仓库提交历史，按版本聚合；每条更新都对应真实提交，合并提交不计入。</p>
-<p>校验：scripts/generate_changelog.py --check · 不重不漏。</p>
-<div class="cl-bottom"><span>OTAE BOT / 更新日志</span><span>每个版本改了什么，都在这里。</span><span>{page.number:02} / {page.total:02}</span></div>
+<footer class="cl-foot"><div class="cl-bottom"><span>OTAE BOT / 更新日志</span><span>每个版本改了什么，都在这里。</span><span>{page.number:02} / {page.total:02}</span></div>
 </footer></main></body></html>'''
 
 
