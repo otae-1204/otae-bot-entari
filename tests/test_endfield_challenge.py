@@ -85,6 +85,34 @@ def _war_fixture() -> dict:
     }
 
 
+def _war_repeat_fixture() -> dict:
+    """同名关卡在多个赛季/轮换复用，用来覆盖同名歧义与择优。"""
+
+    def group(name: str) -> dict:
+        dungeon = {"id": name, "name": name, "isPass": False}
+        return {"name": name, "star": 3, "plusTask": False, "normalDungeon": dungeon, "hardDungeon": dungeon, "cruelDungeon": dungeon}
+
+    def week(name: str, start: str, end: str, groups: list[dict]) -> dict:
+        return {"id": name, "name": name, "startTs": start, "endTs": end, "groups": [], "dungeonGroups": groups}
+
+    return {
+        "seasons": [
+            {
+                "id": "s-past", "name": "追忆赛季", "startTs": "1500000000", "endTs": "1600000000", "stars": 6, "allPlusTasks": False,
+                "weeks": [week("追忆轮换Ⅰ", "1500000000", "1600000000", [group("野性旧事"), group("裂地旧创")])],
+            },
+            {
+                "id": "s-current", "name": "谵妄赛季", "startTs": "1700000000", "endTs": "1900000000", "stars": 6, "allPlusTasks": False,
+                "weeks": [
+                    week("谵妄轮换Ⅰ", "1700000000", "1750000000", [group("野性旧事")]),
+                    week("谵妄轮换Ⅱ", "1800000000", "1900000000", [group("野性旧事"), group("野性旧事·改")]),
+                ],
+            },
+        ],
+        "achieves": [],
+    }
+
+
 class EndfieldChallengeTests(unittest.TestCase):
     def test_prepare_assets_keeps_mixed_download_failures_without_crashing(self):
         async def run():
@@ -441,6 +469,72 @@ class EndfieldChallengeTests(unittest.TestCase):
         self.assertEqual(payload.current().current_week().name, "轮换Ⅰ")
         season, week, group, dungeon = resolve_war_detail(payload, ("当前赛季", "轮换Ⅰ", "战争简史"), "cruel")
         self.assertEqual((season.name, week.name, group.name, dungeon.difficulty), ("当前赛季", "轮换Ⅰ", "战争简史", "cruel"))
+
+    def test_repeated_stage_name_resolves_to_the_running_rotation(self):
+        # 同一关卡在多个轮换/赛季复用，同名不算歧义：按「正在进行的轮换」择优。
+        payload = parse_war_echoes(_war_repeat_fixture())
+        season, week, group, dungeon = resolve_war_detail(payload, ("野性旧事",), "cruel")
+        self.assertEqual((season.name, week.name, group.name, dungeon.difficulty), ("谵妄赛季", "谵妄轮换Ⅱ", "野性旧事", "cruel"))
+        season, week, group, _ = resolve_war_detail(payload, ("谵妄赛季", "野性旧事"), "cruel")
+        self.assertEqual((season.name, week.name), ("谵妄赛季", "谵妄轮换Ⅱ"))
+
+    def test_ambiguity_error_carries_a_resolvable_example_path(self):
+        payload = parse_war_echoes(_war_repeat_fixture())
+        with self.assertRaises(challenge.ChallengeAmbiguousError) as ctx:
+            resolve_war_detail(payload, ("野性旧",), "cruel")
+        error = ctx.exception
+        self.assertEqual(error.path, ("谵妄赛季", "谵妄轮换Ⅱ"))
+        self.assertIn("野性旧事", error.candidates)
+        # 报错里给出的赛季+轮换+名称必须真的能解析到首候选本身，否则用户会陷入死循环。
+        _, _, group, _ = resolve_war_detail(payload, error.path + (error.candidates[0],), "cruel")
+        self.assertEqual(group.name, error.candidates[0])
+
+    def test_ambiguity_example_points_at_the_preferred_candidate(self):
+        payload = parse_war_echoes(_war_repeat_fixture())
+        with self.assertRaises(challenge.ChallengeAmbiguousError) as ctx:
+            resolve_war_detail(payload, ("野性旧事·改 残酷",), "cruel")
+        error = ctx.exception
+        # candidates[0] 与 path 必须指向同一条记录，否则示例会被解析到别的关卡。
+        self.assertEqual(error.candidates[0], "野性旧事·改")
+        _, _, group, _ = resolve_war_detail(payload, error.path + (error.candidates[0],), "cruel")
+        self.assertEqual(group.name, "野性旧事·改")
+
+    def test_command_parser_accepts_difficulty_suffix_from_akedata_names(self):
+        detail = commands.parse_command("回响 野性旧事·残酷")
+        self.assertEqual((detail.challenge_view, detail.challenge_terms, detail.challenge_difficulty), ("detail", ("野性旧事",), "cruel"))
+        spaced = commands.parse_command("回响 野性旧事 残酷")
+        self.assertEqual((spaced.challenge_terms, spaced.challenge_difficulty), (("野性旧事",), "cruel"))
+        monument = commands.parse_command("影拓 当前主题 清波访客·苦难")
+        self.assertEqual((monument.challenge_terms, monument.challenge_difficulty), (("当前主题", "清波访客"), "hard"))
+        unknown = commands.parse_command("回响 野性旧事·未知")
+        self.assertEqual((unknown.challenge_terms, unknown.challenge_difficulty), (("野性旧事·未知",), ""))
+        self.assertTrue(commands.parse_command("回响 野性旧事·普通 残酷").error)
+
+    def test_ambiguous_reply_suggests_a_command_that_resolves(self):
+        import plugins.endfield.handlers as endfield_plugin
+
+        async def run():
+            matcher = SimpleNamespace(finish=AsyncMock())
+            event = SimpleNamespace(user=SimpleNamespace(id="1000"), guild=SimpleNamespace(id="group-1"))
+            error = challenge.ChallengeAmbiguousError(
+                "野性旧",
+                ("野性旧事·改", "野性旧事"),
+                path=("谵妄赛季", "谵妄轮换Ⅱ"),
+            )
+            with patch.object(endfield_plugin, "CredentialCipher") as cipher:
+                with patch.object(endfield_plugin, "_handle_challenge", AsyncMock(side_effect=error)):
+                    await endfield_plugin._handle_personal_command(
+                        matcher,
+                        event,
+                        commands.parse_command("回响 野性旧 残酷"),
+                        bot=SimpleNamespace(self_id="10000"),
+                    )
+            cipher.from_env.assert_called_once_with()
+            matcher.finish.assert_awaited_once_with(
+                "“野性旧”有多个可能：野性旧事·改、野性旧事\n示例：/ef 回响 谵妄赛季 谵妄轮换Ⅱ 野性旧事·改 残酷"
+            )
+
+        asyncio.run(run())
 
     def test_history_cards_show_best_tier_and_pad_empty_slots(self):
         monument = parse_monument(_monument_fixture()).current()

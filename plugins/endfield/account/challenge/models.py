@@ -211,9 +211,17 @@ class ChallengeResolutionError(ValueError):
 
 
 class ChallengeAmbiguousError(ChallengeResolutionError):
-    def __init__(self, query: str, candidates: Sequence[str]):
+    """Several different names are close enough that one cannot be chosen.
+
+    ``path`` holds the season/rotation names that narrow the winner down, so
+    callers can print an example that actually resolves instead of echoing the
+    query that just failed.
+    """
+
+    def __init__(self, query: str, candidates: Sequence[str], *, path: Sequence[str] = ()):
         self.query = query
         self.candidates = tuple(dict.fromkeys(str(item) for item in candidates if item))
+        self.path = tuple(dict.fromkeys(str(item) for item in path if item))
         super().__init__(f"“{query}”有多个可能：{'、'.join(self.candidates[:5])}")
 
 

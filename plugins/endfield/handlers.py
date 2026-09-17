@@ -148,6 +148,10 @@ from .account.challenge.draw import (
     resolve_war_detail,
 )
 from .account.challenge.i18n import ChallengeLocale, get_challenge_locale, start_challenge_locale_warmup
+from .account.challenge.parsing import (
+    _difficulty_label as _challenge_difficulty_label,
+    _monument_difficulty_label as _challenge_monument_difficulty_label,
+)
 from .stages.draw import draw_stage_card, draw_stage_catalog_cards
 from .stages.service import EndfieldStageService, StageVariantNotFound
 from .stages.fz import StageDataIncomplete
@@ -824,10 +828,17 @@ async def _handle_personal_command(matcher, event: Event, command: ParsedEndfiel
         return await matcher.finish("终末地养成数据源暂时不可用，请稍后重试。")
     except ChallengeAmbiguousError as exc:
         if command.action == "challenge":
-            head = "影拓" if command.challenge_kind == "monument" else "回响"
-            candidate = exc.candidates[0] if exc.candidates else ("名称" if command.challenge_kind == "monument" else "赛季")
-            difficulty = f" {command.challenge_difficulty}" if command.challenge_difficulty else ""
-            return await matcher.finish(f"{exc}\n示例：/ef {head} {candidate}{difficulty}")
+            monument = command.challenge_kind == "monument"
+            head = "影拓" if monument else "回响"
+            candidate = exc.candidates[0] if exc.candidates else ("名称" if monument else "赛季")
+            # Prefix the suggested command with the season/rotation that holds
+            # the top candidate: echoing the bare name just repeats the query
+            # that already failed.
+            scope = " ".join(exc.path)
+            label = _challenge_monument_difficulty_label if monument else _challenge_difficulty_label
+            difficulty = label(command.challenge_difficulty) if command.challenge_difficulty else ""
+            example = " ".join(item for item in (head, scope, candidate, difficulty) if item)
+            return await matcher.finish(f"{exc}\n示例：/ef {example}")
         return await matcher.finish(str(exc))
     except ChallengeResolutionError as exc:
         return await matcher.finish(str(exc))

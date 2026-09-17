@@ -155,24 +155,36 @@ def resolve_monument_detail(
     stage_query = " ".join(str(item) for item in terms).strip()
     group_query = str(terms[0]).strip()
     if len(terms) > 1:
-        group = _pick(group_query, payload.groups, lambda item: item.name)
+        group = _pick(group_query, payload.groups, lambda item: item.name, rank=_monument_group_rank)
         stage_query = " ".join(str(item) for item in terms[1:]).strip()
     else:
-        group = _pick_or_none(group_query, payload.groups, lambda item: item.name)
+        group = _pick_or_none(group_query, payload.groups, lambda item: item.name, rank=_monument_group_rank)
     if group is not None:
         stages = [pair[0 if normalized_difficulty == "normal" else 1] for pair in group.stages]
         if len(terms) == 1:
             if not stages:
                 raise ChallengeResolutionError(f"主题“{group.name}”暂无关卡记录")
             return group, stages[0]
-        stage = _pick(stage_query, stages, lambda item: item.name)
+        stage = _pick(
+            stage_query,
+            stages,
+            lambda item: item.name,
+            rank=_monument_stage_rank,
+            path=lambda item: (group.name,),
+        )
         return group, stage
     candidates: list[tuple[MonumentGroup, MonumentDungeon]] = []
     for item in payload.groups:
         for pair in item.stages:
             dungeon = pair[0 if normalized_difficulty == "normal" else 1]
             candidates.append((item, dungeon))
-    chosen = _pick(stage_query, candidates, lambda item: item[1].name)
+    chosen = _pick(
+        stage_query,
+        candidates,
+        lambda item: item[1].name,
+        rank=_monument_pair_rank,
+        path=lambda item: (item[0].name,),
+    )
     return chosen
 
 
@@ -184,12 +196,24 @@ def resolve_war_detail(
     if not terms:
         raise ChallengeResolutionError("请指定战争回响赛季、轮换或关卡名称")
     normalized_difficulty = difficulty if difficulty in {"normal", "hard", "cruel"} else "cruel"
-    season: WarSeason | None = _pick_or_none(str(terms[0]), payload.seasons, lambda item: item.name)
+    season: WarSeason | None = _pick_or_none(
+        str(terms[0]),
+        payload.seasons,
+        lambda item: item.name,
+        rank=lambda item: (item.current(), item.end_ts),
+        path=lambda item: (item.name,),
+    )
     if season is not None:
         rest = list(terms[1:])
         week: WarWeek | None = None
         if rest:
-            week = _pick_or_none(str(rest[0]), season.weeks, lambda item: item.name)
+            week = _pick_or_none(
+                str(rest[0]),
+                season.weeks,
+                lambda item: item.name,
+                rank=lambda item: (item.current(), item.end_ts),
+                path=lambda item: (season.name, item.name),
+            )
             if week is not None:
                 rest.pop(0)
         if week is None:
@@ -208,7 +232,13 @@ def resolve_war_detail(
                 for group_item in week_item.groups
                 if group_item.dungeon(normalized_difficulty) is not None
             ]
-            selected_week, group, dungeon = _pick(" ".join(rest), dungeon_candidates, lambda item: item[2].name)
+            selected_week, group, dungeon = _pick(
+                " ".join(rest),
+                dungeon_candidates,
+                lambda item: item[2].name,
+                rank=lambda item: (item[0].current(), item[0].end_ts),
+                path=lambda item: (season.name, item[0].name),
+            )
             return season, selected_week, group, dungeon
         group = week.groups[0] if week.groups else None
         dungeon = group.dungeon(normalized_difficulty) if group else None
@@ -223,7 +253,13 @@ def resolve_war_detail(
         for group in week.groups
         if group.dungeon(normalized_difficulty) is not None
     ]
-    return _pick(" ".join(str(item) for item in terms), candidates, lambda item: item[3].name)
+    return _pick(
+        " ".join(str(item) for item in terms),
+        candidates,
+        lambda item: item[3].name,
+        rank=_war_rank,
+        path=lambda item: (item[0].name, item[1].name),
+    )
 
 
 def _monument_dungeon(raw, difficulty, locale: ChallengeLocale | None = None):
@@ -351,26 +387,70 @@ def _latest_war_record(season):
     return max(records, key=lambda item: (item.record_ts, item.first_pass_ts), default=None)
 
 
-def _pick(query, items, label):
+def _pick(query, items, label, *, rank=None, path=None):
+    """Resolve one record by name.
+
+    ``rank`` breaks ties between records that share a name: the same stage is
+    reused across rotations and seasons, so an identical label is not real
+    ambiguity -- only close-but-different labels are.  ``path`` maps a
+    candidate to the season/rotation names that narrow it down, so the
+    ambiguity message can suggest an example that really resolves.
+    """
     if not items:
         raise ChallengeResolutionError(f"未找到“{query}”")
     normalized = _normalize(query)
     exact = [item for item in items if _normalize(label(item)) == normalized]
-    if len(exact) == 1:
-        return exact[0]
+    if exact:
+        return _best(exact, rank)
     scored = sorted(((item, _score(normalized, _normalize(label(item)))) for item in items), key=lambda pair: pair[1], reverse=True)
     if not scored or scored[0][1] < 0.38:
         raise ChallengeResolutionError(f"未找到“{query}”，请使用“历史”查看可用名称")
-    if len(scored) > 1 and scored[0][1] - scored[1][1] < 0.08:
-        raise ChallengeAmbiguousError(query, [label(item) for item, _ in scored[:5]])
-    return scored[0][0]
+    best = scored[0][1]
+    close = [item for item, score in scored if best - score < 0.08]
+    if len({_normalize(label(item)) for item in close}) > 1:
+        preferred = _best(close, rank)
+        # Keep the preferred candidate first: callers echo ``candidates[0]``
+        # together with ``path``, so the two must describe the same record.
+        preferred_label = label(preferred)
+        ordered = [preferred_label] + [label(item) for item in close if label(item) != preferred_label]
+        raise ChallengeAmbiguousError(
+            query,
+            ordered,
+            path=path(preferred) if path is not None else (),
+        )
+    return _best(close, rank)
 
 
-def _pick_or_none(query, items, label):
+def _best(items, rank):
+    if rank is None:
+        return items[0]
+    return max(items, key=rank)
+
+
+def _pick_or_none(query, items, label, *, rank=None, path=None):
     try:
-        return _pick(query, items, label)
+        return _pick(query, items, label, rank=rank, path=path)
     except ChallengeResolutionError:
         return None
+
+
+def _war_rank(item):
+    """Prefer the rotation that is running now, then the newest one."""
+    week, season = item[1], item[0]
+    return (week.current(), season.current(), week.end_ts, season.end_ts)
+
+
+def _monument_group_rank(group):
+    return (group.is_active, group.end_ts)
+
+
+def _monument_stage_rank(dungeon):
+    return (dungeon.record.available, dungeon.record.record_ts, dungeon.passed)
+
+
+def _monument_pair_rank(item):
+    group, dungeon = item
+    return (_monument_group_rank(group), _monument_stage_rank(dungeon))
 
 
 def _score(query, candidate):

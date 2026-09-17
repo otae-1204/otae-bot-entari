@@ -395,6 +395,14 @@ def _parse_ownership_command(parts: list[str]) -> ParsedEndfieldCommand:
     return ParsedEndfieldCommand("ownership_refresh" if refresh else "ownership_stats", scope=scope)
 
 
+def _split_difficulty_suffix(token: str) -> tuple[str, str]:
+    """Split ``野性旧事·残酷`` into its bare name and difficulty suffix."""
+    match = re.match(r"^(?P<name>.+?)\s*[·・]\s*(?P<difficulty>[^·・]+)$", token)
+    if match is None:
+        return token, ""
+    return match.group("name").strip(), match.group("difficulty").strip()
+
+
 def _parse_challenge_command(kind: str, parts: list[str]) -> ParsedEndfieldCommand:
     """Parse personal challenge commands while keeping account selection explicit.
 
@@ -468,11 +476,23 @@ def _parse_challenge_command(kind: str, parts: list[str]) -> ParsedEndfieldComma
     filtered: list[str] = []
     for token in remaining:
         normalized = difficulty_aliases.get(token.casefold())
+        consumed = normalized is not None
+        if normalized is None:
+            # AKEData ships stage names with the difficulty baked in
+            # ("野性旧事·残酷"), so accept that spelling as a difficulty too
+            # and keep the bare name for matching.
+            bare, suffix = _split_difficulty_suffix(token)
+            normalized = difficulty_aliases.get(suffix.casefold()) if suffix else None
+            if normalized and bare:
+                token = bare
+                consumed = False
+            else:
+                normalized = None
         if normalized:
             if difficulty and difficulty != normalized:
                 return ParsedEndfieldCommand("challenge", challenge_kind=kind, error="只能指定一个难度")
             difficulty = normalized
-        else:
+        if not consumed:
             filtered.append(token)
     remaining = filtered
     if remaining:
