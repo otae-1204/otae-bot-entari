@@ -220,7 +220,18 @@ Bot 数量限制，不能仅凭状态码认定为 Token 错误。
 不要删除整个 `sessions.json`，也不要随意填入其他会话的 ID。
 
 若云端 Bot 被手动删除，确认接受丢失该会话历史后，停机删除其对应绑定项，
-重启后会在下次提问时创建新的独立 Bot。
+重启后会在下次提问时创建新的独立 Bot。停机后在项目根目录执行离线工具，
+它只删除选中的那一项，写入前自动备份，未确认云端状态时不要直接删除整个文件：
+
+```powershell
+python -X utf8 scripts/repair_grok_binding.py                       # 只读列出全部绑定
+python -X utf8 scripts/repair_grok_binding.py --peer 123456         # 预演，不写盘
+python -X utf8 scripts/repair_grok_binding.py --peer 123456 --yes   # 执行
+```
+
+`--peer` 是群号或私聊用户号，多账号平台再用 `--kind`、`--platform`、`--self-id`
+限定；也可以直接用 `--agent-id` 指定失效的 Bot UUID。匹配到多项、文件结构不符或
+写入失败时都会拒绝并保持原文件不变，`--yes` 执行前请先停止机器人进程。
 
 ## 云端连接恢复
 
