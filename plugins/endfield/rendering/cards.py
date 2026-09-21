@@ -314,13 +314,35 @@ async def draw_attendance_card(view: AttendanceCardView) -> bytes:
         <main class="attendance-list">{''.join(rows) or '<div class="empty">没有可签到的角色</div>'}</main>
         """,
         extra_css="""
-        .attendance-list{display:grid;gap:12px}
-        .attendance-row{display:grid;grid-template-columns:minmax(260px,.8fr) minmax(420px,1.2fr);min-height:102px;border:1px solid #8d8d8d;border-left:8px solid #222;background:#fff}
-        .attendance-row.status-failed{border-left-width:3px;background:#ededed}
-        .role-main,.status{padding:18px 22px}.role-main{display:flex;flex-direction:column;justify-content:center;border-right:1px solid #b8b8b8}.role-main strong{font-size:28px}
-        .status{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:20px}.status-copy{display:flex;min-width:0;flex-direction:column;justify-content:center}.status-copy>b{font-size:22px}.role-main span,.status-copy>span{margin-top:7px;color:#666;font-size:16px;line-height:1.45}
-        .attendance-rewards{display:flex;flex-wrap:wrap;align-items:center;gap:8px}.attendance-reward{display:inline-flex;align-items:center;gap:8px;padding:5px 9px;border:1px solid #b8b8b8;background:#fff;color:#181818;line-height:1.2}.attendance-reward-icon{width:34px;height:34px;flex:none;object-fit:contain}.attendance-reward b{margin-left:3px;font-weight:900}
-        .attendance-meta{min-width:118px;padding:10px 14px;border-left:4px solid #222;background:#ededed}.attendance-meta span,.attendance-meta b{display:block;margin:0}.attendance-meta span{color:#666;font-size:13px;font-weight:800}.attendance-meta b{margin-top:4px;font-size:22px;white-space:nowrap}
+        .attendance-card{min-height:0;padding:24px;background:#ededed;color:#222222}
+        .attendance-card header{margin-bottom:16px;padding:22px 24px;border:0;border-bottom:5px solid #dfec32;border-radius:4px;background:#292929;gap:24px}
+        .attendance-card header small{color:#c8c8c8;font-size:12px;letter-spacing:.16em}
+        .attendance-card header h1{font-size:34px;margin-top:7px;line-height:1.2}
+        .attendance-card header time{color:#d0d0d0;font-size:17px;max-width:38%;text-align:right;overflow-wrap:anywhere}
+        .attendance-card .attendance-list{display:grid;gap:12px;padding:0;border:0;background:none}
+        .attendance-row{display:grid;grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr);min-height:112px;border:1px solid #cecece;border-left:5px solid #787878;border-radius:8px;background:#fff}
+        .attendance-row.status-already{border-left-color:#787878}
+        .attendance-row.status-failed{border-left-color:#787878;background:#fafafa}
+        .attendance-card .role-main,.attendance-card .status{min-width:0;padding:18px 20px}
+        .attendance-card .role-main{display:flex;flex-direction:column;justify-content:center;border-right:1px solid #e0e0e0;gap:5px}
+        .attendance-card .role-main strong{font-size:27px;line-height:1.4;color:#252525;overflow-wrap:anywhere}
+        .attendance-card .role-main span{color:#777777;font-size:16px;line-height:1.5;overflow-wrap:anywhere}
+        .attendance-card .status{display:flex;flex-wrap:wrap;align-items:center;gap:14px}
+        .attendance-card .status-copy{display:flex;flex:1 1 260px;min-width:0;flex-direction:column;justify-content:center}
+        .attendance-card .status-copy>b{font-size:21px;line-height:1.5;color:#333333;overflow-wrap:anywhere}
+        .attendance-card .status-already .status-copy>b{color:#666666}
+        .attendance-card .status-failed .status-copy>b{color:#333333}
+        .attendance-card .status-copy>span{margin-top:7px;color:#888888;font-size:16px;line-height:1.5;min-width:0;overflow-wrap:anywhere}
+        .attendance-rewards{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+        .attendance-reward{display:inline-flex;align-items:center;gap:8px;max-width:100%;min-width:0;padding:5px 9px;border:1px solid #dddddd;border-radius:6px;background:#f5f5f5;color:#444444;line-height:1.4}
+        .attendance-reward>span{min-width:0;overflow-wrap:anywhere}
+        .attendance-reward-icon{width:40px;height:40px;flex:none;object-fit:contain}
+        .attendance-reward b{margin-left:3px;font-weight:700;color:#252525}
+        .attendance-meta{flex:0 1 118px;min-width:0;max-width:100%;padding:10px 13px;border:1px solid #d5d5d5;border-radius:6px;background:#eeeeee}
+        .attendance-meta span,.attendance-meta b{display:block;margin:0;overflow-wrap:anywhere}
+        .attendance-meta span{color:#777777;font-size:13px;font-weight:400;line-height:1.5}
+        .attendance-meta b{margin-top:3px;color:#333333;font-size:24px;line-height:1.3}
+        .attendance-card .empty{padding:26px;color:#777777;background:#f8f8f8;border:1px dashed #cccccc;border-radius:8px}
         """,
     )
 

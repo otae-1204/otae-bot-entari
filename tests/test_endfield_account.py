@@ -19,7 +19,7 @@ from io import BytesIO
 from pathlib import Path
 
 import httpx
-from PIL import Image
+from PIL import Image, ImageChops
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -1769,6 +1769,95 @@ class EndfieldOfficialClientTests(unittest.IsolatedAsyncioTestCase):
         result = await client.attendance("account-token", role)
 
         self.assertEqual(result.rewards, (client_module.AttendanceReward("签到奖励", 1),))
+
+    async def test_attendance_resolves_every_current_skland_reward_with_original_icon(self):
+        fixture = json.loads((ROOT / "tests/fixtures/endfield_attendance_rewards.json").read_text(encoding="utf-8"))
+        resources = fixture["resourceInfoMap"]
+        self.assertEqual(len(resources), 22)
+        self.assertTrue(all(item["name"] == "" for item in resources.values()))
+        client = client_module.EndfieldOfficialClient(mock.AsyncMock())
+        client._skland_context = mock.AsyncMock(return_value=object())
+        client._signed_skland_request = mock.AsyncMock(side_effect=[
+            {"data": {"awardIds": [{"id": key, "type": 3} for key in resources]}},
+            {"data": fixture},
+        ])
+
+        result = await client.attendance("account-token", mock.Mock(role_id="role", server_id="1"))
+
+        self.assertEqual(result.rewards, tuple(
+            client_module.AttendanceReward(fixture["expectedNames"][key], item["count"], item["icon"])
+            for key, item in resources.items()
+        ))
+        self.assertEqual(len({reward.name for reward in result.rewards}), 8)
+
+    async def test_attendance_calendar_only_supplements_awarded_items(self):
+        fixture = json.loads((ROOT / "tests/fixtures/endfield_attendance_rewards.json").read_text(encoding="utf-8"))
+        client = client_module.EndfieldOfficialClient(mock.AsyncMock())
+        client._skland_context = mock.AsyncMock(return_value=object())
+        client._signed_skland_request = mock.AsyncMock(side_effect=[
+            {"data": {"awardIds": ["endfield_attendance_1_2"]}},
+            {"data": fixture},
+        ])
+
+        result = await client.attendance("account-token", mock.Mock(role_id="role", server_id="1"))
+
+        self.assertEqual(len(result.rewards), 1)
+        self.assertEqual((result.rewards[0].name, result.rewards[0].count), ("中级作战记录", 2))
+
+    def test_attendance_preserves_post_name_and_quantity_when_calendar_is_incomplete(self):
+        award_id = "endfield_attendance_1_2"
+        entries = client_module._attendance_award_entries([award_id])
+        for calendar_name in ("", None, "签到奖励", award_id):
+            with self.subTest(calendar_name=calendar_name):
+                rewards = client_module._attendance_rewards(entries, [
+                    {award_id: {"name": "接口提供的奖励名称", "quantity": 7, "iconUrl": "https://example.com/reward.png"}},
+                    {award_id: {"name": calendar_name, "count": 2, "icon": ""}},
+                ])
+                self.assertEqual(rewards, [client_module.AttendanceReward(
+                    "接口提供的奖励名称", 7, "https://example.com/reward.png"
+                )])
+
+    def test_attendance_explicit_award_fields_take_priority_and_preserve_zero(self):
+        award_id = "endfield_attendance_1_2"
+        entries = client_module._attendance_award_entries([
+            {"id": award_id, "resourceName": "本次奖励", "count": 0}
+        ])
+        rewards = client_module._attendance_rewards(entries, [{award_id: {"name": "月历奖励", "count": 2}}])
+        self.assertEqual(rewards, [client_module.AttendanceReward("本次奖励", 0)])
+
+    def test_attendance_prefers_service_name_and_skips_non_url_icon_fields(self):
+        award_id = "endfield_attendance_1_2"
+        icon = "https://bbs.hycdn.cn/asset/endfield_attendance/921A397E2765462C009B939E0CD92606.png?v=1"
+        for field in ("iconUrl", "imageUrl", "iconPath", "src"):
+            with self.subTest(field=field):
+                resource = {"icon": "opaque_icon_id", field: icon}
+                entries = client_module._attendance_award_entries([award_id])
+                inferred = client_module._attendance_rewards(entries, [{award_id: resource}])[0]
+                named = client_module._attendance_rewards(entries, [{award_id: {**resource, "name": {"zh-cn": "服务端新名称"}}}])[0]
+                self.assertEqual((inferred.name, inferred.icon_url), ("中级作战记录", icon))
+                self.assertEqual((named.name, named.icon_url), ("服务端新名称", icon))
+
+    def test_attendance_does_not_guess_name_from_reused_alias(self):
+        award_id = "endfield_attendance_1_2"
+        icon = "https://bbs.hycdn.cn/asset/endfield_attendance/future-unknown.png"
+        rewards = client_module._attendance_rewards(
+            client_module._attendance_award_entries([award_id]),
+            [{award_id: {"name": "", "icon": icon, "count": 2}}],
+        )
+        self.assertEqual(rewards, [client_module.AttendanceReward("签到奖励", 2, icon)])
+
+    def test_attendance_uses_item_table_icon_id_for_experience_cards(self):
+        for item_id, icon_id, name in (
+            ("item_expcard_stage1_mid", "item_expcard_2_2", "中级作战记录"),
+            ("item_expcard_stage1_high", "item_expcard_2_3", "高级作战记录"),
+        ):
+            for identifier in (item_id, icon_id):
+                with self.subTest(identifier=identifier):
+                    reward = client_module._attendance_rewards(
+                        client_module._attendance_award_entries([identifier]), []
+                    )[0]
+                    self.assertEqual(reward.name, name)
+                    self.assertTrue(reward.icon_url.endswith(f"/{icon_id}.png"))
 
     async def test_attendance_counts_completed_days_from_month_calendar(self):
         client = client_module.EndfieldOfficialClient(mock.AsyncMock())
@@ -3985,7 +4074,7 @@ class EndfieldNeutralCardTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(f'src="{icon_url}"', body)
         self.assertIn("嵌晶玉", body)
 
-    async def test_attendance_and_analysis_cards_are_grayscale(self):
+    async def test_attendance_card_has_archive_accent_and_analysis_card_stays_grayscale(self):
         attendance = models_module.AttendanceCardView(
             roles=[
                 models_module.AttendanceRoleView(
@@ -4012,7 +4101,9 @@ class EndfieldNeutralCardTests(unittest.IsolatedAsyncioTestCase):
             complete=True,
             errors=(),
         )
-        self.assert_grayscale_png(await draw_module.draw_attendance_card(attendance))
+        image = Image.open(BytesIO(await draw_module.draw_attendance_card(attendance))).convert("RGB")
+        self.assertGreater(image.width, 1000)
+        self.assertIsNotNone(ImageChops.difference(image.getchannel("R"), image.getchannel("B")).getbbox())
         self.assert_grayscale_png(await draw_module.draw_gacha_analysis_card(analysis, uid="****1234"), minimum_height=700)
 
     async def test_history_card_is_grayscale_and_handles_twenty_rows(self):

@@ -57,12 +57,37 @@ CHARACTER_POOL_TYPES = (
 # can be recovered from a resource's ``id``/``iconId``/icon URL.  The names
 # were checked against AKEData ItemTable + I18nTextTable_CN.
 _ATTENDANCE_AKEDATA_ITEM_NAMES = {
+    "item_expcard_stage1_mid": "中级作战记录",
+    "item_expcard_stage2_low": "初级认知载体",
+    "item_expcard_stage1_high": "高级作战记录",
+    "item_weapon_expcard_mid": "武器检查装置",
+    "item_weapon_expcard_high": "武器检查套组",
+    "item_char_skill_level_1_6": "协议棱柱",
     "item_diamond": "嵌晶玉",
     "item_gold": "折金票",
     "item_originium_recharge": "衍质源石",
     "item_ticketgacha_beginner_ten": "十连启程寻访凭证",
     "item_ticketgacha_special_single": "特许寻访凭证",
     "item_ticketgacha_standard_single": "基础寻访凭证",
+}
+# ItemTable item ids and icon ids are not always identical.
+_ATTENDANCE_AKEDATA_ICON_IDS = {
+    "item_expcard_stage1_mid": "item_expcard_2_2",
+    "item_expcard_stage1_high": "item_expcard_2_3",
+}
+# Verified original Skland icons against ItemTable + I18nTextTable_CN, version
+# 1.5.3@10024360-6 (2026-09-21). Match image fingerprints, never numbered reward
+# aliases: a future calendar can reuse an alias for a different item.
+# See docs/endfield_attendance_card.md for sources and the public fixture.
+_ATTENDANCE_SKLAND_ICON_ITEMS = {
+    "921a397e2765462c009b939e0cd92606": "item_expcard_stage1_mid",
+    "ed34d5a121dbc81da6f6991792ff97f6": "item_expcard_stage2_low",
+    "7f6ce8ae13546508255b89a4d8571fe3": "item_expcard_stage1_high",
+    "0dea0bc0fd87138df322e8a254a6999f": "item_weapon_expcard_mid",
+    "90403112f070c14859d107b530ae5851": "item_weapon_expcard_high",
+    "0c1e8cf15711a7d59aa7d8786b533cf1": "item_char_skill_level_1_6",
+    "2a58a0e85f39092433842ccd62324785": "item_gold",
+    "8ed434a6cdb173c96ed0572115112f93": "item_diamond",
 }
 _ATTENDANCE_GENERIC_REWARD_NAMES = {"签到奖励", "attendance reward"}
 _ATTENDANCE_AKEDATA_ITEM_ICON_BASE = (
@@ -1350,52 +1375,53 @@ def _attendance_rewards(
             or award_details.get("resourceId")
             or (award if isinstance(award, (str, int)) else "")
         )
-        item = _attendance_resource_info((award_id, award_details), resource_maps)
+        # Keep sources separate: calendar entries supplement the actual award,
+        # and an empty/generic calendar name must not erase a valid POST name.
+        sources = [award_details, *_attendance_resource_infos(
+            (award_id, award_details), resource_maps
+        )]
         raw_ids = {
             candidate.casefold()
             for candidate in _attendance_id_candidates(award_id)
         }
         name = _attendance_human_name(
-            (
-                item.get("name"),
-                item.get("itemName"),
-                item.get("resourceName"),
-                award_details.get("name"),
-                award_details.get("itemName"),
+            tuple(
+                source.get(key)
+                for source in sources
+                for key in ("name", "itemName", "resourceName")
             ),
             raw_ids,
         )
+        canonical_id = _attendance_akedata_item_id(*sources, award_id)
         name = (
             name
-            or _attendance_akedata_name(item, award_details, award_id)
+            or _ATTENDANCE_AKEDATA_ITEM_NAMES.get(canonical_id)
             or "签到奖励"
         )
-        count = _as_int(
-            item.get("count")
-            or item.get("quantity")
-            or award_details.get("count")
-            or award_details.get("quantity")
-            or 1
-        )
-        canonical_id = _attendance_akedata_item_id(item, award_details, award_id)
-        icon_url = _attendance_icon_url(item, award_details, canonical_id=canonical_id)
+        count = _as_int(next((
+            source[key]
+            for source in sources
+            for key in ("count", "quantity")
+            if source.get(key) is not None and source[key] != ""
+        ), 1))
+        icon_url = _attendance_icon_url(*sources, canonical_id=canonical_id)
         rewards.append(AttendanceReward(name, count, icon_url))
     return rewards
 
 
-def _attendance_resource_info(award_id: Any, resource_maps: list[Any]) -> dict[str, Any]:
+def _attendance_resource_infos(award_id: Any, resource_maps: list[Any]) -> list[dict[str, Any]]:
     keys = _attendance_id_candidates(award_id)
     if not keys:
         keys = (str(award_id or ""),)
-    merged: dict[str, Any] = {}
+    resources: list[dict[str, Any]] = []
     for resource_map in resource_maps:
         if not isinstance(resource_map, dict):
             continue
         for key in keys:
             item = resource_map.get(key)
             if isinstance(item, dict):
-                merged.update(item)
-    return merged
+                resources.append(item)
+    return resources
 
 
 def _attendance_human_name(values: tuple[Any, ...], raw_ids: set[str]) -> str:
@@ -1413,25 +1439,22 @@ def _attendance_human_name(values: tuple[Any, ...], raw_ids: set[str]) -> str:
     return ""
 
 
-def _attendance_akedata_name(*values: Any) -> str:
-    for value in values:
-        for candidate in _attendance_id_candidates(value):
-            name = _ATTENDANCE_AKEDATA_ITEM_NAMES.get(candidate.casefold())
-            if name:
-                return name
-    return ""
-
-
 def _attendance_akedata_item_id(*values: Any) -> str:
     """Return a safe AKEData item id, without turning Skland aliases into URLs."""
+    fallback = ""
     for value in values:
         for candidate in _attendance_id_candidates(value):
             normalized = candidate.casefold()
             if normalized in _ATTENDANCE_AKEDATA_ITEM_NAMES:
                 return normalized
-            if _ATTENDANCE_AKEDATA_ITEM_ID_RE.fullmatch(candidate):
-                return candidate
-    return ""
+            for item_id, icon_id in _ATTENDANCE_AKEDATA_ICON_IDS.items():
+                if normalized == icon_id:
+                    return item_id
+            if normalized in _ATTENDANCE_SKLAND_ICON_ITEMS:
+                return _ATTENDANCE_SKLAND_ICON_ITEMS[normalized]
+            if not fallback and _ATTENDANCE_AKEDATA_ITEM_ID_RE.fullmatch(candidate):
+                fallback = candidate
+    return fallback
 
 
 def _attendance_icon_url(
@@ -1444,7 +1467,8 @@ def _attendance_icon_url(
         if icon.startswith(("http://", "https://", "data:")):
             return icon
     if canonical_id:
-        return f"{_ATTENDANCE_AKEDATA_ITEM_ICON_BASE}/{canonical_id}.png"
+        icon_id = _ATTENDANCE_AKEDATA_ICON_IDS.get(canonical_id, canonical_id)
+        return f"{_ATTENDANCE_AKEDATA_ITEM_ICON_BASE}/{icon_id}.png"
     return ""
 
 
@@ -1452,7 +1476,8 @@ def _attendance_icon_value(value: Any, *, _depth: int = 0) -> str:
     if _depth > 3:
         return ""
     if isinstance(value, str):
-        return value.strip()
+        icon = value.strip()
+        return icon if icon.startswith(("http://", "https://", "data:")) else ""
     if not isinstance(value, dict):
         return ""
     for key in ("icon", "iconUrl", "iconPath", "image", "imageUrl", "url", "src"):
@@ -1499,8 +1524,12 @@ def _attendance_id_candidates(value: Any, *, _depth: int = 0) -> tuple[str, ...]
             "resource_id",
             "iconId",
             "icon",
+            "iconUrl",
+            "iconPath",
             "image",
+            "imageUrl",
             "url",
+            "src",
             "name",
             "itemName",
             "resourceName",
