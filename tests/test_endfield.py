@@ -4,6 +4,7 @@ import importlib.util
 import asyncio
 import copy
 import io
+import json
 import struct
 import sys
 import tempfile
@@ -837,22 +838,35 @@ class EndfieldCommandParserTests(unittest.TestCase):
 
     def test_endfield_help_image_and_spec_cover_account_features(self):
         image_path = ROOT / "assets/image/help/endfield.png"
-        spec = (ROOT / "scripts/help_pages.json").read_text(encoding="utf-8")
+        pages = json.loads((ROOT / "scripts/help_pages.json").read_text(encoding="utf-8"))["pages"]
+        spec = next(page for page in pages if page["id"] == "endfield")
+        entries = {
+            item["command"]: item
+            for section in spec["sections"] for item in section["items"]
+        }
 
         with Image.open(image_path) as image:
-            self.assertEqual((image.size, image.mode), ((1075, 761), "RGBA"))
-        self.assertIn("/ef 绑定 / 添加账号  多账号追加（仅私聊）", spec)
-        self.assertIn("/ef 账号 [编号]  账号详情图：干员配装总览", spec)
-        self.assertIn("/ef 账号 基建 [账号]  据点与帝江号", spec)
-        self.assertIn("/ef 流水 [账号] [-d N]  汇总（-a全量）", spec)
-        self.assertIn("/ef 抽卡同步 [账号] [--full]", spec)
-        self.assertIn("/ef 抽卡记录 [账号] [页码] [--池 名称]", spec)
-        self.assertIn("/ef 抽卡导入 [账号]（仅私聊）", spec)
-        self.assertIn("/ef 速算 2腐蚀 200", spec)
-        self.assertIn("/ef 速算 <等级><效果> <技艺强度>", spec)
-        self.assertIn("等级 1–4；支持腐蚀 / 导电 / 碎甲", spec)
-        self.assertIn("返回最终数值、效果构成和持续时间", spec)
-        self.assertIn("超限自动分页", spec)
+            self.assertEqual(image.width, 1200)
+            # Height follows content; guard against returning to the clipped landscape card.
+            self.assertGreater(image.height, image.width)
+            self.assertLess(image.height, 3500)
+        for command in (
+            "/ef 账号 [编号]", "/ef 账号 基建 [账号]", "/ef 养成统计 [账号]",
+            "/ef 日常 [账号|全部]", "/ef 签到 [账号|全部]", "/ef 流水 [账号] [-d 天数]",
+            "/ef 抽卡同步 [账号] [--full]", "/ef 抽卡记录 [账号] [页码] [--池 名称]",
+            "/ef 奖章 缺章 [账号]", "/ef 档案 收集 [账号]", "/ef 持有率 [群内|全局]",
+            "/ef 影拓 [账号 编号]", "/ef 回响 [账号 编号]",
+        ):
+            self.assertIn(command, entries)
+        for command in ("/ef 绑定", "/ef 主账号 <编号>", "/ef 解绑 <编号>", "/ef 抽卡导入 [账号]"):
+            self.assertEqual(entries[command]["badge"], "仅私聊")
+        calc = entries["/ef 速算 <等级><效果> <技艺强度>"]
+        self.assertIn("/ef 速算 2腐蚀 200", calc["description"])
+        self.assertIn("/zmd", spec["subtitle"])
+        self.assertEqual(len(spec["sections"]), 8)
+        for section in spec["sections"]:
+            self.assertTrue(section["heading"])
+            self.assertTrue(all(item["description"] for item in section["items"]))
 
     def test_gacha_import_is_private_only_before_phone_prompt(self):
         source = (ROOT / "plugins/endfield/handlers.py").read_text(encoding="utf-8")

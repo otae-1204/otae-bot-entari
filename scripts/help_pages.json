@@ -127,71 +127,112 @@
     {
       "id": "endfield",
       "file": "endfield.png",
-      "title": "终末地功能说明",
-      "content_y": 160,
-      "columns": [
-        [
-          {
-            "heading": "账号管理",
-            "items": [
-              "/ef 绑定 / 添加账号  多账号追加（仅私聊）",
-              "/ef 账号 [编号]  账号详情图：干员配装总览",
-              "/ef 账号 基建 [账号]  据点与帝江号心情",
-              "/ef 养成统计 [账号]  当前档案养成投入",
-              "/ef 流水 [账号] [-d N]  汇总（-a全量）",
-              "/ef 主账号 / 解绑 <编号>（仅私聊）"
-            ]
-          },
-          {
-            "heading": "签到与抽卡",
-            "items": [
-              "/ef 签到 [账号/全部]",
-              "/ef 抽卡 [账号]  同步并生成分析",
-              "/ef 抽卡同步 [账号] [--full]",
-              "/ef 抽卡记录 [账号] [页码] [--池 名称]",
-              "/ef 抽卡导入 [账号]（仅私聊）"
-            ]
-          },
-          {
-            "heading": "异常效果速算",
-            "items": [
-              "/ef 速算 <等级><效果> <技艺强度>",
-              "例：/ef 速算 2腐蚀 200",
-              "等级 1–4；支持腐蚀 / 导电 / 碎甲",
-              "返回最终数值、效果构成和持续时间"
-            ]
-          }
-        ],
-        [
-          {
-            "heading": "查询、关卡与配装",
-            "items": [
-              "/ef <关键词>  查询干员、武器、装备、关卡",
-              "/ef 干员|武器|装备 [关键词]  类型速查",
-              "/ef 装备 主力量 副敏捷  属性筛选",
-              "/ef 版本日历  查看版本开放日程",
-              "/ef 搜索 <关键词> | /efs <关键词>",
-              "-s <fz|akedata|warfarin>  指定数据源",
-              "/ef 副本 [关卡] [变体|总览]",
-              "空参数看目录；省略变体默认最高等级",
-              "/ef 影拓 / 回响 [账号|@群友]  个人总览",
-              "/ef 影拓 / 回响 历史 [第N页]  历史/转发",
-              "/ef 影拓 / 回响 <名称> ...  指定详情",
-              "/ef 配装 <干员> [武器/装备]",
-              "可追加潜能、技能等级、装备锻造"
-            ]
-          },
-          {
-            "heading": "蚀刻章统计",
-            "items": [
-              "/ef 奖章  总数、等级、版本新增",
-              "/ef 奖章 刷新  更新当前/基线快照",
-              "/ef 奖章 缺章 [账号]  未获/未满/未镀层"
-            ]
-          }
-        ]
+      "title": "终末地 · 指令手册",
+      "subtitle": "/ef 与 /zmd 等价，以下统一使用 /ef",
+      "legend": "<内容> 必填　[内容] 选填　| 表示任选其一；输入时不带括号",
+      "groups": [
+        {"id": "reference", "title": "资料与工具"},
+        {"id": "personal", "title": "我的账号"}
       ],
-      "footnote": "<>必填，[]选填；超限自动分页"
+      "sections": [
+        {
+          "heading": "资料检索",
+          "group": "reference",
+          "access": "无需绑定",
+          "items": [
+            {"command": "/ef <关键词>", "description": "查询干员、武器、装备或关卡；例：/ef 佩丽卡"},
+            {"command": "/ef 干员 [名称|元素|职业]", "description": "不填参数看干员速查；例：/ef 干员 灼热"},
+            {"command": "/ef 武器 [名称|类型]", "description": "不填参数看武器速查；例：/ef 武器 单手剑"},
+            {"command": "/ef 装备 [名称|套组名]", "description": "不填参数看套组目录；加 --all 查看全部稀有度"},
+            {"command": "/ef 搜索 <关键词>", "description": "先列出候选再选择，也可用 /efs <关键词>"}
+          ],
+          "notes": ["查看来源：/ef 数据源；查询末尾加 -s fz、-s akedata 或 -s warfarin 可指定数据源。"]
+        },
+        {
+          "heading": "账号管理",
+          "group": "personal",
+          "access": "从绑定开始",
+          "items": [
+            {"command": "/ef 绑定", "description": "按提示绑定森空岛；/ef 添加账号 可追加账号", "badge": "仅私聊"},
+            {"command": "/ef 账号 [编号]", "description": "查看干员配装与养成；多账号不填编号时按提示选择", "badge": "需绑定"},
+            {"command": "/ef 主账号 <编号>", "description": "切换默认使用的账号", "badge": "仅私聊"},
+            {"command": "/ef 解绑 <编号>", "description": "移除指定的绑定账号", "badge": "仅私聊"}
+          ],
+          "notes": ["下文 [账号] 可填编号、昵称或 UID 后四位。个人挑战需加“账号”，例如：/ef 影拓 账号 2。"]
+        },
+        {
+          "heading": "关卡与配装",
+          "group": "reference",
+          "access": "无需绑定",
+          "items": [
+            {"command": "/ef 副本 [关卡名] [变体名|总览]", "description": "不填关卡看目录；省略变体默认最高等级；也可用“关卡”"},
+            {"command": "/ef 配装 [干员] [武器或装备…]", "description": "不填参数按提示交互输入；可追加潜能、技能等级、装备锻造"},
+            {"command": "/ef 装备 主力量 副敏捷", "description": "按主副属性筛选；可替换为智识、意志等属性"},
+            {"command": "/ef 速算 <等级><效果> <技艺强度>", "description": "例：/ef 速算 2腐蚀 200；等级 1–4，支持腐蚀、导电、碎甲"}
+          ],
+          "notes": ["这里查询公开关卡资料；自己的通关成绩请看「个人挑战」。关卡资料固定使用 AkeData。"]
+        },
+        {
+          "heading": "日常与养成",
+          "group": "personal",
+          "access": "需绑定",
+          "items": [
+            {"command": "/ef 日常 [账号|全部]", "description": "理智、活跃度、每周事务与通行证；默认全部账号"},
+            {"command": "/ef 签到 [账号|全部]", "description": "森空岛签到；默认处理全部已绑定账号"},
+            {"command": "/ef 账号 基建 [账号]", "description": "据点存票、增长速度与帝江号心情"},
+            {"command": "/ef 养成统计 [账号]", "description": "当前档案可见的养成投入与材料明细"},
+            {"command": "/ef 流水 [账号] [-d 天数]", "description": "源石、嵌晶玉、武库配额；默认最近一个月，加 -a 查全量"}
+          ]
+        },
+        {
+          "heading": "版本与收藏",
+          "group": "reference",
+          "access": "个人进度需绑定",
+          "items": [
+            {"command": "/ef 版本日历", "description": "当前版本的开放日程"},
+            {"command": "/ef 奖章", "description": "蚀刻章总数、等级分布与版本新增"},
+            {"command": "/ef 奖章 缺章 [账号]", "description": "自己的未获得、未升满、未镀层奖章", "badge": "需绑定"},
+            {"command": "/ef 档案", "description": "档案库各页签总数与版本新增"},
+            {"command": "/ef 档案 收集 [账号]", "description": "自己的档案收集进度", "badge": "需绑定"}
+          ],
+          "notes": ["更新版本数据：/ef 奖章 刷新 或 /ef 档案 刷新。"]
+        },
+        {
+          "heading": "抽卡记录",
+          "group": "personal",
+          "access": "需绑定",
+          "items": [
+            {"command": "/ef 抽卡 [账号]", "description": "同步抽卡记录并生成分析卡"},
+            {"command": "/ef 抽卡同步 [账号] [--full]", "description": "单独同步记录；--full 重拉官方近 90 天窗口"},
+            {"command": "/ef 抽卡记录 [账号] [页码] [--池 名称]", "description": "按页查看记录，可筛选指定卡池"},
+            {"command": "/ef 抽卡导入 [账号]", "description": "按提示导入小黑盒历史统计", "badge": "仅私聊"}
+          ]
+        },
+        {
+          "heading": "群内统计",
+          "group": "reference",
+          "access": "匿名汇总",
+          "items": [
+            {"command": "/ef 持有率 [群内|全局]", "description": "干员持有率；群聊默认群内，私聊默认全局"},
+            {"command": "/ef 持有率 刷新 [群内|全局]", "description": "群管理员可刷新本群；机器人管理员可刷新全局", "badge": "管理权限"}
+          ],
+          "notes": ["统计基于已绑定账号的可用数据，以匿名形式展示。"]
+        },
+        {
+          "heading": "个人挑战",
+          "group": "personal",
+          "access": "需绑定",
+          "items": [
+            {"command": "/ef 影拓 [账号 编号]", "description": "当前主题进度；也可用完整名称“影拓丰碑”"},
+            {"command": "/ef 回响 [账号 编号]", "description": "当前赛季星数与个人记录；也可用“战争回响”"},
+            {"command": "/ef 影拓 历史 [第N页]", "description": "查看历史主题；回响同样支持“历史”"},
+            {"command": "/ef 影拓 <主题> [关卡] [普通|苦难]", "description": "查看指定挑战详情；可在末尾加“账号 编号”"},
+            {"command": "/ef 回响 <赛季> [轮换] [关卡]", "description": "可追加普通、困难或残酷，再加“账号 编号”"}
+          ],
+          "notes": ["历史查询也支持末尾加“账号 编号”；群聊末尾 @群友，可查询对方绑定的主账号。"]
+        }
+      ],
+      "footnote": "再次查看：/zmd help · /ef help · /help ef"
     },
     {
       "id": "tibo",
