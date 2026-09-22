@@ -4,7 +4,7 @@
 
 ![樱花粉视频与直播卡片](images/bilibili-cards-sakura.png)
 
-上图使用用户指定的公开直播间和视频封面；开播、下播两张为样式演示，不代表当前直播状态。
+上图使用用户指定的公开直播间和视频封面；直播状态与“2 小时 18 分钟”时长均为演示数据，不代表真实直播场次。
 
 ## 展示规则
 
@@ -25,6 +25,17 @@
 
 视觉状态由 `card_type` 决定，不依赖旧英文 `badge`。未开播房间的预览不再暗示刚刚下播；订阅轮询仍按直播状态变化发送通知。
 
+开播订阅通知按顺序发送两条消息：卡片、独立纯文本直播间链接，群聊和私聊都能直接点击。两条消息共用接收方发送锁，避免多个主播同时开播时图文链接交错；下播、视频和动态通知保持单张卡片。
+
+## 下播时长
+
+- 直播期间读取当前 `get_info` 响应的 `live_time`，按北京时间（UTC+8）解析为开播时间。中途订阅也使用接口开播时间，不从订阅时刻起算。
+- 在现有 `targets` 记录中保存 `live_started_at` 和 `live_last_seen_at`；旧数据库自动加列，保留原有订阅，bot 重启后可继续使用记录。
+- 检测到下播时，用本次检测时间减去开播时间，顶部显示“本次直播约 2 小时 18 分钟”。不足一分钟时显示“本次直播不足 1 分钟”，超过一天仍累计为小时。
+- 由于沿用每分钟轮询，结果是估算值，存在轮询、网络与调度延迟。没有可靠开播时间、时间异常，或距离上次确认仍在直播超过 180 秒时，显示“本次直播时长未知”。
+- 直播中的 API 开始时间偶尔缺失时，只在 180 秒内存在有效直播记录的情况下保留旧值；长时间断联后需重新取得接口时间。接口返回新的开播时间时改用新场次时间，下播后清空当前场次记录。
+- 时长统计不新增 B 站查询、定时任务或数据库写入次数；时间字段随已有查询和更新处理。开播时每位接收方额外发送一条链接消息。链接预览的“未开播”不推测上一场时长。
+
 ## 本地预览
 
 在项目根目录运行，不启动 bot、不访问 B 站、不发送群消息：
@@ -39,6 +50,7 @@
 - `chat-size.png`：每张缩小到 300 px 宽的群聊尺寸示意。
 - `grayscale.png`：灰度对照。
 - `edge-cases.png`：竖图、方图、超宽图、坏图，以及长标题和长昵称。
+- `live_off.png`、`live_off_unknown.png`：约计时长与时长未知两种下播效果。
 - 各类型的独立原尺寸 PNG。
 
 默认封面和资料均为脚本生成的示例，可传入 `--cover "C:\path\cover.jpg"` 检查本地真实封面。
@@ -46,10 +58,10 @@
 ## 验证
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests/test_bilibili_cards.py tests/test_core_logic.py tests/test_runtime_optimization.py tests/test_endfield_performance.py -k "bili or Bilibili" -q
+.\.venv\Scripts\python.exe -m pytest tests/test_bilibili_cards.py tests/test_bilibili_live_duration.py tests/test_bilibili_notifications.py tests/test_core_logic.py tests/test_runtime_optimization.py tests/test_endfield_performance.py -k "bili or Bilibili" -q
 ```
 
-本次 58 项相关测试通过，覆盖封面四角保留、比例、EXIF 旋转、透明图片、极端比例、状态可辨识、长文本不重叠、失败兜底、订阅状态转换、资源并发与既有 B 站逻辑。已人工检查离线渲染图，并通过真实接口验证以下链接的解析、封面/头像下载和 PNG 生成：
+本次 108 项相关测试通过，覆盖封面四角保留、比例、EXIF 旋转、透明图片、极端比例、状态可辨识、长文本不重叠、失败兜底、订阅状态转换、资源并发与既有 B 站逻辑，以及数据库迁移、重启后计时、中途订阅、重新开播、时区、断联与缺失时间、群聊/私聊链接发送顺序、并发发送不交错和接收方失败隔离。已人工检查离线渲染图，并通过真实接口验证以下链接的解析、封面/头像下载和 PNG 生成：
 
 - [直播间 25731103](https://live.bilibili.com/25731103)：2026-09-22 17:05（北京时间）查询时未开播，生成“未开播”卡片。
 - [视频 BV1extE6LEKB](https://www.bilibili.com/video/BV1extE6LEKB/)：完整保留 2400×1350 封面与长标题；隐藏接口简介中的占位符 `-`。

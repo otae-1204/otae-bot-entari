@@ -131,7 +131,11 @@ def _render_bili_card(
         anchor="lt",
     )
     draw.text(
-        (PADDING + 90, 100), style.hint, font=FONT_SMALL, fill=style.accent, anchor="lt"
+        (PADDING + 90, 100),
+        _status_hint(card, style),
+        font=FONT_SMALL,
+        fill=style.accent,
+        anchor="lt",
     )
     draw.text(
         (CANVAS_W - PADDING, 58),
@@ -254,6 +258,22 @@ def _draw_status_icon(
             (cx - 9, cy + 12, cx - 9, cy + 20, cx + 2, cy + 12), fill=CARD_BG, width=3
         )
         draw.line((cx - 9, cy - 4, cx + 9, cy - 4), fill=CARD_BG, width=3)
+
+
+def _status_hint(card: BiliCard, style: _CardStyle) -> str:
+    if card.card_type != "live_off":
+        return style.hint
+    seconds = card.live_duration_seconds
+    if seconds is None or seconds < 0:
+        return "本次直播时长未知"
+    minutes = seconds // 60
+    if minutes == 0:
+        return "本次直播不足 1 分钟"
+    hours, minutes = divmod(minutes, 60)
+    parts = ([f"{hours} 小时"] if hours else []) + (
+        [f"{minutes} 分钟"] if minutes else []
+    )
+    return "本次直播约 " + " ".join(parts)
 
 
 def _author_detail(card: BiliCard) -> str:

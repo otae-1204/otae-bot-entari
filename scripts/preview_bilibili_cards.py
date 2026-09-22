@@ -153,10 +153,25 @@ def main() -> None:
             card.description = ""
             card.item_id = ""
             card.published_at = 0
+        if kind == "live_off":
+            card.live_duration_seconds = 2 * 3600 + 18 * 60
         path = args.output / f"{kind}.png"
         path.write_bytes(renderer._render_bili_card(card, cover, _png(avatar)))
         if kind in ("video", "live_on", "live_off"):
             main_paths.append(path)
+    # Exercise the unknown-duration fallback alongside the estimated duration.
+    unknown = replace(
+        base,
+        card_type="live_off",
+        live_duration_seconds=None,
+        url="https://live.bilibili.com/123456",
+        description="",
+        item_id="",
+        published_at=0,
+    )
+    (args.output / "live_off_unknown.png").write_bytes(
+        renderer._render_bili_card(unknown, cover, _png(avatar))
+    )
     edge_paths = []
     for name, size in (
         ("portrait", (540, 960)),
