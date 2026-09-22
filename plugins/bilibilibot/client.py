@@ -251,15 +251,17 @@ class BiliClient:
     async def live_card(self, target: TargetInfo) -> BiliCard:
         live = await self._live_room(target.room_id or target.uid)
         is_live = int(live.get("live_status") or 0) == 1
+        # A room preview knows current status, not whether a stream just ended.
+        # Only the subscription transition in BiliService emits live_off.
         return BiliCard(
-            "live_on" if is_live else "live_off",
+            "live_on" if is_live else "live_idle",
             title=str(live.get("title") or target.last_title or "直播间"),
             author=target.name,
             subtitle="正在直播" if is_live else "当前未开播",
             cover_url=str(live.get("user_cover") or live.get("cover") or target.last_cover or ""),
             avatar_url=target.avatar_url,
             url=f"https://live.bilibili.com/{target.room_id or live.get('room_id') or target.uid}",
-            badge="LIVE" if is_live else "ENDED",
+            badge="LIVE" if is_live else "OFFLINE",
             uid=target.uid,
             room_id=str(target.room_id or live.get("room_id") or ""),
             published_at=int(time.time()),
