@@ -49,10 +49,17 @@ class BiliStore:
                 last_cover TEXT NOT NULL DEFAULT '',
                 last_desc TEXT NOT NULL DEFAULT '',
                 updated_at INTEGER NOT NULL DEFAULT 0,
+                live_started_at INTEGER NOT NULL DEFAULT 0,
+                live_last_seen_at INTEGER NOT NULL DEFAULT 0,
                 UNIQUE(kind, uid)
             )
             """
         )
+        # Existing subscription databases gain timing fields without losing data.
+        columns = {row["name"] for row in cur.execute("PRAGMA table_info(targets)")}
+        for column in ("live_started_at", "live_last_seen_at"):
+            if column not in columns:
+                cur.execute(f"ALTER TABLE targets ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS subscriptions (
@@ -142,8 +149,8 @@ class BiliStore:
             raise ValueError(f"unsupported target kind: {target.kind}")
         self.conn.execute(
             """
-            INSERT INTO targets(kind, uid, room_id, name, avatar_url, latest_id, latest_ts, is_live, last_title, last_cover, last_desc, updated_at)
-            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO targets(kind, uid, room_id, name, avatar_url, latest_id, latest_ts, is_live, last_title, last_cover, last_desc, updated_at, live_started_at, live_last_seen_at)
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(kind, uid) DO UPDATE SET
                 room_id = excluded.room_id,
                 name = excluded.name,
@@ -154,7 +161,9 @@ class BiliStore:
                 last_title = excluded.last_title,
                 last_cover = excluded.last_cover,
                 last_desc = excluded.last_desc,
-                updated_at = excluded.updated_at
+                updated_at = excluded.updated_at,
+                live_started_at = excluded.live_started_at,
+                live_last_seen_at = excluded.live_last_seen_at
             """,
             (
                 target.kind,
@@ -169,6 +178,8 @@ class BiliStore:
                 target.last_cover,
                 target.last_desc,
                 int(time.time()),
+                int(target.live_started_at or 0),
+                int(target.live_last_seen_at or 0),
             ),
         )
         if commit:
@@ -264,4 +275,6 @@ class BiliStore:
             last_title=str(row["last_title"] or ""),
             last_cover=str(row["last_cover"] or ""),
             last_desc=str(row["last_desc"] or ""),
+            live_started_at=int(row["live_started_at"] or 0),
+            live_last_seen_at=int(row["live_last_seen_at"] or 0),
         )

@@ -23,6 +23,8 @@ class TargetInfo:
     last_cover: str = ""
     last_desc: str = ""
     url: str = ""
+    live_started_at: int = 0  # API start time, persisted across bot restarts.
+    live_last_seen_at: int = 0  # Last successful observation of an ongoing stream.
 
 
 @dataclass(slots=True)
@@ -48,3 +50,5 @@ class BiliCard:
     room_id: str = ""
     item_id: str = ""
     published_at: int = 0
+    live_started_at: int = 0
+    live_duration_seconds: int | None = None  # Estimated at the poll detecting the end.

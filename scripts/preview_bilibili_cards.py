@@ -1,0 +1,205 @@
+"""Offline card previews. Run: python scripts/preview_bilibili_cards.py.
+
+Uses generated sample artwork by default. Pass --cover /path/to/image to inspect
+an actual cover. Outputs PNGs to output/bilibili-cards without loading bot handlers.
+"""
+
+from __future__ import annotations
+
+import argparse
+import importlib
+import sys
+import types
+from dataclasses import replace
+from datetime import datetime, timezone
+from io import BytesIO
+from pathlib import Path
+
+from PIL import Image, ImageDraw, ImageOps
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+package = types.ModuleType("bilibili_card_preview")
+package.__path__ = [str(ROOT / "plugins/bilibilibot")]
+sys.modules[package.__name__] = package
+renderer = importlib.import_module(f"{package.__name__}.draw")
+models = importlib.import_module(f"{package.__name__}.models")
+
+
+def _png(image: Image.Image) -> bytes:
+    output = BytesIO()
+    image.save(output, format="PNG")
+    return output.getvalue()
+
+
+def _sample_cover(size: tuple[int, int]) -> bytes:
+    """A source image with visible corner markers to reveal accidental cropping."""
+    width, height = size
+    image = Image.new("RGB", size, (228, 221, 230))
+    draw = ImageDraw.Draw(image)
+    draw.ellipse(
+        (width * 0.62, height * 0.10, width * 0.90, height * 0.10 + width * 0.28),
+        fill=(249, 237, 218),
+    )
+    draw.polygon(
+        (
+            (0, height * 0.65),
+            (width * 0.30, height * 0.42),
+            (width * 0.62, height * 0.80),
+            (width, height * 0.51),
+            (width, height),
+            (0, height),
+        ),
+        fill=(188, 171, 188),
+    )
+    draw.polygon(
+        (
+            (0, height * 0.84),
+            (width * 0.38, height * 0.67),
+            (width * 0.70, height * 0.88),
+            (width, height * 0.72),
+            (width, height),
+            (0, height),
+        ),
+        fill=(145, 133, 156),
+    )
+    margin = max(12, min(width, height) // 22)
+    mark = margin * 2
+    for x, y, dx, dy in (
+        (margin, margin, 1, 1),
+        (width - margin, margin, -1, 1),
+        (margin, height - margin, 1, -1),
+        (width - margin, height - margin, -1, -1),
+    ):
+        draw.line(
+            ((x, y + dy * mark), (x, y), (x + dx * mark, y)),
+            fill="white",
+            width=max(2, margin // 5),
+        )
+    title_font = renderer._font(max(20, min(width // 9, height // 5)), True)
+    small_font = renderer._font(max(14, min(width // 28, height // 14)))
+    draw.text(
+        (margin * 2, height * 0.24),
+        "晚风电台",
+        font=title_font,
+        fill=(79, 65, 87),
+        anchor="lt",
+    )
+    draw.text(
+        (margin * 2, height * 0.24 + title_font.size * 1.4),
+        "音乐 / 闲聊 / 日常",
+        font=small_font,
+        fill=(100, 83, 109),
+        anchor="lt",
+    )
+    return _png(image)
+
+
+def _board(paths: list[Path], destination: Path, *, width: int) -> None:
+    cards = []
+    for path in paths:
+        with Image.open(path) as source:
+            cards.append(
+                source.resize(
+                    (width, round(source.height * width / source.width)),
+                    Image.Resampling.LANCZOS,
+                )
+            )
+    gap = 16
+    board = Image.new(
+        "RGB",
+        (
+            len(cards) * (width + gap) + gap,
+            max(card.height for card in cards) + gap * 2,
+        ),
+        renderer.LIGHT_BG,
+    )
+    for index, card in enumerate(cards):
+        board.paste(card, (gap + index * (width + gap), gap))
+    board.save(destination)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--cover", type=Path)
+    parser.add_argument("--output", type=Path, default=ROOT / "output/bilibili-cards")
+    args = parser.parse_args()
+    args.output.mkdir(parents=True, exist_ok=True)
+    cover = args.cover.read_bytes() if args.cover else _sample_cover((1280, 720))
+    avatar = Image.new("RGB", (128, 128), (239, 216, 225))
+    renderer._draw_centered_text(
+        ImageDraw.Draw(avatar),
+        (0, 0, 128, 128),
+        "花",
+        renderer._font(66, True),
+        renderer.ROSE,
+    )
+    base = models.BiliCard(
+        "video",
+        "晚风电台｜一起听歌，聊聊今天的小事",
+        author="花园电台",
+        description="把忙碌留在白天，把音乐留给今晚。一起度过轻松的晚间时光。",
+        uid="123456789",
+        room_id="123456",
+        item_id="BV1xx411c7mD",
+        published_at=int(datetime(2026, 9, 22, 12, 0, tzinfo=timezone.utc).timestamp()),
+        url="https://www.bilibili.com/video/BV1xx411c7mD",
+    )
+    main_paths = []
+    for kind in ("video", "live_on", "live_off", "live_idle", "dynamic"):
+        card = replace(base, card_type=kind)
+        if kind.startswith("live_"):
+            card.url = "https://live.bilibili.com/123456"
+            card.description = ""
+            card.item_id = ""
+            card.published_at = 0
+        if kind == "live_off":
+            card.live_duration_seconds = 2 * 3600 + 18 * 60
+        path = args.output / f"{kind}.png"
+        path.write_bytes(renderer._render_bili_card(card, cover, _png(avatar)))
+        if kind in ("video", "live_on", "live_off"):
+            main_paths.append(path)
+    # Exercise the unknown-duration fallback alongside the estimated duration.
+    unknown = replace(
+        base,
+        card_type="live_off",
+        live_duration_seconds=None,
+        url="https://live.bilibili.com/123456",
+        description="",
+        item_id="",
+        published_at=0,
+    )
+    (args.output / "live_off_unknown.png").write_bytes(
+        renderer._render_bili_card(unknown, cover, _png(avatar))
+    )
+    edge_paths = []
+    for name, size in (
+        ("portrait", (540, 960)),
+        ("square", (800, 800)),
+        ("ultrawide", (1600, 400)),
+        ("missing", None),
+    ):
+        path = args.output / f"{name}.png"
+        card = replace(
+            base,
+            title="这是一个很长的标题，用于检查封面、标题、简介和底部链接是否挤在一起。"
+            * 6,
+            author="名字很长的花园电台主播" * 6,
+            description=base.description * 10,
+        )
+        path.write_bytes(
+            renderer._render_bili_card(
+                card, _sample_cover(size) if size else b"invalid image", None
+            )
+        )
+        edge_paths.append(path)
+    _board(main_paths, args.output / "comparison.png", width=450)
+    _board(main_paths, args.output / "chat-size.png", width=300)
+    _board(edge_paths, args.output / "edge-cases.png", width=300)
+    with Image.open(args.output / "comparison.png") as comparison:
+        ImageOps.grayscale(comparison).save(args.output / "grayscale.png")
+    print(args.output.resolve())
+
+
+if __name__ == "__main__":
+    main()

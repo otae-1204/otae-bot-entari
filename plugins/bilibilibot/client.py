@@ -10,6 +10,7 @@ import email.utils
 import xml.etree.ElementTree as ET
 from random import randint
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from hashlib import md5
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse
@@ -196,6 +197,8 @@ class BiliClient:
                 is_live=int(live_by_room.get("live_status") or 0) == 1,
                 last_title=str(live_by_room.get("title") or ""),
                 last_cover=str(live_by_room.get("user_cover") or live_by_room.get("cover") or ""),
+                live_started_at=self._live_start_timestamp(live_by_room),
+                live_last_seen_at=int(time.time()) if int(live_by_room.get("live_status") or 0) == 1 else 0,
             )
 
         profile = await self._live_user(value)
@@ -212,6 +215,8 @@ class BiliClient:
             is_live=int(live.get("live_status") or 0) == 1,
             last_title=str(live.get("title") or ""),
             last_cover=str(live.get("user_cover") or live.get("cover") or ""),
+            live_started_at=self._live_start_timestamp(live),
+            live_last_seen_at=int(time.time()) if int(live.get("live_status") or 0) == 1 else 0,
         )
 
     async def resolve_video_target(self, uid: str) -> TargetInfo:
@@ -251,18 +256,21 @@ class BiliClient:
     async def live_card(self, target: TargetInfo) -> BiliCard:
         live = await self._live_room(target.room_id or target.uid)
         is_live = int(live.get("live_status") or 0) == 1
+        # A room preview knows current status, not whether a stream just ended.
+        # Only the subscription transition in BiliService emits live_off.
         return BiliCard(
-            "live_on" if is_live else "live_off",
+            "live_on" if is_live else "live_idle",
             title=str(live.get("title") or target.last_title or "直播间"),
             author=target.name,
             subtitle="正在直播" if is_live else "当前未开播",
             cover_url=str(live.get("user_cover") or live.get("cover") or target.last_cover or ""),
             avatar_url=target.avatar_url,
             url=f"https://live.bilibili.com/{target.room_id or live.get('room_id') or target.uid}",
-            badge="LIVE" if is_live else "ENDED",
+            badge="LIVE" if is_live else "OFFLINE",
             uid=target.uid,
             room_id=str(target.room_id or live.get("room_id") or ""),
             published_at=int(time.time()),
+            live_started_at=self._live_start_timestamp(live),
         )
 
     async def latest_live_state(self, target: TargetInfo) -> TargetInfo:
@@ -276,7 +284,25 @@ class BiliClient:
             is_live=card.badge == "LIVE",
             last_title=card.title,
             last_cover=card.cover_url,
+            live_started_at=card.live_started_at,
+            live_last_seen_at=card.published_at if card.card_type == "live_on" else 0,
         )
+
+    @staticmethod
+    def _live_start_timestamp(live: dict[str, Any]) -> int:
+        if int(live.get("live_status") or 0) != 1:
+            return 0
+        try:
+            # Bilibili's live_time is a Beijing wall-clock string, independent
+            # of the bot host's timezone. Offline rooms return a zero date.
+            started_at = int(
+                datetime.strptime(str(live.get("live_time") or ""), "%Y-%m-%d %H:%M:%S")
+                .replace(tzinfo=timezone(timedelta(hours=8)))
+                .timestamp()
+            )
+        except (ValueError, OverflowError, OSError):
+            return 0
+        return started_at if 0 < started_at <= int(time.time()) else 0
 
     async def latest_video(self, uid: str) -> BiliCard:
         await self.ensure_wbi_keys()

@@ -30,6 +30,10 @@ KIND_ALIASES = {
     "dynamic": KIND_DYNAMIC,
     "动态": KIND_DYNAMIC,
 }
+
+# Polling normally runs every minute. A long outage makes the end time unknown.
+LIVE_TIMING_MAX_GAP_SECONDS = 180
+
 def expand_kinds(raw: str) -> list[str]:
     kind = KIND_ALIASES.get(raw.lower(), KIND_ALIASES.get(raw))
     if kind == "all":
@@ -129,6 +133,26 @@ class BiliService:
 
     async def _check_live_target(self, target: TargetInfo) -> None:
         latest = await self.client.latest_live_state(target)
+        observed_at = int(time.time())
+        recent_live_observation = (
+            target.is_live
+            and 0 < target.live_last_seen_at <= observed_at
+            and observed_at - target.live_last_seen_at <= LIVE_TIMING_MAX_GAP_SECONDS
+        )
+        duration = None
+        if latest.is_live:
+            if not 0 < latest.live_started_at <= observed_at:
+                latest.live_started_at = (
+                    target.live_started_at
+                    if recent_live_observation and 0 < target.live_started_at <= target.live_last_seen_at
+                    else 0
+                )
+            latest.live_last_seen_at = observed_at
+        else:
+            if recent_live_observation and 0 < target.live_started_at <= target.live_last_seen_at:
+                duration = observed_at - target.live_started_at
+            latest.live_started_at = 0
+            latest.live_last_seen_at = 0
         if latest.is_live != target.is_live:
             card = BiliCard(
                 "live_on" if latest.is_live else "live_off",
@@ -141,6 +165,7 @@ class BiliService:
                 badge="LIVE" if latest.is_live else "ENDED",
                 uid=target.uid,
                 room_id=latest.room_id or target.room_id,
+                live_duration_seconds=duration,
             )
             await self.broadcast(target.kind, target.uid, card)
         self.store.upsert_target(latest)
@@ -258,6 +283,9 @@ class BiliService:
             try:
                 async with lock:
                     await ChainMsg([image]).send(target, bot)
+                    if card.card_type == "live_on" and card.url.strip():
+                        # Keep the image and clickable link together per recipient.
+                        await ChainMsg.text(card.url.strip()).send(target, bot)
             except Exception as exc:
                 logger.warning(f"[bilibilibot] send to {sub.subscriber_type}:{sub.subscriber_id} failed: {exc}")
 
