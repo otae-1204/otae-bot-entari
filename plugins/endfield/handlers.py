@@ -37,6 +37,7 @@ from otae_bot.adapters.entari import (
     timer,
 )
 from otae_bot.adapters.onebot import send_forward_images
+from otae_bot.help_images import pick_help_image
 from otae_bot.infrastructure.http.client import clear_http_cache, get_http_cache_stats
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
 
@@ -3021,8 +3022,9 @@ async def _render_current_version_calendar() -> bytes:
 
 
 async def _finish_endfield_help(matcher) -> None:
-    if ENDFIELD_HELP_IMAGE_PATH.exists():
-        return await matcher.finish(ChainMsg([make_image(path=ENDFIELD_HELP_IMAGE_PATH)]))
+    image = pick_help_image(ENDFIELD_HELP_IMAGE_PATH)
+    if image:
+        return await matcher.finish(ChainMsg([make_image(path=image)]))
     return await matcher.finish(format_help())
 
 

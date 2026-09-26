@@ -1,0 +1,35 @@
+{
+  "default": "school",
+  "art": [
+    {
+      "id": "school",
+      "file": "school.png",
+      "focus": [0.58, 0.32],
+      "credit": "BanG Dream! 卡面 card_normal；原帮助图底板所用插画"
+    },
+    {
+      "id": "wedding",
+      "file": "wedding.png",
+      "focus": [0.38, 0.26],
+      "credit": "BanG Dream! 卡面 card_after_training"
+    },
+    {
+      "id": "apple",
+      "file": "apple.jpg",
+      "focus": [0.37, 0.28],
+      "credit": "pixiv 140824056"
+    },
+    {
+      "id": "okhands",
+      "file": "okhands.jpg",
+      "focus": [0.5, 0.2],
+      "credit": "pixiv 139863557"
+    },
+    {
+      "id": "plush",
+      "file": "plush.jpg",
+      "focus": [0.5, 0.3],
+      "credit": "豆包 AI 生成；右下角水印与左侧签名靠焦点裁切避开"
+    }
+  ]
+}

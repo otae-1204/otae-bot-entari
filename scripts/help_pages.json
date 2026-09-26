@@ -4,6 +4,7 @@
       "id": "main",
       "file": "main.png",
       "title": "otaebot 使用说明",
+      "art": ["school", "apple"],
       "columns": [
         [
           {
@@ -60,12 +61,14 @@
             ]
           }
         ]
-      ]
+      ],
+      "footnote": "注： <> 为必填，[] 为选填"
     },
     {
       "id": "usage",
       "file": "使用说明.png",
       "title": "otaebot 使用说明",
+      "art": ["school"],
       "columns": [
         [
           {
@@ -122,81 +125,128 @@
             ]
           }
         ]
-      ]
+      ],
+      "footnote": "注： <> 为必填，[] 为选填"
     },
     {
       "id": "endfield",
       "file": "endfield.png",
       "title": "终末地功能说明",
-      "content_y": 160,
+      "subtitle": "/ef 与 /zmd 等价",
+      "art": ["okhands", "plush"],
       "columns": [
         [
           {
             "heading": "账号管理",
+            "access": "从绑定开始",
             "items": [
-              "/ef 绑定 / 添加账号  多账号追加（仅私聊）",
-              "/ef 账号 [编号]  账号详情图：干员配装总览",
-              "/ef 账号 基建 [账号]  据点与帝江号心情",
-              "/ef 养成统计 [账号]  当前档案养成投入",
-              "/ef 流水 [账号] [-d N]  汇总（-a全量）",
-              "/ef 主账号 / 解绑 <编号>（仅私聊）"
+              {"cmd": "/ef 绑定", "desc": "按提示绑定森空岛", "badge": "仅私聊"},
+              {"cmd": "/ef 添加账号", "desc": "追加更多账号", "badge": "仅私聊"},
+              {"cmd": "/ef 账号 [编号]", "desc": "干员配装与养成总览", "badge": "需绑定"},
+              {"cmd": "/ef 主账号 <编号>", "desc": "切换默认账号", "badge": "仅私聊"},
+              {"cmd": "/ef 解绑 <编号>", "desc": "移除绑定账号", "badge": "仅私聊"}
+            ],
+            "notes": ["[账号] 可填编号、昵称或 UID 后四位"]
+          },
+          {
+            "heading": "日常与养成",
+            "access": "需绑定",
+            "items": [
+              {"cmd": "/ef 日常 [账号|全部]", "desc": "理智、活跃度与通行证"},
+              {"cmd": "/ef 签到 [账号|全部]", "desc": "森空岛签到，默认全部账号"},
+              {"cmd": "/ef 账号 基建 [账号]", "desc": "据点与帝江号心情"},
+              {"cmd": "/ef 养成统计 [账号]", "desc": "养成投入与材料明细"},
+              {"cmd": "/ef 流水 [账号] [-d 天数]", "desc": "资源流水，-a 查全量"}
             ]
           },
           {
-            "heading": "签到与抽卡",
+            "heading": "抽卡记录",
+            "access": "需绑定",
             "items": [
-              "/ef 签到 [账号/全部]",
-              "/ef 抽卡 [账号]  同步并生成分析",
-              "/ef 抽卡同步 [账号] [--full]",
-              "/ef 抽卡记录 [账号] [页码] [--池 名称]",
-              "/ef 抽卡导入 [账号]（仅私聊）"
+              {"cmd": "/ef 抽卡 [账号]", "desc": "同步并生成分析卡"},
+              {"cmd": "/ef 抽卡同步 [账号] [--full]", "desc": "--full 重拉近 90 天"},
+              {"cmd": "/ef 抽卡记录 [账号] [页码] [--池 名称]", "desc": "分页查看"},
+              {"cmd": "/ef 抽卡导入 [账号]", "desc": "导入小黑盒统计", "badge": "仅私聊"}
             ]
           },
           {
-            "heading": "异常效果速算",
+            "heading": "个人挑战",
+            "access": "需绑定",
             "items": [
-              "/ef 速算 <等级><效果> <技艺强度>",
-              "例：/ef 速算 2腐蚀 200",
-              "等级 1–4；支持腐蚀 / 导电 / 碎甲",
-              "返回最终数值、效果构成和持续时间"
+              {"cmd": "/ef 影拓 [账号 编号]", "desc": "当前主题进度"},
+              {"cmd": "/ef 回响 [账号 编号]", "desc": "当前赛季星数与记录"},
+              {"cmd": "/ef 影拓 历史 [第N页]", "desc": "历史主题，回响同理"},
+              {"cmd": "/ef 影拓 <主题> [关卡] [普通|苦难]", "desc": "指定挑战详情"},
+              {"cmd": "/ef 回响 <赛季> [轮换] [关卡]", "desc": "可加普通、困难或残酷"}
+            ],
+            "notes": ["末尾加“账号 编号”指定账号；群聊末尾 @群友 查对方主账号"]
+          },
+          {
+            "heading": "群内统计",
+            "access": "匿名汇总",
+            "items": [
+              {"cmd": "/ef 持有率 [群内|全局]", "desc": "干员持有率"},
+              {"cmd": "/ef 持有率 刷新 [群内|全局]", "desc": "刷新统计", "badge": "管理权限"}
             ]
           }
         ],
         [
           {
-            "heading": "查询、关卡与配装",
+            "heading": "资料检索",
+            "access": "无需绑定",
             "items": [
-              "/ef <关键词>  查询干员、武器、装备、关卡",
-              "/ef 干员|武器|装备 [关键词]  类型速查",
-              "/ef 装备 主力量 副敏捷  属性筛选",
-              "/ef 版本日历  查看版本开放日程",
-              "/ef 搜索 <关键词> | /efs <关键词>",
-              "-s <fz|akedata|warfarin>  指定数据源",
-              "/ef 副本 [关卡] [变体|总览]",
-              "空参数看目录；省略变体默认最高等级",
-              "/ef 影拓 / 回响 [账号|@群友]  个人总览",
-              "/ef 影拓 / 回响 历史 [第N页]  历史/转发",
-              "/ef 影拓 / 回响 <名称> ...  指定详情",
-              "/ef 配装 <干员> [武器/装备]",
-              "可追加潜能、技能等级、装备锻造"
-            ]
+              {"cmd": "/ef <关键词>", "desc": "查询干员、武器、装备或关卡"},
+              {"cmd": "/ef 干员 [名称|元素|职业]", "desc": "干员速查"},
+              {"cmd": "/ef 武器 [名称|类型]", "desc": "武器速查"},
+              {"cmd": "/ef 装备 [名称|套组名]", "desc": "套组目录，--all 看全部"},
+              {"cmd": "/ef 装备 主力量 副敏捷", "desc": "按主副属性筛选"},
+              {"cmd": "/ef 搜索 <关键词>", "desc": "列出候选再选，同 /efs"}
+            ],
+            "notes": ["/ef 数据源 查看来源；末尾加 -s fz|akedata|warfarin 指定"]
           },
           {
-            "heading": "蚀刻章统计",
+            "heading": "关卡与配装",
+            "access": "无需绑定",
             "items": [
-              "/ef 奖章  总数、等级、版本新增",
-              "/ef 奖章 刷新  更新当前/基线快照",
-              "/ef 奖章 缺章 [账号]  未获/未满/未镀层"
-            ]
+              {"cmd": "/ef 副本 [关卡名] [变体名|总览]", "desc": "省略变体默认最高等级"},
+              {"cmd": "/ef 配装 [干员] [武器或装备…]", "desc": "可追加潜能、技能、锻造"},
+              {"cmd": "/ef 速算 <等级><效果> <技艺强度>", "desc": "例：/ef 速算 2腐蚀 200"}
+            ],
+            "notes": ["速算等级 1–4，支持腐蚀、导电、碎甲"]
+          },
+          {
+            "heading": "图鉴与档案",
+            "access": "无需绑定",
+            "items": [
+              {"cmd": "/ef 物品 [名称]", "desc": "说明与获取途径，同 材料"},
+              {"cmd": "/ef 道具 [名称]", "desc": "效果与恢复，同 食物"},
+              {"cmd": "/ef 敌人 [名称]", "desc": "抗性与出现区域，同 怪物"},
+              {"cmd": "/ef 词条 [名称]", "desc": "说明、关联与来源，同 术语"},
+              {"cmd": "/ef 档案 <名称>", "desc": "档案条目详情"}
+            ],
+            "notes": ["不填名称查看目录"]
+          },
+          {
+            "heading": "版本与收藏",
+            "access": "个人进度需绑定",
+            "items": [
+              {"cmd": "/ef 版本日历", "desc": "版本开放日程"},
+              {"cmd": "/ef 奖章", "desc": "蚀刻章总数与版本新增"},
+              {"cmd": "/ef 奖章 缺章 [账号]", "desc": "未获/未满/未镀层", "badge": "需绑定"},
+              {"cmd": "/ef 档案", "desc": "档案库总数与版本新增"},
+              {"cmd": "/ef 档案 收集 [账号]", "desc": "档案收集进度", "badge": "需绑定"}
+            ],
+            "notes": ["/ef 奖章 刷新、/ef 档案 刷新 更新版本数据"]
           }
         ]
       ],
-      "footnote": "<>必填，[]选填；超限自动分页"
+      "footnote": "<>必填，[]选填，|任选其一；超限自动分页"
     },
     {
       "id": "tibo",
       "file": "tibo.png",
       "title": "Tibo 雷达功能说明",
+      "art": ["plush"],
       "columns": [
         [
           {
@@ -236,6 +286,227 @@
         ]
       ],
       "footnote": "公开信息；不代表实时在线或官方承诺"
+    },
+    {
+      "id": "steam",
+      "file": "steam.png",
+      "title": "Steam 功能说明",
+      "art": ["apple"],
+      "columns": [
+        [
+          {
+            "heading": "账号绑定",
+            "items": [
+              "/steambind <SteamID/好友代码>  绑定账号",
+              "/steamunbind  解绑当前账号",
+              "/steamnickname [昵称]  设置播报昵称"
+            ]
+          },
+          {
+            "heading": "信息查询",
+            "items": [
+              "/steaminfo  查询自己的 Steam 主页",
+              "/steaminfo @用户  查询群友 Steam 主页",
+              "/steaminfo <SteamID/好友代码>  查询指定账号"
+            ]
+          },
+          {
+            "heading": "群状态",
+            "items": [
+              "/steamcheck  查看本群已绑定好友状态",
+              "/steamgame <游戏名/appid>  查询本群玩家游戏时长"
+            ]
+          }
+        ],
+        [
+          {
+            "heading": "播报设置",
+            "items": [
+              "/steamenable  启用本群 Steam 播报",
+              "/steamdisable  禁用本群 Steam 播报",
+              "/steamupdate [名称] [图片]  更新群播报信息"
+            ]
+          },
+          {
+            "heading": "缓存管理",
+            "access": "仅 SUPERUSER",
+            "items": [
+              "/steamcache refresh  刷新 Steam 游戏列表",
+              "/steamcache aliaslookupambiguous  管理游戏匹配缓存"
+            ],
+            "notes": ["普通用户无需使用"]
+          }
+        ]
+      ],
+      "footnote": "注： <> 为必填，[] 为选填"
+    },
+    {
+      "id": "minecraft",
+      "file": "minecraft.png",
+      "title": "Minecraft 功能说明",
+      "art": ["wedding"],
+      "columns": [
+        [
+          {
+            "heading": "服务器查询",
+            "items": [
+              "/ping [名称/地址]  查询服务器状态",
+              "/pinglist  查看本群服务器列表",
+              "/online [服务器] [-a]  查看在线时长排行"
+            ]
+          },
+          {
+            "heading": "服务器管理",
+            "items": [
+              "/addserver <名称> <地址>  保存服务器",
+              "/removeserver <名称>  删除服务器",
+              "/addservernickname <名称> <昵称>  添加服务器昵称"
+            ]
+          },
+          {
+            "heading": "修改服务器",
+            "items": [
+              "/updateservername <名称> <新名称>  改名",
+              "/updateserveraddress <名称> <新地址>  改地址"
+            ]
+          }
+        ],
+        [
+          {
+            "heading": "播报服务器",
+            "items": [
+              "/addbroadcast <名称> [地址]  加入播报列表",
+              "/removebroadcast <名称>  移出播报列表",
+              "/broadcastlist  查看播报列表与间隔",
+              "/broadcastinterval [时间]  设置间隔",
+              "/broadcastinterval reset  恢复默认"
+            ]
+          },
+          {
+            "heading": "修改播报",
+            "items": [
+              "/updatebroadcastaddress <名称> <地址>  改播报地址",
+              "/updatebroadcastname <名称> <新名称>  改播报名"
+            ]
+          },
+          {
+            "heading": "资料查询",
+            "items": [
+              "/wiki <内容>  搜索 Minecraft 中文 Wiki",
+              "/mod <mod名> [数量]  搜索 Mcmod 模组",
+              "/资料 <资料名>  搜索 Mcmod 资料"
+            ]
+          }
+        ]
+      ],
+      "footnote": "注： <> 为必填，[] 为选填"
+    },
+    {
+      "id": "bili",
+      "file": "bili.png",
+      "title": "BiliBili 功能说明",
+      "art": ["school"],
+      "columns": [
+        [
+          {
+            "heading": "订阅",
+            "items": [
+              "/bili follow <类型> <uid/房间号>  关注推送",
+              "/bili unfollow <类型> <uid/房间号>  取消关注",
+              "/bili list [类型]  查看订阅列表"
+            ]
+          },
+          {
+            "heading": "刷新",
+            "items": [
+              "/bili refresh <类型> <uid/房间号>  手动刷新基线",
+              "首次订阅  只建立基线，不推历史"
+            ]
+          }
+        ],
+        [
+          {
+            "heading": "类型",
+            "items": [
+              "all  直播、视频、动态全部订阅",
+              "live  直播开播/下播",
+              "video  视频发布",
+              "dynamic  动态发布"
+            ]
+          },
+          {
+            "heading": "链接预览",
+            "items": [
+              "B站视频/直播/动态链接  自动生成预览卡片",
+              "b23.tv 短链  自动解析预览",
+              "以 / 开头的命令  不会触发预览"
+            ]
+          }
+        ]
+      ],
+      "footnote": "注： <> 为必填，[] 为选填"
+    },
+    {
+      "id": "mcsm",
+      "file": "mcsm.png",
+      "title": "MCSM 功能说明",
+      "art": ["wedding"],
+      "columns": [
+        [
+          {
+            "heading": "面板绑定",
+            "items": [
+              "/mcsm bind <面板地址>  绑定当前群面板",
+              "私聊发送 API Key  完成面板认证",
+              "/mcsm unbindpanel  解绑面板并清空实例"
+            ]
+          },
+          {
+            "heading": "实例加入",
+            "items": [
+              "/mcsm bind <节点ID>  私聊选择实例",
+              "/mcsm bind <UUID> <别名> [节点ID]  直接绑定",
+              "/mcsm unbind <别名>  从本群移除实例"
+            ]
+          },
+          {
+            "heading": "实例查看",
+            "items": [
+              "/mcsm  默认查看本群实例",
+              "/mcsm list [-a]  查看实例列表",
+              "/mcsm status <别名>  查看实例详情"
+            ]
+          }
+        ],
+        [
+          {
+            "heading": "实例操作",
+            "items": [
+              "/mcsm start|stop <别名>  启动或停止",
+              "/mcsm restart|kill <别名>  重启或强杀",
+              "/mcsm cmd <别名> <命令>  执行控制台命令",
+              "/mcsm log <别名> [-a|-n 数量]  查看日志"
+            ]
+          },
+          {
+            "heading": "群级管理",
+            "items": [
+              "/mcsm admin add @某人  添加本群管理员",
+              "/mcsm admin del @某人  移除本群管理员",
+              "/mcsm admin list  查看本群管理员"
+            ]
+          },
+          {
+            "heading": "显示控制",
+            "items": [
+              "/mcsm hide <别名>  隐藏实例",
+              "/mcsm unhide <别名>  取消隐藏"
+            ],
+            "notes": ["群主、群管理员、SUPERUSER 自动有权限"]
+          }
+        ]
+      ],
+      "footnote": "注： <> 为必填，[] 为选填"
     }
   ]
 }
