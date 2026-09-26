@@ -18,6 +18,7 @@ from typing import Any
 from otae_bot.infrastructure.storage.json_store import JsonStore
 
 from ..catalog.models import ArchiveBaselineView, ArchiveItemView, ArchiveSnapshotView
+from ..catalog.views.archives import normalize_archive_snapshot
 
 _DEFAULT_PATH = str(Path("data") / "endfield" / "archive_snapshot.json")
 
@@ -114,7 +115,7 @@ def _dict_to_snapshot(data: dict[str, Any]) -> ArchiveSnapshotView:
         if isinstance(category_raw, dict)
         else {}
     )
-    return ArchiveSnapshotView(
+    return normalize_archive_snapshot(ArchiveSnapshotView(
         items=items,
         version=str(data.get("version") or ""),
         fetched_at=int(data.get("fetched_at") or 0),
@@ -123,7 +124,7 @@ def _dict_to_snapshot(data: dict[str, Any]) -> ArchiveSnapshotView:
         page_counts=page_counts,
         category_counts=category_counts,
         group_count=int(data.get("group_count") or 0),
-    )
+    ))
 
 
 def _baseline_to_dict(baseline: ArchiveBaselineView) -> dict[str, Any]:

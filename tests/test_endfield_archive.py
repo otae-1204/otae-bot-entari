@@ -18,7 +18,10 @@ from plugins.endfield.catalog.models import (
     ArchiveSnapshotView,
 )
 from plugins.endfield.catalog.service import EndfieldService
-from plugins.endfield.catalog.views.archives import build_akedata_archive_snapshot
+from plugins.endfield.catalog.views.archives import (
+    build_akedata_archive_snapshot,
+    normalize_archive_snapshot,
+)
 
 endfield_service_module = importlib.import_module("plugins.endfield.catalog.service")
 
@@ -111,6 +114,40 @@ def _make_snapshot(ids: list[str], *, version: str = "v") -> ArchiveSnapshotView
 
 
 class ArchiveSnapshotBuildTest(unittest.TestCase):
+    def test_exclusive_versions_count_once_without_merging_other_names(self):
+        pages, categories, groups, entries, i18n = _mini_tables()
+        categories["digital"] = {"categoryId": "digital", "name": {"text": "电子档案", "id": 0}}
+        for stem in (
+            "nar_sm1l1m4_hatman", "nar_sm1l1m5_hatman",
+            "nar_sm1l1m5_Alexander", "nar_sm1l1m5_Hans", "nar_other",
+        ):
+            # 反向输入，仍优先选 _1；未知组的同名 _1/_2 必须保留。
+            for variant in ((2, 1) if stem == "nar_other" else (3, 2, 1)):
+                iid = f"{stem}_{variant}"
+                groups[iid] = {"categoryId": "digital", "icon": f"icon_{variant}"}
+                entries[iid] = {
+                    "id": iid, "firstLvId": iid, "type": "text",
+                    "name": {"text": "同名档案", "id": 0},
+                }
+        snap = build_akedata_archive_snapshot(pages, categories, groups, entries, i18n)
+        self.assertEqual(snap.total_count, 11)  # 原有 5 + 4 份互斥档案 + 2 份独立同名档案
+        self.assertEqual(snap.page_counts["见闻辑录"], 7)
+        self.assertEqual(snap.category_counts["电子档案"], 6)
+        self.assertEqual(snap.group_count, 10)
+        by_id = {item.item_id: item for item in snap.items}
+        self.assertIn("nar_other_2", by_id)
+        self.assertNotIn("nar_sm1l1m5_Hans_3", by_id)
+        self.assertTrue(by_id["nar_sm1l1m5_Hans_1"].icon_url.endswith("/icon_1.png"))
+        self.assertEqual(normalize_archive_snapshot(snap), snap)
+
+    def test_exclusive_version_fallback_is_not_dropped(self):
+        snap = _make_snapshot(["nar_sm1l1m5_Hans_3", "nar_sm1l1m5_Hans_2"])
+        normalized = normalize_archive_snapshot(snap)
+        self.assertEqual(normalized.total_count, 1)
+        self.assertEqual(normalized.items[0].item_id, "nar_sm1l1m5_Hans_1")
+        self.assertEqual(normalized.items[0].name, "nar_sm1l1m5_Hans_2")
+        self.assertEqual(len(snap.items), 2)  # 不修改调用方的原快照
+
     def test_build_snapshot_localizes_and_filters(self):
         pages, categories, first_lv, all_item, i18n = _mini_tables()
         snap = build_akedata_archive_snapshot(
@@ -146,6 +183,21 @@ class ArchiveSnapshotBuildTest(unittest.TestCase):
 
 
 class ArchiveStoreRoundTripTest(unittest.TestCase):
+    def test_old_cache_counts_are_normalized_on_read(self):
+        items = [
+            _make_item(f"nar_sm1l1m5_Hans_{variant}", category_name="电子档案", group_id=str(variant))
+            for variant in (1, 2, 3)
+        ]
+        raw = _snapshot_to_dict(ArchiveSnapshotView(
+            items=items, total_count=3, page_counts={"见闻辑录": 3},
+            category_counts={"电子档案": 3}, group_count=3,
+        ))
+        back = _dict_to_snapshot(raw)
+        self.assertEqual(back.total_count, 1)
+        self.assertEqual(back.page_counts, {"见闻辑录": 1})
+        self.assertEqual(back.category_counts, {"电子档案": 1})
+        self.assertEqual(back.group_count, 1)
+
     def test_snapshot_dict_round_trip(self):
         pages, categories, first_lv, all_item, i18n = _mini_tables()
         snap = build_akedata_archive_snapshot(
@@ -216,6 +268,21 @@ class ArchiveServiceTest(unittest.IsolatedAsyncioTestCase):
     def _service(self) -> EndfieldService:
         return EndfieldService(AsyncMock())
 
+    def test_exclusive_versions_do_not_become_new_archives(self):
+        service = self._service()
+        current = _make_snapshot(["nar_sm1l1m5_Hans_1", "nar_sm1l1m5_Hans_2", "nar_new"])
+        baseline = ArchiveBaselineView(version="1.4", ids=["nar_sm1l1m5_Hans_3"])
+        diff = service.build_archive_diff(current, baseline)
+        self.assertEqual(diff.current.total_count, 2)
+        self.assertEqual([item.item_id for item in diff.new_items], ["nar_new"])
+        diff = service.build_archive_diff(current, ArchiveBaselineView(version="1.4"))
+        self.assertEqual(len(diff.new_items), 2)
+        progress = service.build_archive_progress_view(
+            {"data": {"detail": {"base": {"docNum": 1}}}}, current,
+            nickname="管理员", uid="123", server_name="国服",
+        )
+        self.assertEqual((progress.collected, progress.total_count, progress.missing), (1, 2, 1))
+
     def test_build_archive_diff(self):
         service = self._service()
         current = _make_snapshot(["nar_a", "nar_b", "nar_c"], version="1.5")
@@ -284,6 +351,21 @@ class ArchiveServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(snap.version, "1.5")
         self.assertEqual(snap.page_counts, {"中枢档案": 3, "音像存档": 1, "见闻辑录": 1})
 
+    async def test_completeness_check_uses_collectible_count(self):
+        pages, categories, groups, _, i18n = _mini_tables()
+        entries = {
+            f"nar_sm1l1m5_Hans_{variant}": {
+                "id": f"nar_sm1l1m5_Hans_{variant}", "firstLvId": "paper_1", "type": "text",
+            }
+            for variant in (1, 2, 3)
+        }
+        tables = (pages, categories, groups, entries, i18n, "1.5.3@test-1")
+        with patch.object(
+            endfield_service_module, "fetch_akedata_archive_tables", AsyncMock(return_value=tables)
+        ):
+            snap = await self._service().fetch_archive_snapshot_akedata()
+        self.assertEqual(snap.total_count, 1)
+
     async def test_fetch_archive_baseline(self):
         service = self._service()
         manifest = {
@@ -295,6 +377,10 @@ class ArchiveServiceTest(unittest.IsolatedAsyncioTestCase):
             ],
         }
         prev_table = {"nar_old": {"id": "nar_old"}, "nar_keep": {"id": "nar_keep"}}
+        prev_table.update({
+            f"nar_sm1l1m5_Hans_{variant}": {"id": f"nar_sm1l1m5_Hans_{variant}"}
+            for variant in (2, 3)
+        })
         with patch.object(
             endfield_service_module, "fetch_akedata_manifest", new=AsyncMock(return_value=manifest)
         ), patch.object(
@@ -303,7 +389,9 @@ class ArchiveServiceTest(unittest.IsolatedAsyncioTestCase):
             baseline = await service.fetch_archive_baseline()
         self.assertEqual(baseline.version, "1.4")
         self.assertEqual(baseline.version_id, "1.4.4@9599201-14")
-        self.assertEqual(set(baseline.ids), {"nar_old", "nar_keep"})
+        self.assertEqual(baseline.ids.count("nar_sm1l1m5_Hans_1"), 1)
+        self.assertNotIn("nar_sm1l1m5_Hans_2", baseline.ids)
+        self.assertEqual(set(baseline.ids), {"nar_old", "nar_keep", "nar_sm1l1m5_Hans_1"})
 
 
 class ArchivePreviewTest(unittest.IsolatedAsyncioTestCase):

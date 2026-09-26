@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 from ...providers.akedata import AKEDATA_PRTS_ICON_BASE
@@ -21,6 +22,63 @@ from .common import _to_int
 # PrtsPage 表内顺序为 document/multi_media/text，与游戏 UI 不一致，故展示顺序以此常量为准；
 # 未知新页签按表内顺序追加在末尾。
 _PAGE_DISPLAY_ORDER = ("text", "multi_media", "document")
+
+# 这四份电子档案的 _1/_2/_3 是任务评价的互斥版本，每位玩家只能获得一版。
+# 精确列举已核实的 ID，不按同名或通用数字后缀去重，避免合并其他独立档案。
+_EXCLUSIVE_ARCHIVE_IDS = {
+    f"{stem}_{variant}": f"{stem}_1"
+    for stem in (
+        "nar_sm1l1m4_hatman",
+        "nar_sm1l1m5_hatman",
+        "nar_sm1l1m5_Alexander",
+        "nar_sm1l1m5_Hans",
+    )
+    for variant in (1, 2, 3)
+}
+
+
+def canonical_archive_id(item_id: str) -> str:
+    """互斥版本共用一个收集 ID；其他档案保留原 ID。"""
+    return _EXCLUSIVE_ARCHIVE_IDS.get(item_id, item_id)
+
+
+def normalize_archive_snapshot(snapshot: ArchiveSnapshotView) -> ArchiveSnapshotView:
+    """新表和旧磁盘快照使用相同口径，优先以 _1 展示，缺失时保留现有版本。"""
+    if not any(item.item_id in _EXCLUSIVE_ARCHIVE_IDS for item in snapshot.items):
+        return snapshot
+    selected: dict[str, ArchiveItemView] = {}
+    for item in snapshot.items:
+        if item.item_id in _EXCLUSIVE_ARCHIVE_IDS:
+            canonical_id = canonical_archive_id(item.item_id)
+            previous = selected.get(canonical_id)
+            if previous is None or item.item_id < previous.item_id:
+                selected[canonical_id] = item
+
+    items: list[ArchiveItemView] = []
+    seen: set[str] = set()
+    for item in snapshot.items:
+        if item.item_id in _EXCLUSIVE_ARCHIVE_IDS:
+            canonical_id = canonical_archive_id(item.item_id)
+            if canonical_id in seen:
+                continue
+            seen.add(canonical_id)
+            item = replace(selected[canonical_id], item_id=canonical_id)
+        items.append(item)
+
+    page_counts: dict[str, int] = {}
+    category_counts: dict[str, int] = {}
+    for item in items:
+        page_counts[item.page_name] = page_counts.get(item.page_name, 0) + 1
+        if item.category_name:
+            category_counts[item.category_name] = category_counts.get(item.category_name, 0) + 1
+    return replace(
+        snapshot,
+        items=items,
+        total_count=len(items),
+        page_counts=page_counts,
+        category_counts=category_counts,
+        group_count=len({item.group_id for item in items if item.group_id}),
+    )
 
 
 def _i18n_text(i18n: dict[str, Any], obj: Any) -> str:
@@ -128,7 +186,7 @@ def build_akedata_archive_snapshot(
         if item.group_id:
             seen_groups.add(item.group_id)
 
-    return ArchiveSnapshotView(
+    return normalize_archive_snapshot(ArchiveSnapshotView(
         items=items,
         version=version_label or "",
         fetched_at=fetched_at,
@@ -137,7 +195,7 @@ def build_akedata_archive_snapshot(
         page_counts=page_counts,
         category_counts=category_counts,
         group_count=len(seen_groups),
-    )
+    ))
 
 
 def _group_order_of(groups: dict[str, tuple[str, str, str, int, str]], group_id: str) -> int:

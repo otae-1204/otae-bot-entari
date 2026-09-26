@@ -176,6 +176,8 @@ from .views.medals import (
 )
 from .views.archives import (
     build_akedata_archive_snapshot as build_akedata_archive_snapshot,
+    canonical_archive_id,
+    normalize_archive_snapshot,
 )
 from .views.operators import (
     _all_skill_records_for_group as _all_skill_records_for_group,
@@ -905,7 +907,10 @@ class EndfieldService:
         if not isinstance(i18n, dict) or not i18n:
             raise ValueError("AKEData I18nTextTable_CN 为空")
 
-        expected_count = sum(1 for entry in all_item.values() if isinstance(entry, dict))
+        expected_count = len({
+            canonical_archive_id(str(entry.get("id") or iid))
+            for iid, entry in all_item.items() if isinstance(entry, dict)
+        })
         snapshot = build_akedata_archive_snapshot(
             page,
             category,
@@ -941,7 +946,10 @@ class EndfieldService:
             table = await fetch_akedata_prts_all_item(str(prev["tableCfgPath"]).lstrip("/"))
             if not isinstance(table, dict) or not table:
                 raise ValueError("AKEData 历史 PrtsAllItem 为空")
-            ids = [iid for iid, entry in table.items() if isinstance(entry, dict)]
+            ids = list(dict.fromkeys(
+                canonical_archive_id(str(entry.get("id") or iid))
+                for iid, entry in table.items() if isinstance(entry, dict)
+            ))
             if not ids:
                 raise ValueError("AKEData 历史档案库基线为空")
             return ArchiveBaselineView(
@@ -964,9 +972,10 @@ class EndfieldService:
         baseline 为 None（无更早版本）时无对比基线，new_items 为空。
         双方同为 akedata 源数据，口径一致；previous_version 用 baseline 的 major.minor。
         """
+        current = normalize_archive_snapshot(current)
         if baseline is None:
             return ArchiveDiffView(current=current, previous_version="", new_items=[])
-        baseline_ids = set(baseline.ids)
+        baseline_ids = {canonical_archive_id(item_id) for item_id in baseline.ids}
         new_items = [
             item
             for item in current.items
@@ -993,6 +1002,7 @@ class EndfieldService:
         """
         base = (((raw_detail.get("data") or {}).get("detail") or {}).get("base") or {})
         doc_num = _to_int(base.get("docNum")) or 0
+        snapshot = normalize_archive_snapshot(snapshot)
         total = snapshot.total_count
         return ArchiveProgressView(
             nickname=nickname,
