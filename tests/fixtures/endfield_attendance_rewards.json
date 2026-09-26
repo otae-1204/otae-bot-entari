@@ -1,0 +1,255 @@
+{
+  "capturedAt": "2026-09-21",
+  "source": "GET https://zonai.skland.com/web/v1/game/endfield/attendance",
+  "nameVerificationVersion": "1.5.3@10024360-6",
+  "resourceInfoMap": {
+    "endfield_attendance_1_2": {
+      "id": "endfield_attendance_1_2",
+      "count": 2,
+      "name": "",
+      "icon": "https://bbs.hycdn.cn/asset/endfield_attendance/921A397E2765462C009B939E0CD92606.png"
+    },
+    "endfield_attendance_1_3": {
+      "id": "endfield_attendance_1_3",
+      "count": 3,
+      "name": "",
+      "icon": "https://bbs.hycdn.cn/asset/endfield_attendance/921A397E2765462C009B939E0CD92606.png"
+    },
+    "endfield_attendance_1_5": {
+      "id": "endfield_attendance_1_5",
+      "count": 5,
+      "name": "",
+      "icon": "https://bbs.hycdn.cn/asset/endfield_attendance/921A397E2765462C009B939E0CD92606.png"
+    },
+    "endfield_attendance_2_5": {
+      "id": "endfield_attendance_2_5",
+      "count": 5,
+      "name": "",
+      "icon": "https://bbs.hycdn.cn/asset/endfield_attendance/ed34d5a121dbc81da6f6991792ff97f6.png"
+    },
+    "endfield_attendance_3_2": {
+      "id": "endfield_attendance_3_2",
+      "count": 2,
+      "name": "",
+      "icon": "https://bbs.hycdn.cn/asset/endfield_attendance/7f6ce8ae13546508255b89a4d8571fe3.png"
+    },
+    "endfield_attendance_3_3": {
+      "id": "endfield_attendance_3_3",
+      "count": 3,
+      "name": "",
+      "icon": "https://bbs.hycdn.cn/asset/endfield_attendance/7f6ce8ae13546508255b89a4d8571fe3.png"
+    },
+    "endfield_attendance_3_5": {
+      "id": "endfield_attendance_3_5",
+      "count": 5,
+      "name": "",
+      "icon": "https://bbs.hycdn.cn/asset/endfield_attendance/7f6ce8ae13546508255b89a4d8571fe3.png"
+    },
+    "endfield_attendance_4_2": {
+      "id": "endfield_attendance_4_2",
+      "count": 2,
+      "name": "",
+      "icon": "https://bbs.hycdn.cn/asset/endfield_attendance/0dea0bc0fd87138df322e8a254a6999f.png"
+    },
+    "endfield_attendance_4_3": {
+      "id": "endfield_attendance_4_3",
+      "count": 3,
+      "name": "",
+      "icon": "https://bbs.hycdn.cn/asset/endfield_attendance/0dea0bc0fd87138df322e8a254a6999f.png"
+    },
+    "endfield_attendance_4_5": {
+      "id": "endfield_attendance_4_5",
+      "count": 5,
+      "name": "",
+      "icon": "https://bbs.hycdn.cn/asset/endfield_attendance/0dea0bc0fd87138df322e8a254a6999f.png"
+    },
+    "endfield_attendance_5_2": {
+      "id": "endfield_attendance_5_2",
+      "count": 2,
+      "name": "",
+      "icon": "https://bbs.hycdn.cn/asset/endfield_attendance/90403112f070c14859d107b530ae5851.png"
+    },
+    "endfield_attendance_5_3": {
+      "id": "endfield_attendance_5_3",
+      "count": 3,
+      "name": "",
+      "icon": "https://bbs.hycdn.cn/asset/endfield_attendance/90403112f070c14859d107b530ae5851.png"
+    },
+    "endfield_attendance_5_5": {
+      "id": "endfield_attendance_5_5",
+      "count": 5,
+      "name": "",
+      "icon": "https://bbs.hycdn.cn/asset/endfield_attendance/90403112f070c14859d107b530ae5851.png"
+    },
+    "endfield_attendance_6_2": {
+      "id": "endfield_attendance_6_2",
+      "count": 2,
+      "name": "",
+      "icon": "https://bbs.hycdn.cn/asset/endfield_attendance/0c1e8cf15711a7d59aa7d8786b533cf1.png"
+    },
+    "endfield_attendance_6_3": {
+      "id": "endfield_attendance_6_3",
+      "count": 3,
+      "name": "",
+      "icon": "https://bbs.hycdn.cn/asset/endfield_attendance/0c1e8cf15711a7d59aa7d8786b533cf1.png"
+    },
+    "endfield_attendance_6_5": {
+      "id": "endfield_attendance_6_5",
+      "count": 5,
+      "name": "",
+      "icon": "https://bbs.hycdn.cn/asset/endfield_attendance/0c1e8cf15711a7d59aa7d8786b533cf1.png"
+    },
+    "endfield_attendance_7_2000": {
+      "id": "endfield_attendance_7_2000",
+      "count": 2000,
+      "name": "",
+      "icon": "https://bbs.hycdn.cn/asset/endfield_attendance/2a58a0e85f39092433842ccd62324785.png"
+    },
+    "endfield_attendance_7_3000": {
+      "id": "endfield_attendance_7_3000",
+      "count": 3000,
+      "name": "",
+      "icon": "https://bbs.hycdn.cn/asset/endfield_attendance/2a58a0e85f39092433842ccd62324785.png"
+    },
+    "endfield_attendance_8_100": {
+      "id": "endfield_attendance_8_100",
+      "count": 100,
+      "name": "",
+      "icon": "https://bbs.hycdn.cn/asset/endfield_attendance/8ed434a6cdb173c96ed0572115112f93.png"
+    },
+    "endfield_attendance_8_120": {
+      "id": "endfield_attendance_8_120",
+      "count": 120,
+      "name": "",
+      "icon": "https://bbs.hycdn.cn/asset/endfield_attendance/8ed434a6cdb173c96ed0572115112f93.png"
+    },
+    "endfield_attendance_8_80": {
+      "id": "endfield_attendance_8_80",
+      "count": 80,
+      "name": "",
+      "icon": "https://bbs.hycdn.cn/asset/endfield_attendance/8ed434a6cdb173c96ed0572115112f93.png"
+    },
+    "endfield_attendance_8_90": {
+      "id": "endfield_attendance_8_90",
+      "count": 90,
+      "name": "",
+      "icon": "https://bbs.hycdn.cn/asset/endfield_attendance/8ed434a6cdb173c96ed0572115112f93.png"
+    }
+  },
+  "calendar": [
+    {
+      "awardId": "endfield_attendance_1_2"
+    },
+    {
+      "awardId": "endfield_attendance_4_2"
+    },
+    {
+      "awardId": "endfield_attendance_7_2000"
+    },
+    {
+      "awardId": "endfield_attendance_8_80"
+    },
+    {
+      "awardId": "endfield_attendance_4_2"
+    },
+    {
+      "awardId": "endfield_attendance_6_2"
+    },
+    {
+      "awardId": "endfield_attendance_1_3"
+    },
+    {
+      "awardId": "endfield_attendance_7_3000"
+    },
+    {
+      "awardId": "endfield_attendance_4_3"
+    },
+    {
+      "awardId": "endfield_attendance_1_3"
+    },
+    {
+      "awardId": "endfield_attendance_7_2000"
+    },
+    {
+      "awardId": "endfield_attendance_8_80"
+    },
+    {
+      "awardId": "endfield_attendance_6_3"
+    },
+    {
+      "awardId": "endfield_attendance_1_3"
+    },
+    {
+      "awardId": "endfield_attendance_4_3"
+    },
+    {
+      "awardId": "endfield_attendance_7_3000"
+    },
+    {
+      "awardId": "endfield_attendance_3_2"
+    },
+    {
+      "awardId": "endfield_attendance_5_2"
+    },
+    {
+      "awardId": "endfield_attendance_2_5"
+    },
+    {
+      "awardId": "endfield_attendance_8_100"
+    },
+    {
+      "awardId": "endfield_attendance_6_5"
+    },
+    {
+      "awardId": "endfield_attendance_3_3"
+    },
+    {
+      "awardId": "endfield_attendance_5_3"
+    },
+    {
+      "awardId": "endfield_attendance_7_3000"
+    },
+    {
+      "awardId": "endfield_attendance_1_5"
+    },
+    {
+      "awardId": "endfield_attendance_4_5"
+    },
+    {
+      "awardId": "endfield_attendance_3_5"
+    },
+    {
+      "awardId": "endfield_attendance_5_5"
+    },
+    {
+      "awardId": "endfield_attendance_7_2000"
+    },
+    {
+      "awardId": "endfield_attendance_7_2000"
+    }
+  ],
+  "expectedNames": {
+    "endfield_attendance_1_2": "中级作战记录",
+    "endfield_attendance_1_3": "中级作战记录",
+    "endfield_attendance_1_5": "中级作战记录",
+    "endfield_attendance_2_5": "初级认知载体",
+    "endfield_attendance_3_2": "高级作战记录",
+    "endfield_attendance_3_3": "高级作战记录",
+    "endfield_attendance_3_5": "高级作战记录",
+    "endfield_attendance_4_2": "武器检查装置",
+    "endfield_attendance_4_3": "武器检查装置",
+    "endfield_attendance_4_5": "武器检查装置",
+    "endfield_attendance_5_2": "武器检查套组",
+    "endfield_attendance_5_3": "武器检查套组",
+    "endfield_attendance_5_5": "武器检查套组",
+    "endfield_attendance_6_2": "协议棱柱",
+    "endfield_attendance_6_3": "协议棱柱",
+    "endfield_attendance_6_5": "协议棱柱",
+    "endfield_attendance_7_2000": "折金票",
+    "endfield_attendance_7_3000": "折金票",
+    "endfield_attendance_8_100": "嵌晶玉",
+    "endfield_attendance_8_120": "嵌晶玉",
+    "endfield_attendance_8_80": "嵌晶玉",
+    "endfield_attendance_8_90": "嵌晶玉"
+  }
+}
