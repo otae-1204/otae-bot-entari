@@ -1075,6 +1075,7 @@ async def draw_gacha_history_card(view: GachaHistoryView) -> bytes:
 async def _draw_neutral_card(selector: str, body: str, *, extra_css: str = "") -> bytes:
     width = 1280
     css = f"""
+    :root{{--card-header-rule:5px solid rgba(223,236,50,.5)}}
     *{{box-sizing:border-box}}html,body{{margin:0;width:{width}px;background:#d8d8d8;color:#181818;font-family:'Microsoft YaHei','PingFang SC','Noto Sans SC',Arial,sans-serif}}
     .{selector}{{width:{width}px;min-height:420px;padding:28px;background:linear-gradient(90deg,rgba(0,0,0,.055) 1px,transparent 1px) 0 0/32px 32px,linear-gradient(0deg,rgba(0,0,0,.055) 1px,transparent 1px) 0 0/32px 32px,#ededed}}
     header{{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;padding:22px 25px;background:#292929;color:#fff;border-bottom:5px solid #000}}
@@ -1097,36 +1098,64 @@ async def _draw_neutral_card(selector: str, body: str, *, extra_css: str = "") -
 
 # ===== 蚀刻章/奖章（F1 版本对比）渲染 =====
 
-MEDAL_PAGE_BUDGETS: tuple[int, ...] = (56, 40, 28, 18)
+MEDAL_PAGE_BUDGETS: tuple[int, ...] = (56, 40, 28, 18, 10, 5, 1)
 MEDAL_DOUBLE_COLUMN_MIN = 6  # 单个列表条目 ≥ 此值时启用双列，压缩卡片高度（F1 新增列表 / F2 各缺章分组）
 MEDAL_CARD_CSS = """
-.medal-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
-.medal-stats--rows{display:flex;flex-direction:column}
-.medal-row{display:flex;gap:10px}
-.medal-stats .tile{flex:1;display:flex;align-items:center;justify-content:center;gap:10px;padding:14px;border:1px solid #999;background:#fff}
-.medal-stats .tile span{color:#1f1f1f;font-size:16px;font-weight:700}
-.medal-stats .tile strong{font-size:26px;line-height:1;font-weight:900;color:#222}
-.medal-stats .tile.primary{border:3px solid #222}
-.medal-stats .lv-tile{flex:1;display:flex;align-items:center;justify-content:center;gap:10px;padding:8px;border:1px solid #999;background:#fff}
-.medal-stats .lv-tile strong{margin:0;font-size:26px;line-height:1;font-weight:900;color:#222}
-.medal-stats .lv-tile .grade-icon{width:52px;height:60px;object-fit:contain;flex-shrink:0}
-.medal-section{margin-top:6px}.medal-section h2{margin:0 0 10px;font-size:22px}
-.medal-list{display:grid;gap:8px}.medal-list--double{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
-.medal-item{display:grid;grid-template-columns:80px minmax(0,1fr);gap:12px;align-items:center;padding:8px 10px;border:1px solid #888;background:#fff}
-.medal-icon{width:80px;height:80px;display:grid;place-items:center;overflow:hidden}
-.medal-upgrade{display:flex;align-items:stretch;gap:8px;padding:8px 10px;border:1px solid #888;background:#fff}
-.medal-upgrade .medal-card{flex:1;display:grid;grid-template-columns:80px minmax(0,1fr);gap:12px;align-items:center;min-width:0}
-.medal-upgrade .medal-arrow{flex:none;display:grid;place-items:center;color:#c9a227;font-size:30px;font-weight:900;line-height:1;padding:0 2px}
-.medal-icon img{width:100%;height:100%;object-fit:contain}.medal-icon .no-icon{color:#999;font-size:11px}
-.medal-info strong{font-size:16px}
-.medal-meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:5px}
-.medal-meta .cat{color:#666;font-size:12px}
-.medal-meta .lv,.medal-meta .tag{padding:1px 7px;border:1px solid #444;font-size:11px;font-weight:800;line-height:1.6}
-.medal-meta .lv{background:#222;color:#fff}
-.medal-meta .tag.up{background:#eef;border-color:#446}.medal-meta .tag.plate{background:#fee;border-color:#944}
-.medal-desc{margin-top:4px;color:#1e2b3c;font-size:13px;line-height:1.5;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}.medal-cond{margin-top:4px;color:#5b6f86;font-size:12px;line-height:1.5;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}.medal-next{margin-top:6px;padding-top:5px;border-top:1px dashed #c5ccd4}.medal-next-tag{display:inline-block;color:#9aa3ad;font-size:11px;font-weight:700;margin-bottom:2px}
-.medal-source{display:flex;justify-content:space-between;gap:16px;margin-top:14px;padding-top:10px;border-top:2px solid #222;color:#777;font-size:12px;font-weight:800}
-.medal-levelbar{display:flex;gap:10px;margin-bottom:14px}.medal-levelbar .lv-cell{flex:1;display:flex;align-items:center;justify-content:center;gap:12px;padding:12px 14px;border:1px solid #999;background:#fff}.medal-levelbar .lv-cell strong{font-size:32px;line-height:1;font-weight:900;color:#222}.medal-levelbar .grade-icon{display:inline-block;width:48px;height:48px;flex-shrink:0;object-fit:contain}
+:is(.medal-stats-card,.medal-missing-card){padding:28px 32px;background:linear-gradient(135deg,#fff,#fafbfd);color:#283440}
+.medal-header{margin:0 0 18px;padding:18px 24px;background:#292929;background-clip:padding-box;color:#fff;border:0;border-bottom:var(--card-header-rule);gap:20px}
+.medal-header small{color:#c7c7c7;font-size:12px;letter-spacing:.24em}
+.medal-header h1{margin:6px 0 0;font-size:36px;line-height:1.2;letter-spacing:.04em;font-weight:800}
+.medal-header p{margin:6px 0 0;color:#c8c8c8;font-size:15px;overflow-wrap:anywhere}
+.medal-main{padding:0;border:0;background:none}
+.medal-stats{padding:14px 22px 0;margin-bottom:18px;border-radius:16px;background:#f2f5f7}
+.medal-row{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));align-items:center}
+.medal-stats .primary{padding:0 20px 0 0}
+.medal-stats .primary span{display:block;color:#616d79;font-size:15px;margin-bottom:2px}
+.medal-stats .primary strong{font-size:40px;line-height:1.1;font-weight:800;letter-spacing:-.04em;font-variant-numeric:tabular-nums}
+.medal-stats .lv-tile{display:flex;align-items:center;justify-content:center;gap:14px;min-height:66px;border-left:1px solid #dfe5e9}
+.medal-stats .lv-tile strong{font-size:32px;line-height:1.1;font-weight:750;font-variant-numeric:tabular-nums}
+.medal-stats .lv-tile .grade-icon{display:block;width:56px;height:66px;object-fit:contain;flex-shrink:0}
+.medal-stats-secondary{display:flex;align-items:center;gap:20px;margin-top:10px;padding:10px 0;border-top:1px solid #dfe5e9}
+.medal-stats-secondary .tile{flex:1;display:flex;align-items:baseline;gap:10px}
+.medal-stats-secondary .tile span{color:#616d79;font-size:15px}
+.medal-stats-secondary .tile strong{font-size:20px;font-weight:750;font-variant-numeric:tabular-nums}
+.medal-section{margin-top:18px}
+.medal-section h2{display:flex;align-items:center;gap:10px;margin:0 0 6px;font-size:22px;font-weight:750;letter-spacing:.03em}
+.medal-section h2::before{content:'';width:5px;height:20px;border-radius:3px;background:#b39a5e}
+.medal-section h2::after{content:'';height:1px;flex:1;margin-left:4px;background:#e2e7eb}
+.medal-section-count{font-size:14px;font-weight:500;letter-spacing:0;color:#65717d}
+.medal-list{display:grid;gap:10px 14px}
+.medal-list--double{grid-template-columns:repeat(2,minmax(0,1fr))}
+.medal-list--double>:only-child{grid-column:1/-1}
+.medal-item,.medal-upgrade{padding:12px 16px;border-radius:14px;background:linear-gradient(110deg,#f3f6f8,#f8fafb)}
+.medal-item{display:grid;grid-template-columns:88px minmax(0,1fr);gap:12px;align-items:start}
+.medal-icon{width:88px;height:88px;display:grid;place-items:center}
+.medal-icon img{width:100%;height:100%;object-fit:contain}
+.medal-icon .no-icon{color:#75808b;font-size:13px;letter-spacing:.1em}
+.medal-info{min-width:0;overflow-wrap:anywhere}
+.medal-info>strong{display:block;font-size:18px;line-height:1.4;font-weight:750;color:#283440}
+.medal-meta{display:flex;align-items:center;flex-wrap:wrap;gap:7px;margin-top:2px}
+.medal-meta .cat{color:#65717d;font-size:14px}
+.medal-meta .tag{padding:1px 7px;border-radius:10px;font-size:12px;font-weight:600;line-height:1.5}
+.medal-meta .tag.up{color:#627965;background:#e9eee5}
+.medal-meta .tag.plate{color:#99824d;background:#f2ecd9}
+.medal-desc{margin-top:4px;color:#2e3946;font-size:15px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere}
+.medal-cond{margin-top:3px;color:#61738a;font-size:14px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere}
+.medal-next{margin-top:8px;padding-top:6px;border-top:1px solid #e2e7eb}
+.medal-next-tag{display:inline-block;color:#837451;font-size:13px;font-weight:700;letter-spacing:.06em}
+.medal-upgrade{display:grid;grid-template-columns:minmax(0,1fr) 28px minmax(0,1fr);align-items:start;gap:12px}
+.medal-upgrade .medal-card{display:grid;grid-template-columns:88px minmax(0,1fr);gap:12px;align-items:start;min-width:0}
+.medal-upgrade .medal-icon{width:88px;height:88px;margin-top:18px}
+.medal-stage{display:block;margin-bottom:3px;color:#667480;font-size:13px;line-height:1.4;letter-spacing:.06em}
+.medal-card--next .medal-stage{color:#837451}
+.medal-upgrade .medal-arrow{align-self:center;display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:#e9edf0;color:#837451;font-size:20px;line-height:1}
+.medal-source{display:flex;justify-content:space-between;gap:20px;margin-top:18px;padding-top:10px;border-top:1px solid #e2e7eb;color:#75808b;font-size:12px;line-height:1.6;overflow-wrap:anywhere}
+.medal-notice{margin:-6px 0 12px;color:#75808b;font-size:13px;line-height:1.6}
+.medal-main .empty{padding:28px 20px;background:#f3f6f8;border:0;border-radius:14px;color:#65717d;font-size:15px;line-height:1.6}
+.medal-levelbar{display:flex;gap:24px;margin-bottom:24px}
+.medal-levelbar .lv-cell{flex:1;display:flex;align-items:center;justify-content:center;gap:12px;padding:12px 14px}
+.medal-levelbar .lv-cell strong{font-size:32px;line-height:1;font-weight:800}
+.medal-levelbar .grade-icon{display:inline-block;width:48px;height:48px;flex-shrink:0;object-fit:contain}
 """
 
 
@@ -1179,17 +1208,23 @@ async def _draw_medal_stats_page(
         else '<div class="empty">暂无新增蚀刻章（暂无更早版本可对比或本版本无新增）</div>'
     )
     body = f"""
-    <header><div><small>ENDFIELD / MEDAL ARCHIVE</small><h1>蚀刻章统计</h1><p>游戏版本 {esc(current.version)}{page_tag}</p></div></header>
-    <main>
+    <header class="medal-header"><div><small>ENDFIELD / MEDAL ARCHIVE</small><h1>蚀刻章统计</h1><p>游戏版本 {esc(current.version)}{page_tag}</p></div></header>
+    <main class="medal-main">
       {stats}
       <section class="medal-section">
-        <h2>新增蚀刻章（本页 {len(medals)}）</h2>
+        <h2>新增蚀刻章<span class="medal-section-count">本页 {len(medals)} 枚</span></h2>
         <div class="medal-list{' medal-list--double' if len(medals) >= MEDAL_DOUBLE_COLUMN_MIN else ''}">{medal_html}</div>
       </section>
       <footer class="medal-source"><span>数据来源 AKEData</span><span>版本 {esc(current.version)} · 共 {current.total_count} 枚</span></footer>
     </main>
     """
     return await _draw_neutral_card("medal-stats-card", body, extra_css=MEDAL_CARD_CSS)
+
+
+def _medal_copy_html(description: str, condition: str) -> str:
+    desc = f'<div class="medal-desc">{esc(description)}</div>' if description else ""
+    cond = f'<div class="medal-cond">{esc(condition)}</div>' if condition else ""
+    return desc + cond
 
 
 def _medal_item_html(medal: MedalItemView, icon_map: dict[str, str]) -> str:
@@ -1206,22 +1241,20 @@ def _medal_item_html(medal: MedalItemView, icon_map: dict[str, str]) -> str:
     if medal.can_be_plated:
         meta_parts.append('<span class="tag plate">可镀层</span>')
     meta = f'<div class="medal-meta">{"".join(meta_parts)}</div>' if meta_parts else ""
-    desc = f'<div class="medal-desc">{esc(medal.description)}</div>' if medal.description else ""
-    cond = f'<div class="medal-cond">{esc(medal.condition)}</div>' if medal.condition else ""
+    copy = _medal_copy_html(medal.description, medal.condition)
     next_block = ""
     if medal.next_description or medal.next_condition:
-        nd = f'<div class="medal-desc">{esc(medal.next_description)}</div>' if medal.next_description else ""
-        nc = f'<div class="medal-cond">{esc(medal.next_condition)}</div>' if medal.next_condition else ""
-        next_block = f'<div class="medal-next"><span class="medal-next-tag">→ 升级后</span>{nd}{nc}</div>'
+        next_copy = _medal_copy_html(medal.next_description, medal.next_condition)
+        next_block = f'<div class="medal-next"><span class="medal-next-tag">→ 升级后</span>{next_copy}</div>'
     return (
         f'<div class="medal-item">{icon}'
-        f'<div class="medal-info"><strong>{esc(medal.name)}</strong>{meta}{desc}{cond}{next_block}</div>'
+        f'<div class="medal-info"><strong>{esc(medal.name)}</strong>{meta}{copy}{next_block}</div>'
         '</div>'
     )
 
 
-def _medal_upgrade_html(medal: MedalItemView, icon_map: dict[str, str]) -> str:
-    """未升满专用：左=已获得的当前档奖章，中间升级箭头，右=升级后奖章（各带图标+名称+类型+描述+条件）。"""
+def _medal_upgrade_html(medal: MedalItemView, icon_map: dict[str, str], *, plating: bool = False) -> str:
+    """当前档与下一档/镀层后的图文对照，两侧保留各自描述与条件。"""
     cur = icon_map.get(medal.icon_url, "")
     nxt = icon_map.get(medal.next_icon_url, "")
     cur_icon = f'<div class="medal-icon"><img src="{esc_attr(cur)}" alt=""></div>' if cur else '<div class="medal-icon"><span class="no-icon">无图</span></div>'
@@ -1235,37 +1268,79 @@ def _medal_upgrade_html(medal: MedalItemView, icon_map: dict[str, str]) -> str:
         meta_parts.append('<span class="tag plate">可镀层</span>')
     meta = f'<div class="medal-meta">{"".join(meta_parts)}</div>' if meta_parts else ""
     cat_meta = f'<div class="medal-meta"><span class="cat">{esc(medal.category_name)}</span></div>' if medal.category_name else ""
-    nd = f'<div class="medal-desc">{esc(medal.next_description)}</div>' if medal.next_description else ""
-    nc = f'<div class="medal-cond">{esc(medal.next_condition)}</div>' if medal.next_condition else ""
+    current_label, next_label = ("镀层前", "镀层后") if plating else ("当前档位", "升级后")
+    current_copy = _medal_copy_html(medal.description, medal.condition)
+    next_copy = _medal_copy_html(medal.next_description, medal.next_condition)
     return (
         '<div class="medal-upgrade">'
-        f'<div class="medal-card">{cur_icon}<div class="medal-info"><strong>{esc(medal.name)}</strong>{meta}'
-        f'<div class="medal-desc">{esc(medal.description)}</div><div class="medal-cond">{esc(medal.condition)}</div></div></div>'
-        '<div class="medal-arrow">→</div>'
-        f'<div class="medal-card">{next_icon}<div class="medal-info"><strong>{esc(medal.name)}</strong>{cat_meta}{nd}{nc}</div></div>'
+        f'<div class="medal-card">{cur_icon}<div class="medal-info"><span class="medal-stage">{current_label}</span><strong>{esc(medal.name)}</strong>{meta}{current_copy}</div></div>'
+        '<div class="medal-arrow" aria-hidden="true">→</div>'
+        f'<div class="medal-card medal-card--next">{next_icon}<div class="medal-info"><span class="medal-stage">{next_label}</span><strong>{esc(medal.name)}</strong>{cat_meta}{next_copy}</div></div>'
         '</div>'
     )
 
 
 async def draw_medal_missing_card(view: MedalMissingView) -> tuple[bytes, ...]:
-    """F2：个人缺章（未获得/未升满/未镀层）；截断后条目数有限，单页足够。"""
-    server_name = server_label(view.server_name) or "默认服务器"
+    """F2：个人缺章；完整文案超出截图高度时分页，保留分组顺序与总计。"""
     all_medals = [*view.not_obtained, *view.not_maxed, *view.not_plated]
     _icon_urls = [m.icon_url for m in all_medals if m.icon_url]
     _icon_urls += [m.next_icon_url for m in view.not_maxed if m.next_icon_url]
     _icon_urls += [m.next_icon_url for m in view.not_plated if m.next_icon_url]
     icon_map = await _image_data_urls(_icon_urls)
+    try:
+        return (await _draw_medal_missing_page(view, icon_map),)
+    except RuntimeError as exc:
+        if not is_height_limit_error(exc):
+            raise
+        last_error = exc
+
+    group_keys = ("not_obtained", "not_maxed", "not_plated")
+    entries = [(key, medal) for key in group_keys for medal in getattr(view, key)]
+    for budget in MEDAL_PAGE_BUDGETS:
+        if budget >= len(entries):
+            continue
+        chunks = [entries[i:i + budget] for i in range(0, len(entries), budget)]
+        pages: list[bytes] = []
+        try:
+            for index, chunk in enumerate(chunks):
+                page_view = replace(view, **{
+                    key: [medal for group, medal in chunk if group == key]
+                    for key in group_keys
+                })
+                pages.append(await _draw_medal_missing_page(
+                    page_view, icon_map, page_number=index + 1, page_count=len(chunks),
+                ))
+        except RuntimeError as exc:
+            if not is_height_limit_error(exc):
+                raise
+            last_error = exc
+            continue
+        return tuple(pages)
+    raise last_error
+
+
+async def _draw_medal_missing_page(
+    view: MedalMissingView,
+    icon_map: dict[str, str],
+    *,
+    page_number: int = 1,
+    page_count: int = 1,
+) -> bytes:
+    server_name = server_label(view.server_name) or "默认服务器"
+    page_tag = f" · 第 {page_number}/{page_count} 页" if page_count > 1 else ""
+    shown = len(view.not_obtained) + len(view.not_maxed) + len(view.not_plated)
+    shown_label = f"本页 {shown} · 已展示 {view.shown_count}" if page_count > 1 else f"已展示 {view.shown_count}"
     sections: list[str] = []
     if view.not_obtained:
         sections.append(_medal_section_html("未获得", view.not_obtained, icon_map, force_double=True, count=view.not_obtained_count))
     if view.not_maxed:
         sections.append(_medal_section_html("未升满", view.not_maxed, icon_map, force_single=True, count=view.not_maxed_count))
     if view.not_plated:
-        sections.append(_medal_section_html("未镀层", view.not_plated, icon_map, force_single=True, count=view.not_plated_count))
+        sections.append(_medal_section_html("未镀层", view.not_plated, icon_map, force_single=True, count=view.not_plated_count, plating=True))
     if not sections:
         sections.append('<div class="empty">统计口径内未发现缺漏，蚀刻章已全部集齐。</div>')
     notice = (
-        '<div class="medal-notice">未升满、未镀层仅展示部分，完整清单请在游戏内查看。</div>'
+        '<div class="medal-notice">缺章清单仅展示部分，完整清单请在游戏内查看。</div>'
         if view.truncated else ""
     )
     stats = _medal_stats_block(
@@ -1273,18 +1348,15 @@ async def draw_medal_missing_card(view: MedalMissingView) -> tuple[bytes, ...]:
         [("版本总数", view.total_count), ("未获得", view.not_obtained_count), ("未升满", view.not_maxed_count), ("未镀层", view.not_plated_count)],
     )
     body = f"""
-    <header><div><small>ENDFIELD / MEDAL MISSING</small><h1>蚀刻章缺章</h1><p>{esc(view.nickname)} · {esc(server_name)} · {esc(view.uid)}</p></div></header>
-    <main>
+    <header class="medal-header"><div><small>ENDFIELD / MEDAL MISSING</small><h1>蚀刻章缺章</h1><p>{esc(view.nickname)} · {esc(server_name)} · {esc(view.uid)}{page_tag}</p></div></header>
+    <main class="medal-main">
       {stats}
       {notice}
       {''.join(sections)}
-      <footer class="medal-source"><span>进度：森空岛 SDK · 元数据：AKEData</span><span>快照版本 {esc(view.snapshot_version)} · 已展示 {view.shown_count}</span></footer>
+      <footer class="medal-source"><span>进度：森空岛 SDK · 元数据：AKEData</span><span>快照版本 {esc(view.snapshot_version)} · {shown_label}</span></footer>
     </main>
     """
-    extra = MEDAL_CARD_CSS + (
-        ".medal-notice{margin:-4px 2px 12px;padding:2px 2px;color:#888;font-size:11px}"
-    )
-    return (await _draw_neutral_card("medal-missing-card", body, extra_css=extra),)
+    return await _draw_neutral_card("medal-missing-card", body, extra_css=MEDAL_CARD_CSS)
 
 
 # 等级档位徽记：优先用三档 PNG（assets/image/endfield/medal_{gold,silver,iron}.png，
@@ -1341,10 +1413,7 @@ def _medal_stats_block(
     level_counts: dict[int, int],
     row2: list[tuple[str, int]],
 ) -> str:
-    """统计区。
-    row2 项数与首行(primary+三档 icon=4)一致时用 4 列网格平铺，两行共享列模板、纵向严格对齐；
-    否则退回两行 flex（首行 primary+三档、次行 row2 等宽填满），避免次行留空（F1 版本对比）。
-    """
+    """一体式统计区：总量与三档原图在首行，次行展示补充计数。"""
     primary = (
         f'<div class="tile primary"><span>{esc(primary_label)}</span>'
         f'<strong>{primary_value}</strong></div>'
@@ -1357,12 +1426,10 @@ def _medal_stats_block(
         f'<div class="tile"><span>{esc(label)}</span><strong>{value}</strong></div>'
         for label, value in row2
     )
-    if len(row2) == 4:
-        return f'<section class="medal-stats">{primary}{lv_cells}{row2_html}</section>'
     return (
-        '<section class="medal-stats medal-stats--rows">'
+        '<section class="medal-stats">'
         f'<div class="medal-row">{primary}{lv_cells}</div>'
-        f'<div class="medal-row">{row2_html}</div>'
+        f'<div class="medal-stats-secondary">{row2_html}</div>'
         '</section>'
     )
 
@@ -1375,9 +1442,10 @@ def _medal_section_html(
     force_single: bool = False,
     force_double: bool = False,
     count: int | None = None,
+    plating: bool = False,
 ) -> str:
     items = "".join(
-        _medal_upgrade_html(medal, icon_map)
+        _medal_upgrade_html(medal, icon_map, plating=plating)
         if (medal.next_description or medal.next_condition or medal.next_icon_url)
         else _medal_item_html(medal, icon_map)
         for medal in medals
@@ -1389,8 +1457,9 @@ def _medal_section_html(
     else:
         double = " medal-list--double" if len(medals) >= MEDAL_DOUBLE_COLUMN_MIN else ""
     shown = count if count is not None else len(medals)
+    count_label = f"本页 {len(medals)} / 共 {shown} 枚" if shown != len(medals) else f"{shown} 枚"
     return (
-        f'<section class="medal-section"><h2>{esc(title)}（{shown}）</h2>'
+        f'<section class="medal-section"><h2>{esc(title)}<span class="medal-section-count">{count_label}</span></h2>'
         f'<div class="medal-list{double}">{items}</div></section>'
     )
 
@@ -1419,7 +1488,7 @@ _ARCHIVE_ART_GUIDES = (
     '<text x="128" y="14">70</text><text x="161" y="14">80</text></g></svg>'
 )
 ARCHIVE_CARD_CSS = """
-.archive-stats-card header,.archive-progress-card header{border-bottom:5px solid #dfec32;padding:24px 26px}
+.archive-stats-card header,.archive-progress-card header{border-bottom:var(--card-header-rule);background-clip:padding-box;padding:24px 26px}
 header p{margin:10px 0 0;font-size:15px;color:#c8c8c8}
 .archive-head-counts{display:flex;gap:28px;align-items:center}
 .archive-head-count{border-left:1px solid #626262;padding-left:26px;min-width:144px}
@@ -1450,8 +1519,7 @@ header p{margin:10px 0 0;font-size:15px;color:#c8c8c8}
 .archive-section h3:before{content:'';width:5px;height:19px;background:#252525}
 .archive-section h3 span{margin-left:auto;font-size:12px;color:#727272;font-weight:400}
 .archive-list{display:grid;grid-template-columns:repeat(var(--archive-columns),minmax(0,1fr));gap:12px}
-.archive-item{min-width:0;position:relative;padding-top:7px}
-.archive-item:before{position:absolute;top:0;left:0;content:'━━━━━━  ≡01';width:58px;height:7px;padding:0 4px;background:#151515;color:#bbb;font:5px/7px Arial,sans-serif;white-space:pre}
+.archive-item{min-width:0;position:relative}
 .archive-art{height:148px;display:grid;place-items:center;position:relative;isolation:isolate;overflow:hidden;border-radius:0 5px 0 0;background:linear-gradient(180deg,#626061 0%,#aaa8a9 52%,#e9e7e8 100%)}
 .archive-art-guides{position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-events:none}
 .archive-art img{position:relative;z-index:1;width:94%;height:94%;object-fit:contain;filter:drop-shadow(2px 5px 3px #0003)}
