@@ -56,6 +56,26 @@ def entity_label(entity: Any, *extra: Any) -> str:
     )
 
 
+def select_invite_reply(
+    *,
+    user_id: str,
+    superuser_id: str,
+    private: bool,
+    self_id: str,
+    text: str,
+    pending: dict[str, dict],
+) -> tuple[str, dict] | None:
+    """只接受该 bot 私聊里的明确审批，避免串到其他群或其他 bot。"""
+    if not private or not superuser_id or str(user_id) != str(superuser_id) or not self_id:
+        return None
+    if parse_decision(text) is None:
+        return None
+    for key, info in pending.items():
+        if str(info.get("self_id") or "") == str(self_id):
+            return key, info
+    return None
+
+
 def parse_decision(text: str) -> bool | None:
     """解析超级用户审批回复。True 同意，False 拒绝，无法识别则 None。"""
     compact = "".join(str(text or "").strip().split()).casefold()

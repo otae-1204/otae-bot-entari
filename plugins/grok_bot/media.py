@@ -17,6 +17,7 @@ from PIL import ImageOps, UnidentifiedImageError
 from satori import ChannelType, File, Image
 from satori.model import Upload
 
+from otae_bot.infrastructure.http.tls import ashared_ssl_context
 from otae_bot.infrastructure.rendering.executor import run_image_render
 
 from .config import GrokError
@@ -117,7 +118,7 @@ async def download_url(url: str, *, limit: int, account=None) -> tuple[bytes, st
         trusted = str(account.ensure_url(url))
         url = trusted
     try:
-        async with httpx.AsyncClient(trust_env=False, follow_redirects=False, timeout=20) as client:
+        async with httpx.AsyncClient(trust_env=False, follow_redirects=False, timeout=20, verify=await ashared_ssl_context(trust_env=False)) as client:
             for _ in range(4):
                 if url == trusted:
                     target, headers, extensions = httpx.URL(url), {}, {}

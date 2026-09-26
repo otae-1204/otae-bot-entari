@@ -39,6 +39,10 @@ from .models import (
     _int,
 )
 
+# 关卡特性里官方灰字提示（``<@ba.info>…</>``）的占位哨兵，只在解析与渲染之间传递。
+_INFO_OPEN = "\x01"
+_INFO_CLOSE = "\x02"
+
 
 def parse_monument(raw: dict[str, Any] | None, locale: ChallengeLocale | None = None) -> MonumentPayload:
     data = _unwrap_data(raw, "indieHard")
@@ -272,7 +276,9 @@ def _monument_dungeon(raw, difficulty, locale: ChallengeLocale | None = None):
         difficulty=difficulty,
         passed=_flag(raw.get("isPass")),
         desc=_localized_dungeon_plain(locale, dungeon_id, "desc", raw.get("desc")),
-        feature=_localized_dungeon_plain(locale, dungeon_id, "feature", raw.get("feature")),
+        feature=_localized_dungeon_plain(
+            locale, dungeon_id, "feature", raw.get("feature"), keep_info=True
+        ),
         recommend_level=_int(raw.get("recommendLevel")), record=_record(raw.get("bestRecord")),
         enemies=_enemies(raw.get("enemies"), locale),
     )
@@ -288,7 +294,9 @@ def _war_dungeon(raw, difficulty, locale: ChallengeLocale | None = None):
         difficulty=difficulty,
         passed=_flag(raw.get("isPass")), first_pass_ts=_timestamp(raw.get("firstPassTs")),
         desc=_localized_dungeon_plain(locale, dungeon_id, "desc", raw.get("desc")),
-        feature=_localized_dungeon_plain(locale, dungeon_id, "feature", raw.get("feature")),
+        feature=_localized_dungeon_plain(
+            locale, dungeon_id, "feature", raw.get("feature"), keep_info=True
+        ),
         recommend_level=_int(raw.get("recommendLevel")), plus_task=_flag(raw.get("plusTask")),
         additional_target=_localized_dungeon_plain(
             locale,
@@ -501,8 +509,11 @@ def _localized_dungeon_plain(
     dungeon_id: str,
     field_name: str,
     fallback,
+    *,
+    keep_info: bool = False,
 ) -> str:
-    return _plain(_localized_dungeon_text(locale, dungeon_id, field_name, fallback))
+    text = _localized_dungeon_text(locale, dungeon_id, field_name, fallback)
+    return _plain_feature(text) if keep_info else _plain(text)
 
 
 def _flag(value) -> bool:
@@ -525,6 +536,27 @@ def _timestamp(value):
 
 def _plain(value):
     text = _text(value)
+    text = re.sub(r"<@[^>]+>", "", text)
+    text = re.sub(r"</?[^>]*>", "", text)
+    text = re.sub(r"\{[^}]+\}", "", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def _plain_feature(value):
+    """关卡特性专用：留下官方 ``<@ba.info>`` 灰字提示的边界。
+
+    ``_plain`` 会把 ``<@ba.info>`` 和普通标签一起删掉，官方灰字小字提示就混成了
+    普通条目。这里把 info 段落换成一对哨兵字符，让渲染层能把它还原成灰字；
+    哨兵不出卡片，由 draw 侧剥离。
+    """
+    text = _text(value)
+    text = re.sub(
+        r"<@ba\.info>(.*?)</>",
+        lambda match: f"{_INFO_OPEN}{match.group(1)}{_INFO_CLOSE}",
+        text,
+        flags=re.S,
+    )
     text = re.sub(r"<@[^>]+>", "", text)
     text = re.sub(r"</?[^>]*>", "", text)
     text = re.sub(r"\{[^}]+\}", "", text)

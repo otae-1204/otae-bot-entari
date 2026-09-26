@@ -13,7 +13,27 @@ class EndfieldSource:
 
 
 DATA_SOURCES: tuple[EndfieldSource, ...] = (
-    EndfieldSource("akedata", "AkeData", 10, frozenset({"operator", "weapon", "equipment", "medal", "stage"})),
+    # 图鉴五种资料只走 AkeData（档案条目的快照来自 archive_store，登记在这里只为
+    # source_order 与「该类资料只提供 AkeData」的来源拒绝）。
+    EndfieldSource(
+        "akedata",
+        "AkeData",
+        10,
+        frozenset(
+            {
+                "operator",
+                "weapon",
+                "equipment",
+                "medal",
+                "stage",
+                "item",
+                "prop",
+                "enemy",
+                "term",
+                "archive_entry",
+            }
+        ),
+    ),
     EndfieldSource("fz", "FZ Wiki", 20, frozenset({"operator", "weapon", "equipment"})),
     EndfieldSource("warfarin", "Warfarin Wiki", 30, frozenset({"operator", "weapon"})),
 )

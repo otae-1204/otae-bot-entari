@@ -46,6 +46,8 @@ from .models import (
     _int as _int,
 )
 from .parsing import (
+    _INFO_CLOSE as _INFO_CLOSE,
+    _INFO_OPEN as _INFO_OPEN,
     _date as _date,
     _dict as _dict,
     _difficulty_label as _difficulty_label,
@@ -87,6 +89,8 @@ CHALLENGE_CARD_WIDTH = 1920
 CHALLENGE_CARD_HEIGHT = 1080
 # 卡片高度随内容生长，这里只是防止布局失控时产出超长图的兜底上限。
 CHALLENGE_CARD_MAX_HEIGHT = 6000
+# 官方灰字提示的哨兵边界（见 parsing._plain_feature），只在内存里流转。
+_INFO_SPAN = re.compile(f"[{_INFO_OPEN}{_INFO_CLOSE}]")
 CHALLENGE_VARIANTS = ("a", "b", "c")
 DEFAULT_VARIANT = "b"
 # 空态「下一步」的提示。原因取自 docs/skland_endfield_public_query.md 的实测结论：
@@ -516,7 +520,7 @@ def _monument_detail_html(identity, group, dungeon, variant, assets):
     pair, position, total = _monument_stage_context(group, dungeon)
     difficulty_label = _monument_difficulty_label(dungeon.difficulty)
     best_figure, best_note = _best_cleared_html(pair, ("hard", "normal"), _monument_difficulty_label)
-    features = _feature_items(dungeon.feature)
+    features = _feature_entries(dungeon.feature)
     eyebrow = f"MONUMENT / STAGE {position:02d} OF {total:02d}" if position else "MONUMENT / STAGE DOSSIER"
     diff = _feature_diff(dungeon, pair)
     feature_html = _feature_list_html(features, diff)
@@ -595,25 +599,55 @@ def _duo_member_html(member, assets):
     )
 
 
-def _feature_items(value, limit: int = 6):
-    """官方 feature 是用 " - " 串起来的一整段，拆成条目而不是压成流水账。"""
+def _feature_entries(value, limit: int = 6):
+    """官方 feature 是用 " - " 串起来的一整段，拆成条目而不是压成流水账。
+
+    返回 ``((条目, 是否官方灰字提示), ...)``：官方 ``<@ba.info>`` 段落是策划给的
+    补充说明，观感上是灰字小字，解析层用哨兵标出了它的边界。
+    """
     text = _plain(value)
     if not text:
         return ()
-    parts = re.split(r"(?:^|(?<=[。！？]))\s*[-–]\s*", text)
+    entries: list[tuple[str, bool]] = []
+    for chunk, is_note in _info_chunks(text):
+        entries.extend((item, is_note) for item in _feature_bullets(chunk))
+    return tuple(entries[:limit]) or ((text[:150], False),)
+
+
+def _info_chunks(text: str):
+    """按 info 哨兵切段，交替产出 (文本, 是否为灰字提示)。"""
+    parts = _INFO_SPAN.split(text)
+    for index, part in enumerate(parts):
+        if part.strip():
+            yield part, bool(index % 2)
+
+
+def _feature_bullets(chunk: str):
+    parts = re.split(r"(?:^|(?<=[。！？]))\s*[-–]\s*", chunk)
     items = [part.strip(" 。") for part in parts if part.strip(" 。")]
-    if len(items) < 2 and " - " in text:
-        items = [part.strip(" 。") for part in text.split(" - ") if part.strip(" 。")]
-    return tuple(esc(item[:150]) for item in items[:limit]) or (esc(text[:150]),)
+    if len(items) < 2 and " - " in chunk:
+        items = [part.strip(" 。") for part in chunk.split(" - ") if part.strip(" 。")]
+    return items
 
 
-def _feature_list_html(features, diff) -> str:
+def _feature_items(value, limit: int = 6):
+    """纯文本条目，供差异比对与测试使用（不区分灰字提示）。"""
+    return tuple(text for text, _ in _feature_entries(value, limit=limit))
+
+
+def _feature_list_html(entries, diff) -> str:
     """一条列表讲完机制：标记形状全部一致，只有本档独有的条目染成苦难红。"""
     marked = set(diff)
-    items = "".join(
-        '<li class="is-diff">{}</li>'.format(item) if item in marked else f"<li>{item}</li>" for item in features
-    )
-    return items or '<li class="muted">暂无公开机制说明</li>'
+    parts = []
+    for text, is_note in entries:
+        classes = []
+        if text in marked:
+            classes.append("is-diff")
+        if is_note:
+            classes.append("is-note")
+        attr = f' class="{" ".join(classes)}"' if classes else ""
+        parts.append(f"<li{attr}>{esc(text[:150])}</li>")
+    return "".join(parts) or '<li class="muted">暂无公开机制说明</li>'
 
 
 def _feature_diff(dungeon, tiers):
@@ -706,7 +740,7 @@ def _war_detail_html(identity, season, week, group, dungeon, variant, assets):
     每档带自己的推荐等级、用时、首通、追加目标与配队；星级是关卡组的，留在题头。
     """
     tiers = tuple(item for item in (group.normal, group.hard, group.cruel) if item is not None)
-    features = _feature_items(dungeon.feature)
+    features = _feature_entries(dungeon.feature)
     diff = _feature_diff(dungeon, tiers)
     legend = (
         f'<span class="h3-note"><i class="note-swatch" style="background:{_tier_identity("war", dungeon.difficulty, False)[1]}"></i>'
@@ -1054,6 +1088,8 @@ def _css(variant: str, accent: str, hero: str) -> str:
     .feature-list li{position:relative;padding-left:17px;color:#4d595f;font-size:15px;line-height:1.6;font-weight:750}
     .feature-list li:before{content:"";position:absolute;left:0;top:9px;width:7px;height:7px;background:var(--accent-deep)}
     .feature-list li.muted{color:#879297;font-size:13px}
+    .feature-list li.is-note{color:#879297;font-size:13px;font-weight:750}
+    .feature-list li.is-note:before{top:8px;width:5px;height:5px;background:rgba(23,27,31,.28)}
     .feature-list li.is-diff:before{background:__HARD__}
     .page-detail .missing-record{font-size:12px}
     .page-detail .intel-copy{display:flex;flex-direction:column;justify-content:flex-start;gap:16px}

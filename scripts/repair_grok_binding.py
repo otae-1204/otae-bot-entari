@@ -112,13 +112,16 @@ def select(rows: list[dict], args: argparse.Namespace) -> dict:
                 if row["peer_id"] == args.peer
                 and (args.kind is None or row["kind"] == args.kind)
                 and (args.platform is None or row["platform"] == args.platform)
-                and (args.self_id is None or row["self_id"] == args.self_id)]
+                and (args.self_id is None or row["self_id"] == args.self_id)
+                and (args.channel is None or row["channel_id"] == args.channel)]
     if not hits:
         raise RepairError("没有匹配的会话绑定，未做任何修改。请先用不带选择参数的方式列出全部绑定。")
     if len(hits) > 1:
         listed = "\n".join(f"  - {row['name']} ({row['platform']}/{row['self_id']}, {row['kind']}, "
-                           f"peer={row['peer_id']}, agent_id={row['agent_id']})" for row in hits)
-        raise RepairError(f"匹配到多个会话绑定，未做任何修改。请补充 --kind/--self-id/--platform，或改用 --agent-id：\n{listed}")
+                           f"peer={row['peer_id']}, channel={row['channel_id'] or '-'}, "
+                           f"agent_id={row['agent_id']})" for row in hits)
+        raise RepairError(f"匹配到多个会话绑定，未做任何修改。请补充 --kind/--channel/--self-id/--platform，"
+                          f"或改用 --agent-id：\n{listed}")
     return hits[0]
 
 
@@ -160,6 +163,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--agent-id", help="按绑定的云端 Bot UUID 选择")
     parser.add_argument("--peer", help="按 QQ 群号或私聊用户号选择")
     parser.add_argument("--kind", choices=("group", "private"), help="限定 group 或 private")
+    parser.add_argument("--channel", help="限定频道号；多频道平台下同群号可能有多个会话")
     parser.add_argument("--platform", help="限定平台，例如 qq")
     parser.add_argument("--self-id", help="限定机器人账号 self_id")
     parser.add_argument("--yes", action="store_true", help="真正写入；不加则为只读预演")

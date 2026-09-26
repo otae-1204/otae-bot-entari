@@ -3,8 +3,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
-import os
-import ssl
 from contextlib import AsyncExitStack
 from io import BytesIO
 
@@ -17,6 +15,7 @@ from PIL import ImageOps, UnidentifiedImageError
 from satori import Image, Text
 
 from otae_bot.adapters.entari import make_image
+from otae_bot.infrastructure.http.tls import shared_ssl_context
 from otae_bot.infrastructure.rendering.executor import run_image_render
 
 from .agent import ask
@@ -34,26 +33,6 @@ HELP = """HYW / 何意味
 输入和引用内容会发送给配置的模型服务；搜索词会发送给 DuckDuckGo。"""
 history_store = HistoryStore()
 _active: dict[Scope, int] = {}
-_ssl_contexts: dict[tuple[str | None, str | None], ssl.SSLContext] = {}
-
-
-def shared_ssl_context() -> ssl.SSLContext:
-    """进程内复用一个 TLS 上下文。
-
-    httpx 的 ``AsyncHTTPTransport`` 在 ``verify=True`` 时每次都会读 certifi 的
-    CA 包（本机实测约 1.0s，裸 ``ssl.create_default_context()`` 只要 0.03s），而
-    ``run_request`` 每个请求都要新建 transport。把上下文交给 ``verify=`` 后
-    ``create_ssl_context`` 直接原样返回，单次开销降到 0。
-
-    键含 ``SSL_CERT_FILE`` / ``SSL_CERT_DIR``，与 httpx 的 ``trust_env`` 语义一致，
-    环境变量变化时不会复用错误的上下文。
-    """
-    key = (os.environ.get("SSL_CERT_FILE"), os.environ.get("SSL_CERT_DIR"))
-    context = _ssl_contexts.get(key)
-    if context is None:
-        context = httpx.create_ssl_context(verify=True, trust_env=True)
-        _ssl_contexts[key] = context
-    return context
 
 
 def make_transport(proxy: str | None) -> httpx.AsyncHTTPTransport:

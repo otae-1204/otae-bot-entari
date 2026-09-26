@@ -8,11 +8,12 @@ from otae_bot.adapters.entari import listen_notice, listen_message
 from arclet.entari import Account as Bot, Event
 from otae_bot.adapters.entari import Pred
 from loguru import logger
-from otae_bot.adapters.entari import ChainMsg, SendDest, event_chain, event_plain_text, event_user_id, account_adapter_name
+from otae_bot.adapters.entari import ChainMsg, SendDest, event_chain, event_plain_text, event_user_id, account_adapter_name, is_group
 
 from otae_bot.config.settings import Config, _env
+from otae_bot.infrastructure.http.tls import ashared_ssl_context
 from plugins.request_handler.ark import parse_ark_invite_segment
-from plugins.request_handler.text import entity_label, parse_decision, text_or_empty
+from plugins.request_handler.text import entity_label, parse_decision, select_invite_reply, text_or_empty
 
 superuser = str(Config.SUPERUSERS[0]) if Config.SUPERUSERS else ""
 
@@ -83,7 +84,7 @@ async def _try_onebot_http(action: str, **params) -> Any:
         headers["Authorization"] = f"Bearer {token}"
 
     errors: list[str] = []
-    async with httpx.AsyncClient(timeout=10, trust_env=False) as client:
+    async with httpx.AsyncClient(timeout=10, trust_env=False, verify=await ashared_ssl_context(trust_env=False)) as client:
         for base in urls:
             for path in (f"/{action}", f"/api/{action}"):
                 url = f"{base}{path}"
@@ -125,6 +126,10 @@ async def _try_api(bot: Bot, action: str, **params) -> Any:
 
 def _same_id(a: Any, b: Any) -> bool:
     return bool(a) and bool(b) and str(a) == str(b)
+
+
+def _account_id(bot: Any) -> str:
+    return str(getattr(bot, "self_id", "") or getattr(bot, "id", "") or "")
 
 
 def _iter_system_requests(data: Any) -> list[tuple[str, dict]]:
@@ -373,6 +378,7 @@ async def handle_guild_request(event: Event, bot: Bot):
     )
     msg_id = event.message.id if event.message else str(event.sn)
     event_type = "member" if event.__class__.__name__ == "GuildMemberRequestEvent" else "guild"
+    self_id = _account_id(bot)
 
     info = {
         "guild_name": guild_name,
@@ -383,15 +389,17 @@ async def handle_guild_request(event: Event, bot: Bot):
         "guild_id": guild_id,
         "group_code": guild_id,
         "inviter_uin": inviter_uin,
+        "self_id": self_id,
     }
     info = await _enrich_invite_labels(bot, info)
     guild_name = text_or_empty(info.get("guild_name")) or guild_name
     user_name = text_or_empty(info.get("user_name")) or user_name
+    key = f"{self_id}:{msg_id}"
 
     async with _lock:
-        _pending[msg_id] = info
+        _pending[key] = info
 
-    await _notify_superuser(bot, guild_name, user_name, msg_id, guild_id)
+    await _notify_superuser(bot, guild_name, user_name, key, guild_id)
     await guild_req.finish()
 
 
@@ -482,9 +490,15 @@ async def _notify_ark_invite(bot: Bot, guild_name: str, user_name: str, info: di
 
 # 超级用户审批回复
 
-async def _is_superuser_reply(event: Event) -> bool:
-    uid = str(event_user_id(event))
-    return uid == superuser and bool(_pending)
+def _is_superuser_reply(account: Bot, event: Event) -> bool:
+    return select_invite_reply(
+        user_id=str(event_user_id(event)),
+        superuser_id=superuser,
+        private=not is_group(event),
+        self_id=_account_id(account),
+        text=event_plain_text(event).strip(),
+        pending=_pending,
+    ) is not None
 
 
 approve_handler = listen_message(rule=Pred(_is_superuser_reply), priority=4, block=True)
@@ -494,16 +508,21 @@ approve_handler = listen_message(rule=Pred(_is_superuser_reply), priority=4, blo
 async def handle_approve_reply(event: Event, bot: Bot):
     text = event_plain_text(event).strip()
     decision = parse_decision(text)
-
     if decision is None:
-        await approve_handler.finish("请回复 同意 或 拒绝")
+        return
 
     async with _lock:
-        if not _pending:
-            await approve_handler.finish("当前没有待审批的群邀请")
+        selected = select_invite_reply(
+            user_id=str(event_user_id(event)),
+            superuser_id=superuser,
+            private=not is_group(event),
+            self_id=_account_id(bot),
+            text=text,
+            pending=_pending,
+        )
+        if selected is None:
             return
-
-        key, info = next(iter(_pending.items()))
+        key, info = selected
 
         try:
             api_type = info.get("api_type", "satori")

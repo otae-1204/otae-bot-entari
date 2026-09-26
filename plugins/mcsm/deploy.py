@@ -18,6 +18,7 @@ import httpx
 from loguru import logger
 
 from otae_bot.config.settings import _env
+from otae_bot.infrastructure.http.tls import ashared_ssl_context
 
 try:
     from .client import redact_sensitive_text
@@ -950,7 +951,7 @@ async def diagnose_deploy_failure(
         "Content-Type": "application/json",
     }
     try:
-        async with httpx.AsyncClient(timeout=20, trust_env=False) as client:
+        async with httpx.AsyncClient(timeout=20, trust_env=False, verify=await ashared_ssl_context(trust_env=False)) as client:
             resp = await client.post(
                 f"{config['base_url'].rstrip('/')}/chat/completions",
                 json=body,

@@ -1144,7 +1144,12 @@ class EndfieldOfficialClientTests(unittest.IsolatedAsyncioTestCase):
         with mock.patch.object(client_module.httpx, "AsyncClient") as async_client:
             client = client_module.EndfieldOfficialClient()
 
-        async_client.assert_called_once_with(timeout=25.0, follow_redirects=True, trust_env=False)
+        async_client.assert_called_once_with(
+            timeout=25.0,
+            follow_redirects=True,
+            trust_env=False,
+            verify=client_module.shared_ssl_context(trust_env=False),
+        )
         self.assertIs(client.http, async_client.return_value)
         self.assertTrue(client._owns_http)
 

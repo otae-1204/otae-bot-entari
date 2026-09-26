@@ -19,7 +19,9 @@ from plugins.endfield.account.challenge.draw import (
     ChallengeResolutionError,
     _best_cleared_html,
     _css,
+    _feature_entries,
     _feature_items,
+    _feature_list_html,
     _monument_detail_html,
     _monument_difficulty_label,
     _monument_history_block,
@@ -656,6 +658,77 @@ class EndfieldChallengeTests(unittest.TestCase):
             " - 敌人被击败时，其他所有敌人回复一定生命值。\n\n <@ba.info>- 禁止使用战术物品和消耗品。</>"
         )
         self.assertEqual(items, ("敌人被击败时，其他所有敌人回复一定生命值", "禁止使用战术物品和消耗品"))
+
+    def test_plain_feature_keeps_info_marker_for_official_grey_text(self):
+        from plugins.endfield.account.challenge.parsing import _plain_feature
+
+        text = _plain_feature(
+            " - 击败敌人时，恢复{sp_val:0}点技力。\n <@ba.info>- 敌人属性提升。</>"
+        )
+        # 占位符仍由 _plain 系列删掉（取值在 i18n 层填），info 段落留下哨兵边界
+        self.assertEqual(text, "- 击败敌人时，恢复点技力。 \x01- 敌人属性提升。\x02")
+
+    def test_feature_entries_mark_official_grey_text(self):
+        # 渲染层拿到的是解析层已经打过哨兵的文本（见 _plain_feature）
+        entries = _feature_entries(
+            "- 击败敌人时，恢复15点技力。 \x01- 敌人属性提升。\x02"
+        )
+        self.assertEqual(
+            entries,
+            (("击败敌人时，恢复15点技力", False), ("敌人属性提升", True)),
+        )
+        html = _feature_list_html(entries, ())
+        self.assertIn('<li>击败敌人时，恢复15点技力</li>', html)
+        self.assertIn('<li class="is-note">敌人属性提升</li>', html)
+
+    def test_feature_entries_treat_plain_text_as_regular_items(self):
+        # 不带哨兵的文本（例如快照直接喂进渲染层）不应被误判成灰字提示
+        entries = _feature_entries(" - 第一句。\n - 第二句。")
+        self.assertEqual(entries, (("第一句", False), ("第二句", False)))
+
+    def test_locale_fills_feature_placeholders_from_param_list(self):
+        dungeon_id = "indie_battletower002"
+        locale = build_challenge_locale(
+            {
+                "name": "野性旧事",
+                "feature": " - 击败敌人时，恢复{sp_val:0}点技力。\n - 战技伤害<@ba.vup>+{damage_up:0%}</>。",
+            },
+            {},
+            {
+                dungeon_id: {
+                    "dungeonId": dungeon_id,
+                    "dungeonName": {"id": "name", "text": ""},
+                    "featureDesc": {"id": "feature", "text": ""},
+                    "paramList": [
+                        {"key": "sp_val", "value": 15, "valueStr": ""},
+                        {"key": "damage_up", "value": 0.6, "valueStr": ""},
+                    ],
+                }
+            },
+            version="test",
+        )
+        entry = locale.dungeons[dungeon_id]
+        self.assertEqual(
+            entry.feature,
+            "- 击败敌人时，恢复15点技力。\n - 战技伤害<@ba.vup>+60%</>。",
+        )
+        # 未在 paramList 里给出的占位符原样保留，交给下游清理，不印成「--」
+        self.assertNotIn("--", entry.feature)
+
+    def test_locale_keeps_placeholders_without_param_list(self):
+        dungeon_id = "indie_battletower004"
+        locale = build_challenge_locale(
+            {"feature": " - 恢复{sp_val:0}点技力。"},
+            {},
+            {
+                dungeon_id: {
+                    "dungeonId": dungeon_id,
+                    "featureDesc": {"id": "feature", "text": ""},
+                }
+            },
+            version="test",
+        )
+        self.assertEqual(locale.dungeons[dungeon_id].feature, "- 恢复{sp_val:0}点技力。")
 
     def test_war_overview_shows_best_cleared_tier_only(self):
         raw = _war_fixture()

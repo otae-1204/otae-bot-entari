@@ -10,6 +10,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..i18n import localized_text
+from ...catalog.views.common import (
+    _param_list_values,
+    _substitute_placeholders,
+)
 from ...providers.akedata import _get, fetch_akedata_manifest
 
 
@@ -252,7 +256,13 @@ def build_challenge_locale(
             entry = ChallengeDungeonLocale(
                 name=localized_text(value.get("dungeonName"), translations=cn),
                 desc=localized_text(value.get("dungeonDesc"), translations=cn),
-                feature=localized_text(value.get("featureDesc"), translations=cn),
+                # 关卡特性原文带 {sp_val:0} 这类占位符，取值只存在于同一行的
+                # paramList；不在这里填，下游 _plain 会把它整段删掉，卡片就只剩
+                # 「恢复点技力」「战技伤害+」这种残句。
+                feature=_substitute_placeholders(
+                    localized_text(value.get("featureDesc"), translations=cn),
+                    _param_list_values(value.get("paramList")),
+                ),
                 additional_target=localized_text(value.get("extraGoalDesc"), translations=cn),
             )
             for alias in {str(key), dungeon_id}:

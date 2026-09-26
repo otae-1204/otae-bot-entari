@@ -21,6 +21,7 @@ from loguru import logger
 
 from otae_bot.infrastructure.cache import AsyncTTLCache, CacheStats
 from .json_values import freeze_json, freeze_json_object, json_memory_size, mutable_json
+from .tls import shared_ssl_context
 from .disk import (
     DiskImage,
     public_image_request,
@@ -136,6 +137,7 @@ def _get_client() -> httpx.AsyncClient:
             _client = httpx.AsyncClient(
                 follow_redirects=True,
                 trust_env=False,
+                verify=shared_ssl_context(trust_env=False),
                 limits=httpx.Limits(
                     max_connections=DEFAULT_CONCURRENCY,
                     max_keepalive_connections=DEFAULT_CONCURRENCY,

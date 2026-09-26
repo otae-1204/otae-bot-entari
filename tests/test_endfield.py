@@ -647,7 +647,7 @@ class EndfieldCommandParserTests(unittest.TestCase):
         source = (ROOT / "plugins/endfield/handlers.py").read_text(encoding="utf-8")
         self.assertIn('if command.action == "alias":', source)
         self.assertIn('dev_visible_for_user(str(event_user_id(event)), Config.SUPERUSERS)', source)
-        self.assertIn("_handle_alias_command(command)", source)
+        self.assertIn("await _handle_alias_command(command)", source)
 
     def test_source_help_lists_warfarin_weapon_fallback(self):
         text = commands.format_source()

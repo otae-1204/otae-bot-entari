@@ -13,6 +13,8 @@ import httpx
 
 from loguru import logger
 
+from otae_bot.infrastructure.http.tls import ashared_ssl_context
+
 # ANSI 终端转义码正则（颜色/光标/DEC 私有模式/键盘模式等）
 _ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]|\x1b[=>]")
 
@@ -134,7 +136,7 @@ class MCSMClient:
 
         url = f"{self.base_url}{path}"
         try:
-            async with httpx.AsyncClient(headers=self._headers, trust_env=False, timeout=timeout) as client:
+            async with httpx.AsyncClient(headers=self._headers, trust_env=False, timeout=timeout, verify=await ashared_ssl_context(trust_env=False)) as client:
                 resp = await client.request(method, url, params=params, json=json_data)
                 resp.raise_for_status()
         except httpx.TimeoutException as exc:
@@ -519,7 +521,7 @@ class MCSMClient:
         params = dict(config.get("params") or {})
         headers = {"X-Requested-With": "XMLHttpRequest"}
         try:
-            async with httpx.AsyncClient(timeout=None, trust_env=False) as client:
+            async with httpx.AsyncClient(timeout=None, trust_env=False, verify=await ashared_ssl_context(trust_env=False)) as client:
                 with path.open("rb") as fp:
                     files = {"file": (path.name, fp, "application/octet-stream")}
                     resp = await client.post(upload_url, params=params or None, files=files, headers=headers)

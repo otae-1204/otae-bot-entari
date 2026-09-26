@@ -18,6 +18,8 @@ from uuid import uuid4
 import httpx
 from loguru import logger
 
+from otae_bot.infrastructure.http.tls import shared_ssl_context
+
 from .config import GatewayError, GrokConfig, GrokError
 from .media import (
     MAX_FILE_BYTES,
@@ -436,7 +438,7 @@ class Gateway:
 
 def make_client() -> httpx.AsyncClient:
     # Tailnet requests must bypass global model/search/system proxies.
-    return httpx.AsyncClient(trust_env=False, timeout=httpx.Timeout(20, connect=10), follow_redirects=False)
+    return httpx.AsyncClient(trust_env=False, timeout=httpx.Timeout(20, connect=10), follow_redirects=False, verify=shared_ssl_context(trust_env=False))
 
 
 async def ask(config: GrokConfig, prompt: str) -> Reply:

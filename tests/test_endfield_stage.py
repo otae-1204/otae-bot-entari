@@ -750,6 +750,40 @@ class EndfieldAkeDataStageSourceTests(unittest.TestCase):
         self.assertEqual(hard.mechanics, ("禁止使用战术物品。",))
         self.assertEqual(stage.source.revision, version.id)
 
+    def test_mechanics_fill_placeholders_from_the_same_row_param_list(self):
+        version, tables = _akedata_fixture()
+        series, dungeons, texts, rewards, items, enemies, displays, attributes = tables
+        normal = dict(dungeons["indie_hard022"])
+        normal["featureDesc"] = {"id": "9", "text": ""}
+        normal["paramList"] = [
+            {"key": "sp_val", "value": 15, "valueStr": ""},
+            {"key": "damage_up", "value": 0.6, "valueStr": ""},
+        ]
+        dungeons = {**dungeons, normal["dungeonId"]: normal}
+        texts = {
+            **texts,
+            "9": "- 击败敌人时，恢复{sp_val:0}点技力。\n- 战技伤害<@ba.vup>+{damage_up:0%}</>。",
+        }
+        stage = parse_akedata_stage(
+            version, "indie_hard022", series, dungeons, texts, rewards, items, enemies, displays, attributes
+        )
+        self.assertEqual(
+            stage.variants[0].mechanics,
+            ("击败敌人时，恢复15点技力。", "战技伤害+60%。"),
+        )
+
+    def test_mechanics_keep_placeholders_the_row_cannot_resolve(self):
+        version, tables = _akedata_fixture()
+        series, dungeons, texts, rewards, items, enemies, displays, attributes = tables
+        normal = dict(dungeons["indie_hard022"])
+        normal["featureDesc"] = {"id": "9", "text": ""}
+        dungeons = {**dungeons, normal["dungeonId"]: normal}
+        texts = {**texts, "9": "- 恢复{sp_val:0}点技力。"}
+        stage = parse_akedata_stage(
+            version, "indie_hard022", series, dungeons, texts, rewards, items, enemies, displays, attributes
+        )
+        self.assertEqual(stage.variants[0].mechanics, ("恢复{sp_val:0}点技力。",))
+
     def test_enemy_stats_include_instance_and_spawner_buff_modifiers(self):
         version, tables = _akedata_fixture()
         series, dungeons, texts, rewards, items, enemies, displays, attributes = tables

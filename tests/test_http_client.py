@@ -8,6 +8,44 @@ import httpx
 
 from otae_bot.infrastructure.cache import AsyncTTLCache
 from otae_bot.infrastructure.http import client as http_client
+from otae_bot.infrastructure.http import tls
+
+
+class SharedSslContextTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self._saved = dict(tls._contexts)
+        tls._contexts.clear()
+
+    def tearDown(self):
+        tls._contexts.clear()
+        tls._contexts.update(self._saved)
+
+    async def test_context_is_built_once_off_the_event_loop(self):
+        built = []
+
+        def fake_create(**kwargs):
+            built.append(kwargs)
+            return object()
+
+        with mock.patch.object(tls.httpx, "create_ssl_context", side_effect=fake_create):
+            first, second = await asyncio.gather(
+                tls.ashared_ssl_context(trust_env=False),
+                tls.ashared_ssl_context(trust_env=False),
+            )
+            self.assertIs(tls.shared_ssl_context(trust_env=False), first)
+        self.assertIs(first, second)
+        self.assertEqual(built, [{"verify": True, "trust_env": False}])
+
+    def test_cert_env_only_affects_trust_env_contexts(self):
+        with mock.patch.object(tls.httpx, "create_ssl_context", side_effect=lambda **_: object()):
+            with mock.patch.dict(tls.os.environ):
+                tls.os.environ.pop("SSL_CERT_FILE", None)
+                plain = tls.shared_ssl_context(trust_env=True)
+                ignored = tls.shared_ssl_context(trust_env=False)
+            with mock.patch.dict(tls.os.environ, {"SSL_CERT_FILE": "custom.pem"}):
+                custom = tls.shared_ssl_context(trust_env=True)
+                self.assertIs(tls.shared_ssl_context(trust_env=False), ignored)
+        self.assertIsNot(plain, custom)
 
 
 class AsyncTTLCacheTests(unittest.IsolatedAsyncioTestCase):

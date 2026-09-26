@@ -22,6 +22,7 @@ from PIL import Image
 
 from otae_bot.config.paths import IMAGE_PATH
 from otae_bot.adapters.entari import cmd as _cmd
+from otae_bot.infrastructure.http.tls import ashared_ssl_context
 from otae_bot.infrastructure.storage.json_store import JsonStore
 
 
@@ -118,7 +119,7 @@ async def _download_avatar(account: Account | None, satori_url: str | None, qq_n
     for api in _QQ_AVATAR_APIS:
         try:
             url = api.format(qq=qq_number)
-            async with httpx.AsyncClient(timeout=8) as client:
+            async with httpx.AsyncClient(timeout=8, verify=await ashared_ssl_context()) as client:
                 resp = await client.get(url, follow_redirects=True)
             if resp.status_code == 200 and len(resp.content) > 100:
                 return resp.content

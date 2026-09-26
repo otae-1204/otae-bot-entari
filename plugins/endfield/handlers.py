@@ -70,7 +70,12 @@ from .account.currency.service import (
     split_report,
 )
 from .account.currency.draw import draw_currency_log_cards
-from .catalog.aliases import add_alias, alias_targets
+from .catalog.aliases import (
+    FILE_KINDS as FILE_ALIAS_KINDS,
+    add_alias,
+    alias_targets,
+    normalize_alias_text,
+)
 from .catalog.commands import (
     EndfieldCandidate,
     CANDIDATE_SCORE_THRESHOLD,
@@ -81,6 +86,7 @@ from .catalog.commands import (
     choose_candidate,
     candidate_options,
     dev_visible_for_user,
+    ENCYCLOPEDIA_SCOPES,
     format_candidates,
     format_equipment_attribute_filters,
     format_error,
@@ -94,6 +100,7 @@ from .catalog.commands import (
     parse_equipment_attribute_filters,
     parse_loadout_spec,
     parse_shortcut_command,
+    SCOPE_LABELS,
     score_candidate,
     score_entity_candidate,
     strip_message_mentions,
@@ -197,6 +204,12 @@ from .ownership.draw import draw_ownership_stats
 from .providers.registry import source_label, source_order
 from .calendar.akedata import AkeDataVersionCalendarSource, VersionCalendarError
 from .paths import HELP_IMAGE_PATH as ENDFIELD_HELP_IMAGE_PATH
+from .providers.repository import AkeDataIncomplete, query_snapshot
+from .encyclopedia import archives as encyclopedia_archives
+from .encyclopedia import draw as encyclopedia_draw
+from .encyclopedia import index as encyclopedia_index
+from .encyclopedia import service as encyclopedia_service
+from .encyclopedia.props import PropEffectIncomplete
 
 
 client = WarfarinClient()
@@ -216,7 +229,7 @@ _ARCHIVE_LOCK = asyncio.Lock()
 _FORWARD_SENDER_NAME = "Endfield"
 CARD_CACHE_TTL_SECONDS = 600.0
 CARD_CACHE_MAX_BYTES = 48 * 1024 * 1024
-CARD_RENDER_VERSION = "endfield-card-v49"
+CARD_RENDER_VERSION = "endfield-card-v50"
 CardCacheKey = tuple[str, str, str, str, str, str, str]
 _CARD_CACHE: AsyncTTLCache[CardCacheKey, tuple[bytes, ...]] = AsyncTTLCache(
     ttl_seconds=CARD_CACHE_TTL_SECONDS,
@@ -263,6 +276,11 @@ CONTENT_RESOLVERS: dict[str, Resolver] = {
     "weapon": lambda query: _resolve_candidates_from_sources("weapon", query),
     "equipment": lambda query: _resolve_candidates_from_sources("equipment", query),
     "stage": lambda query: _resolve_candidates_from_sources("stage", query),
+    "item": lambda query: _resolve_candidates_from_sources("item", query),
+    "prop": lambda query: _resolve_candidates_from_sources("prop", query),
+    "enemy": lambda query: _resolve_candidates_from_sources("enemy", query),
+    "term": lambda query: _resolve_candidates_from_sources("term", query),
+    "archive_entry": lambda query: _resolve_archive_entry_candidates(query),
 }
 
 CONTENT_RENDERERS: dict[str, Renderer] = {
@@ -275,6 +293,16 @@ CONTENT_RENDERERS: dict[str, Renderer] = {
     "equipment_attribute": lambda key, source: _render_equipment_attribute(key, source),
     "stage": lambda key, source: _render_stage(key, source),
     "stage_catalog": lambda key, source: _render_stage_catalog(key, source),
+    "item": lambda key, source: _render_encyclopedia("item", key, source),
+    "item_catalog": lambda key, source: _render_encyclopedia("item", key, source, catalog=True),
+    "prop": lambda key, source: _render_encyclopedia("prop", key, source),
+    "prop_catalog": lambda key, source: _render_encyclopedia("prop", key, source, catalog=True),
+    "enemy": lambda key, source: _render_encyclopedia("enemy", key, source),
+    "enemy_catalog": lambda key, source: _render_encyclopedia("enemy", key, source, catalog=True),
+    "term": lambda key, source: _render_encyclopedia("term", key, source),
+    "term_catalog": lambda key, source: _render_encyclopedia("term", key, source, catalog=True),
+    # 档案条目永远不打开 AkeSnapshot，渲染器自己取 archive_store 的当前快照。
+    "archive_entry": lambda key, source: _render_archive_entry(key, source),
 }
 
 SOURCE_CANDIDATE_RESOLVERS: dict[str, dict[str, Resolver]] = {
@@ -295,7 +323,48 @@ SOURCE_CANDIDATE_RESOLVERS: dict[str, dict[str, Resolver]] = {
     "stage": {
         "akedata": lambda query: _resolve_stage_candidates_akedata(query),
     },
+    # 图鉴的四个 AKE kind 只登记 akedata；lambda 是单参，只有 equipment 走双参。
+    "item": {"akedata": lambda query: _resolve_encyclopedia_candidates("item", query)},
+    "prop": {"akedata": lambda query: _resolve_encyclopedia_candidates("prop", query)},
+    "enemy": {"akedata": lambda query: _resolve_encyclopedia_candidates("enemy", query)},
+    "term": {"akedata": lambda query: _resolve_encyclopedia_candidates("term", query)},
+    # 档案条目不走 SOURCE_CANDIDATE_RESOLVERS：快照来自 archive_store，不是 AkeData。
 }
+
+# 需要 `query_snapshot(candidate.revision)` 包住的 kind。
+# archive_entry 永不加入：档案快照的 version 对不上 AKE manifest。
+_AKE_SNAPSHOT_KINDS: frozenset[str] = frozenset(
+    {
+        "operator",
+        "weapon",
+        "equipment",
+        "operator_catalog",
+        "weapon_catalog",
+        "equipment_catalog",
+        "equipment_attribute",
+        "item",
+        "prop",
+        "item_catalog",
+        "prop_catalog",
+        "enemy",
+        "enemy_catalog",
+        "term",
+        "term_catalog",
+    }
+)
+# AKE 渲染输入不完整时整卡回退 FZ 的 kind。新 kind 一律不进：
+# _render_candidate 的 except 元组含 ValueError，而 PropEffectIncomplete 就是它。
+_FZ_WHOLE_VIEW_FALLBACK_KINDS: frozenset[str] = frozenset(
+    {
+        "operator",
+        "weapon",
+        "equipment",
+        "operator_catalog",
+        "weapon_catalog",
+        "equipment_catalog",
+        "equipment_attribute",
+    }
+)
 
 
 endfield_cmd = on_alconna(
@@ -381,7 +450,7 @@ async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand,
     if command.action == "alias":
         if not dev_visible_for_user(str(event_user_id(event)), Config.SUPERUSERS):
             return await matcher.finish(format_unknown())
-        return await matcher.finish(_handle_alias_command(command))
+        return await matcher.finish(await _handle_alias_command(command))
     if command.action == "quick_calc":
         return await matcher.finish(
             format_status_quick_calc(command.status_name, command.status_level, command.arts_strength)
@@ -400,6 +469,15 @@ async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand,
         return await matcher.finish(format_unknown())
     if command.scope == "stage" and command.source and command.source != "akedata":
         return await matcher.finish(f"{source_label(command.source)} 暂不支持关卡资料；关卡仅使用 AkeData。")
+    if (
+        command.scope in ENCYCLOPEDIA_SCOPES
+        and command.source
+        and command.source not in source_order(command.scope)
+    ):
+        return await matcher.finish("该类资料只提供 AkeData")
+    if command.scope == "archive_entry" and archive_store.load_current_view() is None:
+        # 显式档案范围且没有快照：直接回文案，不抛异常、不走「资料暂时不可用」。
+        return await matcher.finish("档案资料尚未就绪，先发送 /ef 档案 刷新")
     if not command.query:
         if command.action == "query" and command.scope in {"operator", "weapon", "equipment"}:
             command = ParsedEndfieldCommand(
@@ -417,6 +495,14 @@ async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand,
                 source=command.source,
                 rarity=command.rarity,
             )
+        elif command.action == "query" and command.scope in {"item", "prop", "enemy", "term"}:
+            command = ParsedEndfieldCommand(
+                "query",
+                scope=command.scope,
+                query="__all__",
+                source=command.source,
+                rarity=command.rarity,
+            )
         else:
             return await _finish_endfield_help(matcher)
 
@@ -424,6 +510,11 @@ async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand,
     try:
         candidate_started = perf_counter()
         candidates = await _collect_candidates(command.scope, command.query, command.source, command.rarity)
+        fallback = await _item_scope_fallback(command, candidates)
+        if fallback == "medal":
+            return await matcher.finish("奖章请用 /ef 奖章")
+        if fallback is not None:
+            candidates = fallback
         candidate_seconds = perf_counter() - candidate_started
         if command.action == "search":
             title = "搜索结果" if candidates else "未找到相关结果"
@@ -478,6 +569,12 @@ async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand,
         return await matcher.finish("数据源暂时不可用")
     except (StageVariantNotFound, StageDataIncomplete) as exc:
         return await matcher.finish(str(exc))
+    except PropEffectIncomplete as exc:
+        logger.warning(f"[endfield] prop effect incomplete for {command.scope} {command.query}: {exc}")
+        return await matcher.finish("道具效果数值未收录")
+    except AkeDataIncomplete as exc:
+        logger.warning(f"[endfield] AKE data incomplete for {command.scope} {command.query}: {exc}")
+        return await matcher.finish("资料暂时不可用")
     except Exception as exc:
         logger.exception(f"[endfield] card failed for {command.scope} {command.query}: {exc}")
         return await matcher.finish("图片生成失败")
@@ -2146,17 +2243,18 @@ async def _collect_candidates(
         return []
     results = await asyncio.gather(*tasks, return_exceptions=True)
     candidates: list[EndfieldCandidate] = []
-    api_errors: list[WarfarinAPIError] = []
+    errors: list[Exception] = []
     for result in results:
-        if isinstance(result, WarfarinAPIError):
-            api_errors.append(result)
+        # AkeDataIncomplete 不能掉进下面的 warning 分支被当成空列表。
+        if isinstance(result, (WarfarinAPIError, AkeDataIncomplete)):
+            errors.append(result)
             continue
         if isinstance(result, Exception):
             logger.warning(f"[endfield] resolver failed for {scope} {query}: {result}")
             continue
         candidates.extend(result)
-    if not candidates and api_errors:
-        raise api_errors[0]
+    if not candidates and errors:
+        raise errors[0]
     return _dedupe_candidates(candidates)
 
 
@@ -2169,7 +2267,10 @@ async def _resolve_candidates_from_sources(
     if kind == "stage" and not requested_source:
         return await _resolve_stage_candidates(query)
     resolvers = SOURCE_CANDIDATE_RESOLVERS.get(kind, {})
-    errors: list[WarfarinAPIError] = []
+    errors: list[Exception] = []
+    # 某个 resolver 返回了列表（包括空列表）就算这个源成功；只有全部尝试都抛了
+    # 才把最后一个错误抛出去，否则「前一个源失败、后一个源返回空」会误报成数据源故障。
+    succeeded = False
     sources = (requested_source,) if requested_source else source_order(kind)
     for source in sources:
         resolver = resolvers.get(source)
@@ -2177,18 +2278,131 @@ async def _resolve_candidates_from_sources(
             continue
         try:
             candidates = await resolver(query, rarity) if kind == "equipment" else await resolver(query)
-        except WarfarinAPIError as exc:
+        except (WarfarinAPIError, AkeDataIncomplete) as exc:
             errors.append(exc)
             logger.warning(f"[endfield] {source_label(source)} resolver failed for {kind} {query}: {exc}")
             continue
         except Exception as exc:
             logger.warning(f"[endfield] {source_label(source)} resolver failed for {kind} {query}: {exc}")
             continue
+        succeeded = True
         if candidates:
             return candidates
+    if succeeded:
+        return []
     if errors:
         raise errors[-1]
     return []
+
+
+async def _item_scope_fallback(
+    command: ParsedEndfieldCommand,
+    candidates: list[EndfieldCandidate],
+) -> list[EndfieldCandidate] | str | None:
+    """`/ef 物品 <词>` 的补查：只在物品候选为空时做，顺序固定。
+
+    返回列表交给 choose_candidate；返回 "medal" 时 handler 提示走 /ef 奖章；
+    返回 None 表示候选已非空或范围不是物品，保持原样。
+    """
+    if command.scope != "item":
+        return None
+    if not command.query or command.query == encyclopedia_service.ALL_QUERY:
+        return None
+    if candidates:
+        return None
+    async with query_snapshot() as data:
+        index = await encyclopedia_index.get_index(data, "prop")
+        props = encyclopedia_service.prop_candidates(index, command.query)
+    if props:
+        return props
+    equipment = await _resolve_candidates_from_sources("equipment", command.query, command.source, command.rarity)
+    if equipment:
+        return equipment
+    weapons = await _resolve_candidates_from_sources("weapon", command.query, command.source)
+    if weapons:
+        return weapons
+        
+    async with query_snapshot() as data:
+        index = await encyclopedia_index.get_index(data, "item")
+        if encyclopedia_service.medal_redirect(index, command.query):
+            return "medal"
+    return []
+
+
+async def _render_encyclopedia(
+    kind: str, key: str, source: str = "", *, catalog: bool = False
+) -> bytes | tuple[bytes, ...] | None:
+    """图鉴卡渲染：只认 AkeData，绝不回退 FZ。"""
+    if source and source != "akedata":
+        return None
+    candidate = EndfieldCandidate(
+        kind=f"{kind}_catalog" if catalog else kind,
+        key=key,
+        display_name=key,
+        score=100,
+        source="akedata",
+    )
+    async with query_snapshot() as data:
+        if catalog:
+            view = await encyclopedia_service.catalog_view(data, kind, key)
+            return await encyclopedia_draw.draw_catalog_cards(view)
+        view = await encyclopedia_service.build_view(data, candidate)
+    return await _DRAWERS[kind](view)
+
+
+async def _render_archive_entry(key: str, source: str = "") -> bytes | None:
+    """档案条目卡：只读 archive_store 的当前快照，不开 AkeSnapshot。"""
+    del source
+    view = archive_store.load_current_view()
+    if view is None:
+        raise _CardNotFound
+    entry = encyclopedia_archives.entry_view(view, key)
+    return await encyclopedia_draw.draw_archive_entry_card(entry)
+
+
+_DRAWERS = {
+    "item": encyclopedia_draw.draw_item_card,
+    "prop": encyclopedia_draw.draw_prop_card,
+    "enemy": encyclopedia_draw.draw_enemy_card,
+    "term": encyclopedia_draw.draw_term_card,
+}
+
+
+async def _resolve_encyclopedia_candidates(kind: str, query: str) -> list[EndfieldCandidate]:
+    """图鉴的四个 AKE kind：自己开 snapshot，取索引，再打分。"""
+    query = query.strip()
+    if not query:
+        return []
+    async with query_snapshot() as data:
+        index = await encyclopedia_index.get_index(data, kind)
+        return encyclopedia_service.candidates(index, kind, query)
+
+
+async def _resolve_archive_entry_candidates(query: str) -> list[EndfieldCandidate]:
+    """档案条目：快照为 None 时返回空列表，不抛、不打 warning。"""
+    query = query.strip()
+    if not query:
+        return []
+    view = archive_store.load_current_view()
+    if view is None:
+        return []
+    entries = encyclopedia_archives.build_entries(view)
+    candidates: list[EndfieldCandidate] = []
+    for entry in entries:
+        score = score_entity_candidate(entry.kind, query, entry.display_name, *entry.extra_names)
+        if score < CANDIDATE_SCORE_THRESHOLD:
+            continue
+        candidates.append(
+            EndfieldCandidate(
+                kind="archive_entry",
+                key=entry.key,
+                display_name=entry.display_name,
+                score=score,
+                source="akedata",
+                revision=str(view.version or ""),
+            )
+        )
+    return candidates
 
 
 async def _resolve_stage_candidates_akedata(query: str) -> list[EndfieldCandidate]:
@@ -2795,13 +3009,12 @@ async def _render_candidate(
                     mode=candidate.mode or "detail",
                     selector=candidate.variant,
                 )
-            elif effective_source == "akedata" and candidate.kind in {"operator", "weapon", "equipment", "operator_catalog", "weapon_catalog", "equipment_catalog", "equipment_attribute"}:
-                from .providers.repository import query_snapshot
+            elif effective_source == "akedata" and candidate.kind in _AKE_SNAPSHOT_KINDS:
                 try:
                     async with query_snapshot(candidate.revision):
                         output = await renderer(candidate.key, effective_source)
                 except (WarfarinAPIError, RuntimeError, ValueError, KeyError, TypeError) as exc:
-                    if requested_source or candidate.kind not in {"operator", "weapon", "equipment", "operator_catalog", "weapon_catalog", "equipment_catalog", "equipment_attribute"}:
+                    if requested_source or candidate.kind not in _FZ_WHOLE_VIEW_FALLBACK_KINDS:
                         raise
                     logger.warning("[endfield] AKE render input incomplete; whole-view FZ fallback ({}: {})", type(exc).__name__, exc)
                     prefix = {"operator": "干员", "weapon": "武器", "equipment": "装备"}.get(candidate.kind)
@@ -3098,26 +3311,66 @@ async def _handle_dev_command(command: ParsedEndfieldCommand) -> str:
     return "dev 命令：status | resolve | refresh | cache"
 
 
-def _handle_alias_command(command: ParsedEndfieldCommand) -> str:
-    usage = "用法：/ef 别名 添加 <干员|武器|装备> <正式名称> <新别名>"
+async def _handle_alias_command(command: ParsedEndfieldCommand) -> str:
+    usage = "用法：/ef 别名 添加 <干员|武器|装备|物品|道具|敌人|词条|档案> <正式名称> <新别名>"
     if command.alias_action != "add" or len(command.args) < 3:
         return usage
     kind = normalize_alias_kind(command.args[0])
     if not kind:
         return usage
+    label = SCOPE_LABELS.get(kind, kind)
     canonical_name = command.args[1]
     alias = " ".join(command.args[2:]).strip()
+    lookup = None
+    if kind not in FILE_ALIAS_KINDS:
+        # 档案条目没有 AkeSnapshot 索引，正式名来自 archive_store 的当前快照。
+        if kind != "archive_entry" and kind not in encyclopedia_index.supported_kinds():
+            return f"{label}尚未开放，暂时不能添加别名"
+        lookup = await _encyclopedia_lookup(kind)
     try:
-        canonical, added = add_alias(kind, canonical_name, alias)
+        canonical, added = add_alias(kind, canonical_name, alias, lookup=lookup)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         logger.warning(f"[endfield] alias update rejected: {exc}")
         return f"添加别名失败：{exc}"
-    label = {"operator": "干员", "weapon": "武器", "equipment": "装备"}[kind]
     if not added:
         return f"{label}别名已存在：{alias} → {canonical}"
     targets = alias_targets(kind, alias)
     collision = f"\n该别名同时匹配：{'、'.join(targets)}" if len(targets) > 1 else ""
     return f"已添加{label}别名：{alias} → {canonical}{collision}"
+
+
+async def _encyclopedia_lookup(kind: str):
+    """给 add_alias 的同步 lookup 预取一份正式名快照。
+
+    档案条目不碰 AkeSnapshot：它的正式名只存在于档案库快照里。
+    """
+    if kind == "archive_entry":
+        entries = encyclopedia_archives.build_entries(archive_store.load_current_view())
+        return lambda query: _exact_archive_names(entries, query)
+
+    async with query_snapshot() as data:
+        index = await encyclopedia_index.get_index(data, kind)
+
+    def lookup(query: str) -> tuple[str, ...]:
+        return index.exact_names(kind, query)
+
+    return lookup
+
+
+def _exact_archive_names(entries, query: str) -> tuple[str, ...]:
+    """档案条目的全等命中；与 EncyclopediaIndex.exact_names 同口径。"""
+    normalized = normalize_alias_text(query)
+    if not normalized:
+        return ()
+    return tuple(
+        sorted(
+            {
+                entry.display_name
+                for entry in entries
+                if normalize_alias_text(entry.display_name) == normalized
+            }
+        )
+    )
 
 
 class _CardNotFound(Exception):

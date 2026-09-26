@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from typing import (
     Any,
 )
@@ -106,6 +107,48 @@ def _substitute_fz_placeholders(desc: Any, values: Any) -> str:
         return _format_template_value(value, fmt)
 
     return re.sub(r"\{([^{}]+)\}", replace, str(desc or ""))
+
+
+def _param_list_values(raw: Any) -> dict[str, Any]:
+    """DungeonTable 的 paramList → ``{key: value}``，供占位符取值。
+
+    关卡特性原文只带模板（``恢复{sp_val:0}点技力``），实际数值在同一条记录的
+    paramList 里；不填的话下游会把占位符整段删掉，卡片只剩残句。
+    """
+    if not isinstance(raw, (list, tuple)):
+        return {}
+    values: dict[str, Any] = {}
+    for item in raw:
+        if not isinstance(item, Mapping):
+            continue
+        key = str(item.get("key") or "").strip()
+        if not key:
+            continue
+        # valueStr 是策划给的展示串，为空时回落到数值 value。
+        shown = item.get("valueStr")
+        values[key] = shown.strip() if isinstance(shown, str) and shown.strip() else item.get("value")
+    return values
+
+
+def _substitute_placeholders(text: Any, values: Any) -> str:
+    """填充 ``{key:fmt}``；解析不出的占位符原样保留，交给下游清理。
+
+    与 ``_substitute_fz_placeholders`` 的区别：那边是 FZ 词条的最终文案，取不到值
+    就写 ``--``；这里是客户端下发的模板，宁可留原文也不要印出 ``恢复--点技力``。
+    """
+    text = str(text or "")
+    if not text or not values:
+        return text
+    value_map = _normalized_value_map(values if isinstance(values, dict) else {})
+
+    def replace(match: re.Match[str]) -> str:
+        key_expr, _, fmt = match.group(1).partition(":")
+        value = _eval_fz_template_expr(key_expr.strip(), value_map)
+        if value is None:
+            return match.group(0)
+        return _format_template_value(value, fmt)
+
+    return re.sub(r"\{([^{}]+)\}", replace, text)
 
 
 def _clean_fz_rich_text(value: Any) -> str:

@@ -203,9 +203,10 @@ class Pred:
         self.func = func
 
     async def __call__(self, account: Account, event: Any) -> bool:
-        result = self.func(event)
         if _takes_two_args(self.func):
             result = self.func(account, event)
+        else:
+            result = self.func(event)
         if inspect.isawaitable(result):
             result = await result
         return bool(result)

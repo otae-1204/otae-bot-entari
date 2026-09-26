@@ -20,6 +20,7 @@ import httpx
 
 from otae_bot.config.settings import _env
 from otae_bot.adapters.entari import event_user_id, get_group_id
+from otae_bot.infrastructure.http.tls import ashared_ssl_context
 
 
 def _base_urls() -> list[str]:
@@ -71,7 +72,7 @@ async def call_onebot_action(bot: Any, action: str, **params: Any) -> Any:
     if token:
         headers["Authorization"] = f"Bearer {token}"
     errors: list[str] = []
-    async with httpx.AsyncClient(timeout=10, trust_env=False) as client:
+    async with httpx.AsyncClient(timeout=10, trust_env=False, verify=await ashared_ssl_context(trust_env=False)) as client:
         for base in urls:
             for suffix in (f"/{action}", f"/api/{action}"):
                 try:

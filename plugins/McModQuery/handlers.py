@@ -8,6 +8,7 @@ from arclet.alconna import Args
 from otae_bot.adapters.entari import ArgVal, ChainMsg, Text
 from arclet.entari import Event
 
+from otae_bot.infrastructure.http.tls import ashared_ssl_context
 from otae_bot.infrastructure.http.user_agent import get_user_agent
 from otae_bot.adapters.entari import cmd_with_args as _cmd
 
@@ -39,7 +40,7 @@ def _build_result_msg(name: str, hrefs: list, titles: list, prefix: str) -> str:
 
 async def _fetch_search_html(keyword: str, *, filter_args: str = "") -> str:
     url = _search_url(keyword, filter_args=filter_args)
-    async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+    async with httpx.AsyncClient(timeout=15, follow_redirects=True, verify=await ashared_ssl_context()) as client:
         resp = await client.get(url, headers=get_user_agent())
         resp.raise_for_status()
         return resp.text

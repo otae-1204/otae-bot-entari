@@ -11,6 +11,7 @@ from otae_bot.adapters.entari import (
 from arclet.entari import Account as Bot, Event
 
 from otae_bot.adapters.entari import cmd_with_args as _cmd
+from otae_bot.infrastructure.http.tls import ashared_ssl_context
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
 from otae_bot.config.settings import Plugin_Config, Config as GlobalConfig
 
@@ -94,7 +95,7 @@ async def handle_peek(
     screen_url = _join_endpoint(webpath, screen_end)
 
     try:
-        async with httpx.AsyncClient(timeout=5) as client:
+        async with httpx.AsyncClient(timeout=5, verify=await ashared_ssl_context()) as client:
             response = await client.get(screen_url)
             response.raise_for_status()
     except httpx.HTTPError:
@@ -162,7 +163,7 @@ async def handle_add_peek(
         await add_peek.finish("请提供正确的 peek 地址")
 
     try:
-        async with httpx.AsyncClient(timeout=5) as client:
+        async with httpx.AsyncClient(timeout=5, verify=await ashared_ssl_context()) as client:
             resp = await client.get(_join_endpoint(path, screen_end))
             resp.raise_for_status()
     except httpx.HTTPError:

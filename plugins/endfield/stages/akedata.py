@@ -9,6 +9,10 @@ from typing import Any
 from loguru import logger
 
 from ..account.i18n import localized_text
+from ..catalog.views.common import (
+    _param_list_values,
+    _substitute_placeholders,
+)
 from ..providers.warfarin import WarfarinClient
 from .models import (
     BossRushStageDetails,
@@ -509,7 +513,12 @@ def _variant(
         sort_order=sort_order or (2 if hard else 1),
         recommended_level=_optional_int(row.get("recommendLv")),
         stamina_cost=_optional_int(row.get("costStamina")),
-        mechanics=_mechanics(_translated(row.get("featureDesc"), text_table)),
+        mechanics=_mechanics(
+            _substitute_placeholders(
+                _translated(row.get("featureDesc"), text_table),
+                _param_list_values(row.get("paramList")),
+            )
+        ),
         enemies=_enemies(
             row,
             text_table,

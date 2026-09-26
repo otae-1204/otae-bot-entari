@@ -15,6 +15,8 @@ from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 import httpx
 
+from otae_bot.infrastructure.http.tls import ashared_ssl_context
+
 
 API_BASE = "https://qfile.qq.com/http2rpc/gotrpc/noauth/"
 SIGN_KEY = b"9EB18BB9ED457684"
@@ -130,7 +132,7 @@ async def preflight_qflash_archive(item: QFlashArchive) -> None:
     """Verify that the resolved direct URL is currently downloadable."""
     url = qflash_download_url(item)
     try:
-        async with httpx.AsyncClient(timeout=20, follow_redirects=True, trust_env=False) as client:
+        async with httpx.AsyncClient(timeout=20, follow_redirects=True, trust_env=False, verify=await ashared_ssl_context(trust_env=False)) as client:
             async with client.stream("GET", url, headers={"User-Agent": USER_AGENT}) as resp:
                 if resp.status_code != 200:
                     raise QFlashError(f"闪传压缩包预检失败: HTTP {resp.status_code}")
@@ -155,7 +157,7 @@ async def download_qflash_archive(item: QFlashArchive, target: Path) -> None:
     url = qflash_download_url(item)
     target.parent.mkdir(parents=True, exist_ok=True)
     try:
-        async with httpx.AsyncClient(timeout=None, follow_redirects=True, trust_env=False) as client:
+        async with httpx.AsyncClient(timeout=None, follow_redirects=True, trust_env=False, verify=await ashared_ssl_context(trust_env=False)) as client:
             async with client.stream("GET", url, headers={"User-Agent": USER_AGENT}) as resp:
                 if resp.status_code != 200:
                     raise QFlashError(f"下载闪传压缩包失败: HTTP {resp.status_code}")
@@ -304,7 +306,7 @@ class QFlashResolver:
         payload.setdefault("scene_type", 0)
         headers = build_qflash_headers(api, payload, referer)
         try:
-            async with httpx.AsyncClient(timeout=self.timeout, trust_env=False) as client:
+            async with httpx.AsyncClient(timeout=self.timeout, trust_env=False, verify=await ashared_ssl_context(trust_env=False)) as client:
                 resp = await client.post(API_BASE + api, content=_json_body(payload).encode("utf-8"), headers=headers)
                 resp.raise_for_status()
                 data = resp.json()

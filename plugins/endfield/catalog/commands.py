@@ -62,6 +62,30 @@ OWNERSHIP_ALIASES = {"持有率", "干员占比", "干员统计", "ownership", "
 OWNERSHIP_GROUP_ALIASES = {"群内", "本群", "当前群", "group", "guild"}
 OWNERSHIP_GLOBAL_ALIASES = {"全局", "全部", "global", "all"}
 
+ITEM_ALIASES = {"物品", "材料", "item", "items"}
+PROP_ALIASES = {"道具", "食物", "料理", "药剂", "prop", "props", "food"}
+ENEMY_ALIASES = {"敌人", "怪物", "enemy", "enemies"}
+TERM_ALIASES = {"词条", "术语", "term", "terms"}
+
+# 图鉴范围词：parse_command、_parse_optional_scope、normalize_alias_kind 三处共用这一份。
+# archive_entry 复用个人解析的档案别名，不另立一套。
+ENCYCLOPEDIA_SCOPES: tuple[str, ...] = ("item", "prop", "enemy", "term", "archive_entry")
+ENCYCLOPEDIA_SCOPE_ALIASES: dict[str, frozenset[str]] = {
+    "item": frozenset(ITEM_ALIASES),
+    "prop": frozenset(PROP_ALIASES),
+    "enemy": frozenset(ENEMY_ALIASES),
+    "term": frozenset(TERM_ALIASES),
+    "archive_entry": frozenset(ARCHIVE_ALIASES),
+}
+# 非交互尾句里能直接点的范围词；档案条目的入口是个人解析的「档案」，不是 scope label。
+ENCYCLOPEDIA_SCOPE_WORDS: dict[str, str] = {
+    "item": "物品",
+    "prop": "道具",
+    "enemy": "敌人",
+    "term": "词条",
+    "archive_entry": "档案",
+}
+
 SCOPE_LABELS = {
     "operator": "干员",
     "weapon": "武器",
@@ -70,6 +94,15 @@ SCOPE_LABELS = {
     "equipment_attribute": "装备",
     "stage": "关卡",
     "stage_catalog": "关卡目录",
+    "item": "物品",
+    "item_catalog": "物品目录",
+    "prop": "道具",
+    "prop_catalog": "道具目录",
+    "enemy": "敌人",
+    "enemy_catalog": "敌人目录",
+    "term": "词条",
+    "term_catalog": "词条目录",
+    "archive_entry": "档案条目",
 }
 
 EQUIPMENT_ATTRIBUTE_NAMES = {
@@ -257,6 +290,11 @@ def parse_command(rest: str) -> ParsedEndfieldCommand:
         return ParsedEndfieldCommand(
             "query", scope="stage", query=" ".join(parts[1:]).strip(), source=source, rarity=rarity
         )
+    for scope, aliases in ENCYCLOPEDIA_SCOPE_ALIASES.items():
+        if head in aliases:
+            return ParsedEndfieldCommand(
+                "query", scope=scope, query=" ".join(parts[1:]).strip(), source=source, rarity=rarity
+            )
 
     return ParsedEndfieldCommand("query", scope="all", query=" ".join(parts).strip(), source=source, rarity=rarity)
 
@@ -364,7 +402,22 @@ def _parse_personal_command(parts: list[str]) -> ParsedEndfieldCommand | None:
                 "archive_progress",
                 account_selector=" ".join(parts[2:]).strip() or "主账号",
             )
-        return ParsedEndfieldCommand("archive_view")
+        # 选项只在这个分支里剥：全局预解析会打坏「/ef 流水 2 --all」这类个人命令。
+        remaining, archive_source, source_error = _parse_source_option(parts[1:])
+        if source_error:
+            return ParsedEndfieldCommand("invalid", error=source_error)
+        remaining, archive_rarity, rarity_error = _parse_rarity_option(remaining)
+        if rarity_error:
+            return ParsedEndfieldCommand("invalid", error=rarity_error)
+        if not remaining:
+            return ParsedEndfieldCommand("archive_view")
+        return ParsedEndfieldCommand(
+            "query",
+            scope="archive_entry",
+            query=" ".join(remaining).strip(),
+            source=archive_source,
+            rarity=archive_rarity,
+        )
     return None
 
 
@@ -834,6 +887,9 @@ def normalize_alias_kind(value: str) -> str:
         return "weapon"
     if lowered in EQUIPMENT_ALIASES:
         return "equipment"
+    for scope, aliases in ENCYCLOPEDIA_SCOPE_ALIASES.items():
+        if lowered in aliases:
+            return scope
     return ""
 
 
@@ -879,6 +935,15 @@ def format_help() -> str:
             "  /ef 装备 主力量 副敏捷（按主副属性筛选）",
             "  /ef 关卡 | /ef 副本（查看关卡资料目录）",
             "  /ef 副本 <关卡名> [变体名|总览]",
+            "  /ef 物品 | /ef 材料（查看物品目录）",
+            "  /ef 物品 <名称>（物品说明、获取途径）",
+            "  /ef 道具 | /ef 食物（查看道具目录）",
+            "  /ef 道具 <名称>（使用效果、冷却与恢复）",
+            "  /ef 敌人 | /ef 怪物（查看敌人目录）",
+            "  /ef 敌人 <名称>（抗性与出现区域）",
+            "  /ef 词条 | /ef 术语（查看词条目录）",
+            "  /ef 词条 <名称>（词条说明、关联词条与来源技能）",
+            "  /ef 档案 <名称>（档案条目详情）",
             "  /ef 配装（交互输入干员、可选武器与装备）",
             "  /ef 配装 佩丽卡 脉冲源石配件 脉冲甲 脉冲源石配件 超轻域手 角色潜能2 武器潜能3",
             "  /ef 搜索 <关键词> | /efs <关键词>",
@@ -890,6 +955,7 @@ def format_help() -> str:
             "武器速查：/ef 武器；可按类型筛选，例如 /ef 武器 单手剑。",
             "装备目录：默认仅金色；--all 显示全部，--rarity 可选 gold、purple、blue、all。",
             "装备属性筛选：主/副可省略，写“力量 敏捷”表示两条属性都要有；多条件同时满足才会列出。",
+            "图鉴：物品、道具、敌人、词条与档案条目只使用 AkeData；/ef 档案 <名称> 是条目详情，/ef 档案 仍是版本统计。",
             "配装第一个名称固定为干员；之后武器与装备无需固定顺序，省略武器时自动使用推荐武器。干员/武器默认90级，角色/武器潜能默认5，装备词条默认3锻。",
             "潜能指定：追加“角色潜能2 武器潜能3”。",
             "武器技能指定：追加“武器技能1等级5”；可重复指定多个技能。",
@@ -908,6 +974,7 @@ def format_source() -> str:
             f"装备：{source_labels(source_order('equipment'))}",
             f"关卡：{source_labels(source_order('stage'))}",
             "关卡数据仅使用 AkeData；其他资料会按顺序尝试备选源。",
+            "物品、道具、敌人、词条与档案条目只使用 AkeData。",
         ]
     )
 
@@ -920,6 +987,17 @@ def format_error(error: str) -> str:
     return f"参数错误：{error}\n发送 /ef help 查看用法。"
 
 
+def _encyclopedia_catalog_scope(scope: str) -> str:
+    """把 `item` / `item_catalog` 这类 scope 归到图鉴范围词，非图鉴范围返回空串。
+
+    档案条目没有目录卡（`/ef 档案` 是版本统计），所以不在这里给目录提示。
+    """
+    base = str(scope or "").removesuffix("_catalog")
+    if base == "archive_entry" or base not in ENCYCLOPEDIA_SCOPE_WORDS:
+        return ""
+    return base
+
+
 def format_not_found(scope: str, query: str) -> str:
     label = SCOPE_LABELS.get(scope, "内容")
     if scope in {"stage", "stage_catalog"}:
@@ -929,6 +1007,11 @@ def format_not_found(scope: str, query: str) -> str:
             f"没有同时满足 {query} 的装备。\n"
             "可以少写一条属性，例如 /ef 装备 主力量；或加 --all 放开稀有度限制"
         )
+    catalog_scope = _encyclopedia_catalog_scope(scope)
+    if catalog_scope:
+        word = ENCYCLOPEDIA_SCOPE_WORDS[catalog_scope]
+        # 用范围词拼目录名：label 对 *_catalog 已经是「物品目录」，再补一次会写成「物品目录目录」。
+        return f"未找到{label}：{query}\n可以发送 /ef {word} 浏览{word}目录"
     return f"未找到{label}：{query}\n可以尝试 /ef 搜索 {query}"
 
 
@@ -990,7 +1073,9 @@ def format_candidates(
     if interactive:
         lines.append(f"可引用本消息并回复 1-{len(options)} 查询对应内容，也可不回复并忽略本消息。")
     else:
-        lines.append("请使用 /ef 干员 <名称>、/ef 武器 <名称> 或 /ef 装备 <名称> 精确查询。")
+        words = ["干员", "武器", "装备"]
+        words.extend(ENCYCLOPEDIA_SCOPE_WORDS[scope] for scope in ENCYCLOPEDIA_SCOPES)
+        lines.append("请使用 " + "、".join(f"/ef {word} <名称>" for word in words) + " 精确查询。")
     return "\n".join(lines)
 
 
@@ -1006,6 +1091,9 @@ def _parse_optional_scope(parts: list[str]) -> tuple[str, list[str]]:
         return "equipment", parts[1:]
     if head in STAGE_ALIASES:
         return "stage", parts[1:]
+    for scope, aliases in ENCYCLOPEDIA_SCOPE_ALIASES.items():
+        if head in aliases:
+            return scope, parts[1:]
     return "all", parts
 
 

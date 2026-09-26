@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
-from arclet.entari import WS, Cleanup, Entari, listen, load_plugin
+from arclet.entari import WS, Cleanup, Entari, Startup, listen, load_plugin
 from arclet.entari.event.plugin import PluginLoadedSuccess
 
 from otae_bot.adapters.command_input import install_quoted_command_mentions
 from otae_bot.adapters.feature_gate import install_group_feature_gates, on_plugin_loaded
 from otae_bot.config.settings import SATORI_CLIENTS
+from otae_bot.infrastructure.http.tls import prewarm_shared_ssl_context
+from otae_bot.infrastructure.loop_watchdog import (
+    close_loop_watchdog,
+    start_loop_watchdog,
+)
 from otae_bot.lifecycle import acquire_run_lock, close_shared_resources
 from otae_bot.plugin_registry import discover_plugins
 
@@ -32,6 +37,8 @@ def build_networks(clients: list[dict] | None = None) -> list[WS]:
 def create_app() -> Entari:
     app = Entari(*build_networks())
     install_quoted_command_mentions()
+    listen(Startup)(start_loop_watchdog)
+    listen(Cleanup)(close_loop_watchdog)
     listen(Cleanup)(close_shared_resources)
     listen(PluginLoadedSuccess)(on_plugin_loaded)
     for name in discover_plugins():
@@ -46,6 +53,7 @@ def main() -> int:
         print("[ERROR] Another bot-entari instance is already running.")
         print("[ERROR] Run scripts\\stop.bat first if you need to restart it.")
         return 2
+    prewarm_shared_ssl_context()
     try:
         create_app().run()
     finally:

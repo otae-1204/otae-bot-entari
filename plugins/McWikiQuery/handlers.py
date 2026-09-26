@@ -15,6 +15,7 @@ from otae_bot.adapters.entari import (
 from arclet.entari import Event
 
 from otae_bot.config.settings import SYSTEM_PROXY
+from otae_bot.infrastructure.http.tls import ashared_ssl_context
 from otae_bot.infrastructure.rendering.browser import screenshot_web_element
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
 from otae_bot.adapters.entari import cmd_with_args as _cmd
@@ -118,7 +119,7 @@ async def handle_wiki(event: Event, content: ArgVal[str]):
     proxy_url = SYSTEM_PROXY.get("http") if isinstance(SYSTEM_PROXY, dict) else None
 
     try:
-        async with httpx.AsyncClient(**_wiki_client_kwargs(proxy_url)) as client:
+        async with httpx.AsyncClient(**_wiki_client_kwargs(proxy_url), verify=await ashared_ssl_context()) as client:
             resp = await client.get(_wiki_search_url(keyword))
             resp.raise_for_status()
             path = _extract_first_result_path(resp.text)

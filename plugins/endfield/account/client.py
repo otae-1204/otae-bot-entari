@@ -16,6 +16,8 @@ from urllib.parse import urlencode
 import httpx
 from loguru import logger
 
+from otae_bot.infrastructure.http.tls import shared_ssl_context
+
 from .store import GachaRecord, RoleCandidate
 from .i18n import localized_text
 
@@ -236,7 +238,12 @@ class EndfieldOfficialClient:
         timeout: float = 25.0,
         community_exchange_interval_seconds: float = SKLAND_EXCHANGE_INTERVAL_SECONDS,
     ):
-        self.http = http or httpx.AsyncClient(timeout=timeout, follow_redirects=True, trust_env=False)
+        self.http = http or httpx.AsyncClient(
+            timeout=timeout,
+            follow_redirects=True,
+            trust_env=False,
+            verify=shared_ssl_context(trust_env=False),
+        )
         self._owns_http = http is None
         self._skland_cache: dict[str, _SklandContext] = {}
         self._skland_exchange_lock = asyncio.Lock()
