@@ -9,16 +9,27 @@ from otae_bot.adapters.entari import close_scheduled_jobs, listen_message, on_re
 from arclet.entari import Account as Bot, Event
 from loguru import logger
 from otae_bot.adapters.entari import Pred
-from otae_bot.adapters.entari import ArgVal, ChainMsg, on_alconna
+from otae_bot.adapters.entari import (
+    ArgVal,
+    ChainMsg,
+    SendDest,
+    account_adapter_name,
+    get_bot,
+    make_image,
+    on_alconna,
+)
 
-from plugins.bilibilibot.client import BiliAPIError, BiliClient
-from plugins.bilibilibot.models import KIND_LIVE
+from plugins.bilibilibot.api import BiliApi
+from plugins.bilibilibot.draw import draw_bili_card
+from plugins.bilibilibot.models import BiliCard
+from plugins.bilibilibot.notifier import Notifier, SenderUnavailable
+from plugins.bilibilibot.poller import Poller
 from plugins.bilibilibot.service import BiliService, expand_kinds
 from plugins.bilibilibot.store import BiliStore
 
 
 store = BiliStore()
-client = BiliClient(
+client = BiliApi(
     sessdata=os.getenv("BILI_SESSDATA", ""),
     buvid3=os.getenv("BILI_BUVID3", ""),
     dm_img_list=os.getenv("BILI_DM_IMG_LIST", ""),
@@ -33,10 +44,45 @@ client = BiliClient(
 service = BiliService(store, client)
 
 
+def _send_dest(subscriber_type: str, subscriber_id: str, bot: Bot) -> SendDest:
+    adapter_name = account_adapter_name(bot)
+    if subscriber_type == "group":
+        return SendDest(subscriber_id, subscriber_id, True, False, "", adapter_name)
+    return SendDest(subscriber_id, "", False, True, "", adapter_name)
+
+
+async def _render(card: BiliCard) -> bytes:
+    return await draw_bili_card(card)
+
+
+async def _send(row, png: bytes) -> None:
+    """Deliver one outbox row; raising SenderUnavailable leaves attempts intact."""
+    try:
+        bot = get_bot()
+    except Exception as exc:
+        raise SenderUnavailable(str(exc)) from exc
+    if bot is None:
+        raise SenderUnavailable("bot is not connected")
+    destination = _send_dest(row.subscriber_type, row.subscriber_id, bot)
+    # Bytes go straight to the adapter: no temporary file to clean up.
+    await ChainMsg([make_image(raw=png)]).send(destination, bot)
+    card = row.card()
+    if card.card_type == "live_on" and card.url.strip():
+        # Keep the image and the clickable link together per recipient.
+        await ChainMsg.text(card.url.strip()).send(destination, bot)
+
+
+notifier = Notifier(store, render=_render, send=_send)
+poller = Poller(client, store, notifier)
+
+
 @listen(Cleanup)
-async def _close_bilibili_store():
+async def _close_bilibili():
     await close_scheduled_jobs()
-    store.close()
+    # Order matters: stop delivery first, then the transport, then the database.
+    await notifier.stop()
+    await client.aclose()
+    await store.close()
 
 
 def _subscriber(event: Event) -> tuple[str, str]:
@@ -86,10 +132,12 @@ async def handle_bili(event: Event, rest: ArgVal):
     if not parts or parts[0] == "help":
         await bili_cmd.finish(
             "用法:\n"
-            "/bili follow <all|live|video|dynamic> <uid或直播间号> [更多id]\n"
-            "/bili unfollow <all|live|video|dynamic> <uid或直播间号> [更多id]\n"
+            "/bili follow <all|live|video|dynamic> <UID> [更多UID]\n"
+            "/bili follow <all|live> room:<直播间号>    （或直接贴直播间链接）\n"
+            "/bili unfollow <all|live|video|dynamic> <UID 或 room:直播间号>\n"
             "/bili list [all|live|video|dynamic]\n"
-            "/bili refresh <all|live|video|dynamic> <uid或直播间号>"
+            "/bili refresh <all|live|video|dynamic> <UID 或 room:直播间号>\n"
+            "提示：纯数字一律按 UID 处理；按直播间号操作请加 room: 前缀。"
         )
 
     action = parts[0].lower()
@@ -116,7 +164,7 @@ async def handle_bili(event: Event, rest: ArgVal):
     if action == "list":
         kind_arg = parts[1] if len(parts) > 1 else None
         try:
-            lines = service.list_subscriptions(subscriber_type, subscriber_id, kind_arg)
+            lines = await service.list_subscriptions(subscriber_type, subscriber_id, kind_arg)
         except ValueError:
             await bili_cmd.finish("类型必须是 all/live/video/dynamic")
         await bili_cmd.finish("\n".join(lines))
@@ -138,30 +186,37 @@ link_preview = listen_message(rule=Pred(_has_bili_link), priority=20, block=Fals
 async def handle_link_preview(bot: Bot, event: Event):
     text = get_plaintext(event)
     try:
-        parsed = await client.parse_link(text)
-        if parsed is None:
+        card = await service.preview_link(text)
+        if card is None:
             return
-        card = await client.card_for_link(parsed)
         await ChainMsg([await service.card_to_segment(card)]).send()
     except Exception as exc:
         logger.debug(f"[bilibilibot] link preview skipped: {exc}")
 
 
-async def _warmup():
+async def _startup():
+    try:
+        # The store must be open before the poller or notifier touch it.
+        await store.open()
+    except Exception as exc:
+        logger.exception(f"[bilibilibot] store open failed: {exc}")
+        return
     try:
         await client.ensure_risk_cookies()
         await client.ensure_wbi_keys()
     except Exception as exc:
         logger.warning(f"[bilibilibot] WBI warmup failed: {exc}")
+    # start() first drains whatever the previous run left in the outbox.
+    await notifier.start()
 
 
-on_ready(_warmup)
+on_ready(_startup)
 
 from otae_bot.adapters.entari import timer
 
 
-timer.add_job(service.check_live, "interval", minutes=1, id="bili_live_check", replace_existing=True, misfire_grace_time=90)
-timer.add_job(service.check_video, "interval", minutes=2, id="bili_video_check", replace_existing=True, misfire_grace_time=90)
-timer.add_job(service.check_dynamic, "interval", minutes=1, id="bili_dynamic_check", replace_existing=True, misfire_grace_time=90)
+timer.add_job(poller.tick_live, "interval", minutes=1, id="bili_live_check", replace_existing=True, misfire_grace_time=90)
+timer.add_job(poller.tick_video, "interval", minutes=2, id="bili_video_check", replace_existing=True, misfire_grace_time=90)
+timer.add_job(poller.tick_dynamic, "interval", minutes=1, id="bili_dynamic_check", replace_existing=True, misfire_grace_time=90)
 timer.add_job(client.refresh_wbi_keys, "interval", hours=1, id="bili_wbi_refresh", replace_existing=True, misfire_grace_time=90)
 timer.add_job(client.refresh_risk_cookies, "interval", hours=6, id="bili_risk_cookie_refresh", replace_existing=True, misfire_grace_time=90)

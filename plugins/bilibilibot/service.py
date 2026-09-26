@@ -1,21 +1,23 @@
+"""Command facade for bilibilibot.
+
+This module only serves the `/bili` command path: subscribing, unsubscribing,
+refreshing and listing, plus the chat link preview. Polling lives in
+`poller.py`, delivery in `notifier.py` and detection in `detect.py`.
+"""
+
 from __future__ import annotations
 
-import asyncio
-import re
-import time
 import tempfile
-from time import perf_counter
 from typing import Iterable
 
-from arclet.entari import Account as Bot
 from loguru import logger
-from otae_bot.adapters.entari import make_image, SendDest, ChainMsg, get_bot, account_adapter_name
-
+from otae_bot.adapters.entari import make_image
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
 
-from .client import BiliAPIError, BiliClient
+from .api import BiliAPIError, BiliApi
 from .draw import draw_bili_card
 from .models import BiliCard, KIND_DYNAMIC, KIND_LIVE, KIND_VIDEO, SUPPORTED_KINDS, TargetInfo
+from .refs import parse_target_ref
 from .store import BiliStore
 
 
@@ -31,8 +33,6 @@ KIND_ALIASES = {
     "动态": KIND_DYNAMIC,
 }
 
-# Polling normally runs every minute. A long outage makes the end time unknown.
-LIVE_TIMING_MAX_GAP_SECONDS = 180
 
 def expand_kinds(raw: str) -> list[str]:
     kind = KIND_ALIASES.get(raw.lower(), KIND_ALIASES.get(raw))
@@ -44,75 +44,174 @@ def expand_kinds(raw: str) -> list[str]:
 
 
 class BiliService:
-    def __init__(self, store: BiliStore, client: BiliClient, *, poll_concurrency: int = 4):
+    def __init__(self, store: BiliStore, client: BiliApi):
         self.store = store
         self.client = client
-        self.poll_concurrency = max(1, int(poll_concurrency))
-        self._video_failure_log_cache: dict[str, tuple[str, int]] = {}
-        self._poll_locks = {
-            KIND_LIVE: asyncio.Lock(),
-            KIND_VIDEO: asyncio.Lock(),
-            KIND_DYNAMIC: asyncio.Lock(),
-        }
-        self._broadcast_locks: dict[tuple[str, str], asyncio.Lock] = {}
+        self._last_resolve_error = ""
 
-    async def follow(self, kind_arg: str, values: list[str], subscriber_type: str, subscriber_id: str) -> tuple[list[str], list[str]]:
+    # --- follow / unfollow / refresh --------------------------------------
+
+    async def follow(
+        self, kind_arg: str, values: list[str], subscriber_type: str, subscriber_id: str
+    ) -> tuple[list[str], list[str]]:
         ok: list[str] = []
         failed: list[str] = []
         kinds = expand_kinds(kind_arg)
-        for value in values:
+        for raw in values:
+            resolved = await self._resolve_value(raw, kinds)
+            if resolved is None:
+                failed.append(self._last_resolve_error)
+                continue
+            uid, live_target, by_room = resolved
             for kind in kinds:
                 try:
-                    target = await self.resolve_target(kind, value)
-                    self.store.upsert_target(target)
-                    added = self.store.add_subscription(kind, target.uid, subscriber_type, subscriber_id)
-                    label = f"{self._kind_name(kind)} {target.name or target.uid}"
-                    ok.append(label + (" 已订阅" if added else " 已存在"))
+                    target = (
+                        live_target
+                        if (kind == KIND_LIVE and live_target is not None)
+                        else await self.resolve_target_by_uid(kind, uid)
+                    )
+                    self._assert_uid_matches(kind, uid, target)
+                    await self.store.upsert_target(target)
+                    added = await self.store.add_subscription(kind, target.uid, subscriber_type, subscriber_id)
+                    label = self._describe(kind, target, by_room=by_room)
+                    ok.append(label + ("已订阅" if added else "已存在"))
                 except Exception as exc:
-                    logger.warning(f"[bilibilibot] follow {kind} {value} failed: {exc}")
-                    failed.append(f"{self._kind_name(kind)} {value}: {exc}")
+                    logger.warning(f"[bilibilibot] follow {kind} {raw} failed: {exc}")
+                    failed.append(f"{self._kind_name(kind)} {raw}: {exc}")
         return ok, failed
 
-    async def unfollow(self, kind_arg: str, values: list[str], subscriber_type: str, subscriber_id: str) -> tuple[list[str], list[str]]:
+    async def unfollow(
+        self, kind_arg: str, values: list[str], subscriber_type: str, subscriber_id: str
+    ) -> tuple[list[str], list[str]]:
         ok: list[str] = []
         failed: list[str] = []
-        for value in values:
-            for kind in expand_kinds(kind_arg):
-                target = self.store.get_target(kind, value)
-                uid = target.uid if target else value
-                removed = self.store.remove_subscription(kind, uid, subscriber_type, subscriber_id)
-                (ok if removed else failed).append(f"{self._kind_name(kind)} {uid}" + (" 已取关" if removed else " 未订阅"))
+        kinds = expand_kinds(kind_arg)
+        for raw in values:
+            resolved = await self._resolve_value(raw, kinds, lookup_only=True)
+            if resolved is None:
+                failed.append(self._last_resolve_error)
+                continue
+            uid, live_target, _by_room = resolved
+            for kind in kinds:
+                removed = await self.store.remove_subscription(kind, uid, subscriber_type, subscriber_id)
+                target = (
+                    live_target
+                    if (kind == KIND_LIVE and live_target is not None)
+                    else await self.store.get_target(kind, uid)
+                )
+                label = self._describe(kind, target, uid=uid) if target else f"{self._kind_name(kind)} {uid}"
+                (ok if removed else failed).append(label + ("已取关" if removed else "未订阅"))
         return ok, failed
 
     async def refresh(self, kind_arg: str, values: list[str]) -> tuple[list[str], list[str]]:
         ok: list[str] = []
         failed: list[str] = []
-        for value in values:
-            for kind in expand_kinds(kind_arg):
+        kinds = expand_kinds(kind_arg)
+        for raw in values:
+            resolved = await self._resolve_value(raw, kinds)
+            if resolved is None:
+                failed.append(self._last_resolve_error)
+                continue
+            uid, live_target, by_room = resolved
+            for kind in kinds:
                 try:
-                    target = await self.resolve_target(kind, value)
-                    self.store.upsert_target(target)
-                    ok.append(f"{self._kind_name(kind)} {target.name or target.uid} 已刷新")
+                    target = (
+                        live_target
+                        if (kind == KIND_LIVE and live_target is not None)
+                        else await self.resolve_target_by_uid(kind, uid)
+                    )
+                    self._assert_uid_matches(kind, uid, target)
+                    await self.store.upsert_target(target)
+                    ok.append(self._describe(kind, target, by_room=by_room) + "已刷新")
                 except Exception as exc:
-                    logger.warning(f"[bilibilibot] refresh {kind} {value} failed: {exc}")
-                    failed.append(f"{self._kind_name(kind)} {value}: {exc}")
+                    logger.warning(f"[bilibilibot] refresh {kind} {raw} failed: {exc}")
+                    failed.append(f"{self._kind_name(kind)} {raw}: {exc}")
         return ok, failed
 
-    async def resolve_target(self, kind: str, value: str) -> TargetInfo:
-        value = value.strip()
+    # --- target resolution -------------------------------------------------
+
+    async def resolve_target_by_uid(self, kind: str, uid: str) -> TargetInfo:
+        """Resolve one kind from a confirmed UID; no value is ever guessed twice."""
         if kind == KIND_LIVE:
-            return await self.client.resolve_live_target(value)
+            return await self.client.resolve_live_by_uid(uid)
         if kind == KIND_VIDEO:
-            return await self.client.resolve_video_target(value)
+            return await self.client.resolve_video_target(uid)
         if kind == KIND_DYNAMIC:
-            return await self.client.resolve_dynamic_target(value)
+            return await self.client.resolve_dynamic_target(uid)
         raise ValueError(f"unsupported kind: {kind}")
 
-    def list_subscriptions(self, subscriber_type: str, subscriber_id: str, kind_arg: str | None = None) -> list[str]:
+    async def _resolve_value(self, raw: str, kinds: list[str], *, lookup_only: bool = False):
+        """Turn one user argument into (uid, live_target, by_room) or None on failure.
+
+        A single value is parsed once, so every kind subscribes to the same
+        person. `room:` and live links are only meaningful for live (and all).
+        """
+        try:
+            ref = parse_target_ref(raw)
+        except ValueError as exc:
+            self._last_resolve_error = str(exc)
+            return None
+
+        if ref.by == "uid":
+            return ref.value, None, False
+
+        if KIND_LIVE not in kinds:
+            self._last_resolve_error = f"直播间号只能用于 live 或 all: {raw}"
+            return None
+
+        live_target = await self._live_target_by_room(ref.value, lookup_only=lookup_only)
+        if live_target is None:
+            return None
+        return live_target.uid, live_target, True
+
+    async def _live_target_by_room(self, room_id: str, *, lookup_only: bool) -> TargetInfo | None:
+        target = await self.store.get_live_target_by_room(room_id)
+        if target is not None:
+            return target
+        try:
+            # Short room ids are not stored verbatim, so ask the API for the long id.
+            resolved = await self.client.resolve_live_by_room(room_id)
+        except Exception as exc:
+            logger.warning(f"[bilibilibot] live room {room_id} resolve failed: {exc}")
+            self._last_resolve_error = f"{self._kind_name(KIND_LIVE)} {room_id}: {exc}"
+            return None
+        stored = await self.store.get_live_target_by_room(resolved.room_id)
+        if stored is not None:
+            return stored
+        if lookup_only:
+            self._last_resolve_error = f"{self._kind_name(KIND_LIVE)} {resolved.room_id} 未订阅"
+            return None
+        return resolved
+
+    def _assert_uid_matches(self, kind: str, uid: str, target: TargetInfo) -> None:
+        if str(target.uid) != str(uid):
+            logger.error(
+                f"[bilibilibot] {kind} resolved UID {target.uid} for {uid}; refusing to subscribe"
+            )
+            raise BiliAPIError(f"解析出的 UID {target.uid} 与期望的 {uid} 不一致")
+
+    def _describe(self, kind: str, target: TargetInfo | None, *, uid: str = "", by_room: bool = False) -> str:
+        if target is None:
+            return f"{self._kind_name(kind)} {uid}"
+        details = [f"UID {target.uid}"]
+        if kind == KIND_LIVE and target.room_id:
+            details.append(f"直播间 {target.room_id}")
+        if by_room and kind == KIND_LIVE:
+            details.append("按直播间号解析")
+        return f"{self._kind_name(kind)} {target.name or target.uid}（{'，'.join(details)}）"
+
+    def _kind_name(self, kind: str) -> str:
+        return {KIND_LIVE: "直播", KIND_VIDEO: "视频", KIND_DYNAMIC: "动态"}.get(kind, kind)
+
+    # --- listing and preview ----------------------------------------------
+
+    async def list_subscriptions(
+        self, subscriber_type: str, subscriber_id: str, kind_arg: str | None = None
+    ) -> list[str]:
         kinds = expand_kinds(kind_arg) if kind_arg else [KIND_LIVE, KIND_VIDEO, KIND_DYNAMIC]
         lines: list[str] = []
         for kind in kinds:
-            rows = self.store.subscriptions_for_subscriber(subscriber_type, subscriber_id, kind)
+            rows = await self.store.subscriptions_for_subscriber(subscriber_type, subscriber_id, kind)
             lines.append(f"{self._kind_name(kind)}:")
             if not rows:
                 lines.append("  (空)")
@@ -123,171 +222,12 @@ class BiliService:
                 lines.append(f"  - {name} ({sub.target_uid}{extra})")
         return lines
 
-    async def check_all(self) -> None:
-        await self.check_live()
-        await self.check_video()
-        await self.check_dynamic()
-
-    async def check_live(self) -> None:
-        await self._poll_targets(KIND_LIVE, self._check_live_target)
-
-    async def _check_live_target(self, target: TargetInfo) -> None:
-        latest = await self.client.latest_live_state(target)
-        observed_at = int(time.time())
-        recent_live_observation = (
-            target.is_live
-            and 0 < target.live_last_seen_at <= observed_at
-            and observed_at - target.live_last_seen_at <= LIVE_TIMING_MAX_GAP_SECONDS
-        )
-        duration = None
-        if latest.is_live:
-            if not 0 < latest.live_started_at <= observed_at:
-                latest.live_started_at = (
-                    target.live_started_at
-                    if recent_live_observation and 0 < target.live_started_at <= target.live_last_seen_at
-                    else 0
-                )
-            latest.live_last_seen_at = observed_at
-        else:
-            if recent_live_observation and 0 < target.live_started_at <= target.live_last_seen_at:
-                duration = observed_at - target.live_started_at
-            latest.live_started_at = 0
-            latest.live_last_seen_at = 0
-        if latest.is_live != target.is_live:
-            card = BiliCard(
-                "live_on" if latest.is_live else "live_off",
-                latest.last_title or target.last_title or "直播状态变化",
-                author=target.name,
-                subtitle="正在直播" if latest.is_live else "直播已结束",
-                cover_url=latest.last_cover or target.last_cover,
-                avatar_url=target.avatar_url,
-                url=f"https://live.bilibili.com/{latest.room_id or target.room_id}",
-                badge="LIVE" if latest.is_live else "ENDED",
-                uid=target.uid,
-                room_id=latest.room_id or target.room_id,
-                live_duration_seconds=duration,
-            )
-            await self.broadcast(target.kind, target.uid, card)
-        self.store.upsert_target(latest)
-
-    async def check_video(self) -> None:
-        await self._poll_targets(KIND_VIDEO, self._check_video_target)
-
-    async def _check_video_target(self, target: TargetInfo) -> None:
-        try:
-            card = await self.client.latest_video(target.uid)
-            next_name = self._refined_name(target.name, target.uid, card.author)
-            next_avatar = target.avatar_url or card.avatar_url
-            if card.item_id and card.item_id != target.latest_id and not self.store.has_seen(KIND_VIDEO, target.uid, card.item_id):
-                card.author = card.author or next_name or target.uid
-                card.avatar_url = card.avatar_url or next_avatar
-                await self.broadcast(KIND_VIDEO, target.uid, card)
-                self.store.mark_seen(KIND_VIDEO, target.uid, card.item_id, card.published_at)
-            self.store.upsert_target(
-                TargetInfo(
-                    KIND_VIDEO,
-                    target.uid,
-                    name=next_name,
-                    avatar_url=next_avatar,
-                    latest_id=card.item_id or target.latest_id,
-                    latest_ts=card.published_at or target.latest_ts,
-                    last_title=card.title or target.last_title,
-                    last_cover=card.cover_url or target.last_cover,
-                    last_desc=card.description or target.last_desc,
-                )
-            )
-        except Exception as exc:
-            self._log_video_check_failure(target.uid, exc)
-            raise
-
-    async def check_dynamic(self) -> None:
-        await self._poll_targets(KIND_DYNAMIC, self._check_dynamic_target)
-
-    async def _check_dynamic_target(self, target: TargetInfo) -> None:
-        items = await self.client.dynamic_items(target.uid)
-        cards = [self.client._dynamic_card_from_item(item, target.uid) for item in items[:5]]
-        cards.sort(key=lambda item: item.published_at)
-        newest_ts = target.latest_ts
-        newest_id = target.latest_id
-        next_name = target.name
-        next_avatar = target.avatar_url
-        for card in cards:
-            next_name = self._refined_name(next_name, target.uid, card.author)
-            next_avatar = next_avatar or card.avatar_url
-            if not card.item_id or card.published_at <= target.latest_ts or self.store.has_seen(KIND_DYNAMIC, target.uid, card.item_id):
-                continue
-            newest_ts = max(newest_ts, card.published_at)
-            newest_id = card.item_id
-            if self._should_skip_video_dynamic(target.uid, card):
-                self.store.mark_seen(KIND_DYNAMIC, target.uid, card.item_id, card.published_at)
-                continue
-            card.author = card.author or next_name or target.uid
-            card.avatar_url = card.avatar_url or next_avatar
-            await self.broadcast(KIND_DYNAMIC, target.uid, card)
-            self.store.mark_seen(KIND_DYNAMIC, target.uid, card.item_id, card.published_at)
-        if cards:
-            latest = max(cards, key=lambda item: item.published_at)
-            self.store.upsert_target(
-                TargetInfo(
-                    KIND_DYNAMIC,
-                    target.uid,
-                    name=next_name,
-                    avatar_url=next_avatar,
-                    latest_id=newest_id or latest.item_id or target.latest_id,
-                    latest_ts=newest_ts or latest.published_at or target.latest_ts,
-                    last_title=latest.title or target.last_title,
-                    last_cover=latest.cover_url or target.last_cover,
-                    last_desc=latest.description or target.last_desc,
-                )
-            )
-
-    async def _poll_targets(self, kind: str, worker) -> None:
-        lock = self._poll_locks[kind]
-        if lock.locked():
-            logger.info(f"[bilibilibot] poll kind={kind} skipped=overlap")
-            return
-        async with lock:
-            started = perf_counter()
-            targets = list(self.store.list_active_targets(kind))
-            semaphore = asyncio.Semaphore(self.poll_concurrency)
-            successes = 0
-            failures = 0
-
-            async def run_target(target: TargetInfo) -> None:
-                nonlocal successes, failures
-                try:
-                    async with semaphore:
-                        await worker(target)
-                        successes += 1
-                except Exception as exc:
-                    failures += 1
-                    if kind != KIND_VIDEO:
-                        logger.warning(
-                            f"[bilibilibot] {kind} check failed for {target.uid}: {exc}"
-                        )
-
-            await asyncio.gather(*(run_target(target) for target in targets))
-            logger.info(
-                f"[bilibilibot] poll kind={kind} targets={len(targets)} "
-                f"success={successes} failed={failures} "
-                f"elapsed={perf_counter() - started:.3f}s"
-            )
-
-    async def broadcast(self, kind: str, uid: str, card: BiliCard) -> None:
-        bot = get_bot()
-        image = await self.card_to_segment(card)
-        for sub in self.store.subscriptions_for_target(kind, uid):
-            target = self._target(bot, sub.subscriber_type, sub.subscriber_id)
-            lock_key = (sub.subscriber_type, sub.subscriber_id)
-            lock = self._broadcast_locks.setdefault(lock_key, asyncio.Lock())
-            try:
-                async with lock:
-                    await ChainMsg([image]).send(target, bot)
-                    if card.card_type == "live_on" and card.url.strip():
-                        # Keep the image and clickable link together per recipient.
-                        await ChainMsg.text(card.url.strip()).send(target, bot)
-            except Exception as exc:
-                logger.warning(f"[bilibilibot] send to {sub.subscriber_type}:{sub.subscriber_id} failed: {exc}")
+    async def preview_link(self, text: str) -> BiliCard | None:
+        """Render one chat link into a card; None when the link is not understood."""
+        parsed = await self.client.parse_link(text)
+        if parsed is None:
+            return None
+        return await self.client.card_for_link(parsed)
 
     async def card_to_segment(self, card: BiliCard):
         png = await draw_bili_card(card)
@@ -297,40 +237,7 @@ class BiliService:
             schedule_temp_file_cleanup(f.name)
             return make_image(path=f.name)
 
-    def _target(self, bot: Bot, subscriber_type: str, subscriber_id: str) -> SendDest:
-        adapter_name = account_adapter_name(bot)
-        if subscriber_type == "group":
-            return SendDest(subscriber_id, subscriber_id, True, False, "", adapter_name)
-        return SendDest(subscriber_id, "", False, True, "", adapter_name)
 
-    def _kind_name(self, kind: str) -> str:
-        return {KIND_LIVE: "直播", KIND_VIDEO: "视频", KIND_DYNAMIC: "动态"}.get(kind, kind)
-
-    def _refined_name(self, current: str, uid: str, candidate: str) -> str:
-        candidate = (candidate or "").strip()
-        current = (current or "").strip()
-        if candidate and (not current or current == uid):
-            return candidate
-        return current
-
-    def _should_skip_video_dynamic(self, uid: str, card: BiliCard) -> bool:
-        if not self.store.subscriptions_for_target(KIND_VIDEO, uid):
-            return False
-        return bool(self._bvid_from_card(card))
-
-    def _bvid_from_card(self, card: BiliCard) -> str:
-        for value in (card.item_id, card.url, card.description):
-            match = re.search(r"\bBV[0-9A-Za-z]{10}\b", value or "")
-            if match:
-                return match.group(0)
-        return ""
-
-    def _log_video_check_failure(self, uid: str, exc: Exception) -> None:
-        message = str(exc)
-        now = int(time.time())
-        cached = self._video_failure_log_cache.get(uid)
-        self._video_failure_log_cache[uid] = (message, now)
-        if cached and cached[0] == message and now - cached[1] < 1800:
-            logger.debug(f"[bilibilibot] video check failed for {uid}: {message}")
-            return
-        logger.warning(f"[bilibilibot] video check failed for {uid}: {message}")
+def kind_names(kinds: Iterable[str]) -> list[str]:
+    service = {KIND_LIVE: "直播", KIND_VIDEO: "视频", KIND_DYNAMIC: "动态"}
+    return [service.get(kind, kind) for kind in kinds]

@@ -137,6 +137,39 @@ def _load_steam_draw_module():
     return _load_module(f"{pkg_name}.draw", "plugins/steamInfo/draw.py")
 
 
+def _load_bili_subpackage(package: str, name: str):
+    """Load the directory package `plugins/bilibilibot/<name>/` as `<package>.<name>`.
+
+    `_load_module` builds a spec for a single file; a package also needs its
+    submodule search location, otherwise the relative imports inside
+    `__init__.py` (`from ..models import ...`, `from .session import ...`)
+    cannot resolve.
+    """
+    target = f"{package}.{name}"
+    if target in sys.modules:
+        return sys.modules[target]
+    directory = ROOT / "plugins/bilibilibot" / name
+    spec = importlib.util.spec_from_file_location(
+        target,
+        directory / "__init__.py",
+        submodule_search_locations=[str(directory)],
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[target] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _bili_root_package(module) -> str:
+    """The synthetic root package a loaded bilibilibot module belongs to.
+
+    `api` is a real package, so its own `__package__` points one level deeper
+    than the root every loader-made name starts with.
+    """
+    return module.__name__.split(".", 1)[0]
+
+
 def _load_bili_new_module(module_name: str):
     pkg_name = f"bilibilibot_new_for_test_{module_name}"
     pkg = types.ModuleType(pkg_name)
@@ -146,6 +179,8 @@ def _load_bili_new_module(module_name: str):
     sys.modules[f"{pkg_name}.models"] = models
     if module_name == "models":
         return models
+    if module_name == "api":
+        return _load_bili_subpackage(pkg_name, "api")
     return _load_module(f"{pkg_name}.{module_name}", f"plugins/bilibilibot/{module_name}.py")
 
 
@@ -446,15 +481,26 @@ class CoreLogicTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             store = bili_store.BiliStore(Path(tmp) / "bilibili.db", Path(tmp) / "missing.db")
             self.assertEqual(store.db_path, Path(tmp) / "bilibili.db")
-            store.upsert_target(bili_models.TargetInfo("video", "123", name="UP", latest_id="BV1xx411c7mD"))
-            self.assertTrue(store.add_subscription("video", "123", "group", "456"))
-            self.assertFalse(store.add_subscription("video", "123", "group", "456"))
-            rows = store.subscriptions_for_subscriber("group", "456", "video")
+
+            async def scenario():
+                # The public store surface is async; the sync core is _sync_*.
+                await store.open()
+                await store.upsert_target(bili_models.TargetInfo("video", "123", name="UP", latest_id="BV1xx411c7mD"))
+                added = await store.add_subscription("video", "123", "group", "456")
+                duplicate = await store.add_subscription("video", "123", "group", "456")
+                rows = await store.subscriptions_for_subscriber("group", "456", "video")
+                removed = await store.remove_subscription("video", "123", "group", "456")
+                missing = await store.remove_subscription("video", "123", "group", "456")
+                await store.close()
+                return added, duplicate, rows, removed, missing
+
+            added, duplicate, rows, removed, missing = asyncio.run(scenario())
+            self.assertTrue(added)
+            self.assertFalse(duplicate)
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0][1].name, "UP")
-            self.assertTrue(store.remove_subscription("video", "123", "group", "456"))
-            self.assertFalse(store.remove_subscription("video", "123", "group", "456"))
-            store.close()
+            self.assertTrue(removed)
+            self.assertFalse(missing)
 
     def test_bili_store_migrates_legacy_live_video_dynamic_only(self):
         bili_store = _load_bili_new_module("store")
@@ -485,16 +531,30 @@ class CoreLogicTests(unittest.TestCase):
             conn.close()
 
             store = bili_store.BiliStore(Path(tmp) / "new.db", legacy)
-            self.assertEqual(store.get_meta("legacy_migrated"), "1")
-            self.assertEqual(store.get_target("video", "11").name, "Video UP")
-            self.assertTrue(store.get_target("live", "22").is_live)
-            self.assertEqual(store.get_target("dynamic", "33").latest_ts, 300)
-            self.assertEqual(len(store.subscriptions_for_subscriber("group", "900")), 2)
-            store.close()
+
+            async def scenario():
+                await store.open()
+                result = (
+                    await store.get_meta("legacy_migrated"),
+                    await store.get_target("video", "11"),
+                    await store.get_target("live", "22"),
+                    await store.get_target("dynamic", "33"),
+                    await store.subscriptions_for_subscriber("group", "900"),
+                )
+                await store.close()
+                return result
+
+            migrated, video, live, dynamic, subscriptions = asyncio.run(scenario())
+            self.assertEqual(migrated, "1")
+            self.assertEqual(video.name, "Video UP")
+            self.assertTrue(live.is_live)
+            self.assertEqual(dynamic.latest_ts, 300)
+            # Only live/video/dynamic migrate; telegram is not a target kind.
+            self.assertEqual(len(subscriptions), 2)
 
     def test_bili_client_link_parsing(self):
-        bili_client = _load_bili_new_module("client")
-        client = bili_client.BiliClient()
+        bili_api = _load_bili_new_module("api")
+        client = bili_api.BiliApi()
 
         async def run():
             live = await client.parse_link("https://live.bilibili.com/12345")
@@ -508,8 +568,8 @@ class CoreLogicTests(unittest.TestCase):
         self.assertEqual((bare.kind, bare.value), ("video", "BV1xx411c7mD"))
 
     def test_bili_client_risk_retry_refreshes_cookie_then_succeeds(self):
-        bili_client = _load_bili_new_module("client")
-        client = bili_client.BiliClient()
+        bili_api = _load_bili_new_module("api")
+        client = bili_api.BiliApi()
         calls = []
 
         async def fake_get_json(url, *, params=None, cookies=None):
@@ -539,8 +599,8 @@ class CoreLogicTests(unittest.TestCase):
             client.img_key = "a" * 32
             client.sub_key = "b" * 32
 
-        async def fake_video_detail(_):
-            return bili_client.BiliCard(
+        async def fake_video_detail(_, *, deadline=None):
+            return bili_api.BiliCard(
                 "video",
                 "ok",
                 author="Detail UP",
@@ -550,6 +610,7 @@ class CoreLogicTests(unittest.TestCase):
 
         client.img_key = "a" * 32
         client.sub_key = "b" * 32
+        client._wbi_updated_at = 9999999999
         client._get_json = fake_get_json
         client.refresh_risk_cookies = fake_refresh_risk
         client.refresh_wbi_keys = fake_refresh_wbi
@@ -563,8 +624,8 @@ class CoreLogicTests(unittest.TestCase):
         self.assertEqual(client.cookies.get("buvid3"), "risk-cookie")
 
     def test_bili_client_risk_retry_failure_message_mentions_cookie(self):
-        bili_client = _load_bili_new_module("client")
-        client = bili_client.BiliClient()
+        bili_api = _load_bili_new_module("api")
+        client = bili_api.BiliApi()
 
         async def fake_get_json(url, *, params=None, cookies=None):
             return {"code": -352, "message": "椋庢帶鏍￠獙澶辫触"}
@@ -574,25 +635,26 @@ class CoreLogicTests(unittest.TestCase):
 
         client.img_key = "a" * 32
         client.sub_key = "b" * 32
+        client._wbi_updated_at = 9999999999
         client._get_json = fake_get_json
         client.refresh_risk_cookies = noop
         client.refresh_wbi_keys = noop
         async def fail_rss(_):
-            raise bili_client.BiliAPIError("rss failed")
+            raise bili_api.BiliAPIError("rss failed")
         client._rsshub_first_item = fail_rss
 
         with self.assertRaisesRegex(Exception, "BILI_SESSDATA/BILI_BUVID3"):
             asyncio.run(client.latest_video("135116630"))
 
     def test_bili_client_login_cookies_are_preserved_after_risk_refresh(self):
-        bili_client = _load_bili_new_module("client")
-        client = bili_client.BiliClient(sessdata="sess", buvid3="login-buvid")
+        bili_api = _load_bili_new_module("api")
+        client = bili_api.BiliApi(sessdata="sess", buvid3="login-buvid")
         self.assertEqual(client.cookies.get("SESSDATA"), "sess")
         self.assertEqual(client.cookies.get("buvid3"), "login-buvid")
 
     def test_bili_client_dm_img_params_are_signed_for_video_list(self):
-        bili_client = _load_bili_new_module("client")
-        client = bili_client.BiliClient(
+        bili_api = _load_bili_new_module("api")
+        client = bili_api.BiliApi(
             dm_img_list="[]",
             dm_img_str="dm-str",
             dm_cover_img_str="cover-str",
@@ -617,13 +679,13 @@ class CoreLogicTests(unittest.TestCase):
         self.assertIn("w_rid", seen_params)
 
     def test_bili_client_video_falls_back_to_rsshub_after_http_412(self):
-        bili_client = _load_bili_new_module("client")
-        client = bili_client.BiliClient()
+        bili_api = _load_bili_new_module("api")
+        client = bili_api.BiliApi()
 
         async def fake_json_retry(*args, **kwargs):
-            raise bili_client.BiliAPIError("Bilibili HTTP 412: arc/search")
+            raise bili_api.BiliAPIError("Bilibili HTTP 412: arc/search")
 
-        async def fake_rss(route):
+        async def fake_rss(route, *, deadline=None):
             self.assertEqual(route, "/bilibili/user/video/135116630")
             return {
                 "title": "RSS Video",
@@ -636,10 +698,11 @@ class CoreLogicTests(unittest.TestCase):
 
         client.img_key = "a" * 32
         client.sub_key = "b" * 32
+        client._wbi_updated_at = 9999999999
         client._get_json_with_risk_retry = fake_json_retry
         client._rsshub_first_item = fake_rss
-        async def fake_video_detail(_):
-            return bili_client.BiliCard(
+        async def fake_video_detail(_, *, deadline=None):
+            return bili_api.BiliCard(
                 "video",
                 "RSS Video",
                 avatar_url="https://example.com/avatar.jpg",
@@ -652,13 +715,13 @@ class CoreLogicTests(unittest.TestCase):
         self.assertEqual(card.item_id, "BV1xx411c7mD")
 
     def test_bili_client_video_rsshub_without_bv_still_has_item_id(self):
-        bili_client = _load_bili_new_module("client")
-        client = bili_client.BiliClient()
+        bili_api = _load_bili_new_module("api")
+        client = bili_api.BiliApi()
 
         async def fake_json_retry(*args, **kwargs):
-            raise bili_client.BiliAPIError("Bilibili HTTP 412: arc/search")
+            raise bili_api.BiliAPIError("Bilibili HTTP 412: arc/search")
 
-        async def fake_rss(route):
+        async def fake_rss(route, *, deadline=None):
             return {
                 "title": "RSS Video",
                 "author": "RSS UP",
@@ -668,25 +731,29 @@ class CoreLogicTests(unittest.TestCase):
                 "published_at": 123,
             }
 
+        async def fake_video_detail(_, *, deadline=None):
+            raise bili_api.BiliAPIError("video detail unavailable")
+
         client.img_key = "a" * 32
         client.sub_key = "b" * 32
         client._wbi_updated_at = 9999999999
         client._get_json_with_risk_retry = fake_json_retry
         client._rsshub_first_item = fake_rss
+        client.video_by_bvid = fake_video_detail
         card = asyncio.run(client.latest_video("135116630"))
         self.assertEqual(card.item_id, "abc123")
 
     def test_bili_client_video_falls_back_to_dynamic_archive(self):
-        bili_client = _load_bili_new_module("client")
-        client = bili_client.BiliClient()
+        bili_api = _load_bili_new_module("api")
+        client = bili_api.BiliApi()
 
         async def fake_json_retry(*args, **kwargs):
-            raise bili_client.BiliAPIError("Bilibili HTTP 412: arc/search")
+            raise bili_api.BiliAPIError("Bilibili HTTP 412: arc/search")
 
-        async def fake_rss_video(uid, primary_error):
-            raise bili_client.BiliAPIError("video rss down")
+        async def fake_rss_video(uid, primary_error, *, deadline=None):
+            raise bili_api.BiliAPIError("video rss down")
 
-        async def fake_dynamic_items(uid):
+        async def fake_dynamic_items(uid, *, deadline=None):
             return [
                 {
                     "id_str": "1206332625750110740",
@@ -707,8 +774,8 @@ class CoreLogicTests(unittest.TestCase):
                 }
             ]
 
-        async def fake_video_detail(_):
-            return bili_client.BiliCard(
+        async def fake_video_detail(_, *, deadline=None):
+            return bili_api.BiliCard(
                 "video",
                 "Detail Video",
                 author="Detail UP",
@@ -718,6 +785,7 @@ class CoreLogicTests(unittest.TestCase):
 
         client.img_key = "a" * 32
         client.sub_key = "b" * 32
+        client._wbi_updated_at = 9999999999
         client._get_json_with_risk_retry = fake_json_retry
         client._rsshub_latest_video = fake_rss_video
         client.dynamic_items = fake_dynamic_items
@@ -730,15 +798,15 @@ class CoreLogicTests(unittest.TestCase):
         self.assertEqual(card.avatar_url, "https://example.com/avatar.jpg")
 
     def test_bili_client_video_dynamic_fallback_uses_dynamic_rss_bv(self):
-        bili_client = _load_bili_new_module("client")
-        client = bili_client.BiliClient()
+        bili_api = _load_bili_new_module("api")
+        client = bili_api.BiliApi()
 
         async def fake_json_retry(*args, **kwargs):
-            raise bili_client.BiliAPIError("Bilibili HTTP 412")
+            raise bili_api.BiliAPIError("Bilibili HTTP 412")
 
-        async def fake_rss(route):
+        async def fake_rss(route, *, deadline=None):
             if route == "/bilibili/user/video/135116630":
-                raise bili_client.BiliAPIError("video rss down")
+                raise bili_api.BiliAPIError("video rss down")
             self.assertEqual(route, "/bilibili/user/dynamic/135116630")
             return {
                 "title": "posted video",
@@ -749,11 +817,12 @@ class CoreLogicTests(unittest.TestCase):
                 "published_at": 456,
             }
 
-        async def fake_video_detail(_):
-            return bili_client.BiliCard("video", "Detail Video", avatar_url="https://example.com/avatar.jpg")
+        async def fake_video_detail(_, *, deadline=None):
+            return bili_api.BiliCard("video", "Detail Video", avatar_url="https://example.com/avatar.jpg")
 
         client.img_key = "a" * 32
         client.sub_key = "b" * 32
+        client._wbi_updated_at = 9999999999
         client._get_json_with_risk_retry = fake_json_retry
         client._rsshub_first_item = fake_rss
         client.video_by_bvid = fake_video_detail
@@ -763,10 +832,10 @@ class CoreLogicTests(unittest.TestCase):
         self.assertEqual(card.badge, "VIDEO")
 
     def test_bili_client_video_dynamic_fallback_reports_no_video_item(self):
-        bili_client = _load_bili_new_module("client")
-        client = bili_client.BiliClient()
+        bili_api = _load_bili_new_module("api")
+        client = bili_api.BiliApi()
 
-        async def fake_dynamic_items(uid):
+        async def fake_dynamic_items(uid, *, deadline=None):
             return [
                 {
                     "id_str": "dynamic-1",
@@ -782,13 +851,13 @@ class CoreLogicTests(unittest.TestCase):
             asyncio.run(client._dynamic_latest_video("135116630"))
 
     def test_bili_client_dynamic_falls_back_to_rsshub_after_risk(self):
-        bili_client = _load_bili_new_module("client")
-        client = bili_client.BiliClient()
+        bili_api = _load_bili_new_module("api")
+        client = bili_api.BiliApi()
 
         async def fake_json_retry(*args, **kwargs):
-            raise bili_client.BiliRiskControlError("dynamic 135116630")
+            raise bili_api.BiliRiskControlError("dynamic 135116630")
 
-        async def fake_rss(route):
+        async def fake_rss(route, *, deadline=None):
             self.assertEqual(route, "/bilibili/user/dynamic/135116630")
             return {
                 "title": "RSS Dynamic",
@@ -802,13 +871,13 @@ class CoreLogicTests(unittest.TestCase):
         client._get_json_with_risk_retry = fake_json_retry
         client._rsshub_first_item = fake_rss
         items = asyncio.run(client.dynamic_items("135116630"))
-        card = client._dynamic_card_from_item(items[0], "135116630")
+        card = bili_api.mapping.dynamic_item_to_card(items[0], "135116630")
         self.assertEqual(card.title, "dynamic desc")
         self.assertEqual(card.cover_url, "https://example.com/dynamic.jpg")
 
     def test_bili_client_rss_parser_extracts_item_and_cover(self):
-        bili_client = _load_bili_new_module("client")
-        client = bili_client.BiliClient()
+        bili_api = _load_bili_new_module("api")
+        client = bili_api.BiliApi()
         author = "\u82b1\u56ed\u305f\u3048"
         xml = f"""<?xml version="1.0" encoding="UTF-8" ?>
         <rss><channel><title>{author} \u7684 Bilibili \u6295\u7a3f\u89c6\u9891</title><item>
@@ -824,8 +893,7 @@ class CoreLogicTests(unittest.TestCase):
         self.assertIn("Hello", item["description"])
 
     def test_bili_client_dynamic_archive_extracts_bv_as_item_id(self):
-        bili_client = _load_bili_new_module("client")
-        client = bili_client.BiliClient()
+        bili_api = _load_bili_new_module("api")
         item = {
             "id_str": "1206332625750110740",
             "modules": {
@@ -843,57 +911,85 @@ class CoreLogicTests(unittest.TestCase):
                 },
             },
         }
-        card = client._dynamic_card_from_item(item, "135116630")
+        card = bili_api.mapping.dynamic_item_to_card(item, "135116630")
         self.assertEqual(card.item_id, "BV1xx411c7mD")
         self.assertEqual(card.title, "Test Video")
 
     def test_bili_client_clean_rsshub_author_title(self):
-        bili_client = _load_bili_new_module("client")
-        client = bili_client.BiliClient()
+        bili_api = _load_bili_new_module("api")
+        client = bili_api.BiliApi()
         author = "\u82b1\u56ed\u305f\u3048"
         self.assertEqual(client._clean_rsshub_author_title(f"{author} \u7684 Bilibili \u6295\u7a3f\u89c6\u9891"), author)
         self.assertEqual(client._clean_rsshub_author_title(f"{author} \u7684 bilibili \u52a8\u6001"), author)
         self.assertEqual(client._clean_rsshub_author_title("Plain Name"), "Plain Name")
 
     def test_bili_client_rsshub_tries_backup_instance(self):
-        bili_client = _load_bili_new_module("client")
-        client = bili_client.BiliClient(rsshub_base_urls=["https://primary.example", "https://backup.example"])
+        bili_api = _load_bili_new_module("api")
+        import httpx
+
         calls = []
 
-        class FakeResponse:
-            def __init__(self, url):
-                self.url = url
-                self.text = """<rss><channel><title>UP</title><item><title>ok</title><link>https://x</link></item></channel></rss>"""
+        def handler(request):
+            calls.append(str(request.url))
+            if request.url.host == "primary.example":
+                return httpx.Response(503)
+            return httpx.Response(
+                200,
+                text="""<rss><channel><title>UP</title><item><title>ok</title><link>https://x</link></item></channel></rss>""",
+            )
 
-            def raise_for_status(self):
-                if "primary" in self.url:
-                    raise Exception("primary down")
+        client = bili_api.BiliApi(
+            rsshub_base_urls=["https://primary.example", "https://backup.example"],
+            transport=httpx.MockTransport(handler),
+        )
 
-        class FakeAsyncClient:
-            def __init__(self, *args, **kwargs):
-                pass
+        async def run():
+            try:
+                return await client._rsshub_first_item("/route")
+            finally:
+                await client.aclose()
 
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, *args):
-                return False
-
-            async def get(self, url):
-                calls.append(url)
-                return FakeResponse(url)
-
-        with patch.object(bili_client.httpx, "AsyncClient", FakeAsyncClient):
-            item = asyncio.run(client._rsshub_first_item("/route"))
+        item = asyncio.run(run())
         self.assertEqual(item["title"], "ok")
         self.assertGreaterEqual(len(calls), 2)
 
-    def test_bili_client_rsshub_all_failures_are_compacted(self):
-        bili_client = _load_bili_new_module("client")
-        client = bili_client.BiliClient(rsshub_base_urls=["https://one.example", "https://two.example", "https://three.example", "https://four.example"])
+    def test_bili_client_reuses_http_client_and_keeps_cookies_send_only(self):
+        import httpx
 
-        async def fail_fetch(base_url, route):
-            raise bili_client.BiliAPIError(f"{base_url}: down")
+        bili_api = _load_bili_new_module("api")
+        sent_cookies = []
+
+        def handler(request):
+            sent_cookies.append(request.headers.get("cookie", ""))
+            return httpx.Response(
+                200,
+                json={"code": 0},
+                headers={"set-cookie": "tracker=1; Domain=.bilibili.com; Path=/"},
+            )
+
+        client = bili_api.BiliApi(sessdata="sess", transport=httpx.MockTransport(handler))
+
+        async def run():
+            try:
+                await client._get_json(client.NAV_URL)
+                first = client._http_client
+                client.cookies.set("buvid3", "refreshed", domain=".bilibili.com")
+                await client._get_json(client.NAV_URL)
+                return first is client._http_client
+            finally:
+                await client.aclose()
+
+        self.assertTrue(asyncio.run(run()))
+        self.assertEqual(sent_cookies[0], "SESSDATA=sess")
+        self.assertIn("buvid3=refreshed", sent_cookies[1])
+        self.assertIsNone(client.cookies.get("tracker"))
+
+    def test_bili_client_rsshub_all_failures_are_compacted(self):
+        bili_api = _load_bili_new_module("api")
+        client = bili_api.BiliApi(rsshub_base_urls=["https://one.example", "https://two.example", "https://three.example", "https://four.example"])
+
+        async def fail_fetch(base_url, route, *, deadline=None):
+            raise bili_api.BiliAPIError(f"{base_url}: down")
 
         client.rsshub_base_urls = ["https://one.example", "https://two.example", "https://three.example", "https://four.example"]
         client._rsshub_fetch_first_item = fail_fetch
@@ -910,8 +1006,8 @@ class CoreLogicTests(unittest.TestCase):
                 raise
 
     def test_bili_client_rsshub_configured_urls_precede_defaults_and_dedupe(self):
-        bili_client = _load_bili_new_module("client")
-        client = bili_client.BiliClient(rsshub_base_urls=["https://custom.example/", "https://rss.materium.io"])
+        bili_api = _load_bili_new_module("api")
+        client = bili_api.BiliApi(rsshub_base_urls=["https://custom.example/", "https://rss.materium.io"])
         self.assertEqual(client.rsshub_base_urls[0], "https://custom.example")
         self.assertEqual(client.rsshub_base_urls.count("https://rss.materium.io"), 1)
         self.assertIn("https://rsshub.app", client.rsshub_base_urls)
@@ -922,7 +1018,7 @@ class CoreLogicTests(unittest.TestCase):
         bili_models = sys.modules[bili_store.__package__ + ".models"]
 
         class FakeClient:
-            async def resolve_live_target(self, value):
+            async def resolve_live_by_uid(self, value):
                 return bili_models.TargetInfo("live", value, name="Live UP", room_id="100")
 
             async def resolve_video_target(self, value):
@@ -934,19 +1030,26 @@ class CoreLogicTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             store = bili_store.BiliStore(Path(tmp) / "bilibili.db", Path(tmp) / "missing.db")
             service = bili_service.BiliService(store, FakeClient())
-            ok, failed = asyncio.run(service.follow("all", ["135116630"], "group", "900"))
+
+            async def scenario():
+                await store.open()
+                ok, failed = await service.follow("all", ["135116630"], "group", "900")
+                live_subs = await store.subscriptions_for_subscriber("group", "900", "live")
+                await store.close()
+                return ok, failed, live_subs
+
+            ok, failed, live_subs = asyncio.run(scenario())
             self.assertEqual(len(ok), 1)
             self.assertEqual(len(failed), 2)
-            self.assertEqual(len(store.subscriptions_for_subscriber("group", "900", "live")), 1)
-            store.close()
+            self.assertEqual(len(live_subs), 1)
 
     def test_bili_service_check_video_refines_uid_name_and_empty_avatar(self):
         bili_store = _load_bili_new_module("store")
-        bili_service = _load_bili_new_module("service")
+        bili_poller = _load_bili_new_module("poller")
         bili_models = sys.modules[bili_store.__package__ + ".models"]
 
         class FakeClient:
-            async def latest_video(self, uid):
+            async def latest_video(self, uid, *, deadline=None):
                 return bili_models.BiliCard(
                     "video",
                     "New Video",
@@ -958,134 +1061,144 @@ class CoreLogicTests(unittest.TestCase):
 
         with TemporaryDirectory() as tmp:
             store = bili_store.BiliStore(Path(tmp) / "bilibili.db", Path(tmp) / "missing.db")
-            store.upsert_target(bili_models.TargetInfo("video", "135116630", name="135116630", latest_id="old"))
-            store.add_subscription("video", "135116630", "group", "900")
-            service = bili_service.BiliService(store, FakeClient())
-            sent = []
+            poller = bili_poller.Poller(FakeClient(), store, intervals={"video": 0})
 
-            async def fake_broadcast(kind, uid, card):
-                sent.append(card)
+            async def scenario():
+                await store.open()
+                await store.upsert_target(bili_models.TargetInfo("video", "135116630", name="135116630", latest_id="old"))
+                await store.add_subscription("video", "135116630", "group", "900")
+                await poller.tick_video()
+                target = await store.get_target("video", "135116630")
+                rows = await store.outbox_rows()
+                await store.close()
+                return target, rows
 
-            service.broadcast = fake_broadcast
-            asyncio.run(service.check_video())
-            target = store.get_target("video", "135116630")
+            target, rows = asyncio.run(scenario())
+            # A uid-shaped name is replaced by the API name; the avatar is filled in.
             self.assertEqual(target.name, "鑺卞洯銇熴亪")
             self.assertEqual(target.avatar_url, "https://example.com/avatar.jpg")
-            self.assertEqual(sent[0].author, "鑺卞洯銇熴亪")
-            store.close()
-
+            self.assertEqual(rows[0].card().author, "鑺卞洯銇熴亪")
     def test_bili_service_check_video_does_not_override_custom_name(self):
         bili_store = _load_bili_new_module("store")
-        bili_service = _load_bili_new_module("service")
+        bili_poller = _load_bili_new_module("poller")
         bili_models = sys.modules[bili_store.__package__ + ".models"]
 
         class FakeClient:
-            async def latest_video(self, uid):
-                return bili_models.BiliCard("video", "New Video", author="鑺卞洯銇熴亪", item_id="BV1xx411c7mD", published_at=100)
+            async def latest_video(self, uid, *, deadline=None):
+                return bili_models.BiliCard("video", "New Video", author="AUTHOR", item_id="BV1xx411c7mD", published_at=100)
 
         with TemporaryDirectory() as tmp:
             store = bili_store.BiliStore(Path(tmp) / "bilibili.db", Path(tmp) / "missing.db")
-            store.upsert_target(bili_models.TargetInfo("video", "135116630", name="鑷畾涔夊悕", latest_id="old"))
-            store.add_subscription("video", "135116630", "group", "900")
-            service = bili_service.BiliService(store, FakeClient())
-            service.broadcast = lambda *args, **kwargs: asyncio.sleep(0)
-            asyncio.run(service.check_video())
-            self.assertEqual(store.get_target("video", "135116630").name, "鑷畾涔夊悕")
-            store.close()
+            poller = bili_poller.Poller(FakeClient(), store, intervals={"video": 0})
 
+            async def scenario():
+                await store.open()
+                await store.upsert_target(bili_models.TargetInfo("video", "135116630", name="鑷\ue044畾涔夊悕", latest_id="old"))
+                await store.add_subscription("video", "135116630", "group", "900")
+                await poller.tick_video()
+                target = await store.get_target("video", "135116630")
+                await store.close()
+                return target
+
+            target = asyncio.run(scenario())
+            self.assertEqual(target.name, "鑷\ue044畾涔夊悕")
     def test_bili_service_check_video_repeated_failures_are_throttled(self):
         bili_store = _load_bili_new_module("store")
-        bili_service = _load_bili_new_module("service")
+        bili_poller = _load_bili_new_module("poller")
         bili_models = sys.modules[bili_store.__package__ + ".models"]
 
         class FakeClient:
-            async def latest_video(self, uid):
+            async def latest_video(self, uid, *, deadline=None):
                 raise RuntimeError("same failure")
 
         with TemporaryDirectory() as tmp:
             store = bili_store.BiliStore(Path(tmp) / "bilibili.db", Path(tmp) / "missing.db")
-            store.upsert_target(bili_models.TargetInfo("video", "135116630", name="UP"))
-            store.add_subscription("video", "135116630", "group", "900")
-            service = bili_service.BiliService(store, FakeClient())
-            with patch.object(bili_service.logger, "warning") as warning, patch.object(bili_service.logger, "debug") as debug:
-                asyncio.run(service.check_video())
-                asyncio.run(service.check_video())
-            self.assertEqual(warning.call_count, 1)
-            self.assertEqual(debug.call_count, 1)
-            store.close()
+            poller = bili_poller.Poller(FakeClient(), store, intervals={"video": 0}, clock=lambda: 1000)
 
+            async def scenario():
+                await store.open()
+                await store.upsert_target(bili_models.TargetInfo("video", "135116630", name="UP"))
+                await store.add_subscription("video", "135116630", "group", "900")
+                with patch.object(bili_poller.logger, "warning") as warning, patch.object(bili_poller.logger, "debug") as debug:
+                    # The same failure within the window is demoted to debug.
+                    await poller.tick_video()
+                    await poller.tick_video()
+                await store.close()
+                return warning.call_count, debug.call_count
+
+            warnings, debugs = asyncio.run(scenario())
+            self.assertEqual(warnings, 1)
+            self.assertEqual(debugs, 1)
     def test_bili_service_check_dynamic_skips_video_dynamic_when_video_subscribed(self):
         bili_store = _load_bili_new_module("store")
-        bili_service = _load_bili_new_module("service")
+        bili_poller = _load_bili_new_module("poller")
         bili_models = sys.modules[bili_store.__package__ + ".models"]
+        item = {
+            "id_str": "dynamic-1",
+            "modules": {
+                "module_author": {"name": "UP", "pub_ts": 100},
+                "module_dynamic": {"major": {"type": "MAJOR_TYPE_ARCHIVE", "archive": {"title": "Video Dynamic", "jump_url": "https://www.bilibili.com/video/BV1xx411c7mD"}}},
+            },
+        }
 
         class FakeClient:
-            def _dynamic_card_from_item(self, item, uid):
-                return bili_models.BiliCard(
-                    "dynamic",
-                    "Video Dynamic",
-                    author="UP",
-                    url="https://www.bilibili.com/video/BV1xx411c7mD",
-                    item_id="BV1xx411c7mD",
-                    published_at=100,
-                )
-
-            async def dynamic_items(self, uid):
-                return [{"id_str": "dynamic-1"}]
+            async def dynamic_items(self, uid, *, deadline=None):
+                return [item]
 
         with TemporaryDirectory() as tmp:
             store = bili_store.BiliStore(Path(tmp) / "bilibili.db", Path(tmp) / "missing.db")
-            store.upsert_target(bili_models.TargetInfo("video", "135116630", name="UP"))
-            store.upsert_target(bili_models.TargetInfo("dynamic", "135116630", name="UP", latest_ts=1))
-            store.add_subscription("video", "135116630", "group", "900")
-            store.add_subscription("dynamic", "135116630", "group", "900")
-            service = bili_service.BiliService(store, FakeClient())
-            sent = []
+            poller = bili_poller.Poller(FakeClient(), store, intervals={"dynamic": 0})
 
-            async def fake_broadcast(kind, uid, card):
-                sent.append(card)
+            async def scenario():
+                await store.open()
+                await store.upsert_target(bili_models.TargetInfo("video", "135116630", name="UP"))
+                await store.upsert_target(bili_models.TargetInfo("dynamic", "135116630", name="UP", latest_ts=1))
+                await store.add_subscription("video", "135116630", "group", "900")
+                await store.add_subscription("dynamic", "135116630", "group", "900")
+                await poller.tick_dynamic()
+                seen = await store.has_seen("dynamic", "135116630", "BV1xx411c7mD")
+                target = await store.get_target("dynamic", "135116630")
+                rows = await store.outbox_rows()
+                await store.close()
+                return seen, target, rows
 
-            service.broadcast = fake_broadcast
-            asyncio.run(service.check_dynamic())
-            self.assertEqual(sent, [])
-            self.assertTrue(store.has_seen("dynamic", "135116630", "BV1xx411c7mD"))
-            self.assertEqual(store.get_target("dynamic", "135116630").latest_id, "BV1xx411c7mD")
-            store.close()
-
+            seen, target, rows = asyncio.run(scenario())
+            # Marked as read, never pushed, but the target still advances.
+            self.assertEqual(rows, [])
+            self.assertTrue(seen)
+            self.assertEqual(target.latest_id, "BV1xx411c7mD")
     def test_bili_service_check_dynamic_sends_video_dynamic_without_video_subscription(self):
         bili_store = _load_bili_new_module("store")
-        bili_service = _load_bili_new_module("service")
+        bili_poller = _load_bili_new_module("poller")
         bili_models = sys.modules[bili_store.__package__ + ".models"]
+        item = {
+            "id_str": "dynamic-1",
+            "modules": {
+                "module_author": {"name": "UP", "pub_ts": 100},
+                "module_dynamic": {"major": {"type": "MAJOR_TYPE_ARCHIVE", "archive": {"title": "Video Dynamic", "jump_url": "https://www.bilibili.com/video/BV1xx411c7mD"}}},
+            },
+        }
 
         class FakeClient:
-            def _dynamic_card_from_item(self, item, uid):
-                return bili_models.BiliCard(
-                    "dynamic",
-                    "Video Dynamic",
-                    author="UP",
-                    url="https://www.bilibili.com/video/BV1xx411c7mD",
-                    item_id="BV1xx411c7mD",
-                    published_at=100,
-                )
-
-            async def dynamic_items(self, uid):
-                return [{"id_str": "dynamic-1"}]
+            async def dynamic_items(self, uid, *, deadline=None):
+                return [item]
 
         with TemporaryDirectory() as tmp:
             store = bili_store.BiliStore(Path(tmp) / "bilibili.db", Path(tmp) / "missing.db")
-            store.upsert_target(bili_models.TargetInfo("dynamic", "135116630", name="UP", latest_ts=1))
-            store.add_subscription("dynamic", "135116630", "group", "900")
-            service = bili_service.BiliService(store, FakeClient())
-            sent = []
+            poller = bili_poller.Poller(FakeClient(), store, intervals={"dynamic": 0})
 
-            async def fake_broadcast(kind, uid, card):
-                sent.append((kind, card.item_id))
+            async def scenario():
+                await store.open()
+                await store.upsert_target(bili_models.TargetInfo("dynamic", "135116630", name="UP", latest_ts=1))
+                await store.add_subscription("dynamic", "135116630", "group", "900")
+                await poller.tick_dynamic()
+                rows = await store.outbox_rows()
+                await store.close()
+                return rows
 
-            service.broadcast = fake_broadcast
-            asyncio.run(service.check_dynamic())
-            self.assertEqual(sent, [("dynamic", "BV1xx411c7mD")])
-            store.close()
-
+            rows = asyncio.run(scenario())
+            # Without a video subscription the video dynamic is delivered.
+            self.assertEqual([(row.kind, row.card().item_id) for row in rows], [("dynamic", "BV1xx411c7mD")])
     def test_bili_draw_card_generates_png_without_remote_images(self):
         bili_draw = _load_bili_new_module("draw")
         bili_models = sys.modules[bili_draw.__package__ + ".models"]
@@ -3033,6 +3146,30 @@ remotePort = {{ $v.Second }}
         self.assertIsNone(text_module.parse_decision("note"))
 
         self.assertEqual(text_module.text_or_empty(None, "None", " 测试群 "), "测试群")
+        pending = {
+            "bot-a:1": {"self_id": "bot-a", "guild_name": "甲群"},
+            "bot-b:2": {"self_id": "bot-b", "guild_name": "乙群"},
+        }
+        self.assertEqual(
+            text_module.select_invite_reply(
+                user_id="246", superuser_id="246", private=True, self_id="bot-b",
+                text="同意", pending=pending,
+            )[0],
+            "bot-b:2",
+        )
+        self.assertIsNone(text_module.select_invite_reply(
+            user_id="246", superuser_id="246", private=False, self_id="bot-a",
+            text="同意", pending=pending,
+        ))
+        self.assertIsNone(text_module.select_invite_reply(
+            user_id="246", superuser_id="246", private=True, self_id="bot-a",
+            text="今天吃什么", pending=pending,
+        ))
+        self.assertIsNone(text_module.select_invite_reply(
+            user_id="100", superuser_id="246", private=True, self_id="bot-a",
+            text="同意", pending=pending,
+        ))
+
         self.assertEqual(text_module.entity_label(types.SimpleNamespace(name=None, id="123456")), "123456")
         self.assertEqual(
             text_module.entity_label(types.SimpleNamespace(nick=None, name=None), "246"),

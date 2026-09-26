@@ -4,7 +4,15 @@
 
 ![樱花粉视频与直播卡片](images/bilibili-cards-sakura.png)
 
-上图使用用户指定的公开直播间和视频封面；直播状态与“2 小时 18 分钟”时长均为演示数据，不代表真实直播场次。
+上图由预览脚本生成，视频卡与直播卡封面取自仓库内的 `docs/images/bilibili-cards-video-cover.jpg` 和 `docs/images/bilibili-cards-live-cover.jpg`，主播昵称与标题为示例资料；直播状态与“2 小时 18 分钟”时长均为演示数据，不代表真实直播场次。
+
+卡片布局改动后请重新生成该图，而不是手工编辑：
+
+```powershell
+.\.venv\Scripts\python.exe scripts/preview_bilibili_cards.py --write-doc-figure
+```
+
+`tests/test_bilibili_cards.py` 会逐像素校验本图与脚本输出一致，因此忘记重新生成会导致测试失败。
 
 ## 展示规则
 
@@ -53,7 +61,9 @@
 - `live_off.png`、`live_off_unknown.png`：约计时长与时长未知两种下播效果。
 - 各类型的独立原尺寸 PNG。
 
-默认封面和资料均为脚本生成的示例，可传入 `--cover "C:\path\cover.jpg"` 检查本地真实封面。
+默认封面和资料均为脚本生成的示例，可传入 `--cover "C:\path\cover.jpg"` 检查本地真实封面，`--live-cover` 单独指定直播卡封面。
+
+`--title` 会在 `comparison.png` 上方加一行说明文字。`--write-doc-figure` 用文档配图的标题和封面重新渲染，并把结果写入 `docs/images/bilibili-cards-sakura.png`，是更新该图的唯一方式；`--doc-figure` 可改写到其他路径，测试即以此在校验前生成临时副本。
 
 ## 验证
 
@@ -61,7 +71,7 @@
 .\.venv\Scripts\python.exe -m pytest tests/test_bilibili_cards.py tests/test_bilibili_live_duration.py tests/test_bilibili_notifications.py tests/test_core_logic.py tests/test_runtime_optimization.py tests/test_endfield_performance.py -k "bili or Bilibili" -q
 ```
 
-本次 108 项相关测试通过，覆盖封面四角保留、比例、EXIF 旋转、透明图片、极端比例、状态可辨识、长文本不重叠、失败兜底、订阅状态转换、资源并发与既有 B 站逻辑，以及数据库迁移、重启后计时、中途订阅、重新开播、时区、断联与缺失时间、群聊/私聊链接发送顺序、并发发送不交错和接收方失败隔离。已人工检查离线渲染图，并通过真实接口验证以下链接的解析、封面/头像下载和 PNG 生成：
+本次 111 项相关测试通过，覆盖封面四角保留、比例、EXIF 旋转、透明图片、极端比例、状态可辨识、长文本不重叠、失败兜底、订阅状态转换、资源并发与既有 B 站逻辑，以及数据库迁移、重启后计时、中途订阅、重新开播、时区、断联与缺失时间、群聊/私聊链接发送顺序、并发发送不交错和接收方失败隔离。测试还会逐像素校验文档配图与预览脚本输出一致，并用伪造的 `badge` 文案确认订阅状态取自 `card_type`。已人工检查离线渲染图，并通过真实接口验证以下链接的解析、封面/头像下载和 PNG 生成：
 
 - [直播间 25731103](https://live.bilibili.com/25731103)：2026-09-22 17:05（北京时间）查询时未开播，生成“未开播”卡片。
 - [视频 BV1extE6LEKB](https://www.bilibili.com/video/BV1extE6LEKB/)：完整保留 2400×1350 封面与长标题；隐藏接口简介中的占位符 `-`。

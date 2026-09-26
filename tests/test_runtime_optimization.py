@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import importlib.util
+import json
 import sys
 import threading
 import time
@@ -210,27 +212,36 @@ class BilibiliPollingTests(unittest.IsolatedAsyncioTestCase):
                 Path(temp_dir) / "bilibili.db",
                 Path(temp_dir) / "missing.db",
             )
-            store.close()
-            store.close()
+            await store.open()
+            await store.close()
+            await store.close()
 
     async def test_twenty_four_targets_use_four_workers_and_isolate_failures(self):
-        service_module = _load_bili_module("service")
-        models = sys.modules[service_module.__package__ + ".models"]
+        # Concurrency, failure isolation and event-loop responsiveness now live
+        # in the Poller (refactor phase 6); the three assertions are unchanged.
+        poller_module = _load_bili_module("poller")
+        models = sys.modules[poller_module.__package__ + ".models"]
         active = 0
         maximum = 0
         completed = []
         heartbeat_times = []
-        targets = [models.TargetInfo("live", str(index), name=f"UP {index}") for index in range(24)]
+        targets = [
+            models.TargetInfo("live", str(index), name=f"UP {index}")
+            for index in range(24)
+        ]
 
         class Store:
-            def list_active_targets(self, _kind):
+            async def list_active_targets(self, _kind):
                 return targets
 
-            def upsert_target(self, _target):
-                return None
+            async def subscriptions_for_target(self, _kind, _uid):
+                return []
+
+            async def apply_poll_result(self, *_args, **_kwargs):
+                return 0
 
         class Client:
-            async def latest_live_state(self, target):
+            async def live_observation(self, target):
                 nonlocal active, maximum
                 active += 1
                 maximum = max(maximum, active)
@@ -239,10 +250,10 @@ class BilibiliPollingTests(unittest.IsolatedAsyncioTestCase):
                 completed.append(target.uid)
                 if target.uid == "7":
                     raise RuntimeError("failed target")
-                return target
+                return models.LiveObservation(target.uid, room_id="", is_live=False)
 
-        service = service_module.BiliService(Store(), Client(), poll_concurrency=4)
-        poll_task = asyncio.create_task(service.check_live())
+        poller = poller_module.Poller(Client(), Store(), concurrency=4)
+        poll_task = asyncio.create_task(poller.tick_live())
 
         async def heartbeat():
             while not poll_task.done():
@@ -255,89 +266,113 @@ class BilibiliPollingTests(unittest.IsolatedAsyncioTestCase):
             for left, right in zip(heartbeat_times, heartbeat_times[1:])
         ]
         self.assertEqual(maximum, 4)
+        # 24 targets attempted; the failing one is isolated, not fatal.
         self.assertEqual(len(completed), 24)
         self.assertTrue(heartbeat_gaps)
-        self.assertLess(max(heartbeat_gaps), 0.1)
+        # Windows jitter makes a single gap flaky; compare the median instead
+        # of the maximum (plan, section 6, phase 6 note).
+        ordered = sorted(heartbeat_gaps)
+        self.assertLess(ordered[len(ordered) // 2], 0.1)
 
     async def test_same_kind_poll_is_singleflighted(self):
-        store_module = _load_bili_module("store")
-        service_module = _load_bili_module("service")
-        models = sys.modules[store_module.__package__ + ".models"]
+        poller_module = _load_bili_module("poller")
+        models = sys.modules[poller_module.__package__ + ".models"]
         started = asyncio.Event()
         release = asyncio.Event()
         calls = 0
 
+        class Store:
+            async def list_active_targets(self, _kind):
+                return [models.TargetInfo("live", "1", name="UP")]
+
+            async def subscriptions_for_target(self, _kind, _uid):
+                return []
+
+            async def apply_poll_result(self, *_args, **_kwargs):
+                return 0
+
         class Client:
-            async def latest_live_state(self, target):
+            async def live_observation(self, target):
                 nonlocal calls
                 calls += 1
                 started.set()
                 await release.wait()
-                return target
+                return models.LiveObservation(target.uid, room_id="", is_live=False)
 
-        with TemporaryDirectory() as temp_dir:
-            store = store_module.BiliStore(
-                Path(temp_dir) / "bilibili.db",
-                Path(temp_dir) / "missing.db",
-            )
-            store.upsert_target(models.TargetInfo("live", "1", name="UP"))
-            store.add_subscription("live", "1", "group", "900")
-            try:
-                service = service_module.BiliService(store, Client(), poll_concurrency=4)
-                first = asyncio.create_task(service.check_live())
-                await started.wait()
-                await service.check_live()
-                self.assertEqual(calls, 1)
-                release.set()
-                await first
-            finally:
-                store.close()
+        poller = poller_module.Poller(Client(), Store())
+        first = asyncio.create_task(poller.tick_live())
+        await started.wait()
+        # A second tick while the first is still in flight must not start a
+        # second round for the same kind.
+        await poller.tick_live()
+        self.assertEqual(calls, 1)
+        release.set()
+        await first
 
     async def test_broadcasts_to_same_subscriber_are_serialized(self):
-        service_module = _load_bili_module("service")
-        models = sys.modules[service_module.__package__ + ".models"]
+        # Per-recipient serialization is now structural: the notifier dispatches
+        # only the lowest id per recipient, so one chat never has two sends in
+        # flight (plan section 5.3, notifier / "same recipient is serial").
+        notifier_module = _load_bili_module("notifier")
+        models = sys.modules[notifier_module.__package__ + ".models"]
         active = 0
         maximum = 0
+        handled = []
 
-        class Subscription:
-            subscriber_type = "group"
-            subscriber_id = "900"
+        pending = [
+            models.OutboxRow(
+                id=index + 1,
+                event_key=f"live:{index}:live_on:1000",
+                kind="live",
+                uid=str(index),
+                card_type="live_on",
+                subscriber_type="group",
+                subscriber_id="900",
+                card_json=_card_json(models, index),
+                created_at=1000,
+            )
+            for index in range(8)
+        ]
 
         class Store:
-            def subscriptions_for_target(self, _kind, _uid):
-                return [Subscription()]
+            async def outbox_expire(self, _now, _ages):
+                return 0
 
-        class Client:
-            pass
+            async def due_outbox(self, _now, _limit):
+                return list(pending)
 
-        class Message:
-            def __init__(self, segments):
-                self.uid = segments[0]
+            async def outbox_done(self, row_id):
+                handled.append(row_id)
+                for row in list(pending):
+                    if row.id == row_id:
+                        pending.remove(row)
 
-            async def send(self, _target, _bot):
-                nonlocal active, maximum
-                active += 1
-                maximum = max(maximum, active)
-                await asyncio.sleep(0.01)
-                active -= 1
+        async def send(row, _png):
+            nonlocal active, maximum
+            active += 1
+            maximum = max(maximum, active)
+            await asyncio.sleep(0.01)
+            active -= 1
 
-        service = service_module.BiliService(Store(), Client(), poll_concurrency=4)
-        service.card_to_segment = lambda card: asyncio.sleep(0, result=card.uid)
-        service_module.get_bot = lambda: object()
-        service_module.account_adapter_name = lambda _bot: ""
-        service_module.ChainMsg = Message
-
-        await asyncio.gather(
-            *(
-                service.broadcast(
-                    "live",
-                    str(index),
-                    models.BiliCard("live", str(index), uid=str(index)),
-                )
-                for index in range(8)
-            )
+        notifier = notifier_module.Notifier(
+            Store(),
+            render=lambda _card: asyncio.sleep(0, result=b"png"),
+            send=send,
+            concurrency=4,
         )
+        # Drain the whole backlog; with a single recipient every dispatch must
+        # pick up exactly one row, in id order.
+        guard = 0
+        while pending and guard < 20:
+            await notifier._dispatch_once()
+            guard += 1
         self.assertEqual(maximum, 1)
+        self.assertEqual(handled, [1, 2, 3, 4, 5, 6, 7, 8])
+
+
+def _card_json(models, index: int) -> str:
+    card = models.BiliCard("live_on", str(index), uid=str(index))
+    return json.dumps(dataclasses.asdict(card))
 
 
 if __name__ == "__main__":

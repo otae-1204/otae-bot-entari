@@ -1,15 +1,30 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.util
+import subprocess
 import sys
 from io import BytesIO
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 from PIL import Image, ImageChops, ImageDraw, ImageOps
 
-from tests.test_core_logic import _load_bili_new_module
+from tests.test_core_logic import _bili_root_package, _load_bili_new_module
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def _load_preview_script():
+    spec = importlib.util.spec_from_file_location(
+        "preview_bilibili_cards_for_test", ROOT / "scripts/preview_bilibili_cards.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 @pytest.fixture(scope="module")
@@ -180,6 +195,63 @@ def test_long_text_and_failed_images_have_no_text_overlap(renderer, monkeypatch,
             assert a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1]
 
 
+def test_documentation_figure_is_reproducible_by_the_preview_script(tmp_path):
+    """docs/images/bilibili-cards-sakura.png must be the script's own output.
+
+    The figure is generated, so a hand-edited or stale copy would silently
+    disagree with the card renderer. Regenerate with:
+        python scripts/preview_bilibili_cards.py --write-doc-figure
+    """
+    preview = _load_preview_script()
+    regenerated = tmp_path / "bilibili-cards-sakura.png"
+    subprocess.run(
+        [
+            sys.executable,
+            str(preview.__file__),
+            "--output",
+            str(tmp_path / "cards"),
+            "--write-doc-figure",
+            "--doc-figure",
+            str(regenerated),
+        ],
+        check=True,
+        cwd=ROOT,
+        capture_output=True,
+        timeout=180,
+    )
+    generated = Image.open(regenerated).convert("RGB")
+    committed = Image.open(preview.DOC_FIGURE).convert("RGB")
+    assert generated.size == committed.size, (
+        "documentation figure size differs; regenerate it with "
+        "scripts/preview_bilibili_cards.py --write-doc-figure"
+    )
+    difference = ImageChops.difference(generated, committed)
+    assert difference.getbbox() is None, (
+        "documentation figure differs from the preview script output; regenerate it "
+        "with scripts/preview_bilibili_cards.py --write-doc-figure"
+    )
+
+
+@pytest.mark.parametrize(
+    "kind,badge,expected",
+    [("live_on", "RELABELLED", True), ("live_idle", "LIVE", False)],
+)
+def test_live_state_follows_card_type_not_badge_copy(renderer, kind, badge, expected):
+    """Badge text is presentation only; subscription state comes from card_type."""
+    api_module = _load_bili_new_module("api")
+    models = sys.modules[_bili_root_package(api_module) + ".models"]
+    client = api_module.BiliApi()
+    misleading = models.BiliCard(kind, "同一直播间", badge=badge, published_at=1234)
+    client.live_card = AsyncMock(return_value=misleading)
+    latest = asyncio.run(
+        client.latest_live_state(
+            models.TargetInfo("live", "123", name="主播", room_id="456")
+        )
+    )
+    assert latest.is_live is expected
+    assert latest.live_last_seen_at == (1234 if expected else 0)
+
+
 def test_whitespace_fields_do_not_crash(renderer):
     card = _card(renderer, title="   ", author="\n ", subtitle="\t ")
     image = Image.open(BytesIO(renderer._render_bili_card(card, None, None)))
@@ -190,9 +262,9 @@ def test_whitespace_fields_do_not_crash(renderer):
     "status,kind", [(0, "live_idle"), (1, "live_on"), (2, "live_idle")]
 )
 def test_room_preview_does_not_claim_a_stream_just_ended(status, kind):
-    client_module = _load_bili_new_module("client")
-    models = sys.modules[client_module.__package__ + ".models"]
-    client = client_module.BiliClient()
+    api_module = _load_bili_new_module("api")
+    models = sys.modules[_bili_root_package(api_module) + ".models"]
+    client = api_module.BiliApi()
     client._live_room = AsyncMock(
         return_value={"live_status": status, "title": "同一直播间"}
     )
@@ -209,8 +281,10 @@ def test_room_preview_does_not_claim_a_stream_just_ended(status, kind):
 def test_subscription_transitions_still_send_start_and_end_notifications(
     was_live, is_live, kind
 ):
-    service_module = _load_bili_new_module("service")
-    models = sys.modules[service_module.__package__ + ".models"]
+    # The transition rule now lives in the pure detect layer (refactor phase 4);
+    # the assertions are the ones the service-level test made before.
+    detect_module = _load_bili_new_module("detect")
+    models = sys.modules[detect_module.__package__ + ".models"]
     target = models.TargetInfo(
         "live",
         "123",
@@ -219,13 +293,9 @@ def test_subscription_transitions_still_send_start_and_end_notifications(
         is_live=was_live,
         last_cover="https://example.test/previous-cover.png",
     )
-    latest = models.TargetInfo("live", "123", room_id="456", is_live=is_live)
-    client = SimpleNamespace(latest_live_state=AsyncMock(return_value=latest))
-    store = SimpleNamespace(upsert_target=Mock())
-    service = service_module.BiliService(store, client)
-    service.broadcast = AsyncMock()
-    asyncio.run(service._check_live_target(target))
-    card = service.broadcast.await_args.args[2]
-    assert card.card_type == kind
+    observation = models.LiveObservation("123", room_id="456", is_live=is_live)
+    updated, events = detect_module.detect_live(target, observation, 1234)
+    assert [event.card.card_type for event in events] == [kind]
+    card = events[0].card
     assert card.cover_url == target.last_cover
-    store.upsert_target.assert_called_once_with(latest)
+    assert updated.is_live is is_live
