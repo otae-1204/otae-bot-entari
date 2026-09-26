@@ -1519,8 +1519,7 @@ header p{margin:10px 0 0;font-size:15px;color:#c8c8c8}
 .archive-section h3:before{content:'';width:5px;height:19px;background:#252525}
 .archive-section h3 span{margin-left:auto;font-size:12px;color:#727272;font-weight:400}
 .archive-list{display:grid;grid-template-columns:repeat(var(--archive-columns),minmax(0,1fr));gap:12px}
-.archive-item{min-width:0;position:relative;padding-top:7px}
-.archive-item:before{position:absolute;top:0;left:0;content:'━━━━━━  ≡01';width:58px;height:7px;padding:0 4px;background:#151515;color:#bbb;font:5px/7px Arial,sans-serif;white-space:pre}
+.archive-item{min-width:0;position:relative}
 .archive-art{height:148px;display:grid;place-items:center;position:relative;isolation:isolate;overflow:hidden;border-radius:0 5px 0 0;background:linear-gradient(180deg,#626061 0%,#aaa8a9 52%,#e9e7e8 100%)}
 .archive-art-guides{position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-events:none}
 .archive-art img{position:relative;z-index:1;width:94%;height:94%;object-fit:contain;filter:drop-shadow(2px 5px 3px #0003)}
