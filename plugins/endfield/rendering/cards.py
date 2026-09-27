@@ -275,7 +275,7 @@ async def draw_attendance_card(view: AttendanceCardView) -> bytes:
         for item in role.rewards
         if item.icon_url
     )
-    reward_icons = await _image_data_urls(reward_urls) if reward_urls else {}
+    reward_icons = await _centered_reward_icons(reward_urls) if reward_urls else {}
     rows = []
     for role in view.roles:
         server_name = server_label(role.server_name) or "默认服务器"
@@ -314,7 +314,11 @@ async def draw_attendance_card(view: AttendanceCardView) -> bytes:
         <main class="attendance-list">{''.join(rows) or '<div class="empty">没有可签到的角色</div>'}</main>
         """,
         extra_css="""
-        .attendance-card{min-height:0;padding:24px;background:#ededed;color:#222222}
+        /* 移动端 QQ 预览缩略图在宽高比超过约 3:1 时会被裁切（旧版 min-height:420px
+           压线可用，重构后单账号内容高度塌到约 310px 才必须点开看全）。
+           min-height 提高到 430px（成品约 2560×860，2.98:1），多余空间和旧版一样
+           留在卡片下方，行式布局不变。 */
+        .attendance-card{min-height:430px;padding:24px;background:#ededed;color:#222222}
         .attendance-card header{margin-bottom:16px;padding:22px 24px;border:0;border-bottom:5px solid #dfec32;border-radius:4px;background:#292929;gap:24px}
         .attendance-card header small{color:#c8c8c8;font-size:12px;letter-spacing:.16em}
         .attendance-card header h1{font-size:34px;margin-top:7px;line-height:1.2}
@@ -3247,6 +3251,44 @@ async def _image_data_url(url: str) -> str:
 
 async def _image_data_urls(urls: Iterable[str]) -> dict[str, str]:
     return (await _prepare_assets(urls, inline=True)).urls
+
+
+async def _centered_reward_icons(urls: Iterable[str]) -> dict[str, str]:
+    """森空岛奖励图标的可见图形普遍偏在画布上方，CSS 居中的是画布而非图形，
+    会显得图标比文字高出一截（issue #16）。下载后按 alpha 通道裁掉透明边，
+    再把图形放回正方形画布中心，让对齐作用于可见图形本身。"""
+    downloaded = await _image_data_urls(urls)
+    return {
+        url: _centered_png_data_url(data_url) or data_url
+        for url, data_url in downloaded.items()
+    }
+
+
+def _centered_png_data_url(data_url: str) -> str:
+    """Trim transparent padding and re-center the artwork; empty string on failure."""
+    header, sep, payload = data_url.partition(",")
+    if not sep or not header.strip().endswith(";base64"):
+        return ""
+    try:
+        content = base64.b64decode(payload)
+        with Image.open(BytesIO(content)) as image:
+            image.load()
+            if image.mode != "RGBA":
+                image = image.convert("RGBA")
+            alpha = image.getchannel("A").point(lambda v: 255 if v > 16 else 0)
+            bbox = alpha.getbbox()
+            if bbox is None:
+                return ""
+            art = image.crop(bbox)
+        side = max(art.size)
+        canvas = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+        canvas.paste(art, ((side - art.width) // 2, (side - art.height) // 2), art)
+        buffer = BytesIO()
+        canvas.save(buffer, "PNG", optimize=True)
+        return "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
+    except Exception:
+        logger.debug("[endfield] reward icon recenter skipped", exc_info=True)
+        return ""
 
 
 ASSET_FETCH_TIMEOUT_SECONDS = 20.0
