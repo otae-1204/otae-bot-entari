@@ -129,7 +129,18 @@ async def main() -> None:
     reports = {}
     try:
         async with async_playwright() as playwright:
-            browser = await playwright.chromium.launch(headless=True)
+            browser = None
+            for channel in (None, "chrome", "msedge"):
+                try:
+                    kwargs = {"headless": True}
+                    if channel:
+                        kwargs["channel"] = channel
+                    browser = await playwright.chromium.launch(**kwargs)
+                    break
+                except Exception:
+                    continue
+            if browser is None:
+                raise RuntimeError("No browser found. Install Chrome/Edge or run: playwright install chromium")
             try:
                 for name, rows in cases.items():
                     html_path = args.output_dir / f"{name}.html"
