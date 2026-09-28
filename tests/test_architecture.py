@@ -476,7 +476,7 @@ print('CONTRACT ' + json.dumps({'plugins': sorted(expected), 'jobs': jobs}, ensu
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         contract = next(line.removeprefix("CONTRACT ") for line in result.stdout.splitlines() if line.startswith("CONTRACT "))
         loaded = json.loads(contract)["plugins"]
-        self.assertEqual(loaded, list(discover_plugins(ROOT / "plugins")))
+        self.assertEqual(loaded, sorted(discover_plugins(ROOT / "plugins")))
         self.assertIn("plugins.hyw", loaded)
         self.assertIn("plugins.grok_bot", loaded)
 
