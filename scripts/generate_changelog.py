@@ -285,7 +285,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.draft:
         covered = {short for release in data.get("releases") or [] for short in release_commits(release)}
-        print(draft(commits, covered))
+        print(draft(commits, covered | bookkeeping_commits()))
         return 0
 
     found = problems(data, commits, bookkeeping_commits())

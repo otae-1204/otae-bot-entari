@@ -28,7 +28,7 @@ from plugins.changelog.models import (
     load_changelog,
     parse_changelog,
 )
-from plugins.changelog.rendering import CARD_WIDTH, page_html
+from plugins.changelog.rendering import CARD_WIDTH, DEVICE_SCALE_FACTOR, page_html
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA_FILE = ROOT / "plugins/changelog/changelog.json"
@@ -75,8 +75,9 @@ class DataIntegrityTests(unittest.TestCase):
         releases = self.changelog.releases
         ends = [release.end_date for release in releases]
         self.assertEqual(ends, sorted(ends, reverse=True))
+        # Same-day windows may touch (v1.14.0 / v1.15.0); models.parse_changelog allows it.
         for newer, older in zip(releases, releases[1:]):
-            self.assertGreater(newer.start_date, older.end_date)
+            self.assertGreaterEqual(newer.start_date, older.end_date)
         versions = [release.version for release in releases]
         self.assertEqual(len(versions), len(set(versions)))
 
@@ -622,7 +623,7 @@ class RealRenderTests(unittest.TestCase):
         png = asyncio.run(run())
         with Image.open(io.BytesIO(png)) as image:
             self.assertEqual(image.format, "PNG")
-            self.assertEqual(image.width, CARD_WIDTH)
+            self.assertEqual(image.width, CARD_WIDTH * DEVICE_SCALE_FACTOR)
             self.assertGreater(image.height, 200)
 
 

@@ -38,46 +38,57 @@ def text(value: object) -> str:
     return escape(str(value)) if value is not None else "—"
 
 
-def _meta(release: Release) -> str:
-    tags = "".join(f'<span class="cl-tag">{text(tag)}</span>' for tag in release.tags)
-    return (
-        '<div class="cl-meta">'
-        f"<span>{text(release.date_range)}</span>{tags}"
-        f"<span>{len(release.highlights)} 条更新</span>"
-        f"<span>{release.commit_count} 个提交</span>"
-        "</div>"
-    )
+def _chips(release: Release) -> str:
+    tags = "".join(f'<span class="cl-chip">{text(tag)}</span>' for tag in release.tags)
+    return f'<div class="cl-meta"><span class="cl-chip accent">{text(release.version)}</span>{tags}</div>'
+
+
+def _fact(label: str, value: object, unit: str) -> str:
+    return f"<div><small>{text(label)}</small><b>{text(value)}<i>{text(unit)}</i></b></div>"
 
 
 def _items(release: Release) -> str:
-    rows = []
-    for item in release.highlights:
-        stamp = f"{item.date} · " if item.date else ""
-        rows.append(
-            f'<div class="cl-item"><span class="cl-kind {text(item.kind)}">'
-            f"{text(item.label)}</span><p>{text(item.text)}"
-            f'<span class="cl-commits">{text(stamp + " ".join(item.commits))}</span></p></div>'
+    groups, number = [], 0
+    for kind in KIND_ORDER:
+        items = [item for item in release.highlights if item.kind == kind]
+        if not items:
+            continue
+        rows = []
+        for item in items:
+            number += 1
+            stamp = f"{item.date} · " if item.date else ""
+            rows.append(
+                f'<div class="cl-item"><span class="cl-n">{number:02}</span><p>{text(item.text)}'
+                f'<span class="cl-commits">{text(stamp + " ".join(item.commits))}</span></p></div>'
+            )
+        groups.append(
+            f'<section class="cl-group kind-{text(kind)}"><h2 class="cl-gh"><i></i>{text(KIND_LABELS[kind])}'
+            f"<em>{len(items)} 条</em></h2>{''.join(rows)}</section>"
         )
-    return "".join(rows)
+    return "".join(groups)
 
 
 def release_pages(
     release: Release, *, number: int, total: int
 ) -> tuple[ChangelogPage, ...]:
     """单个版本的详情卡。"""
-    body = _meta(release)
+    body = _chips(release)
     if release.summary:
-        body += (
-            '<div class="cl-summary"><span class="cl-eyebrow">一句话概括</span>'
-            f"{text(release.summary)}</div>"
-        )
-    body += _items(release)
+        body += f'<p class="cl-summary">{text(release.summary)}</p>'
+    body += (
+        '<div class="cl-facts">'
+        + _fact("更新", len(release.highlights), "条")
+        + _fact("提交", release.commit_count, "个")
+        + _fact("提交日", len(release.dates) or 1, "天")
+        + "</div>"
+        + _items(release)
+    )
     return (
         ChangelogPage(
             release.title,
-            f"{release.version} · {release.date_range} / RELEASE NOTES",
+            release.date_range,
             body,
-            "版本详情",
+            "版本",
             number,
             total,
         ),
@@ -86,6 +97,22 @@ def release_pages(
 
 def latest_pages(changelog: Changelog) -> tuple[ChangelogPage, ...]:
     return release_pages(changelog.latest, number=1, total=len(changelog.releases))
+
+
+def _row(release: Release, number: int | None = None) -> str:
+    detail = " · ".join(
+        part for part in ("/".join(release.tags), "、".join(release.kind_labels())) if part
+    )
+    index = f'<span class="cl-no">{number:02}</span>' if number is not None else ""
+    return (
+        f'<div class="cl-row{"" if number is not None else " cl-row-ver"}">{index}<div class="cl-main">'
+        f'<div class="cl-top"><span class="cl-ver">{text(release.version)}</span>'
+        f'<span class="cl-date">{text(release.date_range)}</span></div>'
+        f'<b class="cl-title">{text(release.title)}</b>'
+        f'<span class="cl-hint">{text(release.summary or "—")}</span>'
+        + (f'<span class="cl-kinds">{text(detail)}</span>' if detail else "")
+        + "</div></div>"
+    )
 
 
 def index_pages(
@@ -97,27 +124,14 @@ def index_pages(
     page = min(max(1, page), pages)
     start = (page - 1) * page_size
     window = changelog.releases[start : start + page_size]
-
-    rows = []
-    for offset, release in enumerate(window, start + 1):
-        detail = " · ".join(
-            part for part in ("/".join(release.tags), "、".join(release.kind_labels())) if part
-        )
-        rows.append(
-            f'<div class="cl-row"><span class="cl-no">{offset:02}</span>'
-            f'<span class="cl-ver">{text(release.version)}</span>'
-            f'<span class="cl-title">{text(release.title)}'
-            f'<span class="cl-hint">{text(release.summary or "—")}'
-            f"（{text(release.date_range)}"
-            f"{' · ' + text(detail) if detail else ''}）</span></span></div>"
-        )
     body = (
         '<div class="cl-meta">'
-        f"<span>共 {total_releases} 个版本</span>"
-        f"<span>{text(changelog.first_date)} ~ {text(changelog.last_date)}</span>"
-        f"<span>{changelog.highlight_count} 条更新</span>"
-        f"<span>第 {page}/{pages} 页</span></div>"
-        + "".join(rows)
+        f'<span class="cl-chip accent">共 {total_releases} 个版本</span>'
+        f'<span class="cl-chip">{changelog.highlight_count} 条更新</span>'
+        f'<span class="cl-chip">第 {page}/{pages} 页</span></div>'
+        + '<div class="cl-list">'
+        + "".join(_row(release, offset) for offset, release in enumerate(window, start + 1))
+        + "</div>"
         + '<div class="cl-note">序号 1 为最新版本。查看详情：/更新日志 &lt;版本号&gt;，'
         "例如 /更新日志 " + text(changelog.latest.version) + "；也可用 /更新日志 2026-09 "
         "或关键词检索。"
@@ -127,7 +141,7 @@ def index_pages(
     return (
         ChangelogPage(
             "更新日志目录",
-            f"{text(changelog.first_date)} 至今 / ALL VERSIONS",
+            f"{text(changelog.first_date)} 至今的全部版本",
             body,
             "目录",
             page,
@@ -145,28 +159,23 @@ def search_pages(
             f"没有找到与「{text(query)}」相关的更新。试试 /更新日志 列表 看全部版本。</div>"
         )
     else:
-        rows = []
-        for release in results[:limit]:
-            rows.append(
-                f'<div class="cl-row cl-row-ver">'
-                f'<span class="cl-ver">{text(release.version)}</span>'
-                f'<span class="cl-title">{text(release.title)}'
-                f'<span class="cl-hint">{text(release.summary or "—")}'
-                f"（{text(release.date_range)}）</span></span></div>"
-            )
         extra = (
             f'<div class="cl-note">只显示前 {limit} 个，共 {len(results)} 个版本。</div>'
             if len(results) > limit
             else ""
         )
         body = (
-            f'<div class="cl-meta"><span>关键词 {text(query)}</span>'
-            f"<span>{len(results)} 个版本</span></div>" + "".join(rows) + extra
+            f'<div class="cl-meta"><span class="cl-chip accent">关键词 {text(query)}</span>'
+            f'<span class="cl-chip">{len(results)} 个版本</span></div>'
+            + '<div class="cl-list">'
+            + "".join(_row(release) for release in results[:limit])
+            + "</div>"
+            + extra
         )
     return (
         ChangelogPage(
             "更新检索",
-            f"关键词：{text(query)} / SEARCH",
+            f"关键词：{text(query)}",
             body,
             "检索",
         ),
@@ -179,27 +188,37 @@ def stats_pages(changelog: Changelog) -> tuple[ChangelogPage, ...]:
         for kind, value in release.counts().items():
             counted[kind] = counted.get(kind, 0) + value
     busiest = max(counted.values(), default=1)
-    rows = "".join(
-        '<div class="cl-tally">'
+    tallies = "".join(
+        f'<div class="cl-tally kind-{text(kind)}">'
         f'<span class="cl-tally-name">{text(KIND_LABELS.get(kind, kind))}</span>'
         '<span class="cl-tally-track">'
         f'<span class="cl-tally-bar" style="width:{count / busiest * 100:.1f}%"></span></span>'
         f'<span class="cl-tally-count">{count} 条</span></div>'
         for kind, count in ((kind, counted[kind]) for kind in KIND_ORDER if kind in counted)
     )
+    releases = tuple(reversed(changelog.releases))
+    tallest = max((len(release.highlights) for release in releases), default=1)
+    columns = "".join(
+        f'<div class="cl-col"><b>{len(release.highlights)}</b>'
+        f'<i style="height:{len(release.highlights) / tallest * 150:.0f}px"></i>'
+        f"<span>{text(release.version.removeprefix('v').removesuffix('.0'))}</span></div>"
+        for release in releases
+    )
     body = (
-        '<div class="cl-stats">'
-        f"<div><span>版本</span><strong>{len(changelog.releases)}</strong></div>"
-        f"<div><span>更新条数</span><strong>{changelog.highlight_count}</strong></div>"
-        f"<div><span>覆盖提交</span><strong>{changelog.commit_count}</strong></div>"
-        "</div>"
-        f'<div class="cl-meta"><span>{text(changelog.first_date)} ~ {text(changelog.last_date)}</span>'
-        f"<span>当前提交 {text(changelog.head)}</span></div>" + rows
+        '<div class="cl-facts">'
+        + _fact("版本", len(changelog.releases), "个")
+        + _fact("更新条数", changelog.highlight_count, "条")
+        + _fact("覆盖提交", changelog.commit_count, "个")
+        + "</div>"
+        f'<div class="cl-meta"><span class="cl-chip">当前提交 {text(changelog.head)}</span></div>'
+        '<h2 class="cl-sec">各版本更新条数<em>从早到晚</em></h2>'
+        f'<div class="cl-columns">{columns}</div>'
+        '<h2 class="cl-sec">按类型<em>全部版本合计</em></h2>' + tallies
     )
     return (
         ChangelogPage(
             "更新统计",
-            f"{text(changelog.first_date)} ~ {text(changelog.last_date)} / STATS",
+            f"{text(changelog.first_date)} ~ {text(changelog.last_date)}",
             body,
             "统计",
         ),
@@ -218,19 +237,19 @@ def help_pages() -> tuple[ChangelogPage, ...]:
         ("/更新日志 帮助", "显示本帮助"),
     )
     rows = "".join(
-        f'<div class="cl-command"><code>{text(command)}</code><span>{text(hint)}</span></div>'
-        for command, hint in commands
+        f'<div class="cl-command"><span class="cl-n">{index:02}</span><code>{text(command)}</code><span>{text(hint)}</span></div>'
+        for index, (command, hint) in enumerate(commands, 1)
     )
     body = (
-        '<div class="cl-summary"><span class="cl-eyebrow">更新日志</span>'
-        "让群里的每个人都能查到我们每个版本改了什么。</div>" + rows
+        '<p class="cl-summary">让群里的每个人都能查到我们每个版本改了什么。</p>'
+        + rows
         + '<div class="cl-note">别名：/更新、/changelog、/版本。'
         "版本号按时间段划定（仓库没有打 tag）；合并提交不计入。</div>"
     )
     return (
         ChangelogPage(
             "更新日志用法",
-            "命令一览 / COMMANDS",
+            "命令一览",
             body,
             "帮助",
         ),

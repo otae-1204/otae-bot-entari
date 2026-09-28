@@ -1,248 +1,133 @@
-/* 更新日志卡片：与雷达卡片共用同一套纸色/墨绿视觉语言。 */
+/* 更新日志卡片：与雷达卡片共用樱色留白的配色与版式。 */
 
 :root {
-  --paper: #f4f3ed;
-  --ink: #172d2a;
-  --muted: #526760;
-  --line: #d4dbd0;
-  --accent: #c9f07b;
-  --forest: #286456;
-  --white: #fcfcf8;
-  --amber: #80572b;
+  --paper: #efe6e5;
+  --panel: #f8f2f1;
+  --raise: #fbf7f6;
+  --line: #dccccd;
+  --ink: #221a1c;
+  --sub: #54464a;
+  --faint: #7a6a6f;
+  --accent: #a3304b;
+  --seal: #c0304a;
+  --pink: #e493a6;
+  --track: #e2d2d4;
+  --green: #3d7641;
+  --lift: 0 2px 0 #e4d6d6;
 }
 
 * { box-sizing: border-box; }
-
-html, body { margin: 0; padding: 0; }
+html, body { margin: 0; padding: 0; background: var(--paper); }
 
 body {
-  background: #e1e5dc;
   color: var(--ink);
   font-family: ChangeLogSans, "Microsoft YaHei", sans-serif;
-  font-size: 19px;
+  font-size: 21px;
   line-height: 1.6;
+  font-variant-numeric: tabular-nums;
+  font-synthesis: none;
   -webkit-font-smoothing: antialiased;
 }
 
-.cl-card {
-  width: 1080px;
-  margin: 0 auto;
-  background: var(--paper);
-  padding: 38px 48px 26px;
-  border-top: 7px solid var(--forest);
-}
+code { font-family: ChangeLogSans, "Microsoft YaHei", sans-serif; }
 
-.cl-brand-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 20px;
-  border-bottom: 1px solid var(--ink);
-  padding-bottom: 18px;
-}
+.cl-card { width: 820px; margin: 0 auto; padding: 56px 48px 44px; background: var(--paper); }
 
-.cl-brand {
-  display: flex;
-  align-items: center;
-  font-size: 21px;
-  font-weight: 700;
-  letter-spacing: 3px;
-}
+.cl-masthead { display: flex; justify-content: space-between; align-items: center; gap: 20px; }
+.cl-kicker { display: flex; align-items: center; gap: 12px; color: var(--sub); font-size: 17px; letter-spacing: 4px; }
+.cl-kicker::before { content: ""; width: 26px; height: 2px; background: var(--seal); }
+.cl-index { color: var(--faint); font-size: 17px; letter-spacing: 2px; white-space: nowrap; }
+.cl-index b { color: var(--ink); font-weight: 400; }
+.cl-card h1 { margin: 20px 0 10px; font-size: 44px; line-height: 1.3; font-weight: 400; letter-spacing: 4px; overflow-wrap: anywhere; }
+.cl-subtitle { margin: 0; color: var(--sub); font-size: 21px; overflow-wrap: anywhere; }
 
-.cl-edition {
-  font-size: 14px;
-  color: var(--muted);
-  letter-spacing: 1px;
-  text-align: right;
-}
+article { margin-top: 22px; }
 
-.cl-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-end;
-  gap: 24px;
-  padding: 28px 0 22px;
-}
-
-.cl-head h1 {
-  font-size: 40px;
-  line-height: 1.22;
-  letter-spacing: -1.2px;
-  margin: 0 0 9px;
-  font-weight: 700;
-  overflow-wrap: anywhere;
-}
-
-.cl-head p { color: var(--muted); margin: 0; font-size: 18px; }
-
-.cl-badge {
-  flex-shrink: 0;
-  text-align: right;
-  font-size: 15px;
-  color: var(--forest);
-  border: 1px solid var(--line);
-  padding: 8px 14px;
-  white-space: nowrap;
-}
-
-.cl-badge strong { display: block; font-size: 22px; letter-spacing: -0.5px; }
-
-.cl-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 14px;
-  padding: 0 0 20px;
-  font-size: 15px;
-  color: var(--muted);
-}
-
-.cl-tag {
-  border: 1px solid var(--line);
-  padding: 2px 9px;
-  color: var(--forest);
-  font-size: 14px;
-}
+.cl-meta { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 4px; }
+.cl-chip { padding: 3px 14px; border: 1px solid var(--line); border-radius: 6px; background: var(--raise); color: var(--sub); font-size: 18px; overflow-wrap: anywhere; }
+.cl-chip.accent { border-color: var(--accent); background: var(--accent); color: #fff; }
 
 .cl-summary {
-  background: var(--ink);
-  color: var(--paper);
+  margin: 28px 0 0;
   padding: 22px 26px;
-  margin: 0 0 26px;
-  font-size: 20px;
-}
-
-.cl-summary .cl-eyebrow {
-  display: block;
-  font-size: 13px;
-  letter-spacing: 1.7px;
-  font-weight: 700;
-  color: var(--accent);
-  margin-bottom: 8px;
-}
-
-.cl-item {
-  display: grid;
-  grid-template-columns: 76px minmax(0, 1fr);
-  gap: 0 18px;
-  padding: 20px 0;
-  border-top: 1px solid var(--line);
-}
-
-.cl-kind {
-  font-size: 14px;
-  color: var(--white);
-  background: var(--forest);
-  text-align: center;
-  padding: 4px 0;
-  height: fit-content;
-  letter-spacing: 0.5px;
-}
-
-.cl-kind.fix { background: #8a5a2b; }
-.cl-kind.perf { background: #2f6f7a; }
-.cl-kind.docs { background: #5d6b5a; }
-.cl-kind.chore, .cl-kind.style, .cl-kind.test, .cl-kind.refactor { background: #55606b; }
-
-.cl-item p { margin: 0; overflow-wrap: anywhere; }
-
-.cl-item .cl-commits {
-  display: block;
-  margin-top: 9px;
-  font-family: monospace;
-  font-size: 13px;
-  color: var(--muted);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--accent);
+  border-radius: 4px 16px 16px 4px;
+  background: var(--panel);
+  box-shadow: var(--lift);
+  font-size: 24px;
+  line-height: 1.7;
   overflow-wrap: anywhere;
 }
 
-.cl-tally {
-  display: grid;
-  grid-template-columns: 108px minmax(0, 1fr) 76px;
-  gap: 0 18px;
-  align-items: center;
-  padding: 11px 0;
-  border-top: 1px solid var(--line);
-}
+.cl-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 26px 0 6px; }
+.cl-facts > div { min-width: 0; }
+.cl-facts > div + div { padding-left: 24px; border-left: 1px solid var(--line); }
+.cl-facts small { display: block; color: var(--faint); font-size: 18px; }
+.cl-facts b { color: var(--accent); font-size: 52px; font-weight: 400; line-height: 1.2; }
+.cl-facts b i { margin-left: 6px; color: var(--sub); font-size: 20px; font-style: normal; }
+.cl-facts + .cl-meta { margin-top: 18px; }
 
-.cl-tally-name { color: var(--ink); font-size: 16px; }
+.cl-group { --dot: var(--faint); }
+.cl-group.kind-feat, .cl-tally.kind-feat { --dot: var(--accent); }
+.cl-group.kind-fix, .cl-tally.kind-fix { --dot: var(--seal); }
+.cl-group.kind-perf, .cl-tally.kind-perf { --dot: var(--green); }
+.cl-group.kind-refactor, .cl-tally.kind-refactor { --dot: var(--sub); }
 
-.cl-tally-track {
-  display: block;
-  height: 12px;
-  background: #e3e7dc;
-}
+.cl-gh { display: flex; align-items: center; gap: 12px; margin: 38px 0 2px; font-size: 24px; font-weight: 400; letter-spacing: 3px; }
+.cl-gh i { width: 12px; height: 12px; border-radius: 50%; background: var(--dot); }
+.cl-gh em { color: var(--faint); font-size: 19px; font-style: normal; letter-spacing: 0; }
 
-.cl-tally-bar {
-  display: block;
-  height: 100%;
-  background: var(--forest);
-}
+.cl-item { display: grid; grid-template-columns: 46px minmax(0, 1fr); padding: 20px 0; border-bottom: 1px solid var(--line); }
+.cl-n { color: var(--accent); font-size: 23px; line-height: 1.55; }
+.cl-item p { margin: 0; font-size: 21px; line-height: 1.75; overflow-wrap: anywhere; }
+.cl-commits { display: block; margin-top: 8px; color: var(--faint); font-size: 16px; overflow-wrap: anywhere; }
 
-.cl-tally-count {
-  font-family: monospace;
-  font-size: 15px;
-  color: var(--muted);
-  text-align: right;
-}
-
-.cl-row {
-  display: grid;
-  grid-template-columns: 56px 118px minmax(0, 1fr);
-  gap: 0 16px;
-  align-items: baseline;
-  padding: 16px 0;
-  border-top: 1px solid var(--line);
-}
-
-/* 检索结果没有目录序号，省掉首列，避免出现空的占位横线。 */
-.cl-row.cl-row-ver {
-  grid-template-columns: 118px minmax(0, 1fr);
-}
-
-.cl-row .cl-no { font-family: monospace; color: var(--muted); font-size: 17px; }
-.cl-row .cl-date { font-family: monospace; font-size: 16px; color: var(--forest); }
-.cl-row .cl-title { font-weight: 700; overflow-wrap: anywhere; }
-.cl-row .cl-hint { display: block; font-weight: 400; font-size: 15px; color: var(--muted); margin-top: 5px; }
+.cl-list { margin-top: 18px; }
+.cl-row { display: grid; grid-template-columns: 50px minmax(0, 1fr); gap: 0 10px; padding: 20px 0; border-bottom: 1px solid var(--line); }
+.cl-row.cl-row-ver { grid-template-columns: minmax(0, 1fr); }
+.cl-no { color: var(--faint); font-size: 23px; line-height: 1.5; }
+.cl-row:first-child .cl-no { color: var(--accent); }
+.cl-main { min-width: 0; }
+.cl-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; }
+.cl-ver { color: var(--accent); font-size: 21px; }
+.cl-date { color: var(--faint); font-size: 17px; }
+.cl-title { display: block; margin-top: 4px; font-size: 25px; font-weight: 400; letter-spacing: 1px; overflow-wrap: anywhere; }
+.cl-hint { display: block; margin-top: 4px; color: var(--sub); font-size: 18px; overflow-wrap: anywhere; }
+.cl-kinds { display: block; margin-top: 6px; color: var(--faint); font-size: 16px; }
 
 .cl-note {
-  background: #e9ede3;
-  border-left: 3px solid #748c67;
-  padding: 13px 17px;
-  color: #42564b;
-  font-size: 15px;
-  line-height: 1.8;
-  margin: 22px 0 0;
+  margin: 26px 0 0;
+  padding: 14px 18px;
+  border-left: 3px solid var(--pink);
+  border-radius: 0 10px 10px 0;
+  background: var(--panel);
+  color: var(--sub);
+  font-size: 18px;
+  line-height: 1.75;
   overflow-wrap: anywhere;
 }
 
-.cl-stats {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 18px;
-  background: var(--white);
-  border: 1px solid var(--line);
-  padding: 22px 25px;
-  margin: 0 0 8px;
-}
+.cl-sec { display: flex; align-items: baseline; gap: 12px; margin: 40px 0 14px; font-size: 26px; font-weight: 400; letter-spacing: 3px; }
+.cl-sec em { color: var(--faint); font-size: 17px; font-style: normal; letter-spacing: 0; }
 
-.cl-stats span { display: block; font-size: 15px; color: var(--muted); }
-.cl-stats strong { display: block; font-size: 40px; font-weight: 400; letter-spacing: -1px; padding: 6px 0; }
+.cl-columns { display: flex; align-items: flex-end; gap: 6px; padding: 18px 14px 0; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); }
+.cl-col { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; }
+.cl-col b { color: var(--sub); font-size: 15px; font-weight: 400; }
+.cl-col i { width: 70%; min-height: 3px; margin-top: 4px; border-radius: 4px 4px 0 0; background: linear-gradient(180deg, var(--accent), var(--pink)); }
+.cl-col span { width: 100%; padding: 6px 0 8px; border-top: 1px solid var(--line); color: var(--faint); font-size: 14px; text-align: center; white-space: nowrap; }
 
-.cl-command { padding: 15px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
-.cl-command code { font-family: monospace; font-size: 17px; color: var(--forest); }
-.cl-command span { display: block; color: var(--muted); font-size: 15px; margin-top: 5px; }
+.cl-tally { display: grid; grid-template-columns: 90px minmax(0, 1fr) 80px; gap: 0 16px; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--line); }
+.cl-tally-name { font-size: 20px; }
+.cl-tally-track { height: 10px; border-radius: 5px; background: var(--track); overflow: hidden; }
+.cl-tally-bar { display: block; height: 100%; border-radius: 5px; background: var(--dot, var(--faint)); }
+.cl-tally-count { color: var(--sub); font-size: 18px; text-align: right; }
 
-.cl-foot {
-  margin-top: 26px;
-  border-top: 1px solid var(--ink);
-  padding-top: 16px;
-  font-size: 13px;
-  color: var(--muted);
-}
+.cl-command { display: grid; grid-template-columns: 46px minmax(0, 1fr); gap: 2px 0; padding: 18px 0; border-bottom: 1px solid var(--line); }
+.cl-command .cl-n { grid-row: span 2; }
+.cl-command code { color: var(--accent); font-size: 21px; overflow-wrap: anywhere; }
+.cl-command > span:last-child { color: var(--sub); font-size: 18px; }
 
-.cl-bottom {
-  display: flex;
-  justify-content: space-between;
-  gap: 18px;
-  font-size: 13px;
-  color: var(--muted);
-}
+.cl-list > .cl-row:last-child, .cl-group:last-child .cl-item:last-child, .cl-tally:last-child { border-bottom: 0; }
+.cl-foot { margin-top: 34px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--faint); font-size: 16px; }
+.cl-foot b { display: block; margin-bottom: 4px; color: var(--ink); font-size: 17px; font-weight: 400; letter-spacing: 4px; }

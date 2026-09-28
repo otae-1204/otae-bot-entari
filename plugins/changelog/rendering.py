@@ -11,8 +11,10 @@ from otae_bot.infrastructure.rendering.browser import screenshot_web_element
 
 from .presentation import ChangelogPage, text
 
-CARD_WIDTH = 1080
+#: 与雷达卡片同一张 820px 画布，按 2x 渲染，手机上约以一半尺寸阅读。
+CARD_WIDTH = 820
 CARD_MAX_HEIGHT = 6000
+DEVICE_SCALE_FACTOR = 2.0
 ASSETS = Path(__file__).parent / "assets"
 FONT = Path(__file__).resolve().parents[2] / "assets/font/steamInfo/MiSans-Regular.ttf"
 
@@ -22,14 +24,21 @@ CSP = (
 )
 
 
+def _font_face(path: Path, weight: int) -> str:
+    data = base64.b64encode(path.read_bytes()).decode("ascii")
+    return (
+        "@font-face{font-family:ChangeLogSans;"
+        f'src:url(data:font/ttf;base64,{data}) format("truetype");'
+        f"font-weight:{weight};font-display:block}}"
+    )
+
+
 @lru_cache(maxsize=1)
 def _styles() -> str:
     """内嵌字体与样式表：渲染期间不发起任何网络请求。"""
-    font = base64.b64encode(FONT.read_bytes()).decode("ascii")
     return (
-        "@font-face{font-family:ChangeLogSans;"
-        f"src:url(data:font/ttf;base64,{font}) format(\"truetype\");"
-        "font-weight:100 900;font-display:block}"
+        _font_face(FONT, 400)
+        + _font_face(FONT.with_name("MiSans-Bold.ttf"), 700)
         + (ASSETS / "card.css").read_text(encoding="utf-8")
     )
 
@@ -41,13 +50,12 @@ def page_html(page: ChangelogPage) -> str:
 <meta http-equiv="Content-Security-Policy" content="{CSP}"><title>{text(page.title)} · 更新日志</title>
 <style>{_styles()}</style></head>
 <body><main class="cl-card">
-<header class="cl-brand-row"><div class="cl-brand">OTAE / CHANGELOG</div>
-<div class="cl-edition">更新日志<br>RELEASE NOTES</div></header>
-<div class="cl-head"><div><h1>{text(page.title)}</h1><p>{text(page.subtitle)}</p></div>
-<div class="cl-badge"><strong>{page.number:02}</strong>{page.total:02} / {text(page.section)}</div></div>
+<header class="cl-masthead"><span class="cl-kicker">更新日志</span>
+<span class="cl-index">{text(page.section)} <b>{page.number:02}</b> / {page.total:02}</span></header>
+<h1>{text(page.title)}</h1><p class="cl-subtitle">{text(page.subtitle)}</p>
 <article>{page.body}</article>
-<footer class="cl-foot"><div class="cl-bottom"><span>OTAE BOT / 更新日志</span><span>每个版本改了什么，都在这里。</span><span>{page.number:02} / {page.total:02}</span></div>
-</footer></main></body></html>'''
+<footer class="cl-foot"><b>OTAE BOT</b>每个版本改了什么，都在这里。</footer>
+</main></body></html>'''
 
 
 async def render_page(page: ChangelogPage) -> bytes:
@@ -63,6 +71,7 @@ async def render_page(page: ChangelogPage) -> bytes:
             ".cl-card",
             viewport=(CARD_WIDTH, 900),
             max_height=CARD_MAX_HEIGHT,
+            device_scale_factor=DEVICE_SCALE_FACTOR,
             strict_max_height=True,
             wait_for_fonts=True,
             settle_ms=0,
@@ -71,4 +80,4 @@ async def render_page(page: ChangelogPage) -> bytes:
         path.unlink(missing_ok=True)
 
 
-__all__ = ["CARD_MAX_HEIGHT", "CARD_WIDTH", "page_html", "render_page"]
+__all__ = ["CARD_MAX_HEIGHT", "CARD_WIDTH", "DEVICE_SCALE_FACTOR", "page_html", "render_page"]
