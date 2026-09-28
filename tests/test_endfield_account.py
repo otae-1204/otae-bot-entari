@@ -1890,6 +1890,32 @@ class EndfieldOfficialClientTests(unittest.IsolatedAsyncioTestCase):
             ["POST", "GET"],
         )
 
+    async def test_attendance_extracts_diamond_milestones_from_calendar_ladder(self):
+        fixture = json.loads((ROOT / "tests/fixtures/endfield_attendance_rewards.json").read_text(encoding="utf-8"))
+        calendar = [
+            {**entry, "done": day <= 5, "available": False}
+            for day, entry in enumerate(fixture["calendar"], 1)
+        ]
+        client = client_module.EndfieldOfficialClient(mock.AsyncMock())
+        client._skland_context = mock.AsyncMock(return_value=object())
+        client._signed_skland_request = mock.AsyncMock(side_effect=[
+            {"code": 0, "data": {"awardIds": []}},
+            {"code": 0, "data": {
+                "calendar": calendar,
+                "first": [{"awardId": "endfield_attendance_8_120", "done": True}],
+                "resourceInfoMap": fixture["resourceInfoMap"],
+            }},
+        ])
+
+        result = await client.attendance("account-token", mock.Mock(role_id="role", server_id="1"))
+
+        diamond_icon = fixture["resourceInfoMap"]["endfield_attendance_8_80"]["icon"]
+        self.assertEqual((result.monthly_count, result.calendar_days), (5, 30))
+        self.assertEqual(
+            [(item.day, item.reward.name, item.reward.count, item.reward.icon_url) for item in result.milestones],
+            [(4, "嵌晶玉", 80, diamond_icon), (12, "嵌晶玉", 80, diamond_icon), (20, "嵌晶玉", 100, diamond_icon)],
+        )
+
     async def test_attendance_keeps_success_when_month_calendar_fails(self):
         client = client_module.EndfieldOfficialClient(mock.AsyncMock())
         client._skland_context = mock.AsyncMock(return_value=object())
@@ -4049,6 +4075,47 @@ class EndfieldNeutralCardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(body.count("当月累签"), 1)
         self.assertIn("12 天", body)
         self.assertNotIn("None 天", body)
+
+    async def test_attendance_card_shows_diamond_milestone_progress(self):
+        icon_url = "data:image/png;base64,AA=="
+        milestones = [
+            models_module.AttendanceMilestoneView(day, count, icon_url)
+            for day, count in ((4, 80), (12, 80), (20, 100))
+        ]
+        view = models_module.AttendanceCardView(
+            roles=[
+                models_module.AttendanceRoleView(
+                    "进行中", "****1234", "测试服务器", "success", "签到成功",
+                    monthly_count=12, calendar_days=30, milestones=milestones,
+                ),
+                models_module.AttendanceRoleView(
+                    "已领完", "****5678", "测试服务器", "already", "今日已签到",
+                    monthly_count=21, calendar_days=30, milestones=milestones,
+                ),
+                models_module.AttendanceRoleView(
+                    "失败", "****9012", "测试服务器", "failed", "签到失败",
+                    calendar_days=30, milestones=milestones,
+                ),
+            ],
+        )
+        renderer = mock.AsyncMock(return_value=b"png")
+        image_urls = mock.AsyncMock(return_value={icon_url: icon_url})
+
+        with (
+            mock.patch.object(draw_module, "_image_data_urls", image_urls),
+            mock.patch.object(draw_module, "_draw_neutral_card", renderer),
+        ):
+            await draw_module.draw_attendance_card(view)
+
+        image_urls.assert_awaited_once_with((icon_url,))
+        body = renderer.await_args.args[1]
+        self.assertEqual(body.count('class="attendance-milestones"'), 2)
+        self.assertIn("160<small>/ 260</small>", body)
+        self.assertIn("下一档 第 20 天 × 100", body)
+        self.assertIn("还需签到 8 天", body)
+        self.assertIn("260<small>/ 260</small>", body)
+        self.assertIn("已全部领取", body)
+        self.assertEqual(body.count('class="milestone-cell done'), 12 + 21)
 
     async def test_attendance_card_embeds_reward_icon(self):
         icon_url = "data:image/png;base64,AA=="

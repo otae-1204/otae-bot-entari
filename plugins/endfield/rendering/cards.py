@@ -42,6 +42,7 @@ from ..catalog.models import (
     EquipmentCatalogView,
     EquipmentView,
     AttendanceCardView,
+    AttendanceRoleView,
     GachaHistoryView,
     LEVEL_COLUMNS,
     LoadoutView,
@@ -269,12 +270,12 @@ async def draw_equipment_card(view: EquipmentView) -> bytes:
 
 
 async def draw_attendance_card(view: AttendanceCardView) -> bytes:
-    reward_urls = tuple(
+    reward_urls = tuple(dict.fromkeys(
         item.icon_url
         for role in view.roles
-        for item in role.rewards
+        for item in (*role.rewards, *role.milestones)
         if item.icon_url
-    )
+    ))
     reward_icons = await _centered_reward_icons(reward_urls) if reward_urls else {}
     rows = []
     for role in view.roles:
@@ -304,6 +305,7 @@ async def draw_attendance_card(view: AttendanceCardView) -> bytes:
             <section class="attendance-row status-{esc(role.status)}">
               <div class="role-main"><strong>{esc(role.nickname)}</strong><span>{esc(server_name)} · {esc(role.uid)}</span></div>
               <div class="status"><div class="status-copy"><b>{esc(role.message)}</b><span>{rewards}</span></div>{monthly_count}</div>
+              {_attendance_milestone_strip(role, reward_icons)}
             </section>
             """
         )
@@ -347,8 +349,68 @@ async def draw_attendance_card(view: AttendanceCardView) -> bytes:
         .attendance-meta span{color:#777777;font-size:13px;font-weight:400;line-height:1.5}
         .attendance-meta b{margin-top:3px;color:#333333;font-size:24px;line-height:1.3}
         .attendance-card .empty{padding:26px;color:#777777;background:#f8f8f8;border:1px dashed #cccccc;border-radius:8px}
+        .attendance-milestones{grid-column:1/-1;display:flex;align-items:center;gap:22px;min-width:0;padding:12px 20px 14px;border-top:1px solid #e6e6e6}
+        .milestone-summary,.milestone-next{flex:none;min-width:0}
+        .milestone-summary{width:128px}
+        .milestone-next{width:176px;text-align:right}
+        .milestone-summary span,.milestone-next span{display:block;color:#777777;font-size:13px;line-height:1.5;overflow-wrap:anywhere}
+        .milestone-summary b,.milestone-next b{display:block;margin-top:2px;color:#333333;font-size:20px;line-height:1.3;overflow-wrap:anywhere}
+        .milestone-summary small{margin-left:3px;color:#999999;font-size:14px;font-weight:400}
+        .milestone-track{flex:1 1 auto;min-width:0;display:grid;grid-template-columns:repeat(var(--days),minmax(0,1fr));grid-template-rows:auto 10px auto;column-gap:3px;row-gap:5px;align-items:end}
+        .milestone-node{grid-row:1;display:flex;flex-direction:column;align-items:center;min-width:0;color:#9a9a9a}
+        .milestone-node img{width:100%;max-width:26px;aspect-ratio:1;object-fit:contain}
+        .milestone-node b{font-size:13px;line-height:1.2;white-space:nowrap}
+        .milestone-node.reached{color:#252525}
+        .milestone-cell{grid-row:2;height:10px;border-radius:2px;background:#e3e3e3}
+        .milestone-cell.done{background:#3a3a3a}
+        .milestone-cell.milestone{box-shadow:inset 0 0 0 2px #8f8f8f}
+        .milestone-cell.milestone.done{box-shadow:none;background:#1f1f1f}
+        .milestone-day{grid-row:3;justify-self:center;color:#8a8a8a;font-size:12px;line-height:1.2;white-space:nowrap}
         """,
     )
+
+
+def _attendance_milestone_strip(role: AttendanceRoleView, icons: dict[str, str]) -> str:
+    days = role.calendar_days or 0
+    if role.monthly_count is None or days <= 0 or not role.milestones:
+        return ""
+    signed = max(0, min(role.monthly_count, days))
+    milestones = [item for item in role.milestones if 1 <= item.day <= days]
+    if not milestones:
+        return ""
+    milestone_days = {item.day for item in milestones}
+    nodes = []
+    labels = []
+    for item in milestones:
+        icon_url = icons.get(item.icon_url, "")
+        icon = f'<img src="{esc_attr(icon_url)}" alt="嵌晶玉">' if icon_url else ""
+        reached = " reached" if item.day <= signed else ""
+        nodes.append(
+            f'<div class="milestone-node{reached}" style="grid-column:{item.day}">{icon}<b>{item.count}</b></div>'
+        )
+        labels.append(f'<span class="milestone-day" style="grid-column:{item.day}">{item.day}</span>')
+    cells = "".join(
+        f'<i class="milestone-cell{" done" if day <= signed else ""}{" milestone" if day in milestone_days else ""}"'
+        f' style="grid-column:{day}"></i>'
+        for day in range(1, days + 1)
+    )
+    claimed = sum(item.count for item in milestones if item.day <= signed)
+    total = sum(item.count for item in milestones)
+    upcoming = next((item for item in milestones if item.day > signed), None)
+    if upcoming is None:
+        next_copy = "<span>本月嵌晶玉</span><b>已全部领取</b>"
+    else:
+        next_copy = (
+            f"<span>下一档 第 {upcoming.day} 天 × {upcoming.count}</span>"
+            f"<b>还需签到 {upcoming.day - signed} 天</b>"
+        )
+    return f"""
+    <div class="attendance-milestones">
+      <div class="milestone-summary"><span>嵌晶玉里程碑</span><b>{claimed}<small>/ {total}</small></b></div>
+      <div class="milestone-track" style="--days:{days}">{''.join(nodes)}{cells}{''.join(labels)}</div>
+      <div class="milestone-next">{next_copy}</div>
+    </div>
+    """
 
 
 async def draw_daily_dashboard_card(view: DailyDashboardView) -> bytes:

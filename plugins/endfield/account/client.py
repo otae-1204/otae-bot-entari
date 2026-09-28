@@ -169,11 +169,19 @@ class AttendanceReward:
 
 
 @dataclass(frozen=True, slots=True)
+class AttendanceMilestone:
+    day: int
+    reward: AttendanceReward
+
+
+@dataclass(frozen=True, slots=True)
 class AttendanceResult:
     status: str
     message: str
     rewards: tuple[AttendanceReward, ...] = ()
     monthly_count: int | None = None
+    calendar_days: int | None = None
+    milestones: tuple[AttendanceMilestone, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -402,6 +410,8 @@ class EndfieldOfficialClient:
                 rewards = _attendance_rewards(award_entries, reward_maps)
 
         monthly_count: int | None = None
+        calendar_days: int | None = None
+        milestones: tuple[AttendanceMilestone, ...] = ()
         try:
             calendar_payload = await self._signed_skland_request(
                 context, "GET", "/web/v1/game/endfield/attendance", extra_headers=headers
@@ -422,7 +432,11 @@ class EndfieldOfficialClient:
                     1 for item in calendar
                     if isinstance(item, dict) and bool(item.get("done"))
                 )
-        return AttendanceResult(status, message, tuple(rewards), monthly_count)
+                calendar_days = len(calendar)
+                milestones = _attendance_diamond_milestones(calendar, reward_maps)
+        return AttendanceResult(
+            status, message, tuple(rewards), monthly_count, calendar_days, milestones
+        )
 
     async def card_detail(
         self,
@@ -1414,6 +1428,23 @@ def _attendance_rewards(
         icon_url = _attendance_icon_url(*sources, canonical_id=canonical_id)
         rewards.append(AttendanceReward(name, count, icon_url))
     return rewards
+
+
+def _attendance_diamond_milestones(
+    calendar: list[Any], resource_maps: list[Any]
+) -> tuple[AttendanceMilestone, ...]:
+    # The month calendar is a sign-in ladder, not dated: entry N is the reward for
+    # the Nth sign-in of the month, and completed entries always form a prefix.
+    diamond = _ATTENDANCE_AKEDATA_ITEM_NAMES["item_diamond"]
+    milestones: list[AttendanceMilestone] = []
+    for day, entry in enumerate(calendar, 1):
+        award_id = entry.get("awardId") if isinstance(entry, dict) else None
+        if not award_id:
+            continue
+        reward = _attendance_rewards([(award_id, {})], resource_maps)[0]
+        if reward.name == diamond:
+            milestones.append(AttendanceMilestone(day, reward))
+    return tuple(milestones)
 
 
 def _attendance_resource_infos(award_id: Any, resource_maps: list[Any]) -> list[dict[str, Any]]:

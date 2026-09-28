@@ -348,6 +348,13 @@ class AttendanceRewardView:
 
 
 @dataclass(slots=True)
+class AttendanceMilestoneView:
+    day: int
+    count: int
+    icon_url: str = ""
+
+
+@dataclass(slots=True)
 class AttendanceRoleView:
     nickname: str
     uid: str
@@ -356,6 +363,8 @@ class AttendanceRoleView:
     message: str
     rewards: list[AttendanceRewardView] = field(default_factory=list)
     monthly_count: int | None = None
+    calendar_days: int | None = None
+    milestones: list[AttendanceMilestoneView] = field(default_factory=list)
 
 
 @dataclass(slots=True)

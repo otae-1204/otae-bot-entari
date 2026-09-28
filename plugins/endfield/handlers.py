@@ -174,6 +174,7 @@ from .gacha.assets import EndfieldGachaAssetCache, apply_gacha_metadata
 from .gacha.xhh import XhhAPIError, XhhLoginSession
 from .catalog.models import (
     AttendanceCardView,
+    AttendanceMilestoneView,
     AttendanceRewardView,
     AttendanceRoleView,
     DailyAccountView,
@@ -2062,6 +2063,11 @@ def _attendance_view(role: EndfieldRole, result: AttendanceResult) -> Attendance
         message=result.message,
         rewards=[AttendanceRewardView(item.name, item.count, item.icon_url) for item in result.rewards],
         monthly_count=result.monthly_count,
+        calendar_days=result.calendar_days,
+        milestones=[
+            AttendanceMilestoneView(item.day, item.reward.count, item.reward.icon_url)
+            for item in result.milestones
+        ],
     )
 
 

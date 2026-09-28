@@ -42,6 +42,10 @@ def sample_roles(icon_dir: Path) -> list:
         message="签到成功", monthly_count=12,
         rewards=[models.AttendanceRewardView("嵌晶玉", 80, diamond),
                  models.AttendanceRewardView("折金票", 2000, gold)],
+        # Gem steps of the 2026-09 Skland calendar ladder.
+        calendar_days=30,
+        milestones=[models.AttendanceMilestoneView(day, count, diamond)
+                    for day, count in ((4, 80), (12, 80), (20, 100))],
     )
     return [
         success,
@@ -71,7 +75,7 @@ async def inspect_layout(browser, path: Path) -> dict:
           }).map(n => n.className);
           const escapedText = [...root.querySelectorAll(
             '.role-main strong,.role-main>span,.status-copy>b,.attendance-reward>span,' +
-            '.attendance-meta b,header time')].filter(node => {
+            '.attendance-meta b,header time,.milestone-summary b,.milestone-next span,.milestone-next b')].filter(node => {
             const box = node.getBoundingClientRect();
             const range = document.createRange(); range.selectNodeContents(node);
             return [...range.getClientRects()].some(r => r.left < box.left - 1 || r.right > box.right + 1 ||
@@ -123,6 +127,10 @@ async def main() -> None:
                     rewards=[models.AttendanceRewardView("超长奖励名称" + "LONG_REWARD_" * 10, 123456789),
                              *roles[0].rewards] * 2),
             replace(roles[0], nickname='<测试> & "特殊字符"', rewards=[], monthly_count=None),
+            replace(roles[1], nickname="首尾与相邻里程碑", monthly_count=31, milestones=[
+                models.AttendanceMilestoneView(day, count, roles[0].milestones[0].icon_url)
+                for day, count in ((1, 120), (2, 90), (3, 90), (30, 100))]),
+            replace(roles[1], nickname="无嵌晶玉里程碑", milestones=[]),
             replace(roles[2], message='网络错误 <error> & "detail" ' + "NETWORK_ERROR_" * 20),
         ]
         cases["stress-15"] = [replace(roles[i % 3], nickname=f"管理员 {i + 1:02d}") for i in range(15)]
@@ -150,7 +158,8 @@ async def main() -> None:
                         destination.write_text(document, encoding="utf-8")
                         return writer(document)
 
-                    icons = {r.icon_url: r.icon_url for role in rows for r in role.rewards
+                    icons = {r.icon_url: r.icon_url for role in rows
+                             for r in (*role.rewards, *role.milestones)
                              if r.icon_url.startswith("data:")}
                     view = models.AttendanceCardView(rows, "2026-09-21 09:30")
                     with (patch.object(cards, "_write_temp_html", side_effect=capture),
