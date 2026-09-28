@@ -37,7 +37,7 @@ from otae_bot.adapters.entari import (
     timer,
 )
 from otae_bot.adapters.onebot import send_forward_images
-from otae_bot.help_images import pick_help_image
+from otae_bot.infrastructure.rendering.help_runtime import cached_help_image
 from otae_bot.infrastructure.http.client import clear_http_cache, get_http_cache_stats
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
 
@@ -3241,8 +3241,9 @@ async def _render_current_version_calendar() -> bytes:
 
 
 async def _finish_endfield_help(matcher) -> None:
-    image = pick_help_image(ENDFIELD_HELP_IMAGE_PATH)
-    if image:
+    # 按页面比例随机挑插画并运行时渲染；渲染不可用时回退到仓库里的静态帮助图。
+    image = await cached_help_image("endfield") or ENDFIELD_HELP_IMAGE_PATH
+    if image and Path(image).is_file():
         return await matcher.finish(ChainMsg([make_image(path=image)]))
     return await matcher.finish(format_help())
 

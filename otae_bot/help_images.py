@@ -1,31 +1,33 @@
-"""Choose which pre-rendered help image to send.
+"""Aspect-ratio helpers shared by the help artwork chooser.
 
-Every help topic ships one primary PNG (``assets/image/help/<name>.png``). A topic that
-lists several artworks also gets variants under ``assets/image/help/variants/<name>/``;
-each send picks one of them at random so the same help page can show different art.
+Each help page ships one pre-rendered PNG (`assets/image/help/<name>.png`) that acts as
+the offline fallback. The artwork actually sent is picked by
+`otae_bot.infrastructure.rendering.help_cards.ratio_candidates` and rendered on demand
+by `otae_bot.infrastructure.rendering.help_runtime`. The helpers here are the geometry
+behind that choice: how much of an artwork survives `object-fit: cover` into a page box,
+which is what decides whether the sharp standee window still shows the subject.
 """
 
 from __future__ import annotations
 
-import random
-from pathlib import Path
+from functools import lru_cache
 
+#: Legacy directory for pre-rendered per-artwork variants; only used to clean them up.
 VARIANT_DIR_NAME = "variants"
 
 
-def variant_dir(primary: Path) -> Path:
-    return primary.parent / VARIANT_DIR_NAME / primary.stem
+@lru_cache(maxsize=64)
+def image_ratio(path: str) -> float:
+    """Width / height of an image, read from the header only."""
+    from PIL import Image
+
+    with Image.open(path) as image:
+        width, height = image.size
+    return width / height if height else 1.0
 
 
-def help_image_choices(primary: Path) -> list[Path]:
-    """The primary image first, then its variants; empty when the primary is missing."""
-    if not primary.is_file():
-        return []
-    return [primary, *sorted(variant_dir(primary).glob("*.png"))]
-
-
-def pick_help_image(primary: Path, rng: random.Random | None = None) -> Path | None:
-    choices = help_image_choices(primary)
-    if not choices:
-        return None
-    return (rng or random).choice(choices)
+def cover_visibility(source_ratio: float, target_ratio: float) -> float:
+    """Fraction of an image left visible by `object-fit: cover` in a target box."""
+    if source_ratio <= 0 or target_ratio <= 0:
+        return 0.0
+    return min(source_ratio, target_ratio) / max(source_ratio, target_ratio)

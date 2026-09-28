@@ -21,7 +21,7 @@ from html import escape
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Sequence
 
-from otae_bot.help_images import VARIANT_DIR_NAME, variant_dir
+from otae_bot.help_images import VARIANT_DIR_NAME, cover_visibility, image_ratio
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 HELP_IMAGE_DIR = PROJECT_ROOT / "assets/image/help"
@@ -31,7 +31,7 @@ PAGES_PATH = PROJECT_ROOT / "scripts/help_pages.json"
 
 DIGEST_KEY = "otae-help-digest"
 # Bump when the HTML/CSS below changes the output, so shipped images are reported stale.
-TEMPLATE_VERSION = 1
+TEMPLATE_VERSION = 4
 FONT_FAMILY = "OtaeHelpSans"
 
 
@@ -43,7 +43,7 @@ class HelpSpecError(ValueError):
 class HelpTheme:
     page_width: int = 1325
     min_card_height: int = 661
-    window_width: int = 268
+    window_width: int = 240
     max_height: int = 4000
     accent: str = "#527fbe"
     accent_soft: str = "#a5bcde"
@@ -69,6 +69,7 @@ class HelpItem:
     command: str
     description: str = ""
     badge: str = ""
+    example: str = ""
 
 
 @dataclass(frozen=True)
@@ -146,6 +147,7 @@ def parse_item(raw: Any) -> HelpItem:
             _text(raw.get("cmd") or raw.get("command")),
             _text(raw.get("desc") or raw.get("description")),
             _text(raw.get("badge")),
+            _text(raw.get("example") or raw.get("eg")),
         )
     else:
         raise HelpSpecError(f"help item must be a string or object: {raw!r}")
@@ -232,6 +234,80 @@ def load_gallery(path: Path = GALLERY_PATH) -> Gallery:
 
 
 # ---------------------------------------------------------------------------
+# Artwork choice by aspect ratio
+
+#: The standee window is the sharp part of the card, so it is the only gate: an artwork
+#: stays a candidate while at least this much of it survives into the window. The blurred
+#: backdrop sits behind a frosted panel and tolerates heavy cropping, so it never filters -
+#: it only orders the pool, best match first.
+WINDOW_VISIBILITY_FLOOR = 0.15
+
+#: Card metrics from the stylesheet below: `.card` is inset from `.page`, and `.panel`
+#: is inset from `.card` again. Keep in sync with the CSS.
+CARD_WIDTH_INSET = 30
+CARD_HEIGHT_INSET = 100
+PANEL_HEIGHT_INSET = 72
+
+
+def page_height(page: HelpPage, theme: HelpTheme = HelpTheme()) -> int:
+    """Rendered height of a page, read from its shipped PNG.
+
+    The layout does not depend on which artwork is used, so the shipped primary is a
+    reliable proxy for the height of any artwork on the same page.
+    """
+    path = HELP_IMAGE_DIR / page.file
+    if path.is_file():
+        from PIL import Image
+
+        with Image.open(path) as image:
+            return image.height
+    return theme.min_card_height + CARD_HEIGHT_INSET
+
+
+def backdrop_ratio(height: int, theme: HelpTheme = HelpTheme()) -> float:
+    """Aspect ratio of the blurred backdrop box."""
+    return (theme.page_width - CARD_WIDTH_INSET) / max(1, height - CARD_HEIGHT_INSET)
+
+
+def window_ratio(height: int, theme: HelpTheme = HelpTheme()) -> float:
+    """Aspect ratio of the sharp standee window."""
+    return theme.window_width / max(1, height - CARD_HEIGHT_INSET - PANEL_HEIGHT_INSET)
+
+
+def ratio_candidates(
+    page: HelpPage,
+    gallery: Gallery,
+    theme: HelpTheme = HelpTheme(),
+) -> tuple[Artwork, ...]:
+    """Every gallery artwork this page may use, closest backdrop match first.
+
+    The whole gallery is eligible: the backdrop is blurred and sits behind a frosted
+    panel, so cropping it hard costs nothing, while the standee window keeps the subject
+    in frame because every crop is centred on the artwork's focus point.
+    `WINDOW_VISIBILITY_FLOOR` is the single gate - it drops only artwork that would leave
+    the window showing almost nothing, and falls back to the whole gallery when a page is
+    so extreme that nothing clears it, so a send can always produce an image.
+
+    The order is by backdrop match so the result is deterministic and the best-fitting
+    artwork comes first; the caller draws uniformly from the pool.
+    """
+    height = page_height(page, theme)
+    backdrop = backdrop_ratio(height, theme)
+    window = window_ratio(height, theme)
+    scored = [
+        (
+            cover_visibility(image_ratio(str(art.path)), backdrop),
+            cover_visibility(image_ratio(str(art.path)), window),
+            art,
+        )
+        for art in gallery.artworks.values()
+    ]
+    scored.sort(key=lambda row: (-row[0], row[2].id))
+    usable = [row for row in scored if row[1] >= WINDOW_VISIBILITY_FLOOR] or scored
+    return tuple(row[2] for row in usable)
+
+
+# ---------------------------------------------------------------------------
 # Targets and staleness
 
 
@@ -254,13 +330,18 @@ def plan_targets(
     help_dir: Path = HELP_IMAGE_DIR,
     theme: HelpTheme = HelpTheme(),
 ) -> list[RenderTarget]:
-    """First artwork -> ``<file>``; the rest -> ``variants/<file stem>/<art id>.png``."""
+    """One target per page: the first artwork ships as ``<file>``.
+
+    Variants are no longer pre-rendered. The artwork actually sent is picked by
+    :func:`ratio_candidates` and rendered on demand by
+    ``otae_bot.infrastructure.rendering.help_runtime``, so the shipped PNG only has to
+    cover the case where no browser is available.
+    """
     targets = []
     for page in pages:
-        primary = help_dir / page.file
-        for index, art in enumerate(gallery.resolve(page)):
-            path = primary if index == 0 else variant_dir(primary) / f"{art.id}.png"
-            targets.append(RenderTarget(page, art, path, spec_digest(page, art, theme), index == 0))
+        art = gallery.resolve(page)[0]
+        path = help_dir / page.file
+        targets.append(RenderTarget(page, art, path, spec_digest(page, art, theme), True))
     return targets
 
 
@@ -303,8 +384,24 @@ def _dots(color: str) -> str:
 
 def _item_html(item: HelpItem) -> str:
     badge = f'<span class="badge">{escape(item.badge)}</span>' if item.badge else ""
-    description = f'<span class="desc">{escape(item.description)}</span>' if item.description else ""
-    return f'<div class="item" data-fit><span class="cmd">{escape(item.command)}</span>{badge}{description}</div>'
+    # If example is set separately, don't duplicate raw example string inside the inline description
+    desc_text = item.description
+    if item.example and desc_text == item.example:
+        desc_text = ""
+    elif item.example and desc_text.startswith("例:"):
+        desc_text = desc_text[3:].strip()
+    elif item.example and desc_text.startswith("例："):
+        desc_text = desc_text[3:].strip()
+    elif item.example and desc_text.strip() == "2腐蚀 200":
+        desc_text = ""
+    description = f'<span class="desc">{escape(desc_text)}</span>' if desc_text else ""
+    eg = (
+        f'<div class="item-example" data-fit>'
+        f'<span class="eg-tag">例</span><span class="eg-code">{escape(item.example)}</span>'
+        f'</div>'
+        if item.example else ""
+    )
+    return f'<div class="item" data-fit><span class="cmd">{escape(item.command)}</span>{badge}{description}</div>{eg}'
 
 
 def _section_html(section: HelpSection) -> str:
@@ -355,21 +452,26 @@ body{{font-family:"{FONT_FAMILY}",sans-serif;font-synthesis:none}}
   object-position:{_object_position(art.backdrop_focus or art.focus)};
   filter:blur({t.backdrop_blur}px);transform:scale(1.06)}}
 .panel{{position:relative;flex:1;min-width:0;display:flex;flex-direction:column;min-height:{t.min_card_height - 72}px;
-  border-radius:24px;background:rgba(255,255,255,{t.panel_alpha});padding:36px 40px 18px 49px}}
+  border-radius:24px;background:rgba(255,255,255,{t.panel_alpha});padding:34px 32px 18px 36px}}
 .window{{position:relative;flex:0 0 {t.window_width}px;border-radius:24px;overflow:hidden;
   border:3px solid rgba(255,255,255,.9);box-shadow:0 6px 18px rgba(37,30,25,.28)}}
 .window img{{display:block;width:100%;height:100%;object-fit:cover;object-position:{_object_position(art.focus)}}}
-.cols{{display:grid;grid-template-columns:repeat({max(1, len(page.columns))},minmax(0,1fr));column-gap:44px}}
+.cols{{display:grid;grid-template-columns:repeat({max(1, len(page.columns))},minmax(0,1fr));column-gap:28px}}
 .col{{min-width:0}}
-section+section{{margin-top:22px}}
-.heading{{font-size:23px;line-height:32px;font-weight:700;color:{t.heading_color};margin-bottom:4px}}
-.access{{margin-left:10px;font-size:15px;font-weight:500;color:{t.accent};vertical-align:2px}}
-.item{{font-size:20px;line-height:26px;font-weight:500;color:{t.body_color};
-  padding-left:1.2em;text-indent:-1.2em;overflow-wrap:anywhere;text-wrap:pretty}}
+section+section{{margin-top:20px}}
+.heading{{font-size:22px;line-height:30px;font-weight:700;color:{t.heading_color};margin-bottom:4px}}
+.access{{margin-left:8px;font-size:14px;font-weight:500;color:{t.accent};vertical-align:2px}}
+.item{{font-size:18px;line-height:25px;font-weight:500;color:{t.body_color};
+  padding-left:1.1em;text-indent:-1.1em;overflow-wrap:anywhere;text-wrap:pretty}}
 .cmd{{color:{t.heading_color}}}
-.desc{{margin-left:.55em}}
-.badge{{display:inline-block;text-indent:0;margin-left:.45em;padding:0 7px;border-radius:9px;
-  font-size:14px;line-height:19px;color:{t.accent};background:#e3ecf8;vertical-align:2px}}
+.desc{{margin-left:.45em}}
+.badge{{display:inline-block;text-indent:0;margin-left:.4em;padding:0 6px;border-radius:8px;
+  font-size:13px;line-height:18px;color:{t.accent};background:#e3ecf8;vertical-align:1px}}
+.item-example{{display:flex;align-items:baseline;gap:6px;margin:2px 0 3px 14px;
+  font-size:15px;line-height:20px;overflow-wrap:anywhere}}
+.eg-tag{{flex-shrink:0;padding:0 5px;border-radius:4px;background:#e2ebf6;color:{t.accent};
+  font-size:12px;font-weight:700;line-height:16px}}
+.eg-code{{color:#434343;font-weight:600;background:rgba(0,0,0,.04);padding:0 5px;border-radius:4px}}
 .note{{margin-top:6px;padding-left:10px;border-left:3px solid {t.accent_soft};
   font-size:17px;line-height:24px;font-weight:500;color:#6b6b6b;overflow-wrap:anywhere;text-wrap:pretty}}
 .foot{{margin-top:auto;padding-top:12px;text-align:right;font-size:18px;line-height:22px;font-weight:500;

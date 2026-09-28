@@ -6,7 +6,7 @@ from otae_bot.adapters.entari import ChainMsg, make_image as ChainImage, ArgVal
 
 from otae_bot.config.paths import IMAGE_PATH
 from otae_bot.adapters.entari import cmd as _cmd, get_rest
-from otae_bot.help_images import pick_help_image
+from otae_bot.infrastructure.rendering.help_runtime import cached_help_image
 
 HELP_IMAGE_DIR = Path(IMAGE_PATH) / "help"
 HYW_HELP = "HYW 搜索问答：/q 问题，可附带图片；引用自己的回答后 /q 追问。\n/q 帮助 查看详细用法，/q 清空 删除当前会话历史。\n别名：/hyw、/何意味。管理员需先配置 HYW_* 模型参数。"
@@ -21,7 +21,8 @@ TEXT_TOPICS.update({name: CHANGELOG_HELP for name in ("更新", "更新日志", 
 # 子指令 → 图片文件名（不含扩展名）映射
 # 每个目标都必须有对应的 assets/image/help/<name>.png，否则该主题无法解析；
 # tests/test_help_plugin.py 会校验这张表与磁盘一致，避免登记了却没有图。
-# 图片由 scripts/render_help_cards.py 生成；同一主题的插画变体在 variants/<name>/ 下，发送时随机挑一张。
+# assets/image/help/<name>.png 由 scripts/render_help_cards.py 生成，作为无浏览器时的静态回退；
+# 实际发送的插画按页面底板比例从 gallery.json 里随机挑一张，运行时渲染并缓存（见 help_runtime）。
 TOPIC_MAP: dict[str, str] = {
     "main":      "main",
     "home":      "main",
@@ -76,12 +77,9 @@ async def handle_help_command(rest: ArgVal[str]):
         await help_cmd.finish("暂无帮助图片，请将图片放入 assets/image/help/")
         return
 
-    if command_args:
-        img_path = _resolve_image(command_args)
-    else:
-        img_path = HELP_IMAGE_DIR / "main.png"
-
-    chosen = pick_help_image(img_path) if img_path else None
+    # 未给出主题时默认发主帮助图；给了未知主题则不匹配，落到下面的提示。
+    topic = TOPIC_MAP.get(command_args.lower()) if command_args else "main"
+    chosen = await cached_help_image(topic) if topic else None
     if chosen:
         await help_cmd.finish(ChainMsg([ChainImage(path=str(chosen))]))
         return
