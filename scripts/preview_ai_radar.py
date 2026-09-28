@@ -24,7 +24,7 @@ from plugins.radar.config import RadarConfig
 from plugins.radar.models import DegradationAlert, RadarMeta, TrendPoint
 from plugins.radar.presentation import alert_pages, ranking_pages, text, trend_pages
 from plugins.radar.provider import RadarClient
-from plugins.radar.rendering import CARD_MAX_HEIGHT, page_html
+from plugins.radar.rendering import CARD_MAX_HEIGHT, CARD_WIDTH, page_html
 from plugins.radar.service import RadarService
 
 FIXTURES = ROOT / "tests/fixtures/radar"
@@ -113,7 +113,8 @@ async def inspect(page):
     result = await page.evaluate("""() => {
       const root = document.querySelector('.radar-card');
       const bounds = root.getBoundingClientRect();
-      const outside = [...root.querySelectorAll('h1,h2,p,td,th,.metric,.identity,code,.data-note,.brand-row')]
+      const outside = [...root.querySelectorAll('h1,h2,p,td,th,.metric,.identity,code,.data-note,.masthead,.chip')]
+        .filter(n => n.getClientRects().length > 0)
         .filter(n => n.scrollWidth > n.clientWidth + 2 ||
           n.getBoundingClientRect().right > bounds.right + 1 ||
           n.getBoundingClientRect().left < bounds.left - 1)
@@ -142,7 +143,7 @@ async def main():
                 file = args.output_dir / f"{name}.html"
                 file.write_text(page_html(view, preview=True), encoding="utf-8")
                 page = await browser.new_page(
-                    viewport={"width": 1080, "height": 900}, device_scale_factor=1
+                    viewport={"width": CARD_WIDTH, "height": 900}, device_scale_factor=2
                 )
                 requests = []
                 page.on(

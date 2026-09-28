@@ -13,7 +13,8 @@ from otae_bot.infrastructure.rendering.browser import screenshot_web_element
 from .matrix import MATRIX_MAX_HEIGHT, MATRIX_SAMPLE_REMINDER, MATRIX_WIDTH
 from .presentation import RadarPage, notice, stamp, text
 
-CARD_WIDTH = 1080
+#: Phone-first canvas: rendered at 2x, it reads at roughly half size on a phone.
+CARD_WIDTH = 820
 CARD_MAX_HEIGHT = 5000
 #: Rasterise at 2x so the delivered PNG stays sharp after the chat client
 #: downscales it to a phone-width viewport. Matches the endfield cards.
@@ -48,20 +49,31 @@ def _model_icon(icon: str) -> str:
     return f"data:{kind};base64," + base64.b64encode(path.read_bytes()).decode("ascii")
 
 
-@lru_cache(maxsize=1)
-def _matrix_bold_font() -> str:
-    bold = base64.b64encode(FONT.with_name("MiSans-Bold.ttf").read_bytes()).decode(
-        "ascii"
-    )
-    return f'@font-face{{font-family:RadarSans;src:url(data:font/ttf;base64,{bold}) format("truetype");font-weight:700;font-display:block}}'
+CSP = "default-src 'none'; style-src 'unsafe-inline'; font-src data:; img-src data:; base-uri 'none'; form-action 'none'"
+
+
+def _font_face(path: Path, weight: int) -> str:
+    data = base64.b64encode(path.read_bytes()).decode("ascii")
+    return f'@font-face{{font-family:RadarSans;src:url(data:font/ttf;base64,{data}) format("truetype");font-weight:{weight};font-display:block}}'
 
 
 @lru_cache(maxsize=1)
 def _styles() -> str:
-    font = base64.b64encode(FONT.read_bytes()).decode("ascii")
     return (
-        f'@font-face{{font-family:RadarSans;src:url(data:font/ttf;base64,{font}) format("truetype");font-weight:100 900;font-display:block}}'
+        _font_face(FONT, 400)
+        + _font_face(FONT.with_name("MiSans-Bold.ttf"), 700)
         + (ASSETS / "card.css").read_text(encoding="utf-8")
+    )
+
+
+SOURCE_NOTE = "数据来源 api.codexradar.com · 众测评测分数，不等同于人类智商 · — 缺失 · ~ 估算"
+
+
+def _masthead(page: RadarPage) -> str:
+    return (
+        '<header class="masthead"><span class="kicker">AI 智商雷达</span>'
+        f'<span class="page-index">{text(page.section)} <b>{page.number:02}</b> / {page.total:02}</span></header>'
+        f'<h1>{text(page.title)}</h1><p class="subtitle">{text(page.subtitle)}</p>'
     )
 
 
@@ -71,46 +83,55 @@ def page_html(page: RadarPage, *, preview: bool = False) -> str:
     meta = page.meta
     context = footer = ""
     if meta:
-        context = '<div class="context">'
-        context += f"<strong>{text(meta.benchmark_id)}</strong><span>{text(meta.score_label or '评测口径见数据区')}</span>"
+        chips = [f'<span class="chip chip-accent">{text(meta.benchmark_id)}</span>']
+        if meta.score_label:
+            chips.append(f'<span class="chip">{text(meta.score_label)}</span>')
         if meta.rolling_window:
-            context += f"<span>最近 {meta.rolling_window} 次有效运行</span>"
+            chips.append(f'<span class="chip">最近 {meta.rolling_window} 次有效运行</span>')
         if meta.note:
-            context += f"<span>{text(meta.note)}</span>"
-        context += "</div>"
+            chips.append(f'<span class="chip">{text(meta.note)}</span>')
+        context = '<div class="context">' + "".join(chips) + "</div>"
         if meta.stale:
             context += notice(
                 "数据可能过期 · 上游暂不可用，当前展示陈旧缓存。", warning=True
             )
         source_label = (
-            "榜单快照时间"
+            "榜单快照"
             if page.section in {"榜单", "模型", "对比", "趋势"}
-            else "源数据时间"
+            else "源数据"
         )
-        footer = f"<p>{source_label} {text(stamp(meta.source_updated_at))} · 获取时间 {text(stamp(meta.fetched_at))}</p>"
+        footer = f"<p>{source_label} <b>{text(stamp(meta.source_updated_at))}</b> · 获取 <b>{text(stamp(meta.fetched_at))}</b></p>"
         if page.section in {"榜单", "模型", "对比"}:
-            footer += "<p>综合 IQ 独立更新时间与缓存状态：未提供；效率数据时间见各条记录。</p>"
+            footer += "<p>综合 IQ 的独立更新时间与缓存状态上游未提供；效率数据时间见各条记录。</p>"
         elif page.section == "趋势":
-            footer += "<p>曲线的数据时间见图中起止点，独立历史缓存状态未提供。</p>"
-        footer += f"<p>mode: {text(meta.mode)} · scoring: {text(meta.scoring_mode)} · recommendation_mode: {text(meta.recommendation_mode)}</p>"
+            footer += "<p>曲线的数据时间见图中起止点；历史序列的缓存状态上游未提供。</p>"
+        modes = [
+            f"{label} {text(value)}"
+            for label, value in (
+                ("统计", meta.mode),
+                ("计分", meta.scoring_mode),
+                ("推荐", meta.recommendation_mode),
+            )
+            if value
+        ]
+        if modes:
+            footer += "<p>口径 " + " · ".join(modes) + "</p>"
     else:
-        footer = "<p>数据时间 — · 本页为命令说明或频道配置；未提供数据更新时间。</p>"
+        footer = "<p>本页为命令说明或频道配置，不含数据更新时间。</p>"
     preview_label = (
         '<div class="preview-label">离线设计预览 · 来自仓库录制夹具的裁剪样本，不是实时榜单；边界示例另行标注。</div>'
         if preview
         else ""
     )
-    csp = "default-src 'none'; style-src 'unsafe-inline'; font-src data:; img-src data:; base-uri 'none'; form-action 'none'"
     return f'''<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="{csp}"><title>{text(page.title)} · AI 智商雷达</title><style>{_styles()}</style></head>
+<meta http-equiv="Content-Security-Policy" content="{CSP}"><title>{text(page.title)} · AI 智商雷达</title><style>{_styles()}</style></head>
 <body><main class="radar-card">{preview_label}
-<header class="brand-row"><div class="brand"><span class="brand-icon" aria-hidden="true"></span>AI / RADAR</div><div class="edition">模型观察手册<br>INTELLIGENCE OBSERVATORY</div></header>
-<div class="page-head"><div><h1>{text(page.title)}</h1><p>{text(page.subtitle)}</p></div><span class="section-label">{text(page.section)} / {page.number:02}</span></div>
+{_masthead(page)}
 {context}<article>{page.body}</article>
-<aside class="why"><span>i</span><div><h3>为什么看这些数据</h3><p>{text(page.why)}</p></div></aside>
-<footer><div class="meta-footer">{footer}<p>数据来源 api.codexradar.com · 众测评测分数，不等同于人类智商 · — 表示缺失 · ~ 表示估算</p></div>
-<div class="bottom-row"><span>OTAE BOT / AI 智商雷达</span><span>MODEL INTELLIGENCE, IN CONTEXT.</span><span>{page.number:02} / {page.total:02}</span></div></footer>
+<footer class="card-foot"><p class="why"><b>读图</b>{text(page.why)}</p>
+<div class="meta-footer">{footer}</div>
+<div class="bottom-row"><b>OTAE BOT</b><span>{SOURCE_NOTE}</span></div></footer>
 </main></body></html>'''
 
 
@@ -123,25 +144,19 @@ def _matrix_html(page: RadarPage, *, preview: bool = False) -> str:
         if meta and meta.stale
         else ""
     )
-    styles = (
-        _styles()
-        + _matrix_bold_font()
-        + (ASSETS / "matrix.css").read_text(encoding="utf-8")
-    )
+    styles = _styles() + (ASSETS / "matrix.css").read_text(encoding="utf-8")
     body = re.sub(
         r'data-model-icon="([a-z]+)"',
         lambda match: f'{match[0]} src="{_model_icon(match[1])}"',
         page.body,
     )
-    csp = "default-src 'none'; style-src 'unsafe-inline'; font-src data:; img-src data:; base-uri 'none'; form-action 'none'"
     return f'''<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="{csp}"><title>AI 智商雷达 · 模型档位总览</title><style>{styles}</style></head>
+<meta http-equiv="Content-Security-Policy" content="{CSP}"><title>AI 智商雷达 · 模型档位总览</title><style>{styles}</style></head>
 <body><main class="radar-card radar-matrix"><header class="matrix-header">
-<div class="brand-row"><div class="brand"><span class="brand-icon" aria-hidden="true"></span>AI / RADAR</div><div class="edition">模型观察手册<br>INTELLIGENCE OBSERVATORY</div></div>
-<div class="page-head"><div><h1>AI 智商雷达</h1><p>模型与推理档位 / MODEL MATRIX</p></div><div class="matrix-headnote"><strong>全量总览 / FIELD GUIDE</strong><br>{text(source_time)}{preview_note}</div></div></header>
+{_masthead(page)}<p class="matrix-headnote">快照 {text(source_time)}{preview_note}</p></header>
 {status}{body}
-<footer class="matrix-footer"><div class="matrix-legend"><span><b>大字 IQ / 趋势</b> 同模型跨档位历史 · 纵轴固定 0–150</span><span><b>档位 IQ / 得分</b> 本频道效率口径 · IQ 按整数展示</span><span><b>数字颜色</b> 0–150 红 → 金黄 → 绿 · 11 阶，按原始 IQ 连续取色</span><span><b>n</b> 样本量</span><span><b>~</b> 耗时与 API 等价成本估算 · 美元/次</span><span><b>—</b> 暂无数据</span><span><b>样本偏少</b> 0&lt;n&lt;{MATRIX_SAMPLE_REMINDER} 为前端提醒线，非上游统计判定；不提示不代表结果稳定</span></div>
-<div class="matrix-bottom"><span>OTAE / AI RADAR</span><span>api.codexradar.com · {text(meta.mode if meta else None)} · 各项时间为 UTC · 按模型研发厂商分组，组内保留源顺序</span><span>全部模型 · 单张长图</span></div></footer>
+<footer class="matrix-footer"><div class="matrix-legend"><span><b>大字 IQ / 曲线</b>同模型跨档位历史末点与走势</span><span><b>档位 IQ / 得分</b>本频道效率口径，整数展示</span><span><b>数字颜色</b>0–150 红 → 黄 → 绿，按原始 IQ 连续取色</span><span><b>n</b>样本量</span><span><b>~</b>耗时与 API 等价成本为估算，费用按美元/次</span><span><b>—</b>暂无数据</span><span><b>＊ 样本偏少</b>0&lt;n&lt;{MATRIX_SAMPLE_REMINDER} 为前端提醒线，非上游统计判定；不提示不代表结果稳定</span></div>
+<div class="bottom-row"><b>OTAE BOT</b><span>统计 {text(meta.mode if meta else None)} · 时间均为 UTC · 按研发厂商分组，组内保留源顺序 · {SOURCE_NOTE}</span></div></footer>
 </main></body></html>'''
 
 

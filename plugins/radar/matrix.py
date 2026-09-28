@@ -16,9 +16,11 @@ from .models import (
     EfficiencyPoint,
     MatrixModel,
     RadarMatrix,
+    RadarMeta,
     TrendPoint,
 )
 from .presentation import (
+    SAMPLE_REMINDER,
     RadarPage,
     number,
     percent,
@@ -29,34 +31,37 @@ from .presentation import (
     trend_value,
 )
 
-MATRIX_WIDTH = 1960
+#: Two model cards per row, each as wide as a single report card's content.
+MATRIX_WIDTH = 1568
 MATRIX_MAX_HEIGHT = 20000
-# A display reminder, not an upstream confidence or significance threshold.
-MATRIX_SAMPLE_REMINDER = 30
+MATRIX_SAMPLE_REMINDER = SAMPLE_REMINDER
 #: Above this many models the single long image is split into one page per
 #: region, so each delivered PNG keeps a screen-friendly aspect ratio. This is
 #: a delivery budget, not an upstream or statistical limit.
 MATRIX_PAGE_MAX_MODELS = 12
-# Text-friendly adaptation of ColorBrewer's RdYlGn hue sequence.
+# Text-friendly adaptation of ColorBrewer's RdYlGn hue sequence, darkened so
+# every value keeps at least 4.5:1 contrast on the sakura panels and tiles.
 # Fixed IQ domain, shared by model headlines, effort scores and the legend.
 # Source: https://d3js.org/d3-scale-chromatic/diverging#interpolateRdYlGn
 IQ_COLOR_STOPS = (
-    (0.0, "#b33237"),
-    (15.0, "#b33c30"),
-    (30.0, "#af4e29"),
-    (45.0, "#a45f1f"),
-    (60.0, "#906b17"),
-    (75.0, "#866d12"),
-    (90.0, "#6f7725"),
-    (105.0, "#5b7930"),
-    (120.0, "#407c44"),
-    (135.0, "#2c7850"),
-    (150.0, "#196b40"),
+    (0.0, "#aa3034"),
+    (15.0, "#aa392e"),
+    (30.0, "#a64a27"),
+    (45.0, "#9c5a1d"),
+    (60.0, "#896616"),
+    (75.0, "#7f6811"),
+    (90.0, "#697123"),
+    (105.0, "#56732e"),
+    (120.0, "#3d7641"),
+    (135.0, "#2a724c"),
+    (150.0, "#18663d"),
 )
-IQ_MISSING_COLOR = "#879083"
+IQ_MISSING_COLOR = "#8a7a7e"
 
 _NAMES = {
     "gpt-6-astra": ("GPT-6 Astra", "astra"),
+    "gpt-6-sol": ("GPT-6 Sol", "sol"),
+    "gpt-6-luna": ("GPT-6 Luna", "luna"),
     "gpt-5.6-sol": ("Sol", "sol"),
     "gpt-5.6-terra": ("Terra", "terra"),
     "gpt-5.6-luna": ("Luna", "luna"),
@@ -75,6 +80,7 @@ _NAMES = {
     "hy4-preview": ("HY4 Preview", "hunyuan"),
     "claude-sonnet-5": ("Claude Sonnet 5", "claude"),
     "claude-opus-5": ("Claude Opus 5", "claude"),
+    "claude-opus-5-5": ("Claude Opus 5.5", "claude"),
 }
 
 # Group by the model developer; a harness prefix such as DSH is not a vendor.
@@ -191,11 +197,10 @@ def _iq_legend() -> str:
         for value, _ in IQ_COLOR_STOPS
     )
     return (
-        '<div class="matrix-score-key"><span>IQ 色标</span>'
+        '<div class="matrix-score-key"><div class="key-title"><span>IQ 颜色</span><b>低 → 高 · 0–150 连续取色 · 模型与档位共用</b></div>'
         '<div class="iq-color-scale" role="img" aria-label="IQ 0 至 150，每 15 分一个色阶，共 11 阶；低分红色，高分绿色，阶间连续渐变">'
         f'<div class="iq-color-ramp" style="background:linear-gradient(90deg,{gradient})"></div>'
-        f'<div class="iq-color-ticks">{ticks}</div></div>'
-        "<span>11 阶连续渐变 · 模型 / 档位共用</span></div>"
+        f'<div class="iq-color-ticks">{ticks}</div></div></div>'
     )
 
 
@@ -380,7 +385,7 @@ def _sparkline(points: tuple[tuple[float, TrendPoint] | None, ...]) -> str:
 def _tile(point: EfficiencyPoint, continuous: bool) -> str:
     warnings = _tier_warnings(point)
     warning = (
-        f'<div class="tier-warning"><span class="warning-icon" aria-hidden="true">!</span><span>{text(" · ".join(warnings))}</span></div>'
+        f'<div class="tier-warning"><span class="warning-icon" aria-hidden="true">＊</span><span>{text(" · ".join(warnings))}</span></div>'
         if warnings
         else ""
     )
@@ -400,11 +405,11 @@ def _tile(point: EfficiencyPoint, continuous: bool) -> str:
         else "—"
     )
     return f'''<section class="tier" data-effort="{text(point.effort)}" data-evidence="{"limited" if warnings else "available"}" title="档位数据 {text(stamp(point.source_updated_at))}">
-<div class="tier-performance"><div class="tier-heading"><strong class="tier-name">{text(point.effort)}</strong></div>
-<div class="tier-score"><b {_iq_attributes(iq)} title="IQ {number(iq)}">{number(iq, 0)}</b><span>IQ</span></div>
-<div class="tier-evidence"><span>{text(result)}</span><span>n={number(point.total, 0)}</span></div></div>{warning}
+<div class="tier-performance"><div class="tier-heading"><strong class="tier-name">{text(point.effort)}</strong>
+<div class="tier-score"><b {_iq_attributes(iq)} title="IQ {number(iq)}">{number(iq, 0)}</b><span>IQ</span></div></div>
+<div class="tier-evidence"><span>{text(result)}</span><span>n={number(point.total, 0)}</span></div></div>
 <div class="tier-input"><div class="tier-duration"><b>{minutes}</b><span>分钟</span></div>
-<div class="tier-price"><b>{price}</b><span>美元 / 次</span></div></div></section>'''
+<div class="tier-price"><b>{price}</b><span>/ 次</span></div></div>{warning}</section>'''
 
 
 def _panel(model: MatrixModel, *, continuous: bool) -> str:
@@ -413,22 +418,21 @@ def _panel(model: MatrixModel, *, continuous: bool) -> str:
     last = points[-1][1] if points and points[-1] is not None else None
     warnings = _model_warnings(model, points)
     warning = (
-        f'<div class="model-warning" role="note"><span class="warning-icon" aria-hidden="true">!</span><div><b>数据不足</b><p>{text("；".join(warnings))}</p></div></div>'
+        f'<div class="model-warning" role="note"><span class="warning-icon" aria-hidden="true">＊</span><div><b>数据不足</b><p>{text("；".join(warnings))}</p></div></div>'
         if warnings
         else ""
     )
     score = number(last.iq, 0) if last else "—"
-    history_caption = (
-        f"<span>n={number(last.samples, 0)} · 最新历史点</span><span>{text(short_stamp(last.timestamp))}</span>"
+    evidence = (
+        f"<span>跨档位 IQ · n={number(last.samples, 0)}</span>"
         if last
         else "<span>暂无跨档位数据</span>"
     )
-    history_status = (
-        '<span class="matrix-stale">历史缓存可能过期</span>'
-        if model.history_stale
-        else ""
+    if model.history_stale:
+        evidence += '<span class="matrix-stale">历史缓存可能过期</span>'
+    history_time = (
+        f" · 截至 {text(short_stamp(last.timestamp))}" if last else " · UTC"
     )
-    columns = 2 if len(model.tiers) == 4 else max(1, min(3, len(model.tiers)))
     tiles = "".join(_tile(point, continuous) for point in model.tiers)
     times = [
         stamp(point.source_updated_at)
@@ -439,13 +443,14 @@ def _panel(model: MatrixModel, *, continuous: bool) -> str:
     if times and min(times) != max(times):
         time_label = time_label.removesuffix(" UTC") + " — " + short_stamp(max(times))
     return f"""<section class="model-panel family-{icon}" data-model="{text(model.model)}">
-<header class="model-heading"><span class="model-artwork"><img class="model-icon" data-model-icon="{icon}" alt="{text(name)} 图标"></span><div class="model-title"><h4>{text(name)}</h4><p>{text(model.model)}</p></div><span class="tier-count">{len(model.tiers):02}<small>档位</small></span></header>
-<div class="model-summary"><div class="family-score"><div class="summary-label">模型 IQ <span>跨档位</span></div><strong {_iq_attributes(last.iq if last else None)} title="IQ {number(last.iq if last else None)}">{score}<small>IQ</small></strong><div class="family-evidence">{history_caption}{history_status}</div></div>
-<div class="model-history"><div class="history-label"><b>近期 IQ</b><span>{sum(point is not None for point in points)} 点 · UTC</span></div>{_sparkline(points)}</div></div>
+<header class="model-heading"><span class="model-artwork"><img class="model-icon" data-model-icon="{icon}" alt="{text(name)} 图标"></span>
+<div class="model-title"><h4>{text(name)}</h4><p>{text(model.model)} · {len(model.tiers)} 个档位</p></div>
+<div class="family-score"><strong {_iq_attributes(last.iq if last else None)} title="IQ {number(last.iq if last else None)}">{score}<small>IQ</small></strong><div class="family-evidence">{evidence}</div></div></header>
+<div class="model-history"><div class="history-label"><span>近期 IQ 走势</span><b>{sum(point is not None for point in points)} 个点{history_time}</b></div>{_sparkline(points)}</div>
 {warning}
-<div class="tier-section-heading"><span>推理档位</span><span>IQ · 得分 · 耗时与费用</span></div>
-<div class="tier-grid" style="--tier-columns:{columns}">{tiles}</div>
-<div class="panel-data-time"><span>档位更新</span><span>{text(time_label)}</span></div>
+<div class="tier-section-heading"><span>推理档位</span><span>IQ · 得分 · 耗时 · 费用</span></div>
+<div class="tier-grid">{tiles}</div>
+<div class="panel-data-time">档位数据更新 {text(time_label)}</div>
 </section>"""
 
 
@@ -462,28 +467,26 @@ def _region_body(
     tier_count = sum(
         len(model.tiers) for vendor in vendors for model in vendor.models
     )
-    body = f'<section class="region-section" data-region="{region}"><header class="region-heading"><div><span class="region-index">{index:02}</span><h2>{label}<small>{english}</small></h2></div><p>{len(vendors)} 厂商 <span>/</span> {model_count} 模型 <span>/</span> {tier_count} 档位</p></header>'
-    body += '<div class="region-vendors">'
+    body = f'<section class="region-section" data-region="{region}"><header class="region-heading"><h2><span class="region-index">{index:02}</span>{label}<small>{english}</small></h2><p>{len(vendors)} 家厂商 · {model_count} 模型 · {tier_count} 档位</p></header>'
     for vendor in vendors:
         size = len(vendor.models)
-        body += f'<section class="vendor-group" data-vendor="{vendor.key}" style="--model-columns:{min(3, size)}"><header class="vendor-heading"><div><h3>{text(vendor.label)}</h3><span class="vendor-series">{text(vendor.series)}</span></div><span>{size:02} 模型 · {sum(len(model.tiers) for model in vendor.models):02} 档位</span></header><div class="model-grid">'
+        body += f'<section class="vendor-group" data-vendor="{vendor.key}"><header class="vendor-heading"><h3>{text(vendor.label)}<small class="vendor-series">{text(vendor.series)}</small></h3><span>{size} 模型 · {sum(len(model.tiers) for model in vendor.models)} 档位</span></header><div class="model-grid">'
         body += "".join(_panel(model, continuous=continuous) for model in vendor.models)
         body += "</div></section>"
-    return body + "</div></section>"
+    return body + "</section>"
 
 
 def _toolbar(meta: RadarMeta, models: int, tiers: int, scope: str) -> str:
-    return f'<div class="matrix-toolbar"><div><span class="benchmark-pill">{text(meta.benchmark_id)}</span><span class="matrix-scope">地区 / 厂商 / 模型 / 推理档位</span></div><div class="matrix-count"><b>{models:02}</b> 模型 <span>/</span> <b>{tiers:02}</b> 档位 <span>· {scope}</span></div></div>'
+    return (
+        f'<div class="matrix-toolbar"><span class="benchmark-pill">{text(meta.benchmark_id)}</span>'
+        f'<span class="matrix-count">{scope} · {models} 模型 · {tiers} 档位</span>'
+        '<span class="matrix-scope">按地区 → 研发厂商分组</span></div>'
+    )
 
 
-def _split_vendors(
+def _pack(
     vendors: tuple[_VendorGroup, ...], budget: int
-) -> tuple[tuple[_VendorGroup, ...], ...]:
-    """Greedily pack vendors into pages of at most ``budget`` models.
-
-    A vendor group is never broken across pages, so a single oversized vendor
-    keeps its own page rather than being cut mid-group.
-    """
+) -> list[tuple[_VendorGroup, ...]]:
     pages: list[tuple[_VendorGroup, ...]] = []
     current: list[_VendorGroup] = []
     size = 0
@@ -496,6 +499,24 @@ def _split_vendors(
         size += count
     if current:
         pages.append(tuple(current))
+    return pages
+
+
+def _split_vendors(
+    vendors: tuple[_VendorGroup, ...], budget: int
+) -> tuple[tuple[_VendorGroup, ...], ...]:
+    """Pack vendors into as few pages as ``budget`` allows, then even them out.
+
+    A vendor group is never broken across pages, so a single oversized vendor
+    keeps its own page rather than being cut mid-group. Balancing keeps the page
+    count and avoids a near-empty last page (12 + 2 becomes 7 + 7).
+    """
+    pages = _pack(vendors, budget)
+    total = sum(len(vendor.models) for vendor in vendors)
+    for target in range(math.ceil(total / max(1, len(pages))), budget):
+        balanced = _pack(vendors, target)
+        if len(balanced) <= len(pages):
+            return tuple(balanced)
     return tuple(pages)
 
 
@@ -511,8 +532,8 @@ def matrix_pages(snapshot: RadarMatrix) -> tuple[RadarPage, ...]:
         body += '<div class="matrix-empty">该频道暂无模型档位数据</div>'
         return (
             RadarPage(
-                title="AI 智商雷达",
-                subtitle="模型与档位全量总览",
+                title="模型档位总览",
+                subtitle="每个模型的整体 IQ、走势，以及每个推理档位的得分、耗时与费用。",
                 body=body,
                 why=why,
                 section="总览",
@@ -534,8 +555,8 @@ def matrix_pages(snapshot: RadarMatrix) -> tuple[RadarPage, ...]:
             )
         return (
             RadarPage(
-                title="AI 智商雷达",
-                subtitle="模型与档位全量总览",
+                title="模型档位总览",
+                subtitle="每个模型的整体 IQ、走势，以及每个推理档位的得分、耗时与费用。",
                 body=body,
                 why=why,
                 section="总览",
@@ -566,8 +587,8 @@ def matrix_pages(snapshot: RadarMatrix) -> tuple[RadarPage, ...]:
         )
         pages.append(
             RadarPage(
-                title="AI 智商雷达",
-                subtitle=f"{name} · 模型与档位总览",
+                title="模型档位总览",
+                subtitle=f"{name} · 每个模型的整体 IQ、走势，以及各推理档位的得分与投入。",
                 body=body,
                 why="先按研发厂商定位模型，再用总分与趋势看整体变化；档位格给出 IQ、评测得分、样本、耗时和费用，方便比较推理投入。总览过长时按国内外分页，本页为其中一页。",
                 section=label,

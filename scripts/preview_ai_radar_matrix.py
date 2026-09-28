@@ -104,7 +104,7 @@ async def main():
                     await page.set_viewport_size({"width": width, "height": 1100})
                     info = await page.evaluate(r"""() => {
                       const root=document.querySelector('.radar-matrix'), bounds=root.getBoundingClientRect();
-                      const nodes=[...root.querySelectorAll('h1,h2,h3,h4,p,.brand-row,.brand,.edition,.page-head,.matrix-headnote,.tier,.tier-name,.tier-performance,.tier-input,.tier-duration,.tier-price,.tier-evidence,.tier-warning,.model-warning,.model-history,.history-label,.family-evidence,.model-panel,.model-heading,.model-title,.tier-count,.panel-data-time,.matrix-header,.matrix-toolbar,.matrix-footer,.region-heading,.vendor-heading')];
+                      const nodes=[...root.querySelectorAll('h1,h2,h3,h4,p,.masthead,.brand,.page-index,.page-head,.matrix-headnote,.tier,.tier-name,.tier-performance,.tier-input,.tier-duration,.tier-price,.tier-evidence,.tier-warning,.model-warning,.model-history,.history-label,.family-evidence,.model-panel,.model-heading,.model-title,.tier-count,.panel-data-time,.matrix-header,.matrix-toolbar,.matrix-footer,.region-heading,.vendor-heading')];
                       const cardWidths=[...root.querySelectorAll('.model-panel')].map(card => card.getBoundingClientRect().width);
                       const charts=[...root.querySelectorAll('.history-chart')];
                       const iqColors={}, contrasts=[];
@@ -188,8 +188,7 @@ async def main():
                             info["cardWidths"]["max"] - info["cardWidths"]["min"] < 2
                         ), (width, info["cardWidths"])
                     assert (
-                        info["icons"] == len(snapshot.models)
-                        and not info["brokenImages"]
+                        info["icons"] == info["panels"] and not info["brokenImages"]
                     ), info
                     results[str(width)] = info
                     if width == MATRIX_WIDTH or (width == 390 and index == 0):

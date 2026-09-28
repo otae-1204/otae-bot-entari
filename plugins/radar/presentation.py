@@ -27,6 +27,10 @@ from .models import (
 )
 
 
+#: A display reminder shared by every card, not an upstream confidence threshold.
+SAMPLE_REMINDER = 30
+
+
 @dataclass(frozen=True)
 class RadarPage:
     title: str
@@ -122,6 +126,24 @@ def iq_label(row: ModelRow) -> str:
     return "频道换算 IQ" if row.iq_derived else "综合 IQ"
 
 
+def few_samples(samples: float | None) -> bool:
+    return samples is not None and 0 < samples < SAMPLE_REMINDER
+
+
+def sample_star(samples: float | None) -> str:
+    return (
+        f'<span class="star" title="样本少于 {SAMPLE_REMINDER} 次">＊</span>'
+        if few_samples(samples)
+        else ""
+    )
+
+
+def big_score(value: float | None, meta: RadarMeta | None) -> str:
+    """Score split so the unit can be set smaller than the figure."""
+    shown = text(score(value, meta))
+    return shown[:-1] + "<i>%</i>" if shown.endswith("%") else shown
+
+
 def model_table(
     rows: Sequence[ModelRow],
     meta: RadarMeta | None,
@@ -136,18 +158,38 @@ def model_table(
         width = (
             max(0, min(100, row.pass_rate * 100)) if math.isfinite(row.pass_rate) else 0
         )
+        podium = " podium" if ordered and index <= 3 else ""
         body.append(
-            f'<tr><td class="rank">{index:02}</td><td><div class="identity">{identity(row.model, row.effort)}</div></td>'
-            f'<td class="score"><strong>{text(score(row.pass_rate, meta))}</strong>'
-            f'<div class="bar"><i style="width:{width:.2f}%"></i></div></td>'
-            f"<td><b>{number(row.iq)}</b><small>{iq_label(row)}</small></td>"
-            f"<td><b>{row.graded:,}</b><small>{row.cells:,} 道覆盖题目</small></td></tr>"
+            f'<tr class="rank-row{podium}"><td class="rank-cell"><span class="rank">{index:02}</span></td>'
+            f'<td class="who"><div class="identity">{identity(row.model, row.effort)}{sample_star(row.graded)}</div>'
+            f"<small>{iq_label(row)} <b>{number(row.iq)}</b><em>·</em>样本 <b>{row.graded:,}</b><em>·</em>覆盖 {row.cells:,} 题</small></td>"
+            f'<td class="score"><strong>{big_score(row.pass_rate, meta)}</strong></td>'
+            f'<td class="bar-cell"><div class="bar"><i style="width:{width:.2f}%"></i></div></td></tr>'
         )
+    heading = (
+        f'<div class="section-heading"><h2>完整排名</h2><span>{score_label(meta)} ↓</span></div>'
+        if ordered
+        else ""
+    )
+    return heading + '<table class="ranking"><tbody>' + "".join(body) + "</tbody></table>"
+
+
+def ranking_hero(first: ModelRow, meta: RadarMeta, *, lead: bool, start: int) -> str:
+    caution = (
+        f'<div class="caution">＊ 仅 {first.graded:,} 次有效样本，结果仅供参考</div>'
+        if few_samples(first.graded)
+        else ""
+    )
     return (
-        '<table class="ranking"><colgroup><col class="rank-col"><col class="model-col">'
-        '<col class="score-col"><col class="iq-col"><col class="sample-col"></colgroup>'
-        f"<thead><tr><th>#</th><th>模型 / 推理档位</th><th>{score_label(meta)}{' ↓' if ordered else ''}</th><th>IQ · 口径</th>"
-        "<th>有效运行样本</th></tr></thead><tbody>" + "".join(body) + "</tbody></table>"
+        '<section class="hero">'
+        f'<span class="hero-lab">{"本频道第一" if lead else f"第 {start} 名起 · 续页"}</span>'
+        + ('<span class="seal" aria-hidden="true"><b>首</b></span>' if lead else "")
+        + f'<div class="hero-score">{big_score(first.pass_rate, meta)}</div>'
+        f'<div class="identity">{identity(first.model, first.effort)}</div>'
+        f'<div class="hero-note">{score_label(meta)} · 本频道</div>{caution}'
+        f'<div class="hero-stats"><div><small>{iq_label(first)}</small><b>{number(first.iq)}</b></div>'
+        f"<div><small>有效样本</small><b>{first.graded:,}</b></div>"
+        f"<div><small>覆盖题目</small><b>{first.cells:,}</b></div></div></section>"
     )
 
 
@@ -157,19 +199,20 @@ def ranking_pages(rows: Sequence[ModelRow], meta: RadarMeta) -> tuple[RadarPage,
     total = max(1, math.ceil(len(rows) / 8))
     for page in range(total):
         chunk = rows[page * 8 : (page + 1) * 8]
-        hero = ""
-        if chunk:
-            first = chunk[0]
-            hero = (
-                '<section class="hero"><div><span class="eyebrow">BENCHMARK LEADERBOARD</span>'
-                f"<h2>{'本次查询首位' if page == 0 else '继续查看榜单'}</h2>"
-                f'<div class="identity">{identity(first.model, first.effort)}</div></div>'
-                f'<div class="hero-score"><strong>{text(score(first.pass_rate, meta))}</strong>'
-                f"<span>{score_label(meta)} · 本频道</span></div></section>"
-            )
+        hero = (
+            ranking_hero(chunk[0], meta, lead=page == 0, start=page * 8 + 1)
+            if chunk
+            else ""
+        )
         body = hero + model_table(chunk, meta, offset=page * 8, ordered=True)
+        small = (
+            f"＊ 样本少于 {SAMPLE_REMINDER} 次，结果仅供参考。"
+            if any(few_samples(row.graded) for row in chunk)
+            else ""
+        )
         body += notice(
-            "按本频道评测得分排序；综合 IQ 为上游加权值，频道换算 IQ = 本频道得分 × 150，两者分别标注。"
+            small
+            + "按本频道评测得分排序；综合 IQ 为上游加权值，频道换算 IQ = 本频道得分 × 150，两者分别标注。"
         )
         pages.append(
             RadarPage(
@@ -293,6 +336,9 @@ def trend_chart(points: Sequence[TrendPoint]) -> str:
     )
     svg = [
         f'<svg class="chart" viewBox="0 0 920 294" role="img" aria-label="{text(axis_label)}">'
+        '<defs><linearGradient id="trend-fill" x1="0" y1="0" x2="0" y2="1">'
+        '<stop offset="0" stop-color="#e493a6" stop-opacity=".45"/>'
+        '<stop offset="1" stop-color="#e493a6" stop-opacity="0"/></linearGradient></defs>'
     ]
     for iq in trend_axis_ticks(scale):
         y = 236 - (iq - low) / span * 212
@@ -302,6 +348,7 @@ def trend_chart(points: Sequence[TrendPoint]) -> str:
         )
     path = []
     dots = []
+    segments: list[list[tuple[float, float]]] = []
     connected = False
     for item in valid:
         if item is None:
@@ -311,11 +358,23 @@ def trend_chart(points: Sequence[TrendPoint]) -> str:
         x = 52 + (ts - start) / (end - start) * 832 if end > start else 468
         y = 236 - (point.iq - low) / span * 212
         path.append(f"{'L' if connected else 'M'}{x:.2f},{y:.2f}")
+        if not connected:
+            segments.append([])
+        segments[-1].append((x, y))
         connected = True
         dots.append(
-            f'<circle cx="{x:.2f}" cy="{y:.2f}" r="3.5"><title>{text(stamp(point.timestamp))} · IQ {number(point.iq)} · n={point.samples}</title></circle>'
+            f'<circle cx="{x:.2f}" cy="{y:.2f}" r="4.5"><title>{text(stamp(point.timestamp))} · IQ {number(point.iq)} · n={point.samples}</title></circle>'
         )
+    # Polygons, not paths: the line must stay the chart's only <path>.
+    for segment in segments:
+        if len(segment) > 1:
+            outline = " ".join(f"{x:.2f},{y:.2f}" for x, y in segment)
+            svg.append(
+                f'<polygon class="trend-area" points="{segment[0][0]:.2f},236 {outline} {segment[-1][0]:.2f},236"/>'
+            )
     svg.append(f'<path class="trend-line" d="{" ".join(path)}"/>')
+    if valid[-1] is not None:
+        dots[-1] = dots[-1].replace("<circle ", '<circle class="last" ', 1)
     svg.extend(dots)
     for x, ts, anchor in ((52, start, "start"), (884, end, "end")):
         label = datetime.fromtimestamp(ts, timezone.utc).strftime("%m-%d %H:%M UTC")
@@ -331,7 +390,7 @@ def trend_pages(
     if points:
         last = points[-1]
         low, high = trend_scale(point.iq for point in points)
-        body += '<div class="metrics">' + metric(
+        body += '<div class="metrics cols-4">' + metric(
             "最新历史 IQ", number(last.iq), "本序列末点"
         )
         body += metric("末点样本", number(last.samples, 0), "每个时刻样本量可能不同")
@@ -429,37 +488,66 @@ def profile_pages(profile: ModelProfile) -> tuple[RadarPage, ...]:
     return tuple(pages)
 
 
+def _duel_row(label: str, hint: str, cells: Sequence[tuple[str, str]]) -> str:
+    (a, a_note), (b, b_note) = cells
+    return (
+        f'<div class="duel-row"><div class="duel-a"><strong>{text(a)}</strong><small>{text(a_note)}</small></div>'
+        f'<div class="duel-label">{text(label)}<small>{text(hint)}</small></div>'
+        f'<div class="duel-b"><strong>{text(b)}</strong><small>{text(b_note)}</small></div></div>'
+    )
+
+
 def comparison_pages(cmp: Comparison) -> tuple[RadarPage, ...]:
-    profiles = (cmp.left, cmp.right)
-    body = '<div class="comparison">'
-    for side, profile in zip(("A", "B"), profiles):
+    sides = []
+    for profile in (cmp.left, cmp.right):
         row = profile.best
         eff = profile.efficiency
         if eff and (not row or eff.key != row.key):
             eff = None
-        body += f'<section class="compare-panel"><span class="eyebrow">MODEL {side}</span><div class="identity">{identity(profile.model, profile.effort)}</div>'
-        body += metric(
-            iq_label(row) if row else "IQ",
-            number(row.iq if row else None),
-            "保留各自的 IQ 来源",
+        sides.append((profile, row, eff))
+    body = '<div class="versus">'
+    for tag, (profile, row, eff) in zip(("A", "B"), sides):
+        stale = (
+            '<span class="side-stale">数据可能过期 · 陈旧缓存</span>'
+            if profile.meta and profile.meta.stale
+            else ""
         )
-        body += metric(
-            score_label(profile.meta),
-            score(row.pass_rate if row else None, profile.meta),
-            f"有效样本 n={row.graded if row else '—'}",
+        body += (
+            f'<section class="compare-side side-{tag.lower()}"><span class="side-tag">{tag}</span>'
+            f'<div class="identity">{identity(profile.model, profile.effort)}</div>'
+            f'<p class="data-note">榜单 {text(stamp(profile.meta.source_updated_at if profile.meta else None))}'
+            f"<br>效率 {text(stamp(eff.source_updated_at if eff else None))}</p>{stale}</section>"
         )
-        body += metric(
-            "平均 API 等价成本",
-            money(eff.average_price_usd if eff else None),
-            "估算 · 仅展示相同档位",
-        )
-        body += metric(
-            "平均耗时", minutes(eff.average_minutes if eff else None), "估算 · 分钟"
-        )
-        body += f'<p class="data-note">榜单数据 {text(stamp(profile.meta.source_updated_at if profile.meta else None))}<br>效率数据 {text(stamp(eff.source_updated_at if eff else None))}</p>'
-        if profile.meta and profile.meta.stale:
-            body += notice("数据可能过期 · 陈旧缓存", warning=True)
-        body += "</section>"
+        if tag == "A":
+            body += '<span class="vs-seal" aria-hidden="true"><b>VS</b></span>'
+    body += "</div>"
+    body += '<div class="duel">'
+    body += _duel_row(
+        "IQ",
+        "保留各自来源",
+        [(number(row.iq if row else None), iq_label(row) if row else "—") for _, row, _ in sides],
+    )
+    body += _duel_row(
+        score_label(cmp.meta),
+        "本频道",
+        [
+            (
+                score(row.pass_rate if row else None, profile.meta),
+                f"有效样本 n={row.graded:,}" if row else "有效样本 —",
+            )
+            for profile, row, _ in sides
+        ],
+    )
+    body += _duel_row(
+        "API 等价成本",
+        "估算 · 每次任务",
+        [(money(eff.average_price_usd if eff else None), "仅限相同档位") for _, _, eff in sides],
+    )
+    body += _duel_row(
+        "平均耗时",
+        "估算",
+        [(minutes(eff.average_minutes if eff else None), "仅限相同档位") for _, _, eff in sides],
+    )
     body += "</div>"
     left, right = cmp.left.best, cmp.right.best
     same_benchmark = (
@@ -498,11 +586,13 @@ def recommendation_pages(
     pages = []
     for group in groups:
         # Bound each card even if upstream increases the number of candidates.
-        chunks = [group.items[i : i + 3] for i in range(0, len(group.items), 3)] or [()]
-        for chunk in chunks:
+        chunks = [
+            (i, group.items[i : i + 3]) for i in range(0, len(group.items), 3)
+        ] or [(0, ())]
+        for offset, chunk in chunks:
             body = f'<div class="section-heading"><h2>{text(group.title or group.key)}</h2><span>上游推荐顺序</span></div>'
-            for item in chunk:
-                body += f'<section class="candidate"><div class="identity">{identity(item.model, item.effort)}</div><div class="metrics">'
+            for position, item in enumerate(chunk, offset + 1):
+                body += f'<section class="candidate"><div class="identity"><span class="candidate-rank">{position:02}</span>{identity(item.model, item.effort)}</div><div class="metrics">'
                 body += metric("推荐 IQ", number(item.iq), f"样本 n={item.samples}")
                 body += metric(
                     "平均 API 等价成本", money(item.average_cost_usd), "估算"
@@ -694,6 +784,7 @@ def catalog_pages(
 
 def help_pages() -> tuple[RadarPage, ...]:
     commands = (
+        ("00", "看总览", "/radar", "全部模型与档位，一张图看完"),
         ("01", "看实力", "/radar 榜", "同频道得分、IQ、样本与档位"),
         ("02", "看模型", "/radar 模型 astra low", "明确档位的模型档案"),
         ("03", "做对比", "/radar 对比 astra sol max", "能力、成本和耗时并排看"),
@@ -704,16 +795,17 @@ def help_pages() -> tuple[RadarPage, ...]:
         ("08", "选频道", "/radar 频道", "切换评测内容与计分方式"),
         ("09", "查档位", "/radar 档位", "已配置的模型与推理档位"),
     )
-    body = '<section class="help-hero"><span class="eyebrow">A FIELD GUIDE TO MODEL INTELLIGENCE</span><h2>让每次选择，<br>都有数据可循。</h2><p>选模型 · 看波动 · 衡量成本</p><div class="scope" aria-hidden="true"><i></i><b></b></div></section><div class="command-list">'
+    body = '<section class="help-hero"><span class="hero-lab">A FIELD GUIDE TO MODEL INTELLIGENCE</span><span class="seal" aria-hidden="true"><b>雷</b></span><h2>让每次选择，<br>都有数据可循。</h2><p>选模型 · 看波动 · 衡量成本</p></section><div class="command-list">'
     for index, title, command, hint in commands:
-        body += f'<div><span class="rank">{index}</span><strong>{title}</strong><code>{command}</code><span>{hint}</span></div>'
+        featured = ' class="featured"' if index == "00" else ""
+        body += f'<div{featured}><span class="rank">{index}</span><strong>{title}</strong><code>{command}</code><span>{hint}</span></div>'
     body += "</div>" + notice(
         "切换频道：在命令末尾添加 @频道，例如 /radar 榜 @pompeii-adjacency。模型与趋势命令建议显式填写档位。"
     )
     return (
         RadarPage(
-            "AI 智商雷达",
-            "模型观察手册 / FIELD GUIDE",
+            "命令指南",
+            "从要回答的问题出发，选一条命令。",
             body,
             "从要回答的问题选择命令。榜单用于比较，趋势用于观察，推荐用于缩小候选范围；每张数据卡保留来源和口径。",
             "帮助",
