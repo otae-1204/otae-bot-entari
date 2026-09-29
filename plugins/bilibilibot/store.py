@@ -504,6 +504,15 @@ class BiliStore:
     async def outbox_count(self) -> int:
         return await self._run(self._outbox_count_sync)
 
+    async def outbox_backlog_leader(self) -> tuple[str, str, int] | None:
+        """The recipient holding the most pending records, or None when empty.
+
+        The poller pauses when the outbox is large; a backlog owned by one
+        unreachable chat must not pause the poll for everybody, so the notifier
+        asks who owns it before blocking.
+        """
+        return await self._run(self._outbox_backlog_leader_sync)
+
     async def outbox_rows(
         self, *, subscriber_type: str | None = None, subscriber_id: str | None = None
     ) -> list[OutboxRow]:
@@ -613,6 +622,20 @@ class BiliStore:
     def _outbox_count_sync(self) -> int:
         row = self._connection().execute("SELECT COUNT(*) AS total FROM outbox").fetchone()
         return int(row["total"] or 0)
+
+    def _outbox_backlog_leader_sync(self) -> tuple[str, str, int] | None:
+        row = self._connection().execute(
+            """
+            SELECT subscriber_type, subscriber_id, COUNT(*) AS held
+            FROM outbox
+            GROUP BY subscriber_type, subscriber_id
+            ORDER BY held DESC, subscriber_type, subscriber_id
+            LIMIT 1
+            """
+        ).fetchone()
+        if row is None:
+            return None
+        return (str(row["subscriber_type"]), str(row["subscriber_id"]), int(row["held"]))
 
     def _outbox_rows_sync(
         self, subscriber_type: str | None = None, subscriber_id: str | None = None

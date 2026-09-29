@@ -165,6 +165,18 @@ class FakeStore:
     async def outbox_count(self) -> int:
         return len(self.rows)
 
+    async def outbox_backlog_leader(self) -> tuple[str, str, int] | None:
+        held: dict[tuple[str, str], int] = {}
+        for row in self.rows.values():
+            key = (row["subscriber_type"], row["subscriber_id"])
+            held[key] = held.get(key, 0) + 1
+        if not held:
+            return None
+        (subscriber_type, subscriber_id), count = max(
+            held.items(), key=lambda item: (item[1], item[0])
+        )
+        return (subscriber_type, subscriber_id, count)
+
 
 def _models():
     return _load_bili_new_module("models")
@@ -289,7 +301,7 @@ def test_retry_backoff_grows_to_the_cap_then_drops_the_record(logs):
                 lambda: (store.snapshot(row_id) or {}).get("attempts") == 1
             )
             delays = []
-            for expected_attempts in range(2, 8):
+            for expected_attempts in range(2, 4):
                 row = store.snapshot(row_id)
                 assert row is not None
                 delays.append(row["next_attempt_at"] - int(clock()))
@@ -309,10 +321,10 @@ def test_retry_backoff_grows_to_the_cap_then_drops_the_record(logs):
         finally:
             await notifier.stop()
 
-        # 30, 60, 120, 240, 480 and then the 600 s cap.
-        assert delays == [30, 60, 120, 240, 480, 600, 600]
+        # 30 and 60, then the record is dropped and the queue moves on.
+        assert delays == [30, 60, 120]
         assert store.rows == {}
-        assert len(recorder.attempts) == 8
+        assert len(recorder.attempts) == 4
         assert recorder.sent == []
         dropped = [
             text for text in logs.messages("ERROR") if "dropping notification" in text
@@ -560,6 +572,123 @@ def test_backlog_wait_blocks_until_the_outbox_drops_below_the_limit(logs):
         messages = logs.messages("INFO")
         assert any("pausing the poll" in text for text in messages)
         assert any("resuming the poll" in text for text in messages)
+
+    asyncio.run(scenario())
+
+
+def test_one_broken_recipient_does_not_silence_the_others():
+    """The reported bug: A group got its notification while B group got none.
+
+    A head record that can never be delivered used to hold every later record
+    of that recipient for the whole retry budget. The budget is now short
+    enough that the queue advances, so the healthy recipient keeps working and
+    the broken one is reported.
+    """
+
+    async def scenario() -> None:
+        clock = FakeClock()
+        store = FakeStore()
+        for index in range(3):
+            for recipient in ("A", "B"):
+                store.add(
+                    _card("live_on"),
+                    event_key=f"live:123:live_on:{index}",
+                    subscriber_id=recipient,
+                )
+        # Only the first record of B can never be sent; the rest would succeed.
+        recorder = Recorder(
+            fail=lambda row: row.subscriber_id == "B" and row.id == 2
+        )
+        notifier = _build(store, recorder, clock, concurrency=2)
+        await notifier.start()
+        try:
+            # Walk past the whole retry budget of the poisoned head record.
+            for _ in range(6):
+                clock.advance(200)
+                notifier.wake()
+                await asyncio.sleep(0.05)
+            await _wait_until(lambda: store.rows == {})
+        finally:
+            await notifier.stop()
+
+        delivered_a = sorted(row_id for row_id, who in recorder.sent if who == "A")
+        delivered_b = sorted(row_id for row_id, who in recorder.sent if who == "B")
+        assert delivered_a == [1, 3, 5]
+        # B loses only the poisoned record; its queue still advances.
+        assert delivered_b == [4, 6]
+
+    asyncio.run(scenario())
+
+
+def test_a_broken_recipient_is_reported_instead_of_failing_silently(logs):
+    async def scenario() -> None:
+        clock = FakeClock()
+        store = FakeStore()
+        for index in range(4):
+            store.add(
+                _card("live_on"),
+                event_key=f"live:123:live_on:{index}",
+                subscriber_id="900",
+            )
+        recorder = Recorder(fail=lambda row: True)
+        notifier = _build(store, recorder, clock, concurrency=1)
+        await notifier.start()
+        try:
+            # Each record needs 30 s + 60 s + 120 s before it is dropped.
+            for _ in range(30):
+                if store.rows == {}:
+                    break
+                clock.advance(200)
+                notifier.wake()
+                await asyncio.sleep(0.05)
+            await _wait_until(lambda: store.rows == {})
+        finally:
+            await notifier.stop()
+
+        alerts = [
+            text
+            for text in logs.messages("ERROR")
+            if "check that the bot is still in that chat" in text
+        ]
+        assert len(alerts) == 1, "the unreachable chat must be reported exactly once"
+        assert "group:900" in alerts[0]
+        assert "lost 3 notifications in a row" in alerts[0]
+
+    asyncio.run(scenario())
+
+
+def test_backlog_concentrated_on_one_recipient_does_not_pause_the_poll(logs):
+    """One unreachable chat must not starve every healthy recipient."""
+
+    async def scenario() -> None:
+        module = _notifier_module()
+        clock = FakeClock()
+        store = FakeStore()
+        # Five records for the broken chat, one for a healthy one.
+        for index in range(5):
+            store.add(
+                _card("live_on"),
+                event_key=f"live:123:live_on:{index}",
+                subscriber_id="broken",
+            )
+        store.add(_card("live_on"), event_key="live:123:live_on:ok", subscriber_id="ok")
+
+        async def send(_row: Any, _png: bytes) -> None:
+            raise module.SenderUnavailable("bot is offline")
+
+        notifier = module.Notifier(
+            store, render=Recorder().render, send=send, clock=clock, high_watermark=3
+        )
+        await notifier.start()
+        try:
+            # The waiter must return by itself instead of blocking the poller.
+            await asyncio.wait_for(notifier.wait_backlog_below(), timeout=5)
+        finally:
+            await notifier.stop()
+
+        messages = logs.messages("WARNING")
+        assert any("is concentrated on" in text for text in messages)
+        assert not any("pausing the poll" in text for text in logs.messages("INFO"))
 
     asyncio.run(scenario())
 
