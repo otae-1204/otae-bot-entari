@@ -204,6 +204,195 @@ class MedalMissingTest(unittest.TestCase):
         # 当前档位：G→3 档（金）、H→2 档（银）
         self.assertEqual(view.level_counts, {3: 1, 2: 1})
 
+    def test_medal_wall_orders_by_display_slot_and_picks_level_icon(self):
+        """奖章墙：按 ``achieve.display`` 槽位序号排序，并按镀层/实际档位选图标。
+
+        display 是「槽位 → hex」的映射而不是数组，故不能按 achieveMedals 的数组顺序渲染；
+        initLevel>1 的章同样要按 real_level = level + initLevel - 1 选图标（否则会取错档）。
+        """
+        service = EndfieldService.__new__(EndfieldService)
+        hex_a = hashlib.md5(b"achv_a").hexdigest()
+        hex_b = hashlib.md5(b"achv_b").hexdigest()
+        hex_c = hashlib.md5(b"achv_c").hexdigest()
+        # 数组顺序刻意与槽位顺序相反，验证渲染顺序取自 display 而非数组。
+        raw_progress = {"data": {"detail": {"achieve": {
+            "achieveMedals": [
+                {"achievementData": {
+                    "id": hex_c, "name": "C", "initLevel": 2,
+                    "initIcon": "i_c1", "reforge2Icon": "i_c2", "reforge3Icon": "i_c3",
+                }, "level": 1, "isPlated": False},
+                {"achievementData": {
+                    "id": hex_b, "name": "B", "initLevel": 1,
+                    "initIcon": "i_b1", "reforge2Icon": "i_b2",
+                }, "level": 2, "isPlated": False},
+                {"achievementData": {
+                    "id": hex_a, "name": "A", "initLevel": 1,
+                    "initIcon": "i_a1", "platedIcon": "i_a_plated",
+                }, "level": 1, "isPlated": True},
+            ],
+            "display": {"3": hex_c, "1": hex_a, "2": hex_b},
+        }}}}
+        view = service.build_medal_missing_view(
+            raw_progress, self._snapshot([]), nickname="t", uid="u", server_name="s"
+        )
+        self.assertEqual([m.slot for m in view.wall], [1, 2, 3])
+        self.assertEqual([m.name for m in view.wall], ["A", "B", "C"])
+        # A 已镀层 → 镀层图标压过档位图标
+        self.assertEqual(view.wall[0].icon_url, "i_a_plated")
+        self.assertTrue(view.wall[0].plated)
+        # B initLevel=1、level=2 → real=2 → 二档图标
+        self.assertEqual(view.wall[1].icon_url, "i_b2")
+        self.assertEqual(view.wall[1].level, 2)
+        # C initLevel=2、level=1 → real=1+2-1=2 → 二档图标（不是初始档）
+        self.assertEqual(view.wall[2].icon_url, "i_c2")
+        self.assertEqual(view.wall[2].level, 2)
+
+    def test_medal_wall_degrades_without_display(self):
+        """没有 display / 槽位缺图 / 槽位指向未拥有的 hex 时都不抛异常，只少格。"""
+        service = EndfieldService.__new__(EndfieldService)
+        hex_a = hashlib.md5(b"achv_a").hexdigest()
+        snapshot = self._snapshot([])
+
+        for achieve in (
+            {"achieveMedals": [{"achievementData": {"id": hex_a, "name": "A"}, "level": 1}]},
+            {"achieveMedals": [], "display": None},
+            {"achieveMedals": [], "display": {}},
+            {"achieveMedals": [], "display": {"1": hex_a}},          # 指向未拥有的章
+            {"achieveMedals": [{"achievementData": {"id": hex_a}}], "display": {"1": hex_a}},  # 无图标
+        ):
+            view = service.build_medal_missing_view(
+                {"data": {"detail": {"achieve": achieve}}},
+                snapshot, nickname="t", uid="u", server_name="s",
+            )
+            self.assertLessEqual(len(view.wall), 1, achieve)
+
+    def test_medal_wall_absent_when_achieve_missing(self):
+        """整个 achieve 段缺失（接口字段变动）时奖章墙为空，不影响缺章判定。"""
+        service = EndfieldService.__new__(EndfieldService)
+        view = service.build_medal_missing_view(
+            {"data": {"detail": {}}}, self._snapshot([]),
+            nickname="t", uid="u", server_name="s",
+        )
+        self.assertEqual(view.wall, [])
+
+    def test_medal_wall_resolves_back_to_akedata_records(self):
+        """奖章墙能按 id 还原出 AKEData 奖章记录（后续「展示奖章统计」依赖这条链路）。
+
+        森空岛只回 hex id，hex == md5(achv_id)，故无需任何图像识别即可关联到奖章元数据。
+        """
+        from plugins.endfield.catalog.views.medals import (
+            build_medal_id_index,
+            resolve_medal_wall,
+        )
+
+        service = EndfieldService.__new__(EndfieldService)
+        snapshot = self._snapshot([
+            MedalItemView(medal_id="achv_x", name="X 奖章", category_name="章节奖章", max_level=3),
+            MedalItemView(medal_id="achv_y", name="Y 奖章", category_name="技艺奖章", max_level=1),
+            MedalItemView(medal_id="achv_z", name="Z 奖章", max_level=1),
+        ])
+        hex_x = hashlib.md5(b"achv_x").hexdigest()
+        hex_y = hashlib.md5(b"achv_y").hexdigest()
+        # 快照里没有的章（活动已下架/新章）：应配出 None 而不是报错
+        unknown = hashlib.md5(b"achv_not_in_snapshot").hexdigest()
+        raw_progress = {"data": {"detail": {"achieve": {
+            "achieveMedals": [
+                {"achievementData": {"id": hex_x, "name": "X"}, "level": 1, "isPlated": True},
+                {"achievementData": {"id": hex_y, "name": "Y"}, "level": 1, "isPlated": False},
+                {"achievementData": {"id": unknown, "name": "?"}, "level": 1, "isPlated": False},
+            ],
+            "display": {"1": hex_x, "2": hex_y, "3": unknown},
+        }}}}
+        view = service.build_medal_missing_view(
+            raw_progress, snapshot, nickname="t", uid="u", server_name="s"
+        )
+        resolved = resolve_medal_wall(view.wall, snapshot.medals)
+        self.assertEqual(
+            [(wall.slot, medal.medal_id if medal else None) for wall, medal in resolved],
+            [(1, "achv_x"), (2, "achv_y"), (3, None)],
+        )
+        # 顺序与 wall 一致，便于按展示位统计
+        self.assertEqual([wall.slot for wall, _ in resolved], [1, 2, 3])
+        named = {medal.name for _, medal in resolved if medal}
+        self.assertEqual(named, {"X 奖章", "Y 奖章"})
+        # 索引忽略非 achv_ 前缀，避免把 FZ 兜底条目的 id 当 achv_id 哈希
+        self.assertEqual(len(build_medal_id_index(snapshot.medals)), 3)
+        self.assertEqual(len(build_medal_id_index([MedalItemView(medal_id="nomad_id", name="兜底")])), 0)
+
+    def test_wall_icon_prefers_akedata_highres(self):
+        """奖章墙图标优先 AKEData 高清图（400px），而不是森空岛回的 126px 小图。
+
+        森空岛的 achievementData 自带 initIcon（126×126），但页头 2x 出图会发虚；
+        AKEData 的 medaliconbig 是 400×400，且档位按 max(level, init_level) 兜底单档章。
+        """
+        service = EndfieldService.__new__(EndfieldService)
+        snapshot = self._snapshot([
+            MedalItemView(medal_id="achv_a", name="A", max_level=1, init_level=1),
+            MedalItemView(medal_id="achv_b", name="B", max_level=3, init_level=3),
+        ])
+        hex_a = hashlib.md5(b"achv_a").hexdigest()
+        hex_b = hashlib.md5(b"achv_b").hexdigest()
+        raw_progress = {"data": {"detail": {"achieve": {
+            "achieveMedals": [
+                {"achievementData": {
+                    "id": hex_a, "name": "A", "initLevel": 1, "initIcon": "https://bbs.hycdn.cn/a.png",
+                }, "level": 1, "isPlated": False},
+                {"achievementData": {
+                    "id": hex_b, "name": "B", "initLevel": 3, "initIcon": "https://bbs.hycdn.cn/b.png",
+                }, "level": 1, "isPlated": False},
+            ],
+            "display": {"1": hex_a, "2": hex_b},
+        }}}}
+        view = service.build_medal_missing_view(
+            raw_progress, snapshot, nickname="t", uid="u", server_name="s"
+        )
+        by_slot = {item.slot: item for item in view.wall}
+        self.assertIn("achv_a_lv01.png", by_slot[1].icon_url)
+        self.assertNotIn("hycdn.cn", by_slot[1].icon_url)
+        # 档位兜底：森空岛 lv=1 但章是单档 initLevel=3 → 取 lv03（否则 404）
+        self.assertIn("achv_b_lv03.png", by_slot[2].icon_url)
+
+    def test_wall_icon_falls_back_to_skland_for_plated(self):
+        """AKEData 没有镀层图，镀层章必须回退森空岛的 platedIcon（镀层外观不能丢）。"""
+        service = EndfieldService.__new__(EndfieldService)
+        snapshot = self._snapshot([
+            MedalItemView(medal_id="achv_p", name="P", max_level=3, init_level=3, can_be_plated=True),
+        ])
+        hex_p = hashlib.md5(b"achv_p").hexdigest()
+        raw_progress = {"data": {"detail": {"achieve": {
+            "achieveMedals": [
+                {"achievementData": {
+                    "id": hex_p, "name": "P", "initLevel": 3,
+                    "initIcon": "https://bbs.hycdn.cn/p.png",
+                    "platedIcon": "https://bbs.hycdn.cn/p_plated.png",
+                }, "level": 1, "isPlated": True},
+            ],
+            "display": {"1": hex_p},
+        }}}}
+        view = service.build_medal_missing_view(
+            raw_progress, snapshot, nickname="t", uid="u", server_name="s"
+        )
+        self.assertTrue(view.wall[0].plated)
+        self.assertEqual(view.wall[0].icon_url, "https://bbs.hycdn.cn/p_plated.png")
+
+    def test_wall_icon_skips_akedata_when_snapshot_lacks_medal(self):
+        """快照里没有这枚章（活动已下架）时不能拼 AKEData 路径，直接回退森空岛。"""
+        service = EndfieldService.__new__(EndfieldService)
+        hex_x = hashlib.md5(b"achv_gone").hexdigest()
+        raw_progress = {"data": {"detail": {"achieve": {
+            "achieveMedals": [
+                {"achievementData": {
+                    "id": hex_x, "name": "X", "initLevel": 1,
+                    "initIcon": "https://bbs.hycdn.cn/x.png",
+                }, "level": 1, "isPlated": False},
+            ],
+            "display": {"1": hex_x},
+        }}}}
+        view = service.build_medal_missing_view(
+            raw_progress, self._snapshot([]), nickname="t", uid="u", server_name="s"
+        )
+        self.assertEqual(view.wall[0].icon_url, "https://bbs.hycdn.cn/x.png")
+
     def test_md5_id_resolves_name_collision(self):
         """武陵·Ⅳ/·Ⅴ 命名撞名：森空岛两枚同名(hex 不同)，md5-id 能精确归属。"""
         service = EndfieldService.__new__(EndfieldService)

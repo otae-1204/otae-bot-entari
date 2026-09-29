@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 from typing import (
     Any,
+    Iterable,
+    Sequence,
 )
 
 from ...account.i18n import (
@@ -16,6 +19,7 @@ from ..models import (
     MedalItemView,
     MedalProgressView,
     MedalSnapshotView,
+    MedalWallItemView,
 )
 from .common import (
     _clean_fz_rich_text,
@@ -97,23 +101,175 @@ def _parse_player_medal_progress(
         hex_id = _first_text(meta, "id", "achievementId")
         if not (name or hex_id):
             continue
-        plated_raw = item.get("isPlated")
-        plated = plated_raw is True or (
-            isinstance(plated_raw, str) and plated_raw.strip().lower() in ("true", "1", "yes")
-        )
+        plated = _clean_plated_flag(item.get("isPlated"))
         init_level = _to_int(meta.get("initLevel")) or 0
+        # 未镀层双卡右卡要用镀层后图标；无 platedIcon 时留空，由渲染层降级为「无图」。
+        plated_icon = _medal_icon_url(meta, level=0, plated=True) if plated else ""
         view = MedalProgressView(
             medal_id=hex_id,
             level=_to_int(item.get("level")),
             plated=plated,
             init_level=init_level,
-            plated_icon=_first_text(meta, "platedIcon") or "",
+            plated_icon=plated_icon,
         )
         if hex_id:
             by_hex[hex_id] = view
         if name:
             by_name[_norm_medal_name(name)] = view
     return by_hex, by_name
+
+
+def _clean_plated_flag(raw: Any) -> bool:
+    """``isPlated`` 不恒为 bool：实测多为 bool，但防御性接受字符串 ``true``/``1``/``yes``。"""
+    if raw is True:
+        return True
+    return isinstance(raw, str) and raw.strip().lower() in ("true", "1", "yes")
+
+
+def _medal_icon_url(meta: dict[str, Any], *, level: int, plated: bool) -> str:
+    """按档位/镀层选森空岛图标：镀层 > 3 档 > 2 档 > 初始档。
+
+    与账号卡 ``account/draw.py:_medal_icon`` 同一取法；``level`` 需传**校正后**的实际档位。
+    """
+    if plated:
+        plated_icon = _first_text(meta, "platedIcon")
+        if plated_icon:
+            return plated_icon
+    if level >= 3:
+        icon = _first_text(meta, "reforge3Icon")
+        if icon:
+            return icon
+    if level >= 2:
+        icon = _first_text(meta, "reforge2Icon")
+        if icon:
+            return icon
+    return _first_text(meta, "initIcon") or ""
+
+
+def parse_player_medal_wall(
+    raw: dict[str, Any],
+    *,
+    limit: int = 10,
+    medals: Iterable[MedalItemView] | None = None,
+) -> list[MedalWallItemView]:
+    """从森空岛 ``card/detail`` 提取账号公开展示的奖章墙（游戏名片的展示位）。
+
+    路径 ``data.detail.achieve.display``，实测是 ``{"1": "<hex>", ..., "10": "<hex>"}``
+    ——槽位序号 → ``achieveMedals[i].achievementData.id``，故需先建 hex→奖章 索引再按
+    槽位序号排序（不是数组顺序）。``display`` 缺失或槽位指向未拥有的 hex 时跳过该格；
+    展示位没配满时返回少于 ``limit`` 格。奖章墙只展示**已获得**的章，未获得的不可能上榜。
+
+    **槽位序号即蜂窝坐标（2026-09-29 用游戏内截图逐格核对）**：竖排成对，奇数为上行、
+    偶数为下行（上行 1/3/5/7/9，下行 2/4/6/8/10，同列两格是相邻的一对）。渲染层据此
+    还原蜂窝，不要按「前 5 个一行、后 5 个一行」切分。
+
+    **图标取 AKEData 优先**（传 ``medals`` 时生效）：森空岛回的图标只有 126×126，页头
+    2x 出图时明显发虚；AKEData 的 ``medaliconbig/{achv_id}_lv{NN}.png`` 是 400×400。
+    但 AKEData **没有镀层图**（命名空间里没有 *plated* 资源、表里也无对应字段），所以
+    已镀层的章仍回退用森空岛的 ``platedIcon``——镀层外观比清晰度更不能丢。
+    """
+    achieve = (((raw.get("data") or {}).get("detail") or {}).get("achieve") or {})
+    by_hex: dict[str, dict[str, Any]] = {}
+    for item in achieve.get("achieveMedals") or []:
+        if not isinstance(item, dict):
+            continue
+        meta = item.get("achievementData") or {}
+        hex_id = _first_text(meta, "id", "achievementId")
+        if hex_id:
+            by_hex[hex_id] = item
+
+    md5_index = build_medal_id_index(medals) if medals is not None else {}
+
+    display = achieve.get("display")
+    if not isinstance(display, dict):
+        # 兼容把展示位写成数组的形态：下标即槽位序号。
+        display = (
+            {str(index): value for index, value in enumerate(display, 1)}
+            if isinstance(display, list)
+            else {}
+        )
+
+    # 槽位序号是字符串键；非数字键由 _to_int 归 0 排在最前，不影响正常展示位。
+    def _slot_key(pair: tuple[str, Any]) -> tuple[int, str]:
+        slot, hex_id = pair
+        return (_to_int(slot), str(hex_id))
+
+    wall: list[MedalWallItemView] = []
+    for slot, hex_id in sorted(display.items(), key=_slot_key):
+        item = by_hex.get(str(hex_id))
+        if item is None:
+            continue
+        meta = item.get("achievementData") or {}
+        init_level = _to_int(meta.get("initLevel")) or 0
+        # 与缺章判定同一口径：森空岛 level 对 initLevel>1 的章有偏移（详见
+        # docs/bugfix_medal_investigator_max_tier.md），图标必须按实际档位选。
+        offset = init_level - 1 if init_level > 0 else 0
+        level = _to_int(item.get("level")) + offset
+        plated = _clean_plated_flag(item.get("isPlated"))
+        medal = md5_index.get(str(hex_id))
+        wall.append(
+            MedalWallItemView(
+                slot=_to_int(slot),
+                medal_id=str(hex_id),
+                name=_first_text(meta, "name") or "",
+                icon_url=_wall_icon_url(meta, medal, level=level, plated=plated),
+                level=level,
+                plated=plated,
+            )
+        )
+    return wall[:limit]
+
+
+def _wall_icon_url(
+    meta: dict[str, Any],
+    medal: MedalItemView | None,
+    *,
+    level: int,
+    plated: bool,
+) -> str:
+    """奖章墙图标：优先 AKEData 高清图，镀层/无对应 achv_id 时回退森空岛。
+
+    AKEData 的 ``medaliconbig/{achv_id}_lv{NN}.png`` 是 400×400，森空岛只回 126×126
+    （页头 2x 出图时发虚）。但 AKEData 没有镀层图，故镀层章留用森空岛 ``platedIcon``。
+    单档章（``initLevel == maxLevel``）只有 ``_lv{initLevel}`` 一张，故档位取
+    ``max(level, init_level)`` 兜底，避免拼出 404。
+    """
+    if medal is not None and not plated:
+        achv_id = medal.medal_id or ""
+        if achv_id.startswith("achv_"):
+            tier = max(level, medal.init_level, 1)
+            if medal.max_level:
+                tier = min(tier, medal.max_level)
+            return f"{AKEDATA_ICON_BASE}/{achv_id}_lv{tier:02d}.png"
+    return _medal_icon_url(meta, level=level, plated=plated)
+
+
+def build_medal_id_index(medals: Iterable[MedalItemView]) -> dict[str, MedalItemView]:
+    """``md5(achv_id) -> 奖章`` 索引，用于把森空岛 hex id 还原成 AKEData 奖章记录。
+
+    奖章墙（``display``）与进度（``achieveMedals``）都只给 hex id，且 hex 就是
+    ``md5(achv_id)``（实测 115/115，见 ``docs/skland_medal_id_mapping.md``）。要做「用户
+    展示了哪些奖章」这类统计时，先用本函数建一次索引再查，避免各处重复算 md5。
+    """
+    index: dict[str, MedalItemView] = {}
+    for medal in medals:
+        achv_id = medal.medal_id or ""
+        if not achv_id.startswith("achv_"):
+            continue
+        index.setdefault(hashlib.md5(achv_id.encode()).hexdigest(), medal)
+    return index
+
+
+def resolve_medal_wall(
+    wall: Sequence[MedalWallItemView],
+    medals: Iterable[MedalItemView],
+) -> list[tuple[MedalWallItemView, MedalItemView | None]]:
+    """奖章墙 × 全量快照：逐格配出 AKEData 奖章记录（未收录时为 ``None``）。
+
+    返回顺序与 ``wall`` 一致（即森空岛展示位顺序），便于直接统计展示位的奖章构成。
+    """
+    index = build_medal_id_index(medals)
+    return [(item, index.get(item.medal_id)) for item in wall]
 
 
 def build_fz_medal_item(

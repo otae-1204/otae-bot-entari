@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import re
 import unittest
 from unittest.mock import AsyncMock, patch
 
 from lxml import html
 
-from plugins.endfield.catalog.models import MedalItemView, MedalMissingView
+from plugins.endfield.catalog.models import (
+    MedalItemView,
+    MedalMissingView,
+    MedalWallItemView,
+)
 from plugins.endfield.rendering import cards
 
 
@@ -86,3 +91,121 @@ class MedalMissingPaginationTest(unittest.IsolatedAsyncioTestCase):
         ):
             await cards.draw_medal_missing_card(view)
         render.assert_awaited_once()
+
+
+class MedalWallLayoutTest(unittest.IsolatedAsyncioTestCase):
+    """奖章墙蜂窝排布：槽位序号即坐标，奇数槽位上排、偶数槽位下排（2026-09-29 逐格核对游戏截图）。
+
+    排布样式全部内联（``_draw_neutral_card`` 不注入 extra_css），故断言直接看 style 属性。
+    """
+
+    def _wall(self, slots) -> list[MedalWallItemView]:
+        return [
+            MedalWallItemView(slot=slot, name=f"章{slot}", icon_url=f"icon-{slot}")
+            for slot in slots
+        ]
+
+    @staticmethod
+    def _cells(markup: str):
+        return html.fromstring(markup).xpath('//ul[@class="medal-wall-grid"]/li')
+
+    @staticmethod
+    def _style_value(cell, prop: str) -> str:
+        match = re.search(rf"(?:^|;){prop}:([^;]+)", cell.get("style") or "")
+        return match.group(1) if match else ""
+
+    async def test_odd_slots_are_upper_row_and_even_slots_lower_row(self):
+        wall = self._wall(range(1, 11))
+        markup = cards._medal_wall_html(wall, {f"icon-{s}": f"cached-{s}" for s in range(1, 11)})
+        cells = self._cells(markup)
+
+        self.assertEqual(len(cells), 10)
+        # 奇上偶下：上排 top=0，下排 top=行间距
+        for cell, item in zip(cells, wall):
+            expected = "0px" if item.slot % 2 == 1 else f"{cards.MEDAL_WALL_ROW_HEIGHT}px"
+            self.assertEqual(
+                self._style_value(cell, "top"), expected, f"槽位 {item.slot} 的排位置不对"
+            )
+        # 列号 = (slot-1)//2，下排再右错半个步距（同列两格是相邻的一对）
+        self.assertEqual(
+            [self._style_value(cell, "left") for cell in cells],
+            [
+                f"{cards.MEDAL_WALL_STRIDE * ((s - 1) // 2) + cards.MEDAL_WALL_ROW_INDENT * ((s - 1) % 2)}px"
+                for s in range(1, 11)
+            ],
+        )
+
+    async def test_hexagon_is_pointy_top(self):
+        """六边形必须是尖顶（顶点朝上、左右为尖）——平顶会整体转错 90°。"""
+        wall = self._wall([1])
+        markup = cards._medal_wall_html(wall, {"icon-1": "cached-1"})
+        clip = self._style_value(self._cells(markup)[0].xpath(".//img")[0], "clip-path")
+        self.assertEqual(
+            clip, "polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%)"
+        )
+        # 尖顶六边形的宽高比应 > 1（高大于宽）
+        self.assertGreater(
+            cards.MEDAL_WALL_ITEM_HEIGHT / cards.MEDAL_WALL_ITEM_WIDTH, 1.0
+        )
+
+    async def test_wall_grid_scales_with_constants_and_has_no_label(self):
+        markup = cards._medal_wall_html(self._wall(range(1, 11)), {})
+        grid = html.fromstring(markup).xpath('//ul[@class="medal-wall-grid"]')[0]
+        style = grid.get("style")
+        expected_width = (
+            cards.MEDAL_WALL_STRIDE * (cards.MEDAL_WALL_COLUMNS - 1)
+            + cards.MEDAL_WALL_ROW_INDENT
+            + cards.MEDAL_WALL_ITEM_WIDTH
+        )
+        self.assertIn(f"width:{expected_width}px", style)
+        # 两排：高度 = 行间距 + 单格高
+        self.assertIn(f"height:{cards.MEDAL_WALL_ROW_HEIGHT + cards.MEDAL_WALL_ITEM_HEIGHT}px", style)
+        # 需求：卡片里不加「勋章展示墙」标题
+        self.assertNotIn("勋章展示墙", markup)
+
+    async def test_wall_fills_all_display_slots_and_labels_medals(self):
+        """展示位上限 10：只配了 3 枚时，其余 7 格补空槽位底图；章名走 title。"""
+        wall = self._wall([1, 2, 3])
+        markup = cards._medal_wall_html(
+            wall,
+            {
+                "icon-1": "data:image/png;base64,AAA",
+                "icon-2": "cached-2",
+                "icon-3": "cached-3",
+            },
+        )
+        cells = self._cells(markup)
+        self.assertEqual(len(cells), 10)
+        self.assertEqual(
+            [cell.get("title") for cell in cells], ["章1", "章2", "章3"] + [""] * 7
+        )
+        images = [cell.xpath(".//img/@src") for cell in cells]
+        self.assertEqual(images[0], ["data:image/png;base64,AAA"])
+        self.assertEqual(images[1], ["cached-2"])
+        # 空槽位不是空白：用游戏凹槽底图
+        self.assertTrue(all(src and src[0] for src in images[3:]), images[3:])
+
+    async def test_missing_medal_icon_falls_back_to_empty_slot(self):
+        """奖章图缺失时退回空槽位底图，而不是留空洞。"""
+        markup = cards._medal_wall_html(self._wall([1]), {"icon-1": ""})
+        first = self._cells(markup)[0]
+        src = first.xpath(".//img/@src")[0]
+        self.assertTrue(src)
+        # 空槽位是压暗处理的，奖章不是
+        self.assertIn("brightness(", first.xpath(".//img")[0].get("style"))
+
+    async def test_wall_icons_are_loaded_and_wall_only_on_first_page(self):
+        wall = self._wall(range(1, 11))
+        view = MedalMissingView(
+            not_obtained=[MedalItemView(medal_id="a", name="A", icon_url="list-icon")],
+            wall=wall,
+        )
+        with (
+            patch.object(cards, "_image_data_urls", AsyncMock(return_value={})) as assets,
+            patch.object(cards, "_draw_neutral_card", AsyncMock(return_value=b"page")),
+        ):
+            await cards.draw_medal_missing_card(view)
+        loaded = assets.await_args.args[0]
+        self.assertIn("list-icon", loaded)
+        for slot in range(1, 11):
+            self.assertIn(f"icon-{slot}", loaded)

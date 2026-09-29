@@ -494,6 +494,21 @@ class MedalProgressView:
 
 
 @dataclass(slots=True)
+class MedalWallItemView:
+    """奖章墙的一格：账号在游戏名片里公开展示的一枚已获得奖章。
+
+    ``slot`` 是森空岛 ``achieve.display`` 的展示位序号（1 起），决定蜂窝排布顺序；
+    ``icon_url`` 已按等级/镀层选好，取自森空岛 ``achievementData`` 的各档图标。
+    """
+    slot: int = 0
+    medal_id: str = ""        # achievementData.id（hex = md5(achv_id)）
+    name: str = ""
+    icon_url: str = ""
+    level: int = 0            # 校正后的实际档位
+    plated: bool = False
+
+
+@dataclass(slots=True)
 class MedalMissingView:
     """F2 个人缺章视图：未获得 / 未升满 / 未镀层。"""
     nickname: str = ""
@@ -511,6 +526,7 @@ class MedalMissingView:
     truncated: bool = False
     shown_count: int = 0
     level_counts: dict[int, int] = field(default_factory=dict)
+    wall: list[MedalWallItemView] = field(default_factory=list)   # 账号展示的奖章墙（最多 10 格）
 
 
 # ----- 档案库（archive）模块 -----
