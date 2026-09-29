@@ -19,9 +19,9 @@ achv_id 与森空岛 ``achievementData.id`` 经 md5 一一对应（见 ``docs/sk
 from __future__ import annotations
 
 import asyncio
-
-from typing import Any
 import time
+from typing import Any
+from urllib.parse import quote
 
 from otae_bot.infrastructure.http.client import fetch_json
 
@@ -71,18 +71,37 @@ async def fetch_akedata_manifest() -> dict[str, Any]:
     return manifest
 
 
-async def fetch_akedata_medal_tables() -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], str]:
-    """返回 ``(AchievementTable, AchievementTypeTable, I18nTextTable_CN, version_id)``。"""
-    manifest = await fetch_akedata_manifest()
-    latest = manifest["latest"]
-    entry = next((v for v in manifest.get("versions") or [] if v.get("id") == latest), None)
-    if not entry or not entry.get("tableCfgPath"):
+def latest_version_entry(manifest: dict[str, Any]) -> dict[str, Any]:
+    """Resolve the exact build; the display's major.minor label is not a cache key."""
+    latest = manifest.get("latest")
+    entry = next(
+        (v for v in manifest.get("versions") or [] if isinstance(v, dict) and v.get("id") == latest),
+        None,
+    )
+    if not latest or not entry or not entry.get("tableCfgPath"):
         raise RuntimeError(f"AKEData manifest 缺少版本 {latest} 的 tableCfgPath")
+    return entry
+
+
+def _table_path(table_cfg: str, name: str, cache_token: str) -> str:
+    path = f"/{table_cfg.strip('/')}/{name}.json"
+    # One token per refresh shares i18n within the batch, bypassing older cached tables.
+    return f"{path}?v={quote(cache_token, safe='')}" if cache_token else path
+
+
+async def fetch_akedata_medal_tables(
+    *, manifest: dict[str, Any] | None = None, cache_token: str = "",
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], str]:
+    """返回 ``(AchievementTable, AchievementTypeTable, I18nTextTable_CN, version_id)``。"""
+    if manifest is None:
+        manifest = await fetch_akedata_manifest()
+    latest = manifest["latest"]
+    entry = latest_version_entry(manifest)
     table_cfg = str(entry["tableCfgPath"]).lstrip("/")
     achievement, type_table, i18n = await asyncio.gather(
-        _get(f"/{table_cfg}/AchievementTable.json"),
-        _get(f"/{table_cfg}/AchievementTypeTable.json"),
-        _get(f"/{table_cfg}/I18nTextTable_CN.json", max_bytes=_I18N_MAX_BYTES),
+        _get(_table_path(table_cfg, "AchievementTable", cache_token)),
+        _get(_table_path(table_cfg, "AchievementTypeTable", cache_token)),
+        _get(_table_path(table_cfg, "I18nTextTable_CN", cache_token), max_bytes=_I18N_MAX_BYTES),
     )
     return achievement, type_table, i18n, latest
 
@@ -125,20 +144,23 @@ HISTORICAL_TABLE_TTL_SECONDS = 7 * 24 * 3600
 
 
 async def fetch_akedata_achievement_table(
-    table_cfg: str, *, ttl_seconds: float | None = HISTORICAL_TABLE_TTL_SECONDS
+    table_cfg: str, *, ttl_seconds: float | None = HISTORICAL_TABLE_TTL_SECONDS,
+    cache_token: str = "",
 ) -> dict[str, Any]:
     """抓指定版本的 ``AchievementTable.json``（按 achv_ id 索引，~175KB）。
 
     默认长 TTL——历史版本内容恒定；latest 版本调用方可传 None 走默认 600s。
     """
     table = await _get(
-        f"/{str(table_cfg).strip('/')}/AchievementTable.json",
+        _table_path(str(table_cfg), "AchievementTable", cache_token),
         ttl_seconds=ttl_seconds,
     )
     return table if isinstance(table, dict) else {}
 
 
-async def fetch_akedata_archive_tables() -> tuple[
+async def fetch_akedata_archive_tables(
+    *, manifest: dict[str, Any] | None = None, cache_token: str = "",
+) -> tuple[
     dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any], str
 ]:
     """返回 ``(PrtsPage, PrtsCategory, PrtsFirstLv, PrtsAllItem, I18nTextTable_CN, version_id)``。
@@ -149,31 +171,31 @@ async def fetch_akedata_archive_tables() -> tuple[
     无混合类型组）。AKEData 站上「任务文本/地图文本」由 DialogTextTable/LevelDescTable 合成的
     虚拟分类不在 PrtsAllItem 内，本功能不抓这两张表，天然排除。
     """
-    manifest = await fetch_akedata_manifest()
+    if manifest is None:
+        manifest = await fetch_akedata_manifest()
     latest = manifest["latest"]
-    entry = next((v for v in manifest.get("versions") or [] if v.get("id") == latest), None)
-    if not entry or not entry.get("tableCfgPath"):
-        raise RuntimeError(f"AKEData manifest 缺少版本 {latest} 的 tableCfgPath")
+    entry = latest_version_entry(manifest)
     table_cfg = str(entry["tableCfgPath"]).lstrip("/")
     page, category, first_lv, all_item, i18n = await asyncio.gather(
-        _get(f"/{table_cfg}/PrtsPage.json"),
-        _get(f"/{table_cfg}/PrtsCategory.json"),
-        _get(f"/{table_cfg}/PrtsFirstLv.json"),
-        _get(f"/{table_cfg}/PrtsAllItem.json"),
-        _get(f"/{table_cfg}/I18nTextTable_CN.json", max_bytes=_I18N_MAX_BYTES),
+        _get(_table_path(table_cfg, "PrtsPage", cache_token)),
+        _get(_table_path(table_cfg, "PrtsCategory", cache_token)),
+        _get(_table_path(table_cfg, "PrtsFirstLv", cache_token)),
+        _get(_table_path(table_cfg, "PrtsAllItem", cache_token)),
+        _get(_table_path(table_cfg, "I18nTextTable_CN", cache_token), max_bytes=_I18N_MAX_BYTES),
     )
     return page, category, first_lv, all_item, i18n, latest
 
 
 async def fetch_akedata_prts_all_item(
-    table_cfg: str, *, ttl_seconds: float | None = HISTORICAL_TABLE_TTL_SECONDS
+    table_cfg: str, *, ttl_seconds: float | None = HISTORICAL_TABLE_TTL_SECONDS,
+    cache_token: str = "",
 ) -> dict[str, Any]:
     """抓指定版本的 ``PrtsAllItem.json``（按 nar_ id 索引，~165KB）。
 
     历史版本内容恒定，默认长 TTL；latest 版本调用方可传 None 走默认 600s。
     """
     table = await _get(
-        f"/{str(table_cfg).strip('/')}/PrtsAllItem.json",
+        _table_path(str(table_cfg), "PrtsAllItem", cache_token),
         ttl_seconds=ttl_seconds,
     )
     return table if isinstance(table, dict) else {}

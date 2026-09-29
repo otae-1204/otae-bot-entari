@@ -713,7 +713,10 @@ class EndfieldService:
             fetched_at=fetched_at or int(time.time()),
         )
 
-    async def fetch_medal_snapshot_akedata(self, *, fetched_at: int | None = None) -> MedalSnapshotView:
+    async def fetch_medal_snapshot_akedata(
+        self, *, fetched_at: int | None = None,
+        manifest: dict[str, Any] | None = None, cache_token: str = "",
+    ) -> MedalSnapshotView:
         """抓取 AKEData 全量奖章快照（权威主源）。
 
         manifest → latest 版本 → AchievementTable + AchievementTypeTable + I18nTextTable_CN，
@@ -722,7 +725,9 @@ class EndfieldService:
         """
         from ..providers.akedata import fetch_akedata_medal_tables
 
-        achievement, type_table, i18n, version = await fetch_akedata_medal_tables()
+        achievement, type_table, i18n, version = await fetch_akedata_medal_tables(
+            manifest=manifest, cache_token=cache_token,
+        )
         if not isinstance(achievement, dict) or not achievement:
             raise ValueError("AKEData AchievementTable 为空")
         if not isinstance(type_table, dict) or not type_table:
@@ -750,18 +755,26 @@ class EndfieldService:
             )
         return snapshot
 
-    async def fetch_akedata_baseline(self, *, fetched_at: int | None = None) -> MedalBaselineView | None:
+    async def fetch_akedata_baseline(
+        self, *, fetched_at: int | None = None, manifest: dict[str, Any] | None = None,
+        cache_token: str = "",
+    ) -> MedalBaselineView | None:
         """抓 akedata「上一游戏版本」基线（版本对比的 previous 方，源和源）。
 
         manifest → pick_previous_game_version → 抓其 AchievementTable（仅取 achv_id 集合）。
         无更早游戏版本时返回 None；抓取失败会抛出异常，由调用方保留已有基线。
         """
         try:
-            manifest = await fetch_akedata_manifest()
+            if manifest is None:
+                manifest = await fetch_akedata_manifest()
             prev = pick_previous_game_version(manifest)
-            if not prev or not prev.get("tableCfgPath"):
+            if not prev:
                 return None
-            table = await fetch_akedata_achievement_table(str(prev["tableCfgPath"]).lstrip("/"))
+            if not prev.get("tableCfgPath"):
+                raise ValueError("AKEData 历史版本缺少 tableCfgPath")
+            table = await fetch_akedata_achievement_table(
+                str(prev["tableCfgPath"]).lstrip("/"), cache_token=cache_token,
+            )
             if not isinstance(table, dict) or not table:
                 raise ValueError("AKEData 历史 AchievementTable 为空")
             ids = [aid for aid, entry in table.items() if isinstance(entry, dict)]
@@ -894,14 +907,19 @@ class EndfieldService:
             level_counts=owned_level_counts,
         )
 
-    async def fetch_archive_snapshot_akedata(self, *, fetched_at: int | None = None) -> ArchiveSnapshotView:
+    async def fetch_archive_snapshot_akedata(
+        self, *, fetched_at: int | None = None,
+        manifest: dict[str, Any] | None = None, cache_token: str = "",
+    ) -> ArchiveSnapshotView:
         """抓取 AKEData 档案库全量快照（三大页签口径：中枢档案/见闻辑录/音像存档）。
 
         manifest → latest 版本 → PrtsPage + PrtsCategory + PrtsFirstLv + PrtsAllItem +
         I18nTextTable_CN，聚合成快照。条目 ``type`` ↔ 页签 ``pageType`` 一一对应，
         不在三大页签内的条目（任务文本/地图文本等虚拟分类残留）天然被排除。
         """
-        page, category, first_lv, all_item, i18n, version = await fetch_akedata_archive_tables()
+        page, category, first_lv, all_item, i18n, version = await fetch_akedata_archive_tables(
+            manifest=manifest, cache_token=cache_token,
+        )
         if not isinstance(all_item, dict) or not all_item:
             raise ValueError("AKEData PrtsAllItem 为空")
         if not isinstance(i18n, dict) or not i18n:
@@ -931,7 +949,10 @@ class EndfieldService:
             )
         return snapshot
 
-    async def fetch_archive_baseline(self, *, fetched_at: int | None = None) -> ArchiveBaselineView | None:
+    async def fetch_archive_baseline(
+        self, *, fetched_at: int | None = None, manifest: dict[str, Any] | None = None,
+        cache_token: str = "",
+    ) -> ArchiveBaselineView | None:
         """抓 akedata「上一游戏版本」档案库基线（版本对比的 previous 方，源和源）。
 
         manifest → pick_previous_game_version → 抓其 PrtsAllItem（仅取 nar_ id 集合）。
@@ -939,11 +960,16 @@ class EndfieldService:
         nar_ id 跨版本稳定（2026-09-10 实测 1.4.4→1.5.3 重叠 100%）。
         """
         try:
-            manifest = await fetch_akedata_manifest()
+            if manifest is None:
+                manifest = await fetch_akedata_manifest()
             prev = pick_previous_game_version(manifest)
-            if not prev or not prev.get("tableCfgPath"):
+            if not prev:
                 return None
-            table = await fetch_akedata_prts_all_item(str(prev["tableCfgPath"]).lstrip("/"))
+            if not prev.get("tableCfgPath"):
+                raise ValueError("AKEData 历史版本缺少 tableCfgPath")
+            table = await fetch_akedata_prts_all_item(
+                str(prev["tableCfgPath"]).lstrip("/"), cache_token=cache_token,
+            )
             if not isinstance(table, dict) or not table:
                 raise ValueError("AKEData 历史 PrtsAllItem 为空")
             ids = list(dict.fromkeys(

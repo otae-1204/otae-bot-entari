@@ -191,6 +191,11 @@ from .catalog.service import (
 )
 from .medals.store import MedalSnapshotStore
 from .archives.store import ArchiveSnapshotStore
+from .catalog.refresh import (
+    CHECK_INTERVAL_SECONDS,
+    CollectionSnapshotRefresher,
+    SnapshotPersistenceError,
+)
 from .ownership.service import (
     GroupMemberListError,
     OwnershipRefreshResult,
@@ -224,9 +229,8 @@ register_ownership_stats_renderer(draw_ownership_stats)
 calendar_source = AkeDataVersionCalendarSource(client)
 official_calendar_source = OfficialVersionCalendarSource()
 medal_store = MedalSnapshotStore()
-_MEDAL_LOCK = asyncio.Lock()
 archive_store = ArchiveSnapshotStore()
-_ARCHIVE_LOCK = asyncio.Lock()
+collection_refresher = CollectionSnapshotRefresher(service, medal_store, archive_store)
 _FORWARD_SENDER_NAME = "Endfield"
 CARD_CACHE_TTL_SECONDS = 600.0
 CARD_CACHE_MAX_BYTES = 48 * 1024 * 1024
@@ -584,44 +588,19 @@ async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand,
 async def _handle_medal(matcher, command: ParsedEndfieldCommand) -> None:
     """F1：查看蚀刻章统计/新增；刷新时重抓 AKEData 数据 + 上一版本基线（源和源对比）。"""
     if command.action == "medal_refresh":
-        async with _MEDAL_LOCK:
-            await matcher.send("正在抓取 AKEData 蚀刻章数据…")
-            started = perf_counter()
-            try:
-                snapshot = await service.fetch_medal_snapshot_akedata()
-            except Exception as exc:
-                logger.warning(f"[endfield] medal refresh failed: {exc}")
-                return await matcher.finish("AKEData 数据源暂时不可用，请稍后重试。")
-            # 先抓基线，再成对写盘；基线暂时不可用时保留旧基线，避免丢失版本对比。
-            try:
-                baseline = await service.fetch_akedata_baseline()
-            except Exception as exc:
-                logger.warning(f"[endfield] medal baseline unavailable; keeping previous: {exc}")
-                baseline = None
-                baseline_available = False
-            else:
-                baseline_available = True
-            try:
-                if baseline_available:
-                    await medal_store.replace_current_and_baseline(snapshot, baseline)
-                else:
-                    await medal_store.replace_current(snapshot)
-            except Exception as exc:
-                logger.exception(f"[endfield] medal snapshot persistence failed: {exc}")
-                return await matcher.finish("蚀刻章数据保存失败，请稍后重试。")
-            stored_baseline = medal_store.load_baseline_view()
-            baseline_info = (
-                f"{stored_baseline.version}({len(stored_baseline.ids)} ids)"
-                if stored_baseline else "none"
-            )
-            logger.info(
-                f"[endfield] medal snapshot refreshed medals={snapshot.total_count} "
-                f"baseline={baseline_info} time={perf_counter() - started:.1f}s"
-            )
+        await matcher.send("正在抓取 AKEData 蚀刻章数据…")
+        try:
+            await collection_refresher.refresh("medal")
+        except SnapshotPersistenceError as exc:
+            logger.exception(f"[endfield] medal snapshot persistence failed: {exc}")
+            return await matcher.finish("蚀刻章数据保存失败，请稍后重试。")
+        except Exception as exc:
+            logger.warning(f"[endfield] medal refresh failed: {exc}")
+            return await matcher.finish("AKEData 数据源暂时不可用，请稍后重试。")
 
     current = medal_store.load_current_view()
     if current is None:
-        return await matcher.finish("暂无蚀刻章数据，请先发送「/ef 奖章 刷新」。")
+        return await matcher.finish("暂无蚀刻章数据，自动同步会继续重试，请稍后查询。")
     baseline = medal_store.load_baseline_view()
     try:
         diff = service.build_medal_diff(current, baseline)
@@ -638,44 +617,19 @@ async def _handle_medal(matcher, command: ParsedEndfieldCommand) -> None:
 async def _handle_archive(matcher, command: ParsedEndfieldCommand) -> None:
     """档案库版本统计/新增；刷新时重抓 AKEData 档案表 + 上一版本基线（源和源对比）。"""
     if command.action == "archive_refresh":
-        async with _ARCHIVE_LOCK:
-            await matcher.send("正在抓取 AKEData 档案库数据…")
-            started = perf_counter()
-            try:
-                snapshot = await service.fetch_archive_snapshot_akedata()
-            except Exception as exc:
-                logger.warning(f"[endfield] archive refresh failed: {exc}")
-                return await matcher.finish("AKEData 数据源暂时不可用，请稍后重试。")
-            # 先抓基线，再成对写盘；基线暂时不可用时保留旧基线，避免丢失版本对比。
-            try:
-                baseline = await service.fetch_archive_baseline()
-            except Exception as exc:
-                logger.warning(f"[endfield] archive baseline unavailable; keeping previous: {exc}")
-                baseline = None
-                baseline_available = False
-            else:
-                baseline_available = True
-            try:
-                if baseline_available:
-                    await archive_store.replace_current_and_baseline(snapshot, baseline)
-                else:
-                    await archive_store.replace_current(snapshot)
-            except Exception as exc:
-                logger.exception(f"[endfield] archive snapshot persistence failed: {exc}")
-                return await matcher.finish("档案库数据保存失败，请稍后重试。")
-            stored_baseline = archive_store.load_baseline_view()
-            baseline_info = (
-                f"{stored_baseline.version}({len(stored_baseline.ids)} ids)"
-                if stored_baseline else "none"
-            )
-            logger.info(
-                f"[endfield] archive snapshot refreshed items={snapshot.total_count} "
-                f"baseline={baseline_info} time={perf_counter() - started:.1f}s"
-            )
+        await matcher.send("正在抓取 AKEData 档案库数据…")
+        try:
+            await collection_refresher.refresh("archive")
+        except SnapshotPersistenceError as exc:
+            logger.exception(f"[endfield] archive snapshot persistence failed: {exc}")
+            return await matcher.finish("档案库数据保存失败，请稍后重试。")
+        except Exception as exc:
+            logger.warning(f"[endfield] archive refresh failed: {exc}")
+            return await matcher.finish("AKEData 数据源暂时不可用，请稍后重试。")
 
     current = archive_store.load_current_view()
     if current is None:
-        return await matcher.finish("暂无档案库数据，请先发送「/ef 档案 刷新」。")
+        return await matcher.finish("暂无档案库数据，自动同步会继续重试，请稍后查询。")
     baseline = archive_store.load_baseline_view()
     try:
         diff = service.build_archive_diff(current, baseline)
@@ -802,7 +756,7 @@ async def _handle_medal_missing(
         return await matcher.finish("未找到对应账号，请先私聊使用 /ef 绑定。")
     snapshot = medal_store.load_current_view()
     if snapshot is None:
-        return await matcher.finish("暂无蚀刻章数据，请先发送「/ef 奖章 刷新」建立快照。")
+        return await matcher.finish("暂无蚀刻章数据，自动同步会继续重试，请稍后查询。")
     try:
         async with ROLE_TASKS.claim(role):
             token = account_store.decrypt_token(role, cipher)
@@ -836,7 +790,7 @@ async def _handle_archive_progress(
         return await matcher.finish("未找到对应账号，请先私聊使用 /ef 绑定。")
     snapshot = archive_store.load_current_view()
     if snapshot is None:
-        return await matcher.finish("暂无档案库数据，请先发送「/ef 档案 刷新」建立快照。")
+        return await matcher.finish("暂无档案库数据，自动同步会继续重试，请稍后查询。")
     try:
         async with ROLE_TASKS.claim(role):
             token = account_store.decrypt_token(role, cipher)
@@ -3559,6 +3513,34 @@ def _parse_query(rest: str) -> tuple[str, str]:
 
 _ownership_startup_started = False
 _ownership_startup_task: asyncio.Task | None = None
+_collection_startup_started = False
+_collection_startup_task: asyncio.Task | None = None
+
+
+async def _refresh_collection_snapshots() -> None:
+    try:
+        await collection_refresher.refresh_all()
+    except Exception as exc:
+        logger.warning(f"[endfield] collection manifest check failed; will retry: {exc}")
+
+
+@on_ready
+async def _warmup_collection_snapshots(_bot=None) -> None:
+    global _collection_startup_started, _collection_startup_task
+    if _collection_startup_started:
+        return
+    _collection_startup_started = True
+    _collection_startup_task = asyncio.create_task(_refresh_collection_snapshots())
+
+
+timer.add_job(
+    _refresh_collection_snapshots,
+    "interval",
+    seconds=CHECK_INTERVAL_SECONDS,
+    id="endfield_collection_snapshot_refresh",
+    replace_existing=True,
+    max_instances=1,
+)
 
 
 @on_ready
@@ -3619,9 +3601,13 @@ timer.add_job(
 
 @listen(Cleanup)
 async def _close_ownership_startup_task() -> None:
-    if _ownership_startup_task is not None and not _ownership_startup_task.done():
-        _ownership_startup_task.cancel()
-        await asyncio.gather(_ownership_startup_task, return_exceptions=True)
+    startup_tasks = [
+        task for task in (_ownership_startup_task, _collection_startup_task)
+        if task is not None and not task.done()
+    ]
+    for task in startup_tasks:
+        task.cancel()
+    await asyncio.gather(*startup_tasks, return_exceptions=True)
     await close_challenge_locale()
     await asyncio.gather(*(
         cache.close() for cache in (

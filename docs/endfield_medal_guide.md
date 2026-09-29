@@ -22,6 +22,12 @@ F1/F2 详情每条显示 **描述**（深色）+ **获取条件**（浅色），
 
 > 取数细节见 `docs/akedata_data_access_guide.md`；森空岛字段见 `docs/skland_endfield_personal_api.md`。
 
+公开快照与档案共用自动刷新：启动检查一次，之后每 **10 分钟**检查完整构建与热更修订，
+变化时抓取；每 **6 小时**重新校验一次，防止同标识补数据。无变化时不下载大表，失败保留
+可用快照并在下一轮重试。手动 `/zmd 奖章 刷新` 仍可强制刷新，与自动任务共用锁。
+基线始终使用上一游戏大版本，热更不会重置“本版本新增”。具体失败处理和实现见
+[档案指南的自动刷新说明](endfield_archive_guide.md#自动刷新档案与蚀刻章共用)。
+
 ---
 
 ## 3. 架构（文件分工）
@@ -35,6 +41,8 @@ F1/F2 详情每条显示 **描述**（深色）+ **获取条件**（浅色），
 | `plugins/endfield/rendering/cards.py` | `draw_medal_stats_card` / `draw_medal_missing_card` + `_medal_*` 渲染辅助（HTML→Playwright 截图） |
 | `plugins/endfield/catalog/commands.py` | 奖章命令解析（`MEDAL_ALIASES` / `MEDAL_REFRESH_ALIASES` / `MEDAL_MISSING_ALIASES`） |
 | `plugins/endfield/handlers.py` | `_handle_medal` / `_handle_medal_missing` |
+| `plugins/endfield/catalog/refresh.py` | 公共快照自动/手动刷新、修订检测、失败重试 |
+| `plugins/endfield/catalog/snapshot_store.py` | current/baseline/修订指纹的原子持久化 |
 
 ---
 
@@ -79,7 +87,7 @@ F1/F2 详情每条显示 **描述**（深色）+ **获取条件**（浅色），
 
 前置：私聊 `/zmd 绑定` 绑定一个森空岛账号（手机号验证码）。
 
-1. **建快照**：`/zmd 奖章 刷新` — 抓 AKEData 全量 + 上一版本基线（首次必做，约 1.5s；返回「已刷新 N 枚」）。
+1. **建快照**：启动后自动抓 AKEData 全量 + 上一版本基线；可用 `/zmd 奖章 刷新` 立即强制刷新并返回统计卡，无需首次手动初始化。
 2. **F1**：`/zmd 奖章` — 读快照出统计卡（秒回）。检查：标题「游戏版本 X」、两行统计（总数+三级 / 可镀层·可升级·新增）、新增列表双列、每条描述+条件。
 3. **F2**：`/zmd 奖章 缺章` — 用绑定账号查森空岛进度。检查：两行统计（已拥有+三级已有 / 版本总数·未获得·未升满，且 已拥有+未获得=版本总数）、未获得双列、未升满左右双卡（当前档→升级后，两图标不同）。
 
