@@ -1214,6 +1214,7 @@ MEDAL_CARD_CSS = """
 .medal-main{padding:0;border:0;background:none}
 .medal-stats{margin:0 0 18px;border:1px solid #d0d7dc;background:#f2f5f7}
 .medal-row{display:grid;grid-template-columns:1.25fr repeat(3,minmax(0,1fr));align-items:stretch}
+.medal-missing-card .medal-row{grid-template-columns:repeat(4,minmax(0,1fr))}
 .medal-stats .primary{padding:14px 20px 12px}
 .medal-stats .primary span,.medal-stats-secondary .tile span{display:block;color:#616d79;font-size:15px;margin-bottom:2px}
 .medal-stats .primary strong{display:block;font-size:40px;line-height:1.1;font-weight:800;letter-spacing:-.04em;font-variant-numeric:tabular-nums}
