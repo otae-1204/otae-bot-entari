@@ -192,7 +192,6 @@ from .catalog.service import (
 from .medals.store import MedalSnapshotStore
 from .archives.store import ArchiveSnapshotStore
 from .catalog.refresh import (
-    CHECK_INTERVAL_SECONDS,
     CollectionSnapshotRefresher,
     SnapshotPersistenceError,
 )
@@ -597,10 +596,12 @@ async def _handle_medal(matcher, command: ParsedEndfieldCommand) -> None:
         except Exception as exc:
             logger.warning(f"[endfield] medal refresh failed: {exc}")
             return await matcher.finish("AKEData 数据源暂时不可用，请稍后重试。")
+    else:
+        await collection_refresher.ensure_fresh()
 
     current = medal_store.load_current_view()
     if current is None:
-        return await matcher.finish("暂无蚀刻章数据，自动同步会继续重试，请稍后查询。")
+        return await matcher.finish("蚀刻章数据暂时不可用，请稍后查询，或发送 /ef 奖章 刷新 重试。")
     baseline = medal_store.load_baseline_view()
     try:
         diff = service.build_medal_diff(current, baseline)
@@ -626,10 +627,12 @@ async def _handle_archive(matcher, command: ParsedEndfieldCommand) -> None:
         except Exception as exc:
             logger.warning(f"[endfield] archive refresh failed: {exc}")
             return await matcher.finish("AKEData 数据源暂时不可用，请稍后重试。")
+    else:
+        await collection_refresher.ensure_fresh()
 
     current = archive_store.load_current_view()
     if current is None:
-        return await matcher.finish("暂无档案库数据，自动同步会继续重试，请稍后查询。")
+        return await matcher.finish("档案库数据暂时不可用，请稍后查询，或发送 /ef 档案 刷新 重试。")
     baseline = archive_store.load_baseline_view()
     try:
         diff = service.build_archive_diff(current, baseline)
@@ -754,9 +757,10 @@ async def _handle_medal_missing(
     role = account_store.resolve_role(qq_user_id, command.account_selector)
     if role is None:
         return await matcher.finish("未找到对应账号，请先私聊使用 /ef 绑定。")
+    await collection_refresher.ensure_fresh()
     snapshot = medal_store.load_current_view()
     if snapshot is None:
-        return await matcher.finish("暂无蚀刻章数据，自动同步会继续重试，请稍后查询。")
+        return await matcher.finish("蚀刻章数据暂时不可用，请稍后查询，或发送 /ef 奖章 刷新 重试。")
     try:
         async with ROLE_TASKS.claim(role):
             token = account_store.decrypt_token(role, cipher)
@@ -788,9 +792,10 @@ async def _handle_archive_progress(
     role = account_store.resolve_role(qq_user_id, command.account_selector)
     if role is None:
         return await matcher.finish("未找到对应账号，请先私聊使用 /ef 绑定。")
+    await collection_refresher.ensure_fresh()
     snapshot = archive_store.load_current_view()
     if snapshot is None:
-        return await matcher.finish("暂无档案库数据，自动同步会继续重试，请稍后查询。")
+        return await matcher.finish("档案库数据暂时不可用，请稍后查询，或发送 /ef 档案 刷新 重试。")
     try:
         async with ROLE_TASKS.claim(role):
             token = account_store.decrypt_token(role, cipher)
@@ -3513,34 +3518,6 @@ def _parse_query(rest: str) -> tuple[str, str]:
 
 _ownership_startup_started = False
 _ownership_startup_task: asyncio.Task | None = None
-_collection_startup_started = False
-_collection_startup_task: asyncio.Task | None = None
-
-
-async def _refresh_collection_snapshots() -> None:
-    try:
-        await collection_refresher.refresh_all()
-    except Exception as exc:
-        logger.warning(f"[endfield] collection manifest check failed; will retry: {exc}")
-
-
-@on_ready
-async def _warmup_collection_snapshots(_bot=None) -> None:
-    global _collection_startup_started, _collection_startup_task
-    if _collection_startup_started:
-        return
-    _collection_startup_started = True
-    _collection_startup_task = asyncio.create_task(_refresh_collection_snapshots())
-
-
-timer.add_job(
-    _refresh_collection_snapshots,
-    "interval",
-    seconds=CHECK_INTERVAL_SECONDS,
-    id="endfield_collection_snapshot_refresh",
-    replace_existing=True,
-    max_instances=1,
-)
 
 
 @on_ready
@@ -3602,7 +3579,7 @@ timer.add_job(
 @listen(Cleanup)
 async def _close_ownership_startup_task() -> None:
     startup_tasks = [
-        task for task in (_ownership_startup_task, _collection_startup_task)
+        task for task in (_ownership_startup_task,)
         if task is not None and not task.done()
     ]
     for task in startup_tasks:
