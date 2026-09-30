@@ -1172,13 +1172,13 @@ MEDAL_DOUBLE_COLUMN_MIN = 6  # 单个列表条目 ≥ 此值时启用双列，�
 # 保留奇上偶下槽位顺序与复杂装饰边角，不能裁切奖章来制造紧凑效果。
 # 原图是方形画布，六边形只占宽约 83%；用居中的方形 img 保持原图比例。
 MEDAL_WALL_COLUMNS = 5
-MEDAL_WALL_ITEM_WIDTH = 96
-MEDAL_WALL_ITEM_HEIGHT = 111
-MEDAL_WALL_STRIDE = 106              # 普通章面横向留约 10px，接近游戏参考图
-MEDAL_WALL_ROW_HEIGHT = 90           # 上下两排更深地咬合，同时保留斜向窄缝
+MEDAL_WALL_ITEM_WIDTH = 80
+MEDAL_WALL_ITEM_HEIGHT = 92
+MEDAL_WALL_STRIDE = 88               # 普通章面横向留约 8px，接近游戏参考图
+MEDAL_WALL_ROW_HEIGHT = 72           # 上下两排深咬合（尖角高 23px），同时保留斜向窄缝
 MEDAL_WALL_ROW_INDENT = MEDAL_WALL_STRIDE // 2
-MEDAL_WALL_ICON_SIZE = 116          # 400px 画布的章面约 330×380，缩至 96×111
-MEDAL_WALL_INSET_PADDING = 12       # 收窄背板边沿，保留局部内嵌轮廓
+MEDAL_WALL_ICON_SIZE = 97           # 400px 画布的章面约 330×380，缩至 80×92
+MEDAL_WALL_INSET_PADDING = 9        # 收窄背板边沿，保留局部内嵌轮廓
 # 展示位上限 MEDAL_WALL_MAX_SLOTS 来自 catalog.models，解析与渲染共用；没配满的按空槽位渲染。
 # 页头样式分三层：.medal-header 是 F1/F2 有意共享的骨架；--stats 只属于 F1；
 # --missing / --wall 只属于 F2。单卡专属规则必须挂在修饰类下，避免改一张卡连带另一张。
@@ -1193,14 +1193,18 @@ MEDAL_CARD_CSS = """
 .medal-header--stats .medal-head-version{flex:none;align-self:stretch;display:flex;flex-direction:column;justify-content:center;min-width:180px;max-width:360px;padding-left:24px;border-left:1px solid rgba(255,255,255,.14)}
 .medal-header--stats .medal-head-version span{color:#7d878d;font-size:12px;font-weight:900;letter-spacing:.22em}
 .medal-header--stats .medal-head-version strong{margin-top:6px;font:900 44px/1 Arial,'Microsoft YaHei',sans-serif;letter-spacing:-.02em;overflow-wrap:anywhere}
-.medal-header--wall{padding:20px 22px 20px 26px;align-items:center}
-.medal-header--wall .medal-wall-meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
+/* 有墙时页头上下/右侧不留白：墙托盘贴顶、贴右、贴黄线，高度由墙决定；标题块在左侧垂直居中。 */
+.medal-header--wall{padding:0 0 0 26px;align-items:stretch}
+.medal-header--wall .medal-heading{align-self:center;padding:14px 0}
+.medal-header--wall h1{margin-top:6px}
+.medal-header--wall p{margin-top:8px}
+.medal-header--wall .medal-wall-meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
 .medal-header--wall .medal-chip{display:inline-flex;align-items:baseline;gap:6px;padding:6px 12px;border-left:4px solid #aeb6ba;background:#2a3136;color:#aeb6ba;font-size:13px;font-weight:850}
 .medal-header--wall .medal-chip b{color:#f4f6f7;font:900 18px/1 Arial,'Microsoft YaHei',sans-serif}
 .medal-header--wall .medal-chip--plate{border-left-color:#c98a1a}
 /* 奖章墙：页头里的深枪灰托盘；背板沿十格外轮廓内凹，奖章本体不裁成标准六边形。
    背板 SVG 的 medal-wall-* id 是文档级的，前提是一页只有一面墙。 */
-.medal-wall{flex:none;position:relative;padding:20px 22px;background:#171b1f;border:1px solid rgba(255,255,255,.07)}
+.medal-wall{flex:none;display:flex;align-items:center;position:relative;padding:12px 24px 12px 22px;background:#171b1f;border-left:1px solid rgba(255,255,255,.07)}
 .medal-wall-stage{position:relative}
 .medal-wall-backplate{position:absolute;pointer-events:none;overflow:visible;filter:drop-shadow(0 -1px 0 #05080a) drop-shadow(0 1px 0 rgba(255,255,255,.10))}
 .medal-wall-slot{position:absolute}
