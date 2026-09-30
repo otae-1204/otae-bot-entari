@@ -66,8 +66,7 @@ def _derive_medal_levels(entry: dict[str, Any]) -> tuple[int, bool]:
 def _norm_medal_name(name: str) -> str:
     """规范化奖章名用于跨源关联：去全部空白 + 去首尾中英文引号。
 
-    FZ 用 ``achv_`` 语义 id、森空岛用 hex 哈希 id，命名空间不同（2026-07-27 实测），
-    无法按 id 关联；两源 name 均为中文奖章名，按规范化 name 关联（实测 135/140 命中）。
+    主关联使用 ``md5(achv_id)``；名称仅用于缺少可关联 id 时的兼容路径。
     """
     return (
         "".join(str(name).split())
@@ -129,12 +128,11 @@ def _clean_plated_flag(raw: Any) -> bool:
 def _medal_icon_url(meta: dict[str, Any], *, level: int, plated: bool) -> str:
     """按档位/镀层选森空岛图标：镀层 > 3 档 > 2 档 > 初始档。
 
-    与账号卡 ``account/draw.py:_medal_icon`` 同一取法；``level`` 需传**校正后**的实际档位。
+    ``level`` 需传校正后的实际档位；已镀层时只接受镀层原图。
     """
     if plated:
-        plated_icon = _first_text(meta, "platedIcon")
-        if plated_icon:
-            return plated_icon
+        # 已镀层时不能用普通图伪装成功；缺图交由渲染层标记。
+        return _first_text(meta, "platedIcon") or ""
     if level >= 3:
         icon = _first_text(meta, "reforge3Icon")
         if icon:
@@ -165,8 +163,8 @@ def parse_player_medal_wall(
 
     **图标取 AKEData 优先**（传 ``medals`` 时生效）：森空岛回的图标只有 126×126，页头
     2x 出图时明显发虚；AKEData 的 ``medaliconbig/{achv_id}_lv{NN}.png`` 是 400×400。
-    但 AKEData **没有镀层图**（命名空间里没有 *plated* 资源、表里也无对应字段），所以
-    已镀层的章仍回退用森空岛的 ``platedIcon``——镀层外观比清晰度更不能丢。
+    镀层图使用最高档位的 ``_lv{NN}_plating.png``，不是新的档位。
+    同时保留森空岛原图，由渲染层在高清资源下载失败时回退。
     """
     achieve = (((raw.get("data") or {}).get("detail") or {}).get("achieve") or {})
     by_hex: dict[str, dict[str, Any]] = {}
@@ -189,13 +187,16 @@ def parse_player_medal_wall(
             else {}
         )
 
-    # 槽位序号是字符串键；非数字键由 _to_int 归 0 排在最前，不影响正常展示位。
+    # 先过滤无效槽位，避免它们占用 limit 或撑破固定的十格墙面。
     def _slot_key(pair: tuple[str, Any]) -> tuple[int, str]:
         slot, hex_id = pair
         return (_to_int(slot), str(hex_id))
 
     wall: list[MedalWallItemView] = []
     for slot, hex_id in sorted(display.items(), key=_slot_key):
+        slot_number = _to_int(slot)
+        if not 1 <= slot_number <= 10 or any(m.slot == slot_number for m in wall):
+            continue
         item = by_hex.get(str(hex_id))
         if item is None:
             continue
@@ -209,15 +210,16 @@ def parse_player_medal_wall(
         medal = md5_index.get(str(hex_id))
         wall.append(
             MedalWallItemView(
-                slot=_to_int(slot),
+                slot=slot_number,
                 medal_id=str(hex_id),
                 name=_first_text(meta, "name") or "",
                 icon_url=_wall_icon_url(meta, medal, level=level, plated=plated),
                 level=level,
                 plated=plated,
+                fallback_icon_url=_medal_icon_url(meta, level=level, plated=plated),
             )
         )
-    return wall[:limit]
+    return wall[:max(0, limit)]
 
 
 def _wall_icon_url(
@@ -227,20 +229,19 @@ def _wall_icon_url(
     level: int,
     plated: bool,
 ) -> str:
-    """奖章墙图标：优先 AKEData 高清图，镀层/无对应 achv_id 时回退森空岛。
+    """优先 AKEData 400px 原图；镀层为最高档位加 ``_plating`` 后缀。
 
-    AKEData 的 ``medaliconbig/{achv_id}_lv{NN}.png`` 是 400×400，森空岛只回 126×126
-    （页头 2x 出图时发虚）。但 AKEData 没有镀层图，故镀层章留用森空岛 ``platedIcon``。
-    单档章（``initLevel == maxLevel``）只有 ``_lv{initLevel}`` 一张，故档位取
-    ``max(level, init_level)`` 兜底，避免拼出 404。
+    规则来自 AKEData ``v3-table-data.js`` 的 achievement detail 映射。
+    无对应 achv_id 或快照不支持镀层时保留森空岛外观，不猜资源路径。
     """
-    if medal is not None and not plated:
+    if medal is not None:
         achv_id = medal.medal_id or ""
-        if achv_id.startswith("achv_"):
+        if achv_id.startswith("achv_") and (not plated or medal.can_be_plated):
             tier = max(level, medal.init_level, 1)
             if medal.max_level:
-                tier = min(tier, medal.max_level)
-            return f"{AKEDATA_ICON_BASE}/{achv_id}_lv{tier:02d}.png"
+                tier = medal.max_level if plated else min(tier, medal.max_level)
+            suffix = "_plating" if plated else ""
+            return f"{AKEDATA_ICON_BASE}/{achv_id}_lv{tier:02d}{suffix}.png"
     return _medal_icon_url(meta, level=level, plated=plated)
 
 

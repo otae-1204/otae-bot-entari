@@ -498,7 +498,7 @@ class MedalWallItemView:
     """奖章墙的一格：账号在游戏名片里公开展示的一枚已获得奖章。
 
     ``slot`` 是森空岛 ``achieve.display`` 的展示位序号（1 起），决定蜂窝排布顺序；
-    ``icon_url`` 已按等级/镀层选好，取自森空岛 ``achievementData`` 的各档图标。
+    ``icon_url`` 优先为 AKEData 原图，``fallback_icon_url`` 保留同档位的森空岛图标。
     """
     slot: int = 0
     medal_id: str = ""        # achievementData.id（hex = md5(achv_id)）
@@ -506,6 +506,7 @@ class MedalWallItemView:
     icon_url: str = ""
     level: int = 0            # 校正后的实际档位
     plated: bool = False
+    fallback_icon_url: str = ""
 
 
 @dataclass(slots=True)

@@ -73,26 +73,39 @@ F1/F2 详情每条显示 **描述**（深色）+ **获取条件**（浅色），
 同一枚章可能同时进 F2 的 `not_maxed` 和 `not_plated`，故选档时用 `dataclasses.replace(...)` 复制副本，避免后写覆盖。
 
 ### 4.7 奖章墙（F2 页头右侧）
-- 数据取 `achieve.display`，是**槽位 → hex id 的映射而非数组**，所以渲染顺序按槽位序号排，不能沿用 `achieveMedals` 的数组顺序。
-- **槽位序号就是蜂窝坐标**（2026-09-29 拿游戏内名片截图逐格核对）：奇数为上排、偶数为下排，同列两格是相邻的一对。即上排 1/3/5/7/9、下排 2/4/6/8/10；**不是**「前 5 个一行、后 5 个一行」。列号 = `(slot-1)//2`，排号 = `(slot-1)%2`。
-- **六边形是尖顶（pointy-top）**：顶点朝上、左右为尖，高 > 宽。这是最容易搞错的一处——写成平顶（`polygon(25% 0,75% 0,…)`）会整整转错 90°，看起来像药丸。正确裁形：
-  `clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%)`。
-- 几何按游戏截图实测标定（`MEDAL_WALL_*` 常量）：章径 200×231、**列步距 = 宽 × 0.96**（左右几乎相切）、**行间距 = 高 × 0.766**（上下深度咬合）。实测方法：在带刻度网格的放大图上读六边形顶点坐标。
-- 章图是 **126×126 方图、六边形只占宽 86.5%**，所以用 `<img>` + `object-fit:contain` 保比例；若用 `background-size:100% 100%` 拉伸到非方形格框，六边形会被压窄变形。
-- 图标**优先取 AKEData 高清图**：森空岛回的 `achievementData` 图标只有 **126×126**，页头按 2x 出图（单枚显示 96px → 实际 192px）会明显发虚；AKEData 的 `medaliconbig/{achv_id}_lv{NN}.png` 是 **400×400**，相差 3 倍多。取法见 `_wall_icon_url`。
-  - 档位要按 `max(real_level, init_level)` 兜底：单档章（`initLevel == maxLevel`，如多数 3 档章）只有 `_lv{initLevel}` 一张，直接用 `level` 会拼出 404。
-  - **AKEData 没有镀层图**（命名空间无 *plated* 资源、`AchievementTable` 也无对应字段），所以**已镀层的章回退森空岛 `platedIcon`**——镀层外观比清晰度更不能丢。因此同一面墙上镀层章是 126px、未镀层章是 400px，属有意取舍。
-  - 快照里没有这枚章（活动已下架）时不能拼 AKEData 路径，直接回退森空岛。
-- 展示位上限 10 个，**没配满的位置渲染成空槽位**（不是留白）。
-- 图标复用 `_medal_icon_url`（镀层 > 3 档 > 2 档 > 初始档），档位同样要按 `real_level = level + initLevel - 1` 校正（§4.1），否则 initLevel>1 的章会取错图标。注意单档章（`max_level == init_level`，如多数 3 档章）没有 `reforge2/3Icon`，取 `initIcon` 是对的。
-- 降级：展示位指向未拥有的 hex、`display` 整段缺失、或章图没下下来时都不报错——前者只少格，后者退回空槽位底图。
-- **样式必须内联**：`_draw_neutral_card`（`rendering/cards.py`）虽然接了 `extra_css` 参数并插值进局部 `css` 变量，但**没有把它拼进返回的 document**，所以 `MEDAL_CARD_CSS` 实际从未生效。墙的排布/裁形/压暗全部写在元素 `style` 属性上，靠类选择器会失效（连带 `.medal-header` 的立体样式也走内联）。修这个 bug 会同时改变档案卡片外观，故未改。
-- 空槽位底图：`assets/image/endfield/medal_slot_empty.png`，取自游戏「光荣之路（蚀刻章图鉴）」页面背景 `etchlist_bigbg`（本地游戏资源；**AKEData 只托管奖章图标，不托管 UI 底图**，`end-tools.fffdan.com` 也打不开，故从页面底图裁切）。
-  - **裁切要点**：底图必须让六边形**恰好内切**，四周不留多余背景——否则 `object-fit:contain` 一缩放就与 `clip-path` 错位，表现为「只有某一条边贴合」。裁切框比例要与格框一致（尖顶六边形 宽:高 = 1:1.1547）：原图取 x1702–1944 / y944–1223（242×279）。改底图后用 `/tmp` 脚本叠加 clip-path 轮廓自检。
-  - 卡片底色比游戏深，故用 `brightness(.72) saturate(.25)` 压暗后嵌入，保留凹面层次。
-- 页头做成「墙面装饰块」：矩形 + 垂直渐变 + 内高光/内阴影 + 圆角 + 外投影，奖章墙嵌在其上。
-- 卡片里**不加**「勋章展示墙」标题（需求）；章名只进 `title` 提示，不占版面。
-- 只挂在**第一页**：奖章墙是名片展示态，不随缺章分页变化。
+- `achieve.display` 是**槽位 → hex id 的映射**，按槽位排布，不能使用 `achieveMedals` 的数组顺序。
+- 槽位范围为 1–10；奇数上排、偶数下排，同列两格相邻。上排 1/3/5/7/9、下排 2/4/6/8/10；列号 = `(slot-1)//2`，排号 = `(slot-1)%2`。无效槽位在截断前过滤。
+- **背景为尖顶六边形**：上下为顶点、左右为直边。空槽裁形为 `polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%)`；奖章本体不裁形，保留伸出六边形的复杂装饰。
+- `MEDAL_WALL_*` 按游戏参考图约 1.11 倍章宽的列步距、0.81 倍章高的行间距校准：格框 96×111、列步距 106、行间距 90、下排右移 53。普通章面横向约留 10px，章图使用居中的 116×116 方形画布保比例，容器允许边角伸出。蜂窝背板向外扩展 12px，保留窄边沿和内嵌效果。
+- **图标映射**：先用 `md5(achv_id)` 配出快照记录，再区分当前档位和镀层状态，见下表。普通图按 `max(real_level, init_level, 1)` 选档，并限制在 `max_level` 内；镀层图固定用最高档位，不能把镀层当作下一等级。
+
+| 状态 | AKEData 高清资源 | 森空岛备用资源 |
+|---|---|---|
+| 普通章 | `medaliconbig/{achv_id}_lv{tier:02d}.png` | 按实际档位取 `reforge3Icon` / `reforge2Icon` / `initIcon` |
+| 已镀层 | `medaliconbig/{achv_id}_lv{max_level:02d}_plating.png` | `platedIcon` |
+
+**2026-09-30 更正**：AKEData 有高清镀层图，后缀是 `_plating`，不是 `plated`。规则直接来自 [AKEData 的 v3-table-data.js](https://www.akedata.wiki/plugin/js/v3-table-data.js) 中 achievement detail 的 `plating.icon`。实测版本 `1.5.3@10506507-7` 的 `AchievementTable` 中全部 **34/34** 个可镀层条目都能按上述规则下载并解码为 **400×400 PNG**。例如：
+
+- 银档：`achv_fac_settlement_wuling_1_lv02_plating.png`
+- 金档：`achv_bat_defeat_ruanyi_lv03_plating.png`
+- 资源目录：`https://data.akedata.wiki/public/images/assets/beyond/dynamicassets/gameplay/ui/sprites/medaliconbig/`
+
+下载行为与空态：
+- 优先加载高清图，仅对失败的格子加载 `fallback_icon_url`（森空岛同档位图）；分页复用下载结果。快照未知或无法确认支持镀层时直接用森空岛图，不猜路径。
+- 已镀层但两源都缺图时显示“图标暂缺”，保留槽位和章名；不能换成普通章图或假装未设置。
+- 部分展示位未设置时，用六边形浅凹槽补齐十格。游戏局部参考图已确认：放射刻线和 ENDFIELD 字样是空槽的设计底纹，不能当作杂质删除。当前用内联 SVG 重绘低对比刻线、字样和细刻度，搭配 CSS 凹面；这是参考图风格的矢量纹理，非游戏原始贴图。不再使用轮廓不贴合的旧 `medal_slot_empty.png` 截图。
+- 完全没有展示奖章时用紧凑标题，不铺整面空墙。奖章墙只出现在第一页，不加额外标题；章名保留在 `title`。
+- 页头保持完整的深色底，只在蜂窝区域放置沿十格轮廓合成的银灰背板；背板外缘使用内阴影和细高光，形成嵌入页头的凹面，不再把右半边整块染白。`_draw_neutral_card` **会把 `extra_css` 注入 document**，此前“必须内联”的说法不正确。公共样式留在 `MEDAL_CARD_CSS`，动态几何尺寸留在元素上。
+
+可复现预览（只用公开图标和合成玩家进度，不读账号凭据，不修改 bot 快照）：
+
+```bash
+python scripts/render_endfield_medal_wall_preview.py
+# 或传入已有的公开元数据快照：
+python scripts/render_endfield_medal_wall_preview.py --snapshot /path/to/medal_snapshot.json
+```
+
+输出至 `output/medal-wall-preview/`：满墙、零散三格空、连续中间四格空、末尾三格空、仅三枚、单枚、全空、缺图、长昵称九种 PNG 和 HTML，包含有复杂装饰边角的镀层章。全空沿用当前行为：隐藏奖章墙，显示紧凑标题。预览账号标注“演示数据”，不能作为真实账号查询结果。
 
 ### 4.8 长文案与分页
 - 文案不限制行数；未升满标注「当前档位 / 升级后」，未镀层标注「镀层前 / 镀层后」，两侧都保留各自图标、描述与条件。

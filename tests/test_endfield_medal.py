@@ -352,8 +352,8 @@ class MedalMissingTest(unittest.TestCase):
         # 档位兜底：森空岛 lv=1 但章是单档 initLevel=3 → 取 lv03（否则 404）
         self.assertIn("achv_b_lv03.png", by_slot[2].icon_url)
 
-    def test_wall_icon_falls_back_to_skland_for_plated(self):
-        """AKEData 没有镀层图，镀层章必须回退森空岛的 platedIcon（镀层外观不能丢）。"""
+    def test_wall_icon_prefers_highres_plating_and_retains_skland_fallback(self):
+        """镀层走最高档位的 _plating 原图，并保留官方小图用于下载失败时回退。"""
         service = EndfieldService.__new__(EndfieldService)
         snapshot = self._snapshot([
             MedalItemView(medal_id="achv_p", name="P", max_level=3, init_level=3, can_be_plated=True),
@@ -373,7 +373,41 @@ class MedalMissingTest(unittest.TestCase):
             raw_progress, snapshot, nickname="t", uid="u", server_name="s"
         )
         self.assertTrue(view.wall[0].plated)
-        self.assertEqual(view.wall[0].icon_url, "https://bbs.hycdn.cn/p_plated.png")
+        self.assertTrue(view.wall[0].icon_url.endswith("/achv_p_lv03_plating.png"))
+        self.assertEqual(view.wall[0].fallback_icon_url, "https://bbs.hycdn.cn/p_plated.png")
+
+    def test_plating_uses_max_tier_instead_of_skland_relative_level(self):
+        from plugins.endfield.catalog.views.medals import _wall_icon_url
+
+        for initial, maximum in ((2, 2), (3, 3), (1, 3)):
+            with self.subTest(initial=initial, maximum=maximum):
+                medal = MedalItemView(
+                    medal_id="achv_p", name="P", init_level=initial,
+                    max_level=maximum, can_be_plated=True,
+                )
+                url = _wall_icon_url({}, medal, level=1, plated=True)
+                self.assertTrue(url.endswith(f"/achv_p_lv{maximum:02d}_plating.png"))
+
+    def test_plated_unknown_medal_never_falls_back_to_unplated_art(self):
+        from plugins.endfield.catalog.views.medals import _wall_icon_url
+
+        self.assertEqual(_wall_icon_url({"initIcon": "plain"}, None, level=3, plated=True), "")
+        medal = MedalItemView(medal_id="achv_unknown_plating", name="new")
+        self.assertEqual(_wall_icon_url(
+            {"platedIcon": "plated"}, medal, level=3, plated=True,
+        ), "plated")
+
+    def test_invalid_display_slots_do_not_displace_valid_slots(self):
+        from plugins.endfield.catalog.views.medals import parse_player_medal_wall
+
+        raw = {"data": {"detail": {"achieve": {
+            "achieveMedals": [{"achievementData": {"id": "owned", "name": "A"}}],
+            "display": {key: "owned" for key in ("bad", "-1", "0", "1", "01", "3", "10", "11")},
+        }}}}
+        self.assertEqual([m.slot for m in parse_player_medal_wall(raw)], [1, 3, 10])
+        self.assertEqual([m.slot for m in parse_player_medal_wall(raw, limit=2)], [1, 3])
+        self.assertEqual(parse_player_medal_wall(raw, limit=0), [])
+        self.assertEqual(parse_player_medal_wall(raw, limit=-1), [])
 
     def test_wall_icon_skips_akedata_when_snapshot_lacks_medal(self):
         """快照里没有这枚章（活动已下架）时不能拼 AKEData 路径，直接回退森空岛。"""

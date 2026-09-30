@@ -96,7 +96,7 @@ class MedalMissingPaginationTest(unittest.IsolatedAsyncioTestCase):
 class MedalWallLayoutTest(unittest.IsolatedAsyncioTestCase):
     """奖章墙蜂窝排布：槽位序号即坐标，奇数槽位上排、偶数槽位下排（2026-09-29 逐格核对游戏截图）。
 
-    排布样式全部内联（``_draw_neutral_card`` 不注入 extra_css），故断言直接看 style 属性。
+    坐标由内联几何给出，墙面/空槽样式由 MEDAL_CARD_CSS 注入。
     """
 
     def _wall(self, slots) -> list[MedalWallItemView]:
@@ -135,15 +135,14 @@ class MedalWallLayoutTest(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
-    async def test_hexagon_is_pointy_top(self):
-        """六边形必须是尖顶（顶点朝上、左右为尖）——平顶会整体转错 90°。"""
+    async def test_wall_icon_keeps_square_canvas(self):
+        """方形原图居中，不能被拉伸到非方形格子；六边形只用于凹槽背景。"""
         wall = self._wall([1])
         markup = cards._medal_wall_html(wall, {"icon-1": "cached-1"})
-        clip = self._style_value(self._cells(markup)[0].xpath(".//img")[0], "clip-path")
-        self.assertEqual(
-            clip, "polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%)"
-        )
-        # 尖顶六边形的宽高比应 > 1（高大于宽）
+        icon = self._cells(markup)[0].xpath(".//img")[0]
+        self.assertEqual(self._style_value(icon, "width"), self._style_value(icon, "height"))
+        self.assertIn("clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%)", cards.MEDAL_CARD_CSS)
+        # 尖顶六边形高大于宽。
         self.assertGreater(
             cards.MEDAL_WALL_ITEM_HEIGHT / cards.MEDAL_WALL_ITEM_WIDTH, 1.0
         )
@@ -164,7 +163,7 @@ class MedalWallLayoutTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("勋章展示墙", markup)
 
     async def test_wall_fills_all_display_slots_and_labels_medals(self):
-        """展示位上限 10：只配了 3 枚时，其余 7 格补空槽位底图；章名走 title。"""
+        """展示位上限 10：只配 3 枚时其余 7 格为凹槽，禁止再次使用错误截图。"""
         wall = self._wall([1, 2, 3])
         markup = cards._medal_wall_html(
             wall,
@@ -177,22 +176,50 @@ class MedalWallLayoutTest(unittest.IsolatedAsyncioTestCase):
         cells = self._cells(markup)
         self.assertEqual(len(cells), 10)
         self.assertEqual(
-            [cell.get("title") for cell in cells], ["章1", "章2", "章3"] + [""] * 7
+            [cell.get("title") for cell in cells], ["章1", "章2", "章3"] + ["未设置奖章"] * 7
         )
         images = [cell.xpath(".//img/@src") for cell in cells]
         self.assertEqual(images[0], ["data:image/png;base64,AAA"])
         self.assertEqual(images[1], ["cached-2"])
-        # 空槽位不是空白：用游戏凹槽底图
-        self.assertTrue(all(src and src[0] for src in images[3:]), images[3:])
+        self.assertTrue(all(not src for src in images[3:]))
+        self.assertTrue(all(cell.get("data-state") == "empty" for cell in cells[3:]))
+        self.assertTrue(all(cell.xpath('.//*[@class="medal-wall-recess"]') for cell in cells[3:]))
 
-    async def test_missing_medal_icon_falls_back_to_empty_slot(self):
-        """奖章图缺失时退回空槽位底图，而不是留空洞。"""
+    async def test_missing_medal_icon_is_distinct_from_unused_slot(self):
+        """已设置的章缺图时仍保留槽位和名字，并标记缺图，不伪装成未设置。"""
         markup = cards._medal_wall_html(self._wall([1]), {"icon-1": ""})
         first = self._cells(markup)[0]
-        src = first.xpath(".//img/@src")[0]
-        self.assertTrue(src)
-        # 空槽位是压暗处理的，奖章不是
-        self.assertIn("brightness(", first.xpath(".//img")[0].get("style"))
+        self.assertFalse(first.xpath(".//img"))
+        self.assertEqual(first.get("data-state"), "unavailable")
+        self.assertEqual(first.get("title"), "章1")
+        self.assertIn("图标暂缺", first.text_content())
+
+    async def test_out_of_range_slot_cannot_collapse_wall_height(self):
+        markup = cards._medal_wall_html(self._wall([1, 11]), {})
+        grid = html.fromstring(markup).xpath('//ul[@class="medal-wall-grid"]')[0]
+        self.assertEqual(len(self._cells(markup)), 10)
+        self.assertIn(f"height:{cards.MEDAL_WALL_ROW_HEIGHT + cards.MEDAL_WALL_ITEM_HEIGHT}px", grid.get("style"))
+
+    async def test_only_failed_primary_icons_fetch_fallback(self):
+        wall = [MedalWallItemView(slot=i, icon_url=f"ake-{i}", fallback_icon_url=f"sk-{i}") for i in (1, 2)]
+        with (
+            patch.object(cards, "_image_data_urls", AsyncMock(side_effect=[
+                {"ake-1": "highres", "ake-2": ""}, {"sk-2": "plated-fallback"},
+            ])) as assets,
+            patch.object(cards, "_draw_neutral_card", AsyncMock(return_value=b"page")) as render,
+        ):
+            await cards.draw_medal_missing_card(MedalMissingView(wall=wall))
+        self.assertEqual(assets.await_args_list[1].args[0], ["sk-2"])
+        cells = self._cells(render.await_args.args[1])
+        self.assertEqual(cells[0].xpath(".//img/@src"), ["highres"])
+        self.assertEqual(cells[1].xpath(".//img/@src"), ["plated-fallback"])
+
+    async def test_empty_wall_and_followup_page_use_compact_header(self):
+        for view, page in ((MedalMissingView(), 1), (MedalMissingView(wall=self._wall([1])), 2)):
+            with patch.object(cards, "_draw_neutral_card", AsyncMock(return_value=b"page")) as render:
+                await cards._draw_medal_missing_page(view, {}, page_number=page)
+            self.assertNotIn('class="medal-wall"', render.await_args.args[1])
+            self.assertNotIn('medal-header--wall', render.await_args.args[1])
 
     async def test_wall_icons_are_loaded_and_wall_only_on_first_page(self):
         wall = self._wall(range(1, 11))

@@ -1167,36 +1167,40 @@ async def _draw_neutral_card(selector: str, body: str, *, extra_css: str = "") -
 
 MEDAL_PAGE_BUDGETS: tuple[int, ...] = (56, 40, 28, 18, 10, 5, 1)
 MEDAL_DOUBLE_COLUMN_MIN = 6  # 单个列表条目 ≥ 此值时启用双列，压缩卡片高度（F1 新增列表 / F2 各缺章分组）
-# 奖章墙蜂窝排布（2026-09-29 在游戏截图带刻度放大图上实测标定）：
-# 章径 200×231（**尖顶六边形**：顶点朝上、左右为尖），列步距 192（= 宽 × 0.96）、
-# 行间距 177（= 高 × 0.766）。
-# 森空岛章图是 126×126 方图、六边形只占宽 86.5%，故用 object-fit:contain 保比例，
-# 容器按内容反推：章图缩放系数 111/126，内容 83×111（比例 1.337，接近游戏 1.155）。
+# 参照游戏截图：列步距约为章面宽的 1.11 倍，行间距约为章面高的 .81 倍。
+# 保留奇上偶下槽位顺序与复杂装饰边角，不能裁切奖章来制造紧凑效果。
+# 原图是方形画布，六边形只占宽约 83%；用居中的方形 img 保持原图比例。
 MEDAL_WALL_COLUMNS = 5
 MEDAL_WALL_ITEM_WIDTH = 96
 MEDAL_WALL_ITEM_HEIGHT = 111
-MEDAL_WALL_STRIDE = 92               # 列步距 = 宽 × 0.96
-MEDAL_WALL_ROW_HEIGHT = 85           # 行间距，保留紧凑咬合
+MEDAL_WALL_STRIDE = 106              # 普通章面横向留约 10px，接近游戏参考图
+MEDAL_WALL_ROW_HEIGHT = 90           # 上下两排更深地咬合，同时保留斜向窄缝
 MEDAL_WALL_ROW_INDENT = MEDAL_WALL_STRIDE // 2
-# 章图等比缩放到容器高度后，六边形内容宽约占容器宽的 86.5%*111/111 = 86.5%
-MEDAL_WALL_ICON_SCALE = 1.16         # 章图 box 相对内容框的放大系数
+MEDAL_WALL_ICON_SIZE = 116          # 400px 画布的章面约 330×380，缩至 96×111
+MEDAL_WALL_INSET_PADDING = 12       # 收窄背板边沿，保留局部内嵌轮廓
 MEDAL_WALL_MAX_SLOTS = 10            # 森空岛展示位上限；没配满的按空槽位渲染
-# 空槽位底图：游戏「光荣之路（蚀刻章图鉴）」页面背景里的凹槽六边形，
-# 取自本地游戏资源 etchlist_bigbg，按六边形几何裁切（来源与裁切方式见 docs）。
-_MEDAL_SLOT_EMPTY = ASSET_DIR / "medal_slot_empty.png"
-_MEDAL_SLOT_EMPTY_URL: str | None = None   # 懒加载缓存（_local_image_data_url 定义在本文件后段）
 MEDAL_CARD_CSS = """
 :is(.medal-stats-card,.medal-missing-card){padding:28px 32px;background:linear-gradient(135deg,#fff,#fafbfd);color:#283440}
 .medal-header{margin:0 0 18px;padding:18px 24px;background:linear-gradient(180deg,#333335,#232325 62%,#1c1c1e);background-clip:padding-box;color:#fff;border:0;border-bottom:var(--card-header-rule);gap:20px;border-radius:12px;box-shadow:inset 0 1px 0 rgba(255,255,255,.16),inset 0 -1px 0 rgba(0,0,0,.5),0 8px 20px rgba(20,24,30,.24)}
 .medal-header small{color:#c7c7c7;font-size:12px;letter-spacing:.24em}
 .medal-header h1{margin:6px 0 0;font-size:36px;line-height:1.2;letter-spacing:.04em;font-weight:800;text-shadow:0 2px 4px rgba(0,0,0,.45)}
 .medal-header p{margin:6px 0 0;color:#c8c8c8;font-size:15px;overflow-wrap:anywhere}
-/* 奖章墙：页头右侧的蜂窝展示位（几何见 MEDAL_WALL_* 常量，按游戏截图实测标定）。
-   注意：_draw_neutral_card 目前不会注入 extra_css，所以墙的排布样式由 HTML 内联给出，
-   只有这些「随卡片继承即可」的文字样式留在本表里。 */
+/* 深色页头内嵌局部蜂窝背板；奖章本体不裁成标准六边形。 */
 .medal-head{display:flex;align-items:center;gap:20px;width:100%}
-.medal-head:has(.medal-wall){justify-content:space-between;align-items:center;gap:28px}
-.medal-wall{flex:none}.medal-main{padding:0;border:0;background:none}
+.medal-header--wall{padding:24px 28px}
+.medal-header--wall .medal-head{justify-content:space-between;gap:28px;align-items:center}
+.medal-header--wall .medal-heading{flex:1;min-width:0}
+.medal-wall{flex:none;position:relative;margin:16px;background:none}
+.medal-wall-backplate{position:absolute;pointer-events:none;overflow:visible;filter:drop-shadow(0 -1px 0 #101316) drop-shadow(0 1px 0 #ffffff38)}
+.medal-wall-slot{position:absolute}
+.medal-wall-art{display:block;position:relative;width:100%;height:100%;overflow:visible}
+.medal-wall-recess{display:block;position:relative;width:100%;height:100%;overflow:hidden;clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%)}
+.medal-wall-art img{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);object-fit:contain;max-width:none}
+.medal-wall-recess{background:linear-gradient(145deg,#89949c,#e0e5e8);opacity:.62}
+.medal-wall-recess::before{content:'';position:absolute;inset:2px;clip-path:inherit;background:linear-gradient(145deg,#aab3ba,#c0c8cd 70%);box-shadow:inset 0 3px 10px #7c889340}
+.medal-wall-etching{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.medal-wall-unavailable{position:absolute;inset:0;display:grid;place-items:center;color:#566570;font-size:12px}
+.medal-main{padding:0;border:0;background:none}
 .medal-stats{padding:14px 22px 0;margin-bottom:18px;border-radius:16px;background:#f2f5f7}
 .medal-row{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));align-items:center}
 .medal-stats .primary{padding:0 20px 0 0}
@@ -1378,6 +1382,14 @@ async def draw_medal_missing_card(view: MedalMissingView) -> tuple[bytes, ...]:
     _icon_urls += [m.next_icon_url for m in view.not_plated if m.next_icon_url]
     _icon_urls += [m.icon_url for m in view.wall if m.icon_url]
     icon_map = await _image_data_urls(_icon_urls)
+    # 只在高清图缺失时加载同一档位/镀层的备用图，正常路径不增加请求。
+    fallback_urls = [
+        m.fallback_icon_url for m in view.wall
+        if not icon_map.get(m.icon_url) and m.fallback_icon_url
+        and m.fallback_icon_url != m.icon_url
+    ]
+    if fallback_urls:
+        icon_map.update(await _image_data_urls(fallback_urls))
     try:
         return (await _draw_medal_missing_page(view, icon_map),)
     except RuntimeError as exc:
@@ -1410,81 +1422,101 @@ async def draw_medal_missing_card(view: MedalMissingView) -> tuple[bytes, ...]:
     raise last_error
 
 
-def _medal_slot_empty_url() -> str:
-    """空槽底图的 data URL；只读一次并缓存（同一张卡片里会用到多次）。"""
-    global _MEDAL_SLOT_EMPTY_URL
-    if _MEDAL_SLOT_EMPTY_URL is None:
-        _MEDAL_SLOT_EMPTY_URL = _local_image_data_url(_MEDAL_SLOT_EMPTY)
-    return _MEDAL_SLOT_EMPTY_URL
-
-
 def _medal_slot_html(data_url: str, *, empty: bool) -> str:
-    """一格奖章/空槽位：**尖顶**六边形（顶点朝上）由 clip-path 裁出。
-
-    用 ``<img>`` + ``object-fit:contain`` 而不是 background，图片不会被拉伸，
-    六边形本身的比例得以保留（森空岛章图是 126×126 方图，六边形只占宽 86.5%）。
-    样式全部内联 —— ``_draw_neutral_card`` 不会注入 ``extra_css``，靠类选择器会失效。
-    """
-    if not data_url:
+    """奖章保留方形原图及伸出的边角，只有空槽背景使用六边形轮廓。"""
+    if data_url:
         return (
-            '<span style="display:block;width:100%;height:100%;'
-            "clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%)\"></span>"
+            '<span class="medal-wall-art">'
+            f'<img src="{esc_attr(data_url)}" alt="" '
+            f'style="width:{MEDAL_WALL_ICON_SIZE}px;height:{MEDAL_WALL_ICON_SIZE}px"></span>'
         )
-    css = (
-        "display:block;width:100%;height:100%;object-fit:contain;"
-        "clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);"
+    # 按游戏参考图重绘低对比刻线与字样；这是矢量底纹，不是游戏原始贴图。
+    texture = """<svg class="medal-wall-etching" viewBox="0 0 96 111"
+        xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <g fill="none" stroke="#667580" stroke-width=".65" opacity=".27">
+        <path d="M49 3V50 M49 58V107 M25 20L40 44
+          M57 31L65 12 M60 36L75 19 M62 41L86 25
+          M63 46L90 34 M63 51L92 44 M62 56H92
+          M60 61L90 76 M58 65L82 88 M56 68L65 91"/>
+        <path d="M9 31V58 M13 31V54 M8 61H37 M58 75L63 89"
+          stroke-dasharray=".5 1.4"/>
+        <circle cx="49" cy="54" r=".6"/>
+      </g>
+      <g fill="#697781" opacity=".32" font-family="Arial,sans-serif" font-weight="700">
+        <text x="8" y="70" font-size="8" letter-spacing="-.5">END</text>
+        <text x="8" y="78" font-size="8" letter-spacing="-.6">FIELD</text>
+        <path d="M35 72h6v6h-6z M36 66h1v3h-1z M39 66h1v3h-1z"/>
+      </g>
+    </svg>""" if empty else ""
+    label = '' if empty else '<span class="medal-wall-unavailable">图标暂缺</span>'
+    return f'<span class="medal-wall-recess" aria-hidden="true">{texture}</span>{label}'
+
+
+def _medal_wall_backplate_html(width: int, height: int) -> str:
+    """十个扩大后的六边形合成蜂窝背板，只沿整体外轮廓施加内阴影。"""
+    padding = MEDAL_WALL_INSET_PADDING
+    paths = []
+    for slot in range(MEDAL_WALL_MAX_SLOTS):
+        row, column = slot % 2, slot // 2
+        x = MEDAL_WALL_STRIDE * column + MEDAL_WALL_ROW_INDENT * row
+        y = MEDAL_WALL_ROW_HEIGHT * row
+        w, h = MEDAL_WALL_ITEM_WIDTH + 2 * padding, MEDAL_WALL_ITEM_HEIGHT + 2 * padding
+        points = ((x + w / 2, y), (x + w, y + h / 4), (x + w, y + h * .75),
+                  (x + w / 2, y + h), (x, y + h * .75), (x, y + h / 4))
+        paths.append("M" + " L".join(f"{px:g},{py:g}" for px, py in points) + " Z")
+    w, h = width + 2 * padding, height + 2 * padding
+    return (
+        f'<svg class="medal-wall-backplate" aria-hidden="true" width="{w}" height="{h}" '
+        f'viewBox="0 0 {w} {h}" style="left:-{padding}px;top:-{padding}px" '
+        'xmlns="http://www.w3.org/2000/svg">'
+        '<defs><linearGradient id="medal-wall-metal" x1="0" y1="0" x2=".3" y2="1">'
+        '<stop stop-color="#939da5"/><stop offset=".55" stop-color="#bac2c7"/>'
+        '<stop offset="1" stop-color="#aab4bc"/></linearGradient>'
+        '<filter id="medal-wall-inset" x="-10%" y="-10%" width="120%" height="120%">'
+        '<feOffset in="SourceAlpha" dx="0" dy="4" result="offset"/>'
+        '<feGaussianBlur in="offset" stdDeviation="3" result="blur"/>'
+        '<feComposite in="SourceAlpha" in2="blur" operator="out" result="edge"/>'
+        '<feFlood flood-color="#101820" flood-opacity=".75" result="shade"/>'
+        '<feComposite in="shade" in2="edge" operator="in" result="shadow"/>'
+        '<feComposite in="shadow" in2="SourceGraphic" operator="over"/>'
+        '</filter></defs>'
+        f'<path d="{" ".join(paths)}" fill="url(#medal-wall-metal)" filter="url(#medal-wall-inset)"/>'
+        '</svg>'
     )
-    if empty:
-        # 底图是浅色凹槽，压暗并降饱和后嵌进深色页头；保留内部纹理与高光层次，
-        # 不做成一块死黑（游戏里空槽是浅灰凹面，卡片底色更深，故整体压暗一档）。
-        css += "opacity:.9;filter:brightness(.72) saturate(.25) contrast(.92);"
-    else:
-        css += "filter:drop-shadow(0 4px 5px rgba(0,0,0,.55));"
-    return f'<img src="{esc_attr(data_url)}" alt="" style="{css}">'
 
 
 def _medal_wall_html(wall: Sequence[MedalWallItemView], icon_map: dict[str, str]) -> str:
-    """奖章墙：把账号展示的奖章按游戏蜂窝排布，未使用的展示位补空槽位底图。
+    """奖章墙：按游戏蜂窝排布，区分未设置的槽位和已设置但暂时缺图的奖章。
 
     槽位序号即蜂窝坐标（2026-09-29 拿游戏内名片截图逐格核对）：奇数为上排、偶数为下排，
     同列两格是相邻的一对（1/2、3/4 …）。展示位上限 10 个，没配满的位置渲染成空槽。
     """
-    wall_by_slot = {item.slot: item for item in wall if item.slot > 0}
-    highest = max(wall_by_slot, default=0)
-    # 至少铺满展示位上限，槽位更多时按实际算（接口若多给也不丢）
-    highest = max(highest, MEDAL_WALL_MAX_SLOTS)
-    columns = max(min((highest + 1) // 2, MEDAL_WALL_COLUMNS), 1)
-    # 槽位成对（奇上偶下）：最高槽位是偶数就一定会用到第二排。
-    rows = 2 if highest % 2 == 0 else 1
+    wall_by_slot = {item.slot: item for item in wall if 1 <= item.slot <= MEDAL_WALL_MAX_SLOTS}
 
     cells = []
-    for slot in range(1, columns * 2 + 1):
+    for slot in range(1, MEDAL_WALL_MAX_SLOTS + 1):
         row, column = (slot - 1) % 2, (slot - 1) // 2
         item = wall_by_slot.get(slot)
-        if item is None:
-            inner = _medal_slot_html(_medal_slot_empty_url(), empty=True)
-        else:
-            icon = icon_map.get(item.icon_url, "")
-            # 已上墙但图没下下来：退回空槽位底图，不留空洞
-            inner = (
-                _medal_slot_html(icon, empty=False)
-                if icon
-                else _medal_slot_html(_medal_slot_empty_url(), empty=True)
-            )
-        title = item.name if item is not None else ""
+        icon = (icon_map.get(item.icon_url) or icon_map.get(item.fallback_icon_url, "")) if item else ""
+        inner = _medal_slot_html(icon, empty=item is None)
+        title = item.name if item is not None else "未设置奖章"
+        state = "empty" if item is None else ("loaded" if icon else "unavailable")
         cells.append(
-            f'<li style="position:absolute;width:{MEDAL_WALL_ITEM_WIDTH}px;'
+            f'<li class="medal-wall-slot" data-slot="{slot}" data-state="{state}" '
+            f'style="width:{MEDAL_WALL_ITEM_WIDTH}px;'
             f'height:{MEDAL_WALL_ITEM_HEIGHT}px;'
             f'top:{MEDAL_WALL_ROW_HEIGHT * row}px;'
             f'left:{MEDAL_WALL_STRIDE * column + MEDAL_WALL_ROW_INDENT * row}px"'
             f' title="{esc_attr(title)}">{inner}</li>'
         )
 
-    width = MEDAL_WALL_STRIDE * (columns - 1) + MEDAL_WALL_ROW_INDENT + MEDAL_WALL_ITEM_WIDTH
+    width = MEDAL_WALL_STRIDE * (MEDAL_WALL_COLUMNS - 1) + MEDAL_WALL_ROW_INDENT + MEDAL_WALL_ITEM_WIDTH
+    height = MEDAL_WALL_ROW_HEIGHT + MEDAL_WALL_ITEM_HEIGHT
     return (
         '<div class="medal-wall">'
+        f'{_medal_wall_backplate_html(width, height)}'
         f'<ul class="medal-wall-grid" style="position:relative;width:{width}px;'
-        f'height:{MEDAL_WALL_ROW_HEIGHT * (rows - 1) + MEDAL_WALL_ITEM_HEIGHT}px;'
+        f'height:{height}px;'
         f'margin:0;padding:0;list-style:none">{"".join(cells)}</ul></div>'
     )
 
@@ -1519,8 +1551,9 @@ async def _draw_medal_missing_page(
     )
     # 奖章墙只挂第一页：它是账号名片上的展示态，不随缺章分页变化。
     wall_html = _medal_wall_html(view.wall, icon_map) if view.wall and page_number == 1 else ""
+    header_class = "medal-header medal-header--wall" if wall_html else "medal-header"
     body = f"""
-    <header class="medal-header"><div class="medal-head"><div><small>ENDFIELD / MEDAL MISSING</small><h1>蚀刻章缺章</h1><p>{esc(view.nickname)} · {esc(server_name)} · {esc(view.uid)}{page_tag}</p></div>{wall_html}</div></header>
+    <header class="{header_class}"><div class="medal-head"><div class="medal-heading"><small>ENDFIELD / MEDAL MISSING</small><h1>蚀刻章缺章</h1><p>{esc(view.nickname)} · {esc(server_name)} · {esc(view.uid)}{page_tag}</p></div>{wall_html}</div></header>
     <main class="medal-main">
       {stats}
       {notice}

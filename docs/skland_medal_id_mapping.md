@@ -80,6 +80,11 @@ achieve.display = {"1": "<hex>", "2": "<hex>", ..., "10": "<hex>"}
 - 槽位指向的 hex 一定能在 `achieveMedals` 里找到（只展示**已获得**的章）。
 - 图标按 `level` / `isPlated` 从上面四个图标字段里选，同样要按 `real_level = level + initLevel - 1` 校正档位（§2 坑点 4）。
   单档章（`max_level == initLevel`）没有 `reforge2/3Icon`，取 `initIcon` 是正确的。
+- **高清图映射（2026-09-30 核实）**：AKEData 普通章为 `{achv_id}_lv{tier:02d}.png`，镀层章为
+  `{achv_id}_lv{max_level:02d}_plating.png`（同一 `medaliconbig` 目录）。镀层不是新的等级，
+  也没有独立的 achv_id；由同一 hex 对应记录的 `canBePlated`、最高档位和玩家 `isPlated` 联合确定。
+  森空岛 `platedIcon` 仅作高清图下载失败时的备用，不应一开始就固定选低分辨率图。
+  规则来源、34/34 原图核验和渲染空态见 `endfield_medal_guide.md` §4.7。
 - 消费方：`plugins/endfield/catalog/views/medals.py` 的 `parse_player_medal_wall`（F2 缺章卡页头奖章墙）、
   `build_medal_id_index` / `resolve_medal_wall`（hex → AKEData 奖章记录，供展示统计复用）。
 
