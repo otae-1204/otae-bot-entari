@@ -22,6 +22,7 @@ if str(ROOT) not in sys.path:
 from otae_bot.infrastructure.rendering.browser import close_browser
 from plugins.endfield.catalog.service import EndfieldService
 from plugins.endfield.medals.store import _dict_to_snapshot
+from plugins.endfield.providers.akedata import AKEDATA_ICON_BASE
 from plugins.endfield.rendering import cards
 
 
@@ -30,6 +31,7 @@ async def main() -> None:
     parser.add_argument("--snapshot", type=Path)
     parser.add_argument("--output-dir", type=Path, default=ROOT / "output/medal-wall-preview")
     args = parser.parse_args()
+    # 预览只走 AKEData 公开表与纯函数视图构建，不会用到森空岛 client，所以可以传 None。
     service = EndfieldService(None)
     if args.snapshot:
         saved = json.loads(args.snapshot.read_text(encoding="utf-8"))
@@ -52,13 +54,24 @@ async def main() -> None:
     shown_ids = {m.medal_id for m in displayed}
     missing = [m for m in snapshot.medals if m.medal_id not in shown_ids][:4]
     missing_ids = {m.medal_id for m in missing}
+    # 两枚可镀层章保持未镀层、一枚可升级章停在低一档，让「未镀层 / 未升满」双卡也出现在预览里。
+    rest = [m for m in snapshot.medals if m.medal_id not in shown_ids | missing_ids]
+    unplated_ids = {m.medal_id for m in [m for m in rest if m.can_be_plated][:2]}
+    unmaxed_ids = {m.medal_id for m in [
+        m for m in rest if m.can_be_upgraded and m.max_level > max(m.init_level, 1)
+    ][:1]}
+
+    def achievement_data(m):
+        data = {"id": hashlib.md5(m.medal_id.encode()).hexdigest(), "name": m.name, "initLevel": m.init_level}
+        if m.can_be_plated:
+            # 演示用：以 AKEData 公开镀层原图充当森空岛 platedIcon。
+            data["platedIcon"] = f"{AKEDATA_ICON_BASE}/{m.medal_id}_lv{m.max_level:02d}_plating.png"
+        return data
+
     progress = [{
-        "achievementData": {
-            "id": hashlib.md5(m.medal_id.encode()).hexdigest(),
-            "name": m.name, "initLevel": m.init_level,
-        },
-        "level": m.max_level - m.init_level + 1,
-        "isPlated": m.can_be_plated,
+        "achievementData": achievement_data(m),
+        "level": m.max_level - max(m.init_level, 1) + (0 if m.medal_id in unmaxed_ids else 1),
+        "isPlated": m.can_be_plated and m.medal_id not in unplated_ids,
     } for m in snapshot.medals if m.medal_id not in missing_ids]
     view = service.build_medal_missing_view(
         {"data": {"detail": {"achieve": {
@@ -68,7 +81,9 @@ async def main() -> None:
         }}}}, snapshot, nickname="管理员（演示数据）", uid="示例账号", server_name="国服",
     )
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    urls = [m.icon_url for m in [*view.not_obtained, *view.wall] if m.icon_url]
+    groups = [*view.not_obtained, *view.not_maxed, *view.not_plated]
+    urls = [m.icon_url for m in [*groups, *view.wall] if m.icon_url]
+    urls += [m.next_icon_url for m in groups if m.next_icon_url]
     icons = await cards._image_data_urls(urls)
     failed = [url for url in urls if not icons.get(url)]
     if failed:
@@ -85,7 +100,9 @@ async def main() -> None:
         ("partial", replace(view, wall=[m for m in view.wall if m.slot in (1, 4, 9)])),
         ("single", replace(view, wall=view.wall[-1:])),
         ("empty", replace(view, wall=[])),
-        ("unavailable", replace(view, wall=[replace(m, icon_url="") for m in view.wall[:1]])),
+        ("unavailable", replace(view, wall=[
+            replace(m, icon_url="", fallback_icon_url="") for m in view.wall[:1]
+        ] + view.wall[1:3])),
         ("long-name", replace(view, nickname="长昵称测试・" * 14)),
     )
     original_write = cards._write_temp_html

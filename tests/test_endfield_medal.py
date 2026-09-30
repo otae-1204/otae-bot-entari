@@ -258,13 +258,85 @@ class MedalMissingTest(unittest.TestCase):
             {"achieveMedals": [], "display": None},
             {"achieveMedals": [], "display": {}},
             {"achieveMedals": [], "display": {"1": hex_a}},          # 指向未拥有的章
-            {"achieveMedals": [{"achievementData": {"id": hex_a}}], "display": {"1": hex_a}},  # 无图标
         ):
             view = service.build_medal_missing_view(
                 {"data": {"detail": {"achieve": achieve}}},
                 snapshot, nickname="t", uid="u", server_name="s",
             )
-            self.assertLessEqual(len(view.wall), 1, achieve)
+            self.assertEqual(view.wall, [], achieve)
+
+        # 有章但两源都没图：仍占一格，图标留空交给渲染层标「图标暂缺」。
+        view = service.build_medal_missing_view(
+            {"data": {"detail": {"achieve": {
+                "achieveMedals": [{"achievementData": {"id": hex_a}}], "display": {"1": hex_a},
+            }}}},
+            snapshot, nickname="t", uid="u", server_name="s",
+        )
+        self.assertEqual(len(view.wall), 1)
+        self.assertEqual(view.wall[0].slot, 1)
+        self.assertEqual(view.wall[0].icon_url, "")
+        self.assertEqual(view.wall[0].fallback_icon_url, "")
+
+    def test_medal_wall_accepts_list_display(self):
+        """``display`` 若以数组形式返回，下标（1 起）即槽位序号。"""
+        service = EndfieldService.__new__(EndfieldService)
+        hex_a = hashlib.md5(b"achv_a").hexdigest()
+        hex_b = hashlib.md5(b"achv_b").hexdigest()
+        raw_progress = {"data": {"detail": {"achieve": {
+            "achieveMedals": [
+                {"achievementData": {"id": hex_a, "name": "A"}, "level": 1},
+                {"achievementData": {"id": hex_b, "name": "B"}, "level": 1},
+            ],
+            "display": [hex_b, hex_a],
+        }}}}
+        view = service.build_medal_missing_view(
+            raw_progress, self._snapshot([]), nickname="t", uid="u", server_name="s"
+        )
+        self.assertEqual([(m.slot, m.name) for m in view.wall], [(1, "B"), (2, "A")])
+
+    def test_medal_wall_prefers_canonical_slot_key(self):
+        """``"01"`` 与 ``"1"`` 指向不同的章时，规范写法 ``"1"`` 占槽，与 hex 字典序无关。"""
+        from plugins.endfield.catalog.models import MEDAL_WALL_MAX_SLOTS
+        from plugins.endfield.catalog.views.medals import parse_player_medal_wall
+
+        # 让非规范键的 hex 字典序更小，确认结果不是靠排序碰巧对的。
+        hex_low, hex_high = "0" * 32, "f" * 32
+        raw = {"data": {"detail": {"achieve": {
+            "achieveMedals": [
+                {"achievementData": {"id": hex_low, "name": "非规范"}, "level": 1},
+                {"achievementData": {"id": hex_high, "name": "规范"}, "level": 1},
+            ],
+            "display": {"01": hex_low, "1": hex_high},
+        }}}}
+        wall = parse_player_medal_wall(raw)
+        self.assertEqual([(m.slot, m.name) for m in wall], [(1, "规范")])
+        self.assertEqual(MEDAL_WALL_MAX_SLOTS, 10)
+
+    def test_not_plated_next_icon_comes_from_skland_plated_icon(self):
+        """回归：未镀层双卡右侧的「镀层后」图标取森空岛 ``platedIcon``，与当前是否已镀层无关。"""
+        service = EndfieldService.__new__(EndfieldService)
+        snapshot = self._snapshot([
+            MedalItemView(medal_id="achv_p", name="P", max_level=1, can_be_plated=True),
+            MedalItemView(medal_id="achv_q", name="Q", max_level=1, can_be_plated=True),
+        ])
+        raw_progress = {"data": {"detail": {"achieve": {"achieveMedals": [
+            {"achievementData": {
+                "id": hashlib.md5(b"achv_p").hexdigest(), "name": "P",
+                "initIcon": "https://bbs.hycdn.cn/p.png",
+                "platedIcon": "https://bbs.hycdn.cn/p_plated.png",
+            }, "level": 1, "isPlated": False},
+            {"achievementData": {
+                "id": hashlib.md5(b"achv_q").hexdigest(), "name": "Q",
+                "platedIcon": "https://bbs.hycdn.cn/q_plated.png",
+            }, "level": 1, "isPlated": True},
+        ]}}}}
+        view = service.build_medal_missing_view(
+            raw_progress, snapshot, nickname="t", uid="u", server_name="s"
+        )
+        self.assertEqual([m.medal_id for m in view.not_plated], ["achv_p"])
+        self.assertEqual(
+            [m.next_icon_url for m in view.not_plated], ["https://bbs.hycdn.cn/p_plated.png"]
+        )
 
     def test_medal_wall_absent_when_achieve_missing(self):
         """整个 achieve 段缺失（接口字段变动）时奖章墙为空，不影响缺章判定。"""

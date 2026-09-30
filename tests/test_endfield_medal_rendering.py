@@ -7,8 +7,10 @@ from unittest.mock import AsyncMock, patch
 from lxml import html
 
 from plugins.endfield.catalog.models import (
+    MedalDiffView,
     MedalItemView,
     MedalMissingView,
+    MedalSnapshotView,
     MedalWallItemView,
 )
 from plugins.endfield.rendering import cards
@@ -65,6 +67,9 @@ class MedalMissingPaginationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(conditions, [text for medal in medals for text in (medal.condition, medal.next_condition) if text])
         self.assertEqual(displayed_icons, [icons[url] for medal in medals for url in (medal.icon_url, medal.next_icon_url) if url])
         self.assertIn("镀层后", pages[-1].decode())
+        last = html.fromstring(pages[-1].decode())
+        self.assertEqual(set(last.xpath('//*[@class="medal-upgrade"]/@data-kind')), {"plating"})
+        self.assertEqual(last.xpath('//section[@data-group="plate"]/h2/text()'), ["未镀层"])
         self.assertNotIn("获取条件", b"".join(pages).decode())
         self.assertNotIn("镀层条件", b"".join(pages).decode())
         self.assertEqual(view.not_obtained, medals[:4])
@@ -91,6 +96,32 @@ class MedalMissingPaginationTest(unittest.IsolatedAsyncioTestCase):
         ):
             await cards.draw_medal_missing_card(view)
         render.assert_awaited_once()
+
+
+class MedalHeaderScopeTest(unittest.IsolatedAsyncioTestCase):
+    """F1/F2 共享 .medal-header 骨架；单卡专属样式必须挂在各自修饰类下。"""
+
+    async def test_stats_header_uses_its_own_modifier(self):
+        view = MedalDiffView(current=MedalSnapshotView(version="1.5", total_count=3))
+        with (
+            patch.object(cards, "_image_data_urls", AsyncMock(return_value={})),
+            patch.object(cards, "_draw_neutral_card", AsyncMock(return_value=b"page")) as render,
+        ):
+            await cards.draw_medal_stats_card(view)
+        header = html.fromstring(render.await_args.args[1]).xpath("//header")[0]
+        self.assertEqual(header.get("class"), "medal-header medal-header--stats")
+        self.assertEqual(header.xpath('.//*[@class="medal-head-version"]/strong/text()'), ["1.5"])
+
+    def test_card_specific_rules_are_scoped(self):
+        rules = [rule.split("{", 1)[0] for rule in cards.MEDAL_CARD_CSS.splitlines() if "{" in rule]
+        for selector in rules:
+            if "medal-head-version" in selector:
+                self.assertIn(".medal-header--stats", selector)
+            if "medal-chip" in selector or "medal-wall-meta" in selector:
+                self.assertIn(".medal-header--wall", selector)
+        base = next(r for r in cards.MEDAL_CARD_CSS.splitlines() if r.startswith(".medal-header{"))
+        self.assertIn("border-radius:0", base)
+        self.assertNotIn("text-shadow", cards.MEDAL_CARD_CSS)
 
 
 class MedalWallLayoutTest(unittest.IsolatedAsyncioTestCase):
@@ -220,6 +251,36 @@ class MedalWallLayoutTest(unittest.IsolatedAsyncioTestCase):
                 await cards._draw_medal_missing_page(view, {}, page_number=page)
             self.assertNotIn('class="medal-wall"', render.await_args.args[1])
             self.assertNotIn('medal-header--wall', render.await_args.args[1])
+
+    async def test_wall_header_counts_valid_slots_and_marks_plated(self):
+        wall = [
+            MedalWallItemView(slot=1, name="镀", icon_url="icon-1", plated=True),
+            MedalWallItemView(slot=2, name="普", icon_url="icon-2"),
+            MedalWallItemView(slot=11, name="越界", icon_url="icon-11", plated=True),
+        ]
+        with patch.object(cards, "_draw_neutral_card", AsyncMock(return_value=b"page")) as render:
+            await cards._draw_medal_missing_page(MedalMissingView(wall=wall), {"icon-1": "a", "icon-2": "b"})
+        document = html.fromstring(render.await_args.args[1])
+        header = document.xpath("//header")[0]
+        self.assertEqual(
+            header.get("class"), "medal-header medal-header--missing medal-header--wall"
+        )
+        chips = [chip.text_content() for chip in header.xpath('.//*[contains(@class,"medal-chip")]')]
+        self.assertEqual(chips, [f"展示位2/{cards.MEDAL_WALL_MAX_SLOTS}", "已镀层1"])
+        cells = self._cells(render.await_args.args[1])
+        self.assertEqual([c.get("data-plated") for c in cells[:2]], ["1", None])
+
+    async def test_unavailable_slot_has_dashed_outline(self):
+        markup = cards._medal_wall_html(self._wall([1]), {})
+        first = self._cells(markup)[0]
+        self.assertTrue(first.xpath('.//*[local-name()="svg"][@class="medal-wall-outline"]'))
+        empty = self._cells(markup)[1]
+        self.assertFalse(empty.xpath('.//*[local-name()="svg"][@class="medal-wall-outline"]'))
+
+    async def test_wall_slot_limit_shared_with_model_layer(self):
+        from plugins.endfield.catalog import models
+
+        self.assertIs(cards.MEDAL_WALL_MAX_SLOTS, models.MEDAL_WALL_MAX_SLOTS)
 
     async def test_wall_icons_are_loaded_and_wall_only_on_first_page(self):
         wall = self._wall(range(1, 11))

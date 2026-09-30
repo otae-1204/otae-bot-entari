@@ -16,6 +16,7 @@ from ...providers.akedata import (
     AKEDATA_ICON_BASE,
 )
 from ..models import (
+    MEDAL_WALL_MAX_SLOTS,
     MedalItemView,
     MedalProgressView,
     MedalSnapshotView,
@@ -67,6 +68,7 @@ def _norm_medal_name(name: str) -> str:
     """规范化奖章名用于跨源关联：去全部空白 + 去首尾中英文引号。
 
     主关联使用 ``md5(achv_id)``；名称仅用于缺少可关联 id 时的兼容路径。
+    （2026-07-27 未发现 md5 关系前曾按 name 关联，实测 135/140 命中，漏配来自命名滞后。）
     """
     return (
         "".join(str(name).split())
@@ -102,14 +104,14 @@ def _parse_player_medal_progress(
             continue
         plated = _clean_plated_flag(item.get("isPlated"))
         init_level = _to_int(meta.get("initLevel")) or 0
-        # 未镀层双卡右卡要用镀层后图标；无 platedIcon 时留空，由渲染层降级为「无图」。
-        plated_icon = _medal_icon_url(meta, level=0, plated=True) if plated else ""
         view = MedalProgressView(
             medal_id=hex_id,
             level=_to_int(item.get("level")),
             plated=plated,
             init_level=init_level,
-            plated_icon=plated_icon,
+            # 与当前是否已镀层无关：只有**未镀层**的章会读它，作为双卡右侧的「镀层后」图标；
+            # 无 platedIcon 时留空，由渲染层降级为「无图」。
+            plated_icon=_first_text(meta, "platedIcon") or "",
         )
         if hex_id:
             by_hex[hex_id] = view
@@ -147,7 +149,7 @@ def _medal_icon_url(meta: dict[str, Any], *, level: int, plated: bool) -> str:
 def parse_player_medal_wall(
     raw: dict[str, Any],
     *,
-    limit: int = 10,
+    limit: int = MEDAL_WALL_MAX_SLOTS,
     medals: Iterable[MedalItemView] | None = None,
 ) -> list[MedalWallItemView]:
     """从森空岛 ``card/detail`` 提取账号公开展示的奖章墙（游戏名片的展示位）。
@@ -187,15 +189,17 @@ def parse_player_medal_wall(
             else {}
         )
 
-    # 先过滤无效槽位，避免它们占用 limit 或撑破固定的十格墙面。
-    def _slot_key(pair: tuple[str, Any]) -> tuple[int, str]:
-        slot, hex_id = pair
-        return (_to_int(slot), str(hex_id))
+    # 同一槽位号出现多次（如 "01" 与 "1"）时，规范写法 "1" 优先，其余按原始出现顺序。
+    def _slot_key(entry: tuple[int, tuple[str, Any]]) -> tuple[int, bool, int]:
+        order, (slot, _hex_id) = entry
+        slot_number = _to_int(slot)
+        return (slot_number, str(slot).strip() != str(slot_number), order)
 
     wall: list[MedalWallItemView] = []
-    for slot, hex_id in sorted(display.items(), key=_slot_key):
+    for _order, (slot, hex_id) in sorted(enumerate(display.items()), key=_slot_key):
         slot_number = _to_int(slot)
-        if not 1 <= slot_number <= 10 or any(m.slot == slot_number for m in wall):
+        # 先过滤无效槽位，避免它们占用 limit 或撑破固定的十格墙面。
+        if not 1 <= slot_number <= MEDAL_WALL_MAX_SLOTS or any(m.slot == slot_number for m in wall):
             continue
         item = by_hex.get(str(hex_id))
         if item is None:
@@ -266,6 +270,8 @@ def resolve_medal_wall(
     medals: Iterable[MedalItemView],
 ) -> list[tuple[MedalWallItemView, MedalItemView | None]]:
     """奖章墙 × 全量快照：逐格配出 AKEData 奖章记录（未收录时为 ``None``）。
+
+    预留接口：供后续「展示奖章统计」使用，目前只有测试调用。
 
     返回顺序与 ``wall`` 一致（即森空岛展示位顺序），便于直接统计展示位的奖章构成。
     """

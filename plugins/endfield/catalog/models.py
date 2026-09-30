@@ -493,6 +493,9 @@ class MedalProgressView:
     plated_icon: str = ""     # achievementData.platedIcon：镀层后图标（未镀层双卡右卡用）
 
 
+MEDAL_WALL_MAX_SLOTS = 10  # 森空岛 achieve.display 展示位上限；解析与渲染共用
+
+
 @dataclass(slots=True)
 class MedalWallItemView:
     """奖章墙的一格：账号在游戏名片里公开展示的一枚已获得奖章。

@@ -55,6 +55,7 @@ from ..catalog.models import (
     WeaponCatalogItemView,
     WeaponCatalogView,
     WeaponView,
+    MEDAL_WALL_MAX_SLOTS,
     MedalDiffView,
     MedalItemView,
     MedalMissingView,
@@ -1178,77 +1179,92 @@ MEDAL_WALL_ROW_HEIGHT = 90           # 上下两排更深地咬合，同时保�
 MEDAL_WALL_ROW_INDENT = MEDAL_WALL_STRIDE // 2
 MEDAL_WALL_ICON_SIZE = 116          # 400px 画布的章面约 330×380，缩至 96×111
 MEDAL_WALL_INSET_PADDING = 12       # 收窄背板边沿，保留局部内嵌轮廓
-MEDAL_WALL_MAX_SLOTS = 10            # 森空岛展示位上限；没配满的按空槽位渲染
+# 展示位上限 MEDAL_WALL_MAX_SLOTS 来自 catalog.models，解析与渲染共用；没配满的按空槽位渲染。
+# 页头样式分三层：.medal-header 是 F1/F2 有意共享的骨架；--stats 只属于 F1；
+# --missing / --wall 只属于 F2。单卡专属规则必须挂在修饰类下，避免改一张卡连带另一张。
 MEDAL_CARD_CSS = """
-:is(.medal-stats-card,.medal-missing-card){padding:28px 32px;background:linear-gradient(135deg,#fff,#fafbfd);color:#283440}
-.medal-header{margin:0 0 18px;padding:18px 24px;background:linear-gradient(180deg,#333335,#232325 62%,#1c1c1e);background-clip:padding-box;color:#fff;border:0;border-bottom:var(--card-header-rule);gap:20px;border-radius:12px;box-shadow:inset 0 1px 0 rgba(255,255,255,.16),inset 0 -1px 0 rgba(0,0,0,.5),0 8px 20px rgba(20,24,30,.24)}
-.medal-header small{color:#c7c7c7;font-size:12px;letter-spacing:.24em}
-.medal-header h1{margin:6px 0 0;font-size:36px;line-height:1.2;letter-spacing:.04em;font-weight:800;text-shadow:0 2px 4px rgba(0,0,0,.45)}
-.medal-header p{margin:6px 0 0;color:#c8c8c8;font-size:15px;overflow-wrap:anywhere}
-/* 深色页头内嵌局部蜂窝背板；奖章本体不裁成标准六边形。 */
-.medal-head{display:flex;align-items:center;gap:20px;width:100%}
-.medal-header--wall{padding:24px 28px}
-.medal-header--wall .medal-head{justify-content:space-between;gap:28px;align-items:center}
-.medal-header--wall .medal-heading{flex:1;min-width:0}
-.medal-wall{flex:none;position:relative;margin:16px;background:none}
-.medal-wall-backplate{position:absolute;pointer-events:none;overflow:visible;filter:drop-shadow(0 -1px 0 #101316) drop-shadow(0 1px 0 #ffffff38)}
+:is(.medal-stats-card,.medal-missing-card){padding:28px;color:#242b31}
+.medal-header{position:relative;margin:0 0 18px;padding:22px 26px 20px;gap:24px;background:#20252a;background-clip:padding-box;color:#f4f6f7;border:0;border-bottom:var(--card-header-rule);border-radius:0;box-shadow:none}
+.medal-heading{flex:1;min-width:0}
+.medal-header small{display:flex;align-items:center;gap:8px;color:#aeb6ba;font-size:12px;font-weight:900;letter-spacing:.22em}
+.medal-header small::before{content:'';width:6px;height:6px;background:#aeb6ba}
+.medal-header h1{margin:8px 0 0;font-size:40px;line-height:1.05;font-weight:950;letter-spacing:-.01em}
+.medal-header p{margin:10px 0 0;color:#aeb6ba;font-size:15px;line-height:1.4;font-weight:750;overflow-wrap:anywhere}
+.medal-header--stats .medal-head-version{flex:none;align-self:stretch;display:flex;flex-direction:column;justify-content:center;min-width:180px;max-width:360px;padding-left:24px;border-left:1px solid rgba(255,255,255,.14)}
+.medal-header--stats .medal-head-version span{color:#7d878d;font-size:12px;font-weight:900;letter-spacing:.22em}
+.medal-header--stats .medal-head-version strong{margin-top:6px;font:900 44px/1 Arial,'Microsoft YaHei',sans-serif;letter-spacing:-.02em;overflow-wrap:anywhere}
+.medal-header--wall{padding:20px 22px 20px 26px;align-items:center}
+.medal-header--wall .medal-wall-meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
+.medal-header--wall .medal-chip{display:inline-flex;align-items:baseline;gap:6px;padding:6px 12px;border-left:4px solid #aeb6ba;background:#2a3136;color:#aeb6ba;font-size:13px;font-weight:850}
+.medal-header--wall .medal-chip b{color:#f4f6f7;font:900 18px/1 Arial,'Microsoft YaHei',sans-serif}
+.medal-header--wall .medal-chip--plate{border-left-color:#c98a1a}
+/* 奖章墙：页头里的深枪灰托盘；背板沿十格外轮廓内凹，奖章本体不裁成标准六边形。
+   背板 SVG 的 medal-wall-* id 是文档级的，前提是一页只有一面墙。 */
+.medal-wall{flex:none;position:relative;padding:20px 22px;background:#171b1f;border:1px solid rgba(255,255,255,.07)}
+.medal-wall-stage{position:relative}
+.medal-wall-backplate{position:absolute;pointer-events:none;overflow:visible;filter:drop-shadow(0 -1px 0 #05080a) drop-shadow(0 1px 0 rgba(255,255,255,.10))}
 .medal-wall-slot{position:absolute}
 .medal-wall-art{display:block;position:relative;width:100%;height:100%;overflow:visible}
-.medal-wall-recess{display:block;position:relative;width:100%;height:100%;overflow:hidden;clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%)}
 .medal-wall-art img{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);object-fit:contain;max-width:none}
-.medal-wall-recess{background:linear-gradient(145deg,#89949c,#e0e5e8);opacity:.62}
-.medal-wall-recess::before{content:'';position:absolute;inset:2px;clip-path:inherit;background:linear-gradient(145deg,#aab3ba,#c0c8cd 70%);box-shadow:inset 0 3px 10px #7c889340}
-.medal-wall-etching{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
-.medal-wall-unavailable{position:absolute;inset:0;display:grid;place-items:center;color:#566570;font-size:12px}
+.medal-wall-recess{display:block;position:relative;width:100%;height:100%;overflow:hidden;clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);background:linear-gradient(160deg,#0c1013,#3a4248)}
+.medal-wall-recess::before{content:'';position:absolute;inset:2px;clip-path:inherit;background:linear-gradient(160deg,#1a1f23,#272d32 70%);box-shadow:inset 0 4px 10px rgba(0,0,0,.45)}
+.medal-wall-etching,.medal-wall-outline{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.medal-wall-unavailable{position:absolute;inset:0;display:grid;place-items:center;color:#aeb6ba;font-size:12px;font-weight:850;letter-spacing:.04em}
 .medal-main{padding:0;border:0;background:none}
-.medal-stats{padding:14px 22px 0;margin-bottom:18px;border-radius:16px;background:#f2f5f7}
-.medal-row{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));align-items:center}
-.medal-stats .primary{padding:0 20px 0 0}
-.medal-stats .primary span{display:block;color:#616d79;font-size:15px;margin-bottom:2px}
-.medal-stats .primary strong{font-size:40px;line-height:1.1;font-weight:800;letter-spacing:-.04em;font-variant-numeric:tabular-nums}
-.medal-stats .lv-tile{display:flex;align-items:center;justify-content:center;gap:14px;min-height:66px;border-left:1px solid #dfe5e9}
-.medal-stats .lv-tile strong{font-size:32px;line-height:1.1;font-weight:750;font-variant-numeric:tabular-nums}
+.medal-stats{margin:0 0 18px;border:1px solid rgba(23,27,31,.22);border-left:6px solid #171b1f;background:rgba(249,250,248,.96);box-shadow:-8px 12px 28px rgba(23,27,31,.10)}
+.medal-row{display:grid;grid-template-columns:1.25fr repeat(3,minmax(0,1fr));align-items:stretch}
+.medal-stats .primary{padding:14px 20px 12px}
+.medal-stats .primary span,.medal-stats-secondary .tile span{display:block;color:#697279;font-size:13px;font-weight:850}
+.medal-stats .primary strong{display:block;margin-top:4px;font:900 52px/1 Arial,'Microsoft YaHei',sans-serif;letter-spacing:-.03em;color:#171b1f;font-variant-numeric:tabular-nums}
+.medal-stats .lv-tile{display:flex;align-items:center;justify-content:center;gap:14px;min-height:96px;border-left:1px solid rgba(23,27,31,.14)}
+.medal-stats .lv-tile strong{font:900 36px/1 Arial,'Microsoft YaHei',sans-serif;color:#171b1f;font-variant-numeric:tabular-nums}
 .medal-stats .lv-tile .grade-icon{display:block;width:56px;height:66px;object-fit:contain;flex-shrink:0}
-.medal-stats-secondary{display:flex;align-items:center;gap:20px;margin-top:10px;padding:10px 0;border-top:1px solid #dfe5e9}
-.medal-stats-secondary .tile{flex:1;display:flex;align-items:baseline;gap:10px}
-.medal-stats-secondary .tile span{color:#616d79;font-size:15px}
-.medal-stats-secondary .tile strong{font-size:20px;font-weight:750;font-variant-numeric:tabular-nums}
+.medal-stats-secondary{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);border-top:1px solid rgba(23,27,31,.14);background:#eef0f0}
+.medal-stats-secondary .tile{padding:9px 20px 10px;border-left:1px solid rgba(23,27,31,.10)}
+.medal-stats-secondary[data-count="4"]{grid-auto-flow:row;grid-template-columns:1.25fr repeat(3,minmax(0,1fr))}
+.medal-stats-secondary .tile:first-child{border-left:0}
+.medal-stats-secondary .tile strong{display:block;margin-top:4px;font:900 24px/1 Arial,'Microsoft YaHei',sans-serif;color:#171b1f;font-variant-numeric:tabular-nums}
+.medal-stats-secondary .tile[data-accent=plate] strong{color:#a86500}
 .medal-section{margin-top:18px}
-.medal-section h2{display:flex;align-items:center;gap:10px;margin:0 0 6px;font-size:22px;font-weight:750;letter-spacing:.03em}
-.medal-section h2::before{content:'';width:5px;height:20px;border-radius:3px;background:#b39a5e}
-.medal-section h2::after{content:'';height:1px;flex:1;margin-left:4px;background:#e2e7eb}
-.medal-section-count{font-size:14px;font-weight:500;letter-spacing:0;color:#65717d}
-.medal-list{display:grid;gap:10px 14px}
+.medal-section h2{display:flex;align-items:center;gap:10px;margin:0 0 10px;padding-bottom:8px;border-bottom:3px solid #20262a;font-size:22px;line-height:1.1;font-weight:950;color:#171b1f}
+.medal-section h2::before{content:'';flex:none;width:8px;height:22px;background:#171b1f}
+.medal-section[data-group=plate] h2::before{background:#a86500}
+.medal-section-count{margin-left:auto;padding:4px 10px;background:#20252a;color:#f4f6f7;font-size:13px;font-weight:900;letter-spacing:0}
+.medal-list{display:grid;gap:10px}
 .medal-list--double{grid-template-columns:repeat(2,minmax(0,1fr))}
 .medal-list--double>:only-child{grid-column:1/-1}
-.medal-item,.medal-upgrade{padding:12px 16px;border-radius:14px;background:linear-gradient(110deg,#f3f6f8,#f8fafb)}
-.medal-item{display:grid;grid-template-columns:88px minmax(0,1fr);gap:12px;align-items:start}
-.medal-icon{width:88px;height:88px;display:grid;place-items:center}
-.medal-icon img{width:100%;height:100%;object-fit:contain}
-.medal-icon .no-icon{color:#75808b;font-size:13px;letter-spacing:.1em}
+.medal-item,.medal-upgrade{border:1px solid #c4c9cb;border-left:5px solid #20262a;background:rgba(255,255,255,.9)}
+.medal-item{display:grid;grid-template-columns:96px minmax(0,1fr);gap:14px;align-items:start;padding:12px 16px 12px 12px}
+.medal-icon{width:96px;height:96px;display:grid;place-items:center;background:#eceeee;border:1px solid rgba(23,27,31,.08)}
+.medal-icon img{width:88px;height:88px;object-fit:contain}
+.medal-icon .no-icon{color:#8c959a;font-size:13px;font-weight:850;letter-spacing:.1em}
 .medal-info{min-width:0;overflow-wrap:anywhere}
-.medal-info>strong{display:block;font-size:18px;line-height:1.4;font-weight:750;color:#283440}
-.medal-meta{display:flex;align-items:center;flex-wrap:wrap;gap:7px;margin-top:2px}
-.medal-meta .cat{color:#65717d;font-size:14px}
-.medal-meta .tag{padding:1px 7px;border-radius:10px;font-size:12px;font-weight:600;line-height:1.5}
-.medal-meta .tag.up{color:#627965;background:#e9eee5}
-.medal-meta .tag.plate{color:#99824d;background:#f2ecd9}
-.medal-desc{margin-top:4px;color:#2e3946;font-size:15px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere}
-.medal-cond{margin-top:3px;color:#61738a;font-size:14px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere}
-.medal-next{margin-top:8px;padding-top:6px;border-top:1px solid #e2e7eb}
-.medal-next-tag{display:inline-block;color:#837451;font-size:13px;font-weight:700;letter-spacing:.06em}
-.medal-upgrade{display:grid;grid-template-columns:minmax(0,1fr) 28px minmax(0,1fr);align-items:start;gap:12px}
-.medal-upgrade .medal-card{display:grid;grid-template-columns:88px minmax(0,1fr);gap:12px;align-items:start;min-width:0}
-.medal-upgrade .medal-icon{width:88px;height:88px;margin-top:18px}
-.medal-stage{display:block;margin-bottom:3px;color:#667480;font-size:13px;line-height:1.4;letter-spacing:.06em}
-.medal-card--next .medal-stage{color:#837451}
-.medal-upgrade .medal-arrow{align-self:center;display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:#e9edf0;color:#837451;font-size:20px;line-height:1}
-.medal-source{display:flex;justify-content:space-between;gap:20px;margin-top:18px;padding-top:10px;border-top:1px solid #e2e7eb;color:#75808b;font-size:12px;line-height:1.6;overflow-wrap:anywhere}
-.medal-notice{margin:-6px 0 12px;color:#75808b;font-size:13px;line-height:1.6}
-.medal-main .empty{padding:28px 20px;background:#f3f6f8;border:0;border-radius:14px;color:#65717d;font-size:15px;line-height:1.6}
+.medal-info>strong{display:block;font-size:19px;line-height:1.3;font-weight:900;color:#171b1f}
+.medal-meta{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-top:5px}
+.medal-meta .cat{color:#697279;font-size:13px;font-weight:850}
+.medal-meta .tag{padding:1px 7px;border:1px solid rgba(23,27,31,.3);background:rgba(23,27,31,.06);color:#303941;font-size:12px;line-height:1.5;font-weight:900}
+.medal-meta .tag.plate{border-color:rgba(168,101,0,.38);background:rgba(168,101,0,.08);color:#8b5a00}
+.medal-desc{margin-top:7px;color:#2f383f;font-size:15px;line-height:1.5;font-weight:700;white-space:pre-wrap;overflow-wrap:anywhere}
+.medal-cond{margin-top:5px;padding-left:9px;border-left:2px solid #c4c9cb;color:#697279;font-size:14px;line-height:1.45;font-weight:750;white-space:pre-wrap;overflow-wrap:anywhere}
+.medal-next{margin-top:10px;padding-top:8px;border-top:1px dashed #b5bcbf}
+.medal-next-tag,.medal-stage{display:flex;align-items:center;gap:6px;color:#303941;font-size:12px;line-height:1.4;font-weight:900;letter-spacing:.12em}
+.medal-next-tag::before,.medal-stage::before{content:'';flex:none;width:6px;height:8px;background:currentColor;clip-path:polygon(0 0,100% 50%,0 100%)}
+.medal-upgrade{display:grid;grid-template-columns:minmax(0,1fr) 30px minmax(0,1fr);align-items:stretch}
+.medal-upgrade .medal-card{display:grid;grid-template-columns:96px minmax(0,1fr);gap:14px;align-items:start;min-width:0;padding:12px 16px 12px 12px}
+.medal-stage{margin-bottom:4px;color:#697279}
+.medal-card--next{background:#f2f4f4;box-shadow:inset 0 3px 0 #6f7880}
+.medal-card--next .medal-stage{color:#303941}
+.medal-upgrade[data-kind=plating] .medal-card--next{background:rgba(168,101,0,.06);box-shadow:inset 0 3px 0 #a86500}
+.medal-upgrade[data-kind=plating] .medal-card--next .medal-stage{color:#8b5a00}
+.medal-upgrade .medal-arrow{display:grid;place-items:center;background:linear-gradient(90deg,transparent 14px,rgba(23,27,31,.14) 14px,rgba(23,27,31,.14) 16px,transparent 16px)}
+.medal-upgrade .medal-arrow::before{content:'';width:14px;height:22px;background:#20252a;clip-path:polygon(0 0,100% 50%,0 100%)}
+.medal-upgrade[data-kind=plating] .medal-arrow::before{background:#a86500}
+.medal-source{display:flex;justify-content:space-between;gap:20px;margin-top:18px;padding-top:10px;border-top:3px solid #171b1f;color:#697279;font-size:12px;line-height:1.5;font-weight:900;overflow-wrap:anywhere}
+.medal-notice{margin:0 0 14px;padding:10px 14px;border-left:6px solid #a86500;background:#fff;color:#3b444b;font-size:14px;line-height:1.5;font-weight:750}
+.medal-main .empty{padding:24px 20px;border:1px dashed #9aa2a5;background:#edf0f0;color:#71797d;font-size:16px;line-height:1.6;font-weight:750;text-align:center}
 .medal-levelbar{display:flex;gap:24px;margin-bottom:24px}
 .medal-levelbar .lv-cell{flex:1;display:flex;align-items:center;justify-content:center;gap:12px;padding:12px 14px}
-.medal-levelbar .lv-cell strong{font-size:32px;line-height:1;font-weight:800}
+.medal-levelbar .lv-cell strong{font-size:32px;line-height:1;font-weight:900}
 .medal-levelbar .grade-icon{display:inline-block;width:48px;height:48px;flex-shrink:0;object-fit:contain}
 """
 
@@ -1302,7 +1318,7 @@ async def _draw_medal_stats_page(
         else '<div class="empty">暂无新增蚀刻章（暂无更早版本可对比或本版本无新增）</div>'
     )
     body = f"""
-    <header class="medal-header"><div><small>ENDFIELD / MEDAL ARCHIVE</small><h1>蚀刻章统计</h1><p>游戏版本 {esc(current.version)}{page_tag}</p></div></header>
+    <header class="medal-header medal-header--stats"><div class="medal-heading"><small>ENDFIELD / MEDAL ARCHIVE</small><h1>蚀刻章统计</h1><p>游戏版本 {esc(current.version)}{page_tag}</p></div><div class="medal-head-version"><span>VERSION</span><strong>{esc(current.version or "--")}</strong></div></header>
     <main class="medal-main">
       {stats}
       <section class="medal-section">
@@ -1339,7 +1355,7 @@ def _medal_item_html(medal: MedalItemView, icon_map: dict[str, str]) -> str:
     next_block = ""
     if medal.next_description or medal.next_condition:
         next_copy = _medal_copy_html(medal.next_description, medal.next_condition)
-        next_block = f'<div class="medal-next"><span class="medal-next-tag">→ 升级后</span>{next_copy}</div>'
+        next_block = f'<div class="medal-next"><span class="medal-next-tag">升级后</span>{next_copy}</div>'
     return (
         f'<div class="medal-item">{icon}'
         f'<div class="medal-info"><strong>{esc(medal.name)}</strong>{meta}{copy}{next_block}</div>'
@@ -1365,10 +1381,11 @@ def _medal_upgrade_html(medal: MedalItemView, icon_map: dict[str, str], *, plati
     current_label, next_label = ("镀层前", "镀层后") if plating else ("当前档位", "升级后")
     current_copy = _medal_copy_html(medal.description, medal.condition)
     next_copy = _medal_copy_html(medal.next_description, medal.next_condition)
+    kind = "plating" if plating else "upgrade"
     return (
-        '<div class="medal-upgrade">'
+        f'<div class="medal-upgrade" data-kind="{kind}">'
         f'<div class="medal-card">{cur_icon}<div class="medal-info"><span class="medal-stage">{current_label}</span><strong>{esc(medal.name)}</strong>{meta}{current_copy}</div></div>'
-        '<div class="medal-arrow" aria-hidden="true">→</div>'
+        '<div class="medal-arrow" aria-hidden="true"></div>'
         f'<div class="medal-card medal-card--next">{next_icon}<div class="medal-info"><span class="medal-stage">{next_label}</span><strong>{esc(medal.name)}</strong>{cat_meta}{next_copy}</div></div>'
         '</div>'
     )
@@ -1433,7 +1450,7 @@ def _medal_slot_html(data_url: str, *, empty: bool) -> str:
     # 按游戏参考图重绘低对比刻线与字样；这是矢量底纹，不是游戏原始贴图。
     texture = """<svg class="medal-wall-etching" viewBox="0 0 96 111"
         xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <g fill="none" stroke="#667580" stroke-width=".65" opacity=".27">
+      <g fill="none" stroke="#9aa4ab" stroke-width=".65" opacity=".22">
         <path d="M49 3V50 M49 58V107 M25 20L40 44
           M57 31L65 12 M60 36L75 19 M62 41L86 25
           M63 46L90 34 M63 51L92 44 M62 56H92
@@ -1442,13 +1459,19 @@ def _medal_slot_html(data_url: str, *, empty: bool) -> str:
           stroke-dasharray=".5 1.4"/>
         <circle cx="49" cy="54" r=".6"/>
       </g>
-      <g fill="#697781" opacity=".32" font-family="Arial,sans-serif" font-weight="700">
+      <g fill="#9aa4ab" opacity=".26" font-family="Arial,sans-serif" font-weight="700">
         <text x="8" y="70" font-size="8" letter-spacing="-.5">END</text>
         <text x="8" y="78" font-size="8" letter-spacing="-.6">FIELD</text>
         <path d="M35 72h6v6h-6z M36 66h1v3h-1z M39 66h1v3h-1z"/>
       </g>
     </svg>""" if empty else ""
-    label = '' if empty else '<span class="medal-wall-unavailable">图标暂缺</span>'
+    # 已设置但缺图：同一凹槽 + 虚线轮廓 + 文字，和「未设置」区分开。
+    label = '' if empty else (
+        '<svg class="medal-wall-outline" viewBox="0 0 96 111" aria-hidden="true" '
+        'xmlns="http://www.w3.org/2000/svg"><polygon points="48,3 93,29 93,82 48,108 3,82 3,29" '
+        'fill="none" stroke="#8c959a" stroke-width="1.2" stroke-dasharray="4 3"/></svg>'
+        '<span class="medal-wall-unavailable">图标暂缺</span>'
+    )
     return f'<span class="medal-wall-recess" aria-hidden="true">{texture}</span>{label}'
 
 
@@ -1470,13 +1493,13 @@ def _medal_wall_backplate_html(width: int, height: int) -> str:
         f'viewBox="0 0 {w} {h}" style="left:-{padding}px;top:-{padding}px" '
         'xmlns="http://www.w3.org/2000/svg">'
         '<defs><linearGradient id="medal-wall-metal" x1="0" y1="0" x2=".3" y2="1">'
-        '<stop stop-color="#939da5"/><stop offset=".55" stop-color="#bac2c7"/>'
-        '<stop offset="1" stop-color="#aab4bc"/></linearGradient>'
+        '<stop stop-color="#434b52"/><stop offset=".55" stop-color="#30373c"/>'
+        '<stop offset="1" stop-color="#282e33"/></linearGradient>'
         '<filter id="medal-wall-inset" x="-10%" y="-10%" width="120%" height="120%">'
         '<feOffset in="SourceAlpha" dx="0" dy="4" result="offset"/>'
         '<feGaussianBlur in="offset" stdDeviation="3" result="blur"/>'
         '<feComposite in="SourceAlpha" in2="blur" operator="out" result="edge"/>'
-        '<feFlood flood-color="#101820" flood-opacity=".75" result="shade"/>'
+        '<feFlood flood-color="#05080a" flood-opacity=".85" result="shade"/>'
         '<feComposite in="shade" in2="edge" operator="in" result="shadow"/>'
         '<feComposite in="shadow" in2="SourceGraphic" operator="over"/>'
         '</filter></defs>'
@@ -1501,8 +1524,9 @@ def _medal_wall_html(wall: Sequence[MedalWallItemView], icon_map: dict[str, str]
         inner = _medal_slot_html(icon, empty=item is None)
         title = item.name if item is not None else "未设置奖章"
         state = "empty" if item is None else ("loaded" if icon else "unavailable")
+        plated = ' data-plated="1"' if item is not None and item.plated else ""
         cells.append(
-            f'<li class="medal-wall-slot" data-slot="{slot}" data-state="{state}" '
+            f'<li class="medal-wall-slot" data-slot="{slot}" data-state="{state}"{plated} '
             f'style="width:{MEDAL_WALL_ITEM_WIDTH}px;'
             f'height:{MEDAL_WALL_ITEM_HEIGHT}px;'
             f'top:{MEDAL_WALL_ROW_HEIGHT * row}px;'
@@ -1513,12 +1537,24 @@ def _medal_wall_html(wall: Sequence[MedalWallItemView], icon_map: dict[str, str]
     width = MEDAL_WALL_STRIDE * (MEDAL_WALL_COLUMNS - 1) + MEDAL_WALL_ROW_INDENT + MEDAL_WALL_ITEM_WIDTH
     height = MEDAL_WALL_ROW_HEIGHT + MEDAL_WALL_ITEM_HEIGHT
     return (
-        '<div class="medal-wall">'
+        '<div class="medal-wall"><div class="medal-wall-stage">'
         f'{_medal_wall_backplate_html(width, height)}'
         f'<ul class="medal-wall-grid" style="position:relative;width:{width}px;'
         f'height:{height}px;'
-        f'margin:0;padding:0;list-style:none">{"".join(cells)}</ul></div>'
+        f'margin:0;padding:0;list-style:none">{"".join(cells)}</ul></div></div>'
     )
+
+
+def _medal_wall_meta_html(wall: Sequence[MedalWallItemView]) -> str:
+    """页头左侧的墙面计数：只统计有效槽位；没有镀层章时不显示镀层徽标。"""
+    slots = {item.slot: item for item in wall if 1 <= item.slot <= MEDAL_WALL_MAX_SLOTS}
+    plated = sum(1 for item in slots.values() if item.plated)
+    chips = [
+        f'<span class="medal-chip">展示位<b>{len(slots)}</b>/{MEDAL_WALL_MAX_SLOTS}</span>'
+    ]
+    if plated:
+        chips.append(f'<span class="medal-chip medal-chip--plate">已镀层<b>{plated}</b></span>')
+    return f'<div class="medal-wall-meta">{"".join(chips)}</div>'
 
 
 async def _draw_medal_missing_page(
@@ -1551,9 +1587,10 @@ async def _draw_medal_missing_page(
     )
     # 奖章墙只挂第一页：它是账号名片上的展示态，不随缺章分页变化。
     wall_html = _medal_wall_html(view.wall, icon_map) if view.wall and page_number == 1 else ""
-    header_class = "medal-header medal-header--wall" if wall_html else "medal-header"
+    wall_meta = _medal_wall_meta_html(view.wall) if wall_html else ""
+    header_class = "medal-header medal-header--missing" + (" medal-header--wall" if wall_html else "")
     body = f"""
-    <header class="{header_class}"><div class="medal-head"><div class="medal-heading"><small>ENDFIELD / MEDAL MISSING</small><h1>蚀刻章缺章</h1><p>{esc(view.nickname)} · {esc(server_name)} · {esc(view.uid)}{page_tag}</p></div>{wall_html}</div></header>
+    <header class="{header_class}"><div class="medal-heading"><small>ENDFIELD / MEDAL MISSING</small><h1>蚀刻章缺章</h1><p>{esc(view.nickname)} · {esc(server_name)} · {esc(view.uid)}{page_tag}</p>{wall_meta}</div>{wall_html}</header>
     <main class="medal-main">
       {stats}
       {notice}
@@ -1612,6 +1649,10 @@ def _medal_level_bar(level_counts: dict[int, int]) -> str:
     return f'<section class="medal-levelbar">{cells}</section>'
 
 
+# 镀层相关计数用镀层琥珀，其余保持墨色。
+_MEDAL_STAT_ACCENTS = {"可镀层": ' data-accent="plate"', "未镀层": ' data-accent="plate"'}
+
+
 def _medal_stats_block(
     primary_label: str,
     primary_value: int,
@@ -1628,13 +1669,13 @@ def _medal_stats_block(
         for lv in (3, 2, 1)
     )
     row2_html = "".join(
-        f'<div class="tile"><span>{esc(label)}</span><strong>{value}</strong></div>'
+        f'<div class="tile"{_MEDAL_STAT_ACCENTS.get(label, "")}><span>{esc(label)}</span><strong>{value}</strong></div>'
         for label, value in row2
     )
     return (
         '<section class="medal-stats">'
         f'<div class="medal-row">{primary}{lv_cells}</div>'
-        f'<div class="medal-stats-secondary">{row2_html}</div>'
+        f'<div class="medal-stats-secondary" data-count="{len(row2)}">{row2_html}</div>'
         '</section>'
     )
 
@@ -1663,8 +1704,9 @@ def _medal_section_html(
         double = " medal-list--double" if len(medals) >= MEDAL_DOUBLE_COLUMN_MIN else ""
     shown = count if count is not None else len(medals)
     count_label = f"本页 {len(medals)} / 共 {shown} 枚" if shown != len(medals) else f"{shown} 枚"
+    group = ' data-group="plate"' if plating else ""
     return (
-        f'<section class="medal-section"><h2>{esc(title)}<span class="medal-section-count">{count_label}</span></h2>'
+        f'<section class="medal-section"{group}><h2>{esc(title)}<span class="medal-section-count">{count_label}</span></h2>'
         f'<div class="medal-list{double}">{items}</div></section>'
     )
 
