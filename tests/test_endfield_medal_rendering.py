@@ -251,7 +251,8 @@ class MedalWallLayoutTest(unittest.IsolatedAsyncioTestCase):
                 await cards._draw_medal_missing_page(view, {}, page_number=page)
             self.assertNotIn('class="medal-wall"', render.await_args.args[1])
             self.assertNotIn('medal-header--wall', render.await_args.args[1])
-            self.assertIn('class="medal-gaps"', render.await_args.args[1])
+            self.assertNotIn('medal-gaps', render.await_args.args[1])
+            self.assertNotIn('medal-chip', render.await_args.args[1])
 
     async def test_wall_header_shows_gap_chips_and_marks_plated(self):
         wall = [
