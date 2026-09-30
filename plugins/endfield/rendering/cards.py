@@ -1215,16 +1215,22 @@ MEDAL_CARD_CSS = """
 .medal-stats{margin:0 0 18px;border:1px solid #d0d7dc;background:#f2f5f7}
 .medal-row{display:grid;grid-template-columns:1.25fr repeat(3,minmax(0,1fr));align-items:stretch}
 .medal-stats .primary{padding:14px 20px 12px}
-.medal-stats .primary span,.medal-stats-secondary .tile span{display:block;color:#616d79;font-size:15px;margin-bottom:2px}
+.medal-stats .primary span{display:block;color:#616d79;font-size:15px;margin-bottom:2px}
 .medal-stats .primary strong{display:block;font-size:40px;line-height:1.1;font-weight:800;letter-spacing:-.04em;font-variant-numeric:tabular-nums}
+.medal-stats .primary small{margin-left:6px;color:#8c97a1;font-size:22px;font-weight:600;letter-spacing:0}
+.medal-stats .medal-progress{display:block;height:3px;margin-top:10px;background:linear-gradient(90deg,#3d4852 var(--ratio),#dce2e6 0)}
 .medal-stats .lv-tile{display:flex;align-items:center;justify-content:center;gap:14px;min-height:96px;border-left:1px solid #dfe5e9}
 .medal-stats .lv-tile strong{font-size:32px;line-height:1.1;font-weight:750;font-variant-numeric:tabular-nums}
 .medal-stats .lv-tile .grade-icon{display:block;width:56px;height:66px;object-fit:contain;flex-shrink:0}
-.medal-stats-secondary{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);border-top:1px solid #dfe5e9}
-.medal-stats-secondary .tile{padding:9px 20px 10px;border-left:1px solid #dfe5e9}
-.medal-stats-secondary .tile:first-child{border-left:0}
-.medal-stats-secondary[data-count="4"]{grid-auto-flow:row;grid-template-columns:1.25fr repeat(3,minmax(0,1fr))}
-.medal-stats-secondary .tile strong{display:block;font-size:20px;font-weight:750;font-variant-numeric:tabular-nums}
+/* 次行计数条：内容按自然宽度排开，不沿用首行的档位分栏，避免读成金/银/黑的子项。 */
+.medal-stats-secondary{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;padding:10px 20px;border-top:1px solid #dfe5e9;background:#e9eef1}
+.medal-stats-caption{margin-right:6px;padding-right:16px;border-right:1px solid #c6ced4;color:#616d79;font-size:13px;line-height:24px;letter-spacing:.16em}
+.medal-stat-chip{display:inline-flex;align-items:baseline;gap:10px;padding:4px 16px 4px 12px;border-left:4px solid #3d4852;background:#f8fafb;color:#4d5965;font-size:15px}
+.medal-stat-chip b{color:#283440;font-size:24px;line-height:1.15;font-weight:750;font-variant-numeric:tabular-nums}
+.medal-stat-chip[data-tone="up"]{border-left-color:#627965}
+.medal-stat-chip[data-tone="plate"]{border-left-color:#b39a5e}
+.medal-stat-chip[data-zero]{border-left-color:#c3cbd1;background:none;color:#8c97a1}
+.medal-stat-chip[data-zero] b{color:#a3adb5;font-weight:600}
 .medal-section{margin-top:18px}
 .medal-section h2{display:flex;align-items:center;gap:10px;margin:0 0 10px;padding-bottom:8px;border-bottom:2px solid #3d4852;font-size:22px;font-weight:750;letter-spacing:.03em}
 .medal-section h2::before{content:'';flex:none;width:5px;height:20px;background:#b39a5e}
@@ -1306,7 +1312,8 @@ async def _draw_medal_stats_page(
     new_total = len(view.new_medals)
     stats = _medal_stats_block(
         "蚀刻章总数", current.total_count, current.level_counts,
-        [("可镀层", current.platable_count), ("可升级", current.upgradable_count), ("本版本新增", new_total)],
+        [("可镀层", current.platable_count, "plate"), ("可升级", current.upgradable_count, "up"), ("本版本新增", new_total, "none")],
+        caption="其中",
     )
     page_tag = f" · 第 {page_number}/{page_count} 页" if page_count > 1 else ""
     medal_html = (
@@ -1580,7 +1587,8 @@ async def _draw_medal_missing_page(
     )
     stats = _medal_stats_block(
         "已拥有", view.owned_count, view.level_counts,
-        [("版本总数", view.total_count), ("未获得", view.not_obtained_count), ("未升满", view.not_maxed_count), ("未镀层", view.not_plated_count)],
+        [("未获得", view.not_obtained_count, "none"), ("未升满", view.not_maxed_count, "up"), ("未镀层", view.not_plated_count, "plate")],
+        caption="待补齐", primary_total=view.total_count,
     )
     # 奖章墙只挂第一页：它是账号名片上的展示态，不随缺章分页变化。
     wall_html = _medal_wall_html(view.wall, icon_map) if view.wall and page_number == 1 else ""
@@ -1650,25 +1658,38 @@ def _medal_stats_block(
     primary_label: str,
     primary_value: int,
     level_counts: dict[int, int],
-    row2: list[tuple[str, int]],
+    breakdown: list[tuple[str, int, str]],
+    *,
+    caption: str,
+    primary_total: int | None = None,
 ) -> str:
-    """一体式统计区：总量与三档原图在首行，次行展示补充计数。"""
+    """一体式统计区：首行总量与三档原图；次行是一条独立的计数条，不对齐档位列。
+
+    ``breakdown`` 每项为 (标签, 数值, 色调)，色调取 none/up/plate，与下方分组和标签配色对应。
+    给出 ``primary_total`` 时总量显示为「已有 / 总数」并附进度细条。
+    """
+    suffix = progress = ""
+    if primary_total:
+        ratio = min(primary_value / primary_total, 1) * 100
+        suffix = f"<small>/ {primary_total}</small>"
+        progress = f'<i class="medal-progress" style="--ratio:{ratio:.1f}%" aria-hidden="true"></i>'
     primary = (
         f'<div class="tile primary"><span>{esc(primary_label)}</span>'
-        f'<strong>{primary_value}</strong></div>'
+        f'<strong>{primary_value}{suffix}</strong>{progress}</div>'
     )
     lv_cells = "".join(
         f'<div class="lv-tile">{_medal_grade_icon(lv)}<strong>{level_counts.get(lv, level_counts.get(str(lv), 0))}</strong></div>'
         for lv in (3, 2, 1)
     )
-    row2_html = "".join(
-        f'<div class="tile"><span>{esc(label)}</span><strong>{value}</strong></div>'
-        for label, value in row2
+    chips = "".join(
+        f'<span class="medal-stat-chip" data-tone="{tone}"{"" if value else " data-zero"}>'
+        f'{esc(label)}<b>{value}</b></span>'
+        for label, value, tone in breakdown
     )
     return (
         '<section class="medal-stats">'
         f'<div class="medal-row">{primary}{lv_cells}</div>'
-        f'<div class="medal-stats-secondary" data-count="{len(row2)}">{row2_html}</div>'
+        f'<div class="medal-stats-secondary"><span class="medal-stats-caption">{esc(caption)}</span>{chips}</div>'
         '</section>'
     )
 
