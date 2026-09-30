@@ -1195,10 +1195,15 @@ MEDAL_CARD_CSS = """
 /* 有墙时页头上下/右侧不留白：墙贴顶、贴右、贴黄线，高度由墙决定；标题块在左侧垂直居中。 */
 .medal-header--wall{padding:0 0 0 26px;align-items:stretch}
 .medal-header--wall .medal-heading{align-self:center;padding:14px 0}
-.medal-header--wall .medal-wall-meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
-.medal-header--wall .medal-chip{display:inline-flex;align-items:baseline;gap:6px;padding:5px 12px;border-left:4px solid #c7c7c7;background:rgba(255,255,255,.08);color:#c8c8c8;font-size:14px}
-.medal-header--wall .medal-chip b{color:#fff;font-size:18px;line-height:1;font-weight:750}
-.medal-header--wall .medal-chip--plate{border-left-color:#b39a5e}
+/* 待补齐计数徽标：有墙/无墙两种页头都挂在副标题下；与下方三个分组的总数同源。 */
+.medal-header--missing:not(.medal-header--wall){padding:16px 26px 14px}
+.medal-header--missing .medal-gaps{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.medal-header--missing .medal-chip{display:inline-flex;align-items:baseline;gap:6px;padding:5px 12px;border-left:4px solid #c7c7c7;background:rgba(255,255,255,.08);color:#c8c8c8;font-size:14px}
+.medal-header--missing .medal-chip b{color:#fff;font-size:18px;line-height:1;font-weight:750}
+.medal-header--missing .medal-chip--up{border-left-color:#8ba68c}
+.medal-header--missing .medal-chip--plate{border-left-color:#b39a5e}
+.medal-header--missing .medal-chip[data-zero]{border-left-color:#5a5a5c;background:rgba(255,255,255,.04);color:#8e8e8e}
+.medal-header--missing .medal-chip[data-zero] b{color:#9a9a9a;font-weight:600}
 /* 奖章墙：银灰蜂窝背板直接嵌在深色页头里；背板沿十格外轮廓内凹，奖章本体不裁成标准六边形。
    背板 SVG 的 medal-wall-* id 是文档级的，前提是一页只有一面墙。 */
 .medal-wall{flex:none;display:flex;align-items:center;position:relative;padding:12px 24px 12px 22px;background:none}
@@ -1544,16 +1549,17 @@ def _medal_wall_html(wall: Sequence[MedalWallItemView], icon_map: dict[str, str]
     )
 
 
-def _medal_wall_meta_html(wall: Sequence[MedalWallItemView]) -> str:
-    """页头左侧的墙面计数：只统计有效槽位；没有镀层章时不显示镀层徽标。"""
-    slots = {item.slot: item for item in wall if 1 <= item.slot <= MEDAL_WALL_MAX_SLOTS}
-    plated = sum(1 for item in slots.values() if item.plated)
-    chips = [
-        f'<span class="medal-chip">展示位<b>{len(slots)}</b>/{MEDAL_WALL_MAX_SLOTS}</span>'
-    ]
-    if plated:
-        chips.append(f'<span class="medal-chip medal-chip--plate">已镀层<b>{plated}</b></span>')
-    return f'<div class="medal-wall-meta">{"".join(chips)}</div>'
+def _medal_gap_chips_html(view: MedalMissingView) -> str:
+    """页头副标题下的待补齐计数：取截断前的真实总数，与各分组标题一致；为 0 也显示，仅弱化。"""
+    chips = (
+        ("未获得", view.not_obtained_count, ""),
+        ("未升满", view.not_maxed_count, " medal-chip--up"),
+        ("未镀层", view.not_plated_count, " medal-chip--plate"),
+    )
+    return '<div class="medal-gaps">' + "".join(
+        f'<span class="medal-chip{tone}"{"" if value else " data-zero"}>{label}<b>{value}</b></span>'
+        for label, value, tone in chips
+    ) + "</div>"
 
 
 async def _draw_medal_missing_page(
@@ -1583,10 +1589,9 @@ async def _draw_medal_missing_page(
     stats = _medal_stats_block("已拥有", view.owned_count, view.level_counts, primary_total=view.total_count)
     # 奖章墙只挂第一页：它是账号名片上的展示态，不随缺章分页变化。
     wall_html = _medal_wall_html(view.wall, icon_map) if view.wall and page_number == 1 else ""
-    wall_meta = _medal_wall_meta_html(view.wall) if wall_html else ""
     header_class = "medal-header medal-header--missing" + (" medal-header--wall" if wall_html else "")
     body = f"""
-    <header class="{header_class}"><div class="medal-heading"><small>ENDFIELD / MEDAL MISSING</small><h1>蚀刻章缺章</h1><p>{esc(view.nickname)} · {esc(server_name)} · {esc(view.uid)}{page_tag}</p>{wall_meta}</div>{wall_html}</header>
+    <header class="{header_class}"><div class="medal-heading"><small>ENDFIELD / MEDAL MISSING</small><h1>蚀刻章缺章</h1><p>{esc(view.nickname)} · {esc(server_name)} · {esc(view.uid)}{page_tag}</p>{_medal_gap_chips_html(view)}</div>{wall_html}</header>
     <main class="medal-main">
       {stats}
       {notice}

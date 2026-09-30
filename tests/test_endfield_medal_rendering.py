@@ -117,8 +117,8 @@ class MedalHeaderScopeTest(unittest.IsolatedAsyncioTestCase):
         for selector in rules:
             if "medal-head-version" in selector:
                 self.assertIn(".medal-header--stats", selector)
-            if "medal-chip" in selector or "medal-wall-meta" in selector:
-                self.assertIn(".medal-header--wall", selector)
+            if "medal-chip" in selector or "medal-gaps" in selector:
+                self.assertIn(".medal-header--missing", selector)
         base = next(r for r in cards.MEDAL_CARD_CSS.splitlines() if r.startswith(".medal-header{"))
         self.assertIn("border-radius:0", base)
         self.assertNotIn("text-shadow", cards.MEDAL_CARD_CSS)
@@ -251,22 +251,25 @@ class MedalWallLayoutTest(unittest.IsolatedAsyncioTestCase):
                 await cards._draw_medal_missing_page(view, {}, page_number=page)
             self.assertNotIn('class="medal-wall"', render.await_args.args[1])
             self.assertNotIn('medal-header--wall', render.await_args.args[1])
+            self.assertIn('class="medal-gaps"', render.await_args.args[1])
 
-    async def test_wall_header_counts_valid_slots_and_marks_plated(self):
+    async def test_wall_header_shows_gap_chips_and_marks_plated(self):
         wall = [
             MedalWallItemView(slot=1, name="镀", icon_url="icon-1", plated=True),
             MedalWallItemView(slot=2, name="普", icon_url="icon-2"),
             MedalWallItemView(slot=11, name="越界", icon_url="icon-11", plated=True),
         ]
+        view = MedalMissingView(wall=wall, not_obtained_count=4, not_maxed_count=0, not_plated_count=2)
         with patch.object(cards, "_draw_neutral_card", AsyncMock(return_value=b"page")) as render:
-            await cards._draw_medal_missing_page(MedalMissingView(wall=wall), {"icon-1": "a", "icon-2": "b"})
+            await cards._draw_medal_missing_page(view, {"icon-1": "a", "icon-2": "b"})
         document = html.fromstring(render.await_args.args[1])
         header = document.xpath("//header")[0]
         self.assertEqual(
             header.get("class"), "medal-header medal-header--missing medal-header--wall"
         )
-        chips = [chip.text_content() for chip in header.xpath('.//*[contains(@class,"medal-chip")]')]
-        self.assertEqual(chips, [f"展示位2/{cards.MEDAL_WALL_MAX_SLOTS}", "已镀层1"])
+        chips = header.xpath('.//*[contains(@class,"medal-chip")]')
+        self.assertEqual([chip.text_content() for chip in chips], ["未获得4", "未升满0", "未镀层2"])
+        self.assertEqual([chip.get("data-zero") is not None for chip in chips], [False, True, False])
         cells = self._cells(render.await_args.args[1])
         self.assertEqual([c.get("data-plated") for c in cells[:2]], ["1", None])
 
