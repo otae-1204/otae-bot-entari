@@ -1183,7 +1183,7 @@ MEDAL_WALL_INSET_PADDING = 9        # 收窄背板边沿，保留局部内嵌轮
 # 页头样式分三层：.medal-header 是 F1/F2 有意共享的骨架；--stats 只属于 F1；
 # --missing / --wall 只属于 F2。单卡专属规则必须挂在修饰类下，避免改一张卡连带另一张。
 MEDAL_CARD_CSS = """
-:is(.medal-stats-card,.medal-missing-card){padding:28px;background:linear-gradient(135deg,#fff,#fafbfd);color:#283440}
+:is(.medal-stats-card,.medal-missing-card){padding:28px;color:#283440}
 .medal-header{position:relative;margin:0 0 18px;padding:26px 26px 23px;gap:24px;background:linear-gradient(180deg,#333335,#232325 62%,#1c1c1e);background-clip:padding-box;color:#fff;border:0;border-bottom:var(--card-header-rule);border-radius:0;box-shadow:inset 0 1px 0 rgba(255,255,255,.16),inset 0 -1px 0 rgba(0,0,0,.5),0 8px 20px rgba(20,24,30,.24)}
 .medal-heading{flex:1;min-width:0}
 .medal-header small{display:block;color:#c7c7c7;font-size:12px;letter-spacing:.24em}
@@ -1212,7 +1212,7 @@ MEDAL_CARD_CSS = """
 .medal-wall-etching,.medal-wall-outline{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
 .medal-wall-unavailable{position:absolute;inset:0;display:grid;place-items:center;color:#566570;font-size:12px}
 .medal-main{padding:0;border:0;background:none}
-.medal-stats{margin:0 0 18px;background:#f2f5f7}
+.medal-stats{margin:0 0 18px;border:1px solid #d0d7dc;background:#f2f5f7}
 .medal-row{display:grid;grid-template-columns:1.25fr repeat(3,minmax(0,1fr));align-items:stretch}
 .medal-stats .primary{padding:14px 20px 12px}
 .medal-stats .primary span,.medal-stats-secondary .tile span{display:block;color:#616d79;font-size:15px;margin-bottom:2px}
@@ -1221,18 +1221,18 @@ MEDAL_CARD_CSS = """
 .medal-stats .lv-tile strong{font-size:32px;line-height:1.1;font-weight:750;font-variant-numeric:tabular-nums}
 .medal-stats .lv-tile .grade-icon{display:block;width:56px;height:66px;object-fit:contain;flex-shrink:0}
 .medal-stats-secondary{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);border-top:1px solid #dfe5e9}
-.medal-stats-secondary .tile{padding:9px 20px 10px}
+.medal-stats-secondary .tile{padding:9px 20px 10px;border-left:1px solid #dfe5e9}
+.medal-stats-secondary .tile:first-child{border-left:0}
 .medal-stats-secondary[data-count="4"]{grid-auto-flow:row;grid-template-columns:1.25fr repeat(3,minmax(0,1fr))}
 .medal-stats-secondary .tile strong{display:block;font-size:20px;font-weight:750;font-variant-numeric:tabular-nums}
 .medal-section{margin-top:18px}
-.medal-section h2{display:flex;align-items:center;gap:10px;margin:0 0 10px;font-size:22px;font-weight:750;letter-spacing:.03em}
+.medal-section h2{display:flex;align-items:center;gap:10px;margin:0 0 10px;padding-bottom:8px;border-bottom:2px solid #3d4852;font-size:22px;font-weight:750;letter-spacing:.03em}
 .medal-section h2::before{content:'';flex:none;width:5px;height:20px;background:#b39a5e}
-.medal-section h2::after{content:'';order:1;flex:1;height:1px;background:#e2e7eb}
-.medal-section-count{order:2;font-size:14px;font-weight:500;letter-spacing:0;color:#65717d}
+.medal-section-count{margin-left:auto;font-size:14px;font-weight:500;letter-spacing:0;color:#65717d}
 .medal-list{display:grid;gap:10px}
 .medal-list--double{grid-template-columns:repeat(2,minmax(0,1fr))}
 .medal-list--double>:only-child{grid-column:1/-1}
-.medal-item,.medal-upgrade{background:linear-gradient(110deg,#f3f6f8,#f8fafb)}
+.medal-item,.medal-upgrade{border:1px solid #d0d7dc;background:linear-gradient(110deg,#f3f6f8,#f8fafb)}
 .medal-item{display:grid;grid-template-columns:96px minmax(0,1fr);gap:14px;align-items:start;padding:12px 16px 12px 12px}
 .medal-icon{width:96px;height:96px;display:grid;place-items:center}
 .medal-icon img{width:88px;height:88px;object-fit:contain}
@@ -1256,9 +1256,9 @@ MEDAL_CARD_CSS = """
 .medal-card--next .medal-stage{color:#837451}
 .medal-upgrade .medal-arrow{display:grid;place-items:center}
 .medal-upgrade .medal-arrow::before{content:'';width:12px;height:18px;background:#837451;clip-path:polygon(0 0,100% 50%,0 100%)}
-.medal-source{display:flex;justify-content:space-between;gap:20px;margin-top:18px;padding-top:10px;border-top:1px solid #e2e7eb;color:#75808b;font-size:12px;line-height:1.6;overflow-wrap:anywhere}
+.medal-source{display:flex;justify-content:space-between;gap:20px;margin-top:18px;padding-top:10px;border-top:2px solid #3d4852;color:#75808b;font-size:12px;line-height:1.6;overflow-wrap:anywhere}
 .medal-notice{margin:-6px 0 12px;color:#75808b;font-size:13px;line-height:1.6}
-.medal-main .empty{padding:28px 20px;background:#f3f6f8;border:0;color:#65717d;font-size:15px;line-height:1.6;text-align:center}
+.medal-main .empty{padding:28px 20px;background:#f3f6f8;border:1px dashed #c3cbd1;color:#65717d;font-size:15px;line-height:1.6;text-align:center}
 .medal-levelbar{display:flex;gap:24px;margin-bottom:24px}
 .medal-levelbar .lv-cell{flex:1;display:flex;align-items:center;justify-content:center;gap:12px;padding:12px 14px}
 .medal-levelbar .lv-cell strong{font-size:32px;line-height:1;font-weight:800}
