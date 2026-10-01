@@ -1,0 +1,24 @@
+{
+  "_note": "合成的重构寻访账号样本：时间戳、seqId、item_id、角色名全部虚构，仅复刻抽取节奏（5 次付费十连 + 1 次免费十连 + 10 次单抽 + 1 次免费十连，UP 六星出在最后一次免费十连里）。供后端口径用例与前端预览共用，不含任何真实 UID / 昵称。",
+  "pool": {"pool_id": "rerun_chr_example", "pool_name": "绚丽异彩", "pool_type": "E_CharacterGachaPoolType_Rerun", "pool_version": 1, "up_item_ids": ["chr_9001_example"]},
+  "expected": {"paid_total": 60, "free_pull_count": 20, "rush_claimed": 2, "rush_used": 2, "rush_next_threshold": 90, "rush_next_remaining": 30, "keepsake_progress": 60, "since_six_star": 60},
+  "batches": [
+    {"gacha_ts": 1790000000, "is_free": false, "count": 10, "six_star_at": []},
+    {"gacha_ts": 1790000021, "is_free": false, "count": 10, "six_star_at": []},
+    {"gacha_ts": 1790000026, "is_free": false, "count": 10, "six_star_at": []},
+    {"gacha_ts": 1790000031, "is_free": true, "count": 10, "six_star_at": []},
+    {"gacha_ts": 1790000038, "is_free": false, "count": 10, "six_star_at": []},
+    {"gacha_ts": 1790000253, "is_free": false, "count": 10, "six_star_at": []},
+    {"gacha_ts": 1790131110, "is_free": false, "count": 1, "six_star_at": []},
+    {"gacha_ts": 1790131116, "is_free": false, "count": 1, "six_star_at": []},
+    {"gacha_ts": 1790131119, "is_free": false, "count": 1, "six_star_at": []},
+    {"gacha_ts": 1790220587, "is_free": false, "count": 1, "six_star_at": []},
+    {"gacha_ts": 1790222756, "is_free": false, "count": 1, "six_star_at": []},
+    {"gacha_ts": 1790287618, "is_free": false, "count": 1, "six_star_at": []},
+    {"gacha_ts": 1790287633, "is_free": false, "count": 1, "six_star_at": []},
+    {"gacha_ts": 1790378923, "is_free": false, "count": 1, "six_star_at": []},
+    {"gacha_ts": 1790472905, "is_free": false, "count": 1, "six_star_at": []},
+    {"gacha_ts": 1790473443, "is_free": false, "count": 1, "six_star_at": []},
+    {"gacha_ts": 1790473448, "is_free": true, "count": 10, "six_star_at": [7]}
+  ]
+}

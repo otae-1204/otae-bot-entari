@@ -2726,22 +2726,33 @@ class EndfieldGachaServiceTests(unittest.IsolatedAsyncioTestCase):
         self.store.close()
         self.temp.cleanup()
 
-    def test_weapon_up_without_server_guarantee_is_explicitly_unknown(self):
+    def test_weapon_up_without_server_guarantee_falls_back_to_registry_default(self):
+        # v3 口径：FZ 没给 hardGuarantee 时按池类型默认值（武器 80）展示，并以 large_pity_source 标明来源。
         record = store_module.GachaRecord("role", "server", "p", "池", "weapon", "1", 1, "wpn_up", "UP", 6, "武器")
         view = gacha_module.build_gacha_analysis(self.role, [record], [], pool_rules={
             "p": gacha_assets_module.GachaPoolRule("p", ("wpn_up",), 0)
         })
-        self.assertFalse(view.pools[0].large_pity_known)
-        self.assertEqual(view.pools[0].large_pity_limit, 0)
+        self.assertTrue(view.pools[0].large_pity_known)
+        self.assertEqual(view.pools[0].large_pity_limit, 80)
+        self.assertEqual(view.pools[0].large_pity_source, "default")
+        fz_view = gacha_module.build_gacha_analysis(self.role, [record], [], pool_rules={
+            "p": gacha_assets_module.GachaPoolRule("p", ("wpn_up",), 70)
+        })
+        self.assertEqual((fz_view.pools[0].large_pity_limit, fz_view.pools[0].large_pity_source), (70, "fz"))
 
     async def test_full_then_incremental_stops_at_saved_boundary(self):
         fake = _FakeGachaClient()
         service = gacha_module.EndfieldGachaService(self.store, fake, self.cipher)
         first = await service.sync(self.role, full=True)
         second = await service.sync(self.role, full=False)
-        self.assertEqual(first.inserted, 9)
+        # 五条角色流（含重构寻访）各 2 条 + 武器流 1 条
+        self.assertEqual(first.inserted, 11)
         self.assertEqual(second.inserted, 0)
-        self.assertEqual(self.store.count_gacha_records(self.role), 9)
+        self.assertEqual(self.store.count_gacha_records(self.role), 11)
+        self.assertIn(
+            "char:E_CharacterGachaPoolType_Rerun",
+            {state.stream_key for state in self.store.list_sync_states(self.role)},
+        )
 
     async def test_partial_pool_failure_keeps_successful_records(self):
         failed_pool = client_module.CHARACTER_POOL_TYPES[1]
@@ -3041,8 +3052,11 @@ class EndfieldGachaServiceTests(unittest.IsolatedAsyncioTestCase):
         ).pools[0]
         events = {item.pool_position: item for item in pool.six_stars}
 
-        self.assertEqual(events[40].pity_labels, ())
+        # AKE 给出 UP 名单后，官方记录里的非 UP 六星也会标"歪"（up_status="off"）。
+        self.assertEqual(events[40].pity_labels, ("歪",))
+        self.assertEqual(events[40].up_status, "off")
         self.assertEqual(events[120].pity_labels, ("小保底", "大保底"))
+        self.assertEqual(events[120].up_status, "up")
 
     def test_joint_pool_does_not_advance_special_pool_pity(self):
         records = [
@@ -3155,7 +3169,8 @@ class EndfieldGachaServiceTests(unittest.IsolatedAsyncioTestCase):
         ).pools[0]
         events = {item.pool_position: item for item in pool.six_stars}
 
-        self.assertEqual(events[40].pity_labels, ("小保底",))
+        # 第 40 抽的六星不在 UP 名单里，v3 起额外标"歪"。
+        self.assertEqual(events[40].pity_labels, ("小保底", "歪"))
         self.assertEqual(
             events[80].pity_labels,
             ("小保底", "大保底"),
@@ -3742,6 +3757,54 @@ class EndfieldGachaServiceTests(unittest.IsolatedAsyncioTestCase):
 
 
 class EndfieldNeutralCardTests(unittest.IsolatedAsyncioTestCase):
+    def test_v1_gacha_renderer_still_draws_v3_pool_kinds(self):
+        """v3 新字段带默认值，旧渲染在重构寻访 / 点绘申领 / 未知池上仍能出 HTML。"""
+        records = [
+            store_module.GachaRecord(
+                "role", "server", "rerun_chr_x", "绚丽异彩", "E_CharacterGachaPoolType_Rerun", str(seq), seq,
+                "chr_up" if seq == 30 else f"r{seq}", "示例UP" if seq == 30 else "结果", 6 if seq == 30 else 4, "角色",
+                pool_version=1,
+            )
+            for seq in range(1, 41)
+        ]
+        records.extend(
+            store_module.GachaRecord(
+                "role", "server", "rerun_chr_x", "绚丽异彩", "E_CharacterGachaPoolType_Rerun", str(seq), 100,
+                f"f{seq}", "结果", 4, "角色", is_free=True, pool_version=1,
+            )
+            for seq in range(41, 51)
+        )
+        records.extend(
+            store_module.GachaRecord(
+                "role", "server", "rerun_wpn_x", "点绘申领", "weapon", str(seq), 200 + (seq - 51) // 10,
+                f"w{seq}", "武器", 4, "武器", pool_version=1,
+            )
+            for seq in range(51, 161)
+        )
+        records.append(
+            store_module.GachaRecord(
+                "role", "server", "collab_1", "联动寻访", "E_CharacterGachaPoolType_Collab", "999", 999,
+                "c1", "联动六星", 6, "角色",
+            )
+        )
+        rules = {
+            "rerun_chr_x": gacha_assets_module.GachaPoolRule("rerun_chr_x", ("chr_up",), 0),
+            "rerun_wpn_x": gacha_assets_module.GachaPoolRule("rerun_wpn_x", ("wpn_up",), 0),
+        }
+        role = store_module.EndfieldRole(1, 1, "qq", "bind", "role", "server", "甲", "一区", True)
+        view = gacha_module.build_gacha_analysis(role, records, [], pool_rules=rules)
+        self.assertEqual(
+            {pool.kind_key for pool in view.pools}, {"rerun", "weapon_rerun", "unknown_char"},
+        )
+        for pool in view.pools:
+            html = draw_module._draw_gacha_pool(pool)
+            self.assertIn(pool.name, html)
+        weapon = next(pool for pool in view.pools if pool.kind_key == "weapon_rerun")
+        self.assertEqual([gift.claim_count for gift in weapon.keepsake_gifts], [10])
+        self.assertIn("第10次申领赠送武库箱", draw_module._draw_gacha_pool(weapon))
+        self.assertEqual(set(view.expectations), {"special", "rerun", "weapon"})
+        self.assertIn("rerun", {chain.family for chain in view.chains})
+
     def test_gacha_pool_header_renders_left_character_banner_without_label(self):
         pool = gacha_module.PoolAnalysis(
             "special", "限定池", "角色", 10, 0,
