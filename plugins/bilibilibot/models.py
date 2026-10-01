@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
-
 KIND_LIVE = "live"
 KIND_VIDEO = "video"
 KIND_DYNAMIC = "dynamic"

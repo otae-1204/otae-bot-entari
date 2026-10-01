@@ -6,8 +6,7 @@ from typing import Any
 from otae_bot.endfield_notifications.classification import classify
 
 from ..dynamic_filter import ENDFIELD_OFFICIAL_UID, dynamic_lottery_reason
-from ..models import BiliCard, KIND_DYNAMIC, KIND_VIDEO
-
+from ..models import KIND_DYNAMIC, KIND_VIDEO, BiliCard
 
 BV_RE = re.compile(r"\bBV[0-9A-Za-z]{10}\b")
 
