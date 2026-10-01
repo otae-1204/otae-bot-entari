@@ -617,7 +617,7 @@ async def _draw_daily_card(selector: str, body: str, *, extra_css: str = "") -> 
 
 
 async def draw_gacha_analysis_cards(view: GachaAnalysis, *, uid: str) -> tuple[bytes, ...]:
-    """抽卡分析图入口：默认 v3（三栏、按实测高度分页，见 gacha/draw.py）；
+    """抽卡分析图入口：默认 v3（1600 宽、重构侧栏三栏 / 无重构两栏、按实测高度分页，见 gacha/draw.py）；
     ENDFIELD_GACHA_LAYOUT=v1 回到旧版两栏（v3 失败时也会自动回退到它）。"""
     if os.getenv(GACHA_LAYOUT_ENV, "").strip().casefold() == "v1":
         return await _draw_gacha_analysis_cards_v1(view, uid=uid)

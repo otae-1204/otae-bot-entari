@@ -1,6 +1,8 @@
-"""终末地抽卡分析图 v3：三栏、无折叠，长度只靠分页。
+"""终末地抽卡分析图 v3：重构寻访作侧栏的三栏（无重构记录时两栏）、无折叠，长度只靠分页。
 
-    特许寻访（角色） | 重构寻访 + 其他寻访（角色） | 武器申领（武器）
+    right（默认）：特许寻访 | 武器申领 | 重构寻访 + 其他寻访
+    left：         重构寻访 + 其他寻访 | 特许寻访 | 武器申领
+    无重构记录：   特许寻访 + 其他寻访 | 武器申领
 
 每个池、每条记录（六星、赠礼、免费十连、加急招募）都完整渲染；长文本换行，不截断、不省略。
 分页流程：先在浏览器里一次量出每个块的高度（池头、续页池头、每一行记录、栏头、分组标题），
@@ -14,6 +16,7 @@ from __future__ import annotations
 import base64
 import html
 import mimetypes
+import os
 from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from itertools import accumulate
@@ -41,8 +44,12 @@ from .pools import KINDS_BY_KEY, PoolKind, resolve_pool_kind
 from .service import calculate_group_expectation, format_timestamp
 
 
-GACHA_CARD_WIDTH = 1280
+GACHA_CARD_WIDTH = 1600               # 抽卡专用宽度（CSS px，2× 截图 = 3200 px）；其它卡片不受影响
 GACHA_PAGE_MAX_HEIGHT = 4096          # 抽卡专用单页上限（CSS px）；其它卡片仍用 cards.CARD_MAX_HEIGHT
+GACHA_RERUN_SIDE_ENV = "ENDFIELD_GACHA_RERUN_SIDE"
+GACHA_RERUN_SIDES = ("right", "left")
+GACHA_RERUN_SIDE_DEFAULT = "right"    # 主栏位置不随“有没有重构记录”变化（见 docs/endfield_gacha_card_v3.md）
+SIDE_COLUMN_SHARE = 0.86              # 重构侧栏相对主栏（特许 / 武器）的宽度比例
 GACHA_PAGE_SAFETY = 16                # 预测误差余量
 GACHA_RETRY_SAFETY = 4 * GACHA_PAGE_SAFETY   # 截图意外超高时，用 4 倍余量重新装箱再试一次
 GACHA_LEVEL_FLOOR = 400               # 二分统一栏高的下界
@@ -64,31 +71,39 @@ class SectionSpec:
     empty: str                  # 本组无卡池时的占位；空串 = 整组省略
     divider: str = ""           # 栏内分组标题；空 = 直接接在栏头下
     divider_kicker: str = ""
+    show_kind: bool = True      # 池头副标题是否写池类型（特许寻访组不写）
 
 
 @dataclass(frozen=True)
 class ColumnSpec:
+    key: str                    # special | rerun | weapon：总览格的顺序跟随栏序
     title: str
     kicker: str
     sections: tuple[SectionSpec, ...]
+    share: float = 1.0          # 栏宽比例（fr）
 
 
-GACHA_COLUMNS = (
-    ColumnSpec("特许寻访", "角色池 · 特许间共享 80 抽保底", (
-        SectionSpec(("special",), "暂无特许寻访记录"),
-    )),
-    ColumnSpec("重构寻访", "角色池 · 重构间共享 80 抽保底", (
-        SectionSpec(("rerun",), "暂无重构寻访记录"),
-        SectionSpec(("joint", "standard", "beginner", "unknown_char"), "",
-                    divider="其他寻访", divider_kicker="角色池 · 各池独立保底"),
-    )),
-    ColumnSpec("武器申领", "武器池 · 限时 / 重构 / 常驻", (
-        SectionSpec(("weapon_limited", "weapon_rerun", "weapon_constant", "unknown_weapon"), "暂无武器申领记录"),
-    )),
-)
+SPECIAL_SECTION = SectionSpec(("special",), "暂无特许寻访记录", show_kind=False)
+RERUN_SECTION = SectionSpec(("rerun",), "暂无重构寻访记录")
+OTHER_SECTION = SectionSpec(("joint", "standard", "beginner", "unknown_char"), "",
+                            divider="其他寻访", divider_kicker="角色池 · 各池独立保底")
+WEAPON_SECTION = SectionSpec(("weapon_limited", "weapon_rerun", "weapon_constant", "unknown_weapon"), "暂无武器申领记录")
+SPECIAL_COLUMN = ColumnSpec("special", "特许寻访", "角色池 · 特许间共享 80 抽保底", (SPECIAL_SECTION,))
+RERUN_COLUMN = ColumnSpec("rerun", "重构寻访", "角色池 · 重构间共享 80 抽保底", (RERUN_SECTION, OTHER_SECTION),
+                          share=SIDE_COLUMN_SHARE)
+WEAPON_COLUMN = ColumnSpec("weapon", "武器申领", "武器池 · 限时 / 重构 / 常驻", (WEAPON_SECTION,))
+GACHA_LAYOUTS = {
+    "right": (SPECIAL_COLUMN, WEAPON_COLUMN, RERUN_COLUMN),
+    "left": (RERUN_COLUMN, SPECIAL_COLUMN, WEAPON_COLUMN),
+    # 没有重构池：两栏、不留空列；「其他寻访」同为角色池，接在特许寻访下方（与 v1 的角色 | 武器两栏一致）
+    "two": (replace(SPECIAL_COLUMN, sections=(SPECIAL_SECTION, OTHER_SECTION)), WEAPON_COLUMN),
+}
 # 注册表新增池类型时必须在这里指定栏位，否则导入即失败（见 docs/endfield_gacha_card_v3.md）。
-assert {kind for column in GACHA_COLUMNS for section in column.sections for kind in section.kinds} \
-    == set(KINDS_BY_KEY), "GACHA_COLUMNS 必须覆盖 gacha/pools.py 注册表里的每一种 kind_key"
+assert all(
+    {kind for column in columns for section in column.sections for kind in section.kinds}
+    == set(KINDS_BY_KEY) - ({"rerun"} if name == "two" else set())
+    for name, columns in GACHA_LAYOUTS.items()
+), "GACHA_LAYOUTS 的每种排法都必须覆盖 gacha/pools.py 注册表里的每一种 kind_key（两栏只在没有重构池时使用）"
 
 
 # ============================================================ 布局模型：栏 → 分组 → 卡片
@@ -122,11 +137,33 @@ def pool_kind(pool: PoolAnalysis) -> PoolKind:
     )
 
 
-def build_gacha_columns(view: GachaAnalysis, *, show_standard: bool | None = None) -> list[GachaColumn]:
-    """把全部池分到三栏。``show_standard`` 默认取 ``view.show_standard_pools``（GACHA_SHOW_STANDARD）。"""
+def gacha_rerun_side() -> str:
+    """重构侧栏放在哪一边：ENDFIELD_GACHA_RERUN_SIDE=right（默认）| left；无法识别时按默认处理。"""
+    raw = os.getenv(GACHA_RERUN_SIDE_ENV, "").strip().casefold()
+    if raw in GACHA_RERUN_SIDES:
+        return raw
+    if raw:
+        logger.warning(f"[endfield-gacha] invalid {GACHA_RERUN_SIDE_ENV}={raw!r}, using {GACHA_RERUN_SIDE_DEFAULT}")
+    return GACHA_RERUN_SIDE_DEFAULT
+
+
+def build_gacha_columns(
+    view: GachaAnalysis,
+    *,
+    show_standard: bool | None = None,
+    rerun_side: str | None = None,
+) -> list[GachaColumn]:
+    """把全部池分栏：有重构池时三栏（``rerun_side`` 默认读 ENDFIELD_GACHA_RERUN_SIDE），没有时两栏。
+
+    ``show_standard`` 默认取 ``view.show_standard_pools``（GACHA_SHOW_STANDARD）。
+    """
     if show_standard is None:
         show_standard = bool(getattr(view, "show_standard_pools", True))
+    side = rerun_side or gacha_rerun_side()
+    if side not in GACHA_RERUN_SIDES:
+        raise ValueError(f"rerun_side must be one of {GACHA_RERUN_SIDES}, got {side!r}")
     cards = _gacha_cards(view.pools)
+    layout = GACHA_LAYOUTS[side if any(card.kind.key == "rerun" for card in cards) else "two"]
     series_latest: dict[str, int] = {}
     for card in cards:
         series = _series_of(card)
@@ -137,7 +174,7 @@ def build_gacha_columns(view: GachaAnalysis, *, show_standard: bool | None = Non
         return (series_latest[series], series, card.pool.series_index, card.pool.latest_ts, card.pool.name)
 
     columns: list[GachaColumn] = []
-    for index, spec in enumerate(GACHA_COLUMNS):
+    for index, spec in enumerate(layout):
         sections = []
         for section in spec.sections:
             members = [card for card in cards if card.kind.key in section.kinds]
@@ -658,10 +695,10 @@ def paginate_gacha(
     unit_lists: Sequence[Sequence[GachaUnit]],
     measure: GachaMeasure,
     *,
-    max_height: int = GACHA_PAGE_MAX_HEIGHT,
+    max_height: int | None = None,
     safety: float = GACHA_PAGE_SAFETY,
 ) -> tuple[list[list[list[GachaUnit]]], dict]:
-    """返回 ``pages[page][column] = units`` 与分页过程信息（纯函数）。
+    """返回 ``pages[page][column] = units`` 与分页过程信息（纯函数）。``max_height`` 默认 GACHA_PAGE_MAX_HEIGHT。
 
     1. 单页放得下（首页开销 + 最高一栏 ≤ 上限 − 余量）→ 1 页；
     2. 否则在统一栏高 L 下逐栏装箱：首页栏高上限 L，续页 L + (首页开销 − 续页开销)，
@@ -669,6 +706,8 @@ def paginate_gacha(
     3. 先用最宽松的 L 装一次得到最少页数 N，再二分求能装进 N 页的最小 L —— 各页高度均衡；
        其他栏在同一 L 下从第 1 页起填满，内容不够的栏在后续页显示「已展示完毕」。
     """
+    if max_height is None:
+        max_height = GACHA_PAGE_MAX_HEIGHT
     budget_first = max_height - measure.overhead_first - safety
     budget_cont = max_height - measure.overhead_cont - safety
     delta = measure.overhead_first - measure.overhead_cont
@@ -734,7 +773,6 @@ def _stat_lines(cards: Sequence[GachaCard]) -> list[str]:
 
 def _render_unit(
     unit: GachaUnit,
-    column: GachaColumn,
     rows: dict[str, list[str]],
     page_no: int,
     page_units: Sequence[GachaUnit],
@@ -742,7 +780,7 @@ def _render_unit(
     if unit.kind == "card":
         return render_pool_piece(
             unit.card, rows[unit.card.key], unit.start, unit.end, cont=unit.cont,
-            open_end=unit.open_end, show_kind=column.index != 0, prev_page=page_no - 1,
+            open_end=unit.open_end, show_kind=unit.section.spec.show_kind, prev_page=page_no - 1,
         )
     if unit.kind == "divider":
         spec = unit.section.spec
@@ -784,8 +822,9 @@ def _column_html(
             f'<h2>{_esc(column.spec.title)}{"<em>（续）</em>" if cont else ""}</h2></div>'
             f'<p>{"<br>".join(_esc(line) or "&nbsp;" for line in lines)}</p></div>')
     if body is None:
-        body = "".join(_render_unit(unit, column, rows, page_no, units) for unit in units)
-    return f'<div class="pool-column" data-col="{column.index}">{head}<div class="pool-stack">{body}</div></div>'
+        body = "".join(_render_unit(unit, rows, page_no, units) for unit in units)
+    return (f'<div class="pool-column" data-col="{column.index}" data-key="{column.spec.key}">{head}'
+            f'<div class="pool-stack">{body}</div></div>')
 
 
 def _expectation_values(
@@ -834,7 +873,8 @@ def _expectation(view: GachaAnalysis, group: str) -> SixStarExpectation:
     return expectations.get(group) or calculate_group_expectation(view.pools, group)
 
 
-def _summary_html(view: GachaAnalysis) -> str:
+def _summary_html(view: GachaAnalysis, columns: Sequence[GachaColumn]) -> str:
+    """总数格 + 每栏一格，顺序与下方栏一致；两栏（无重构）时不出重构寻访格。"""
     pools = [(pool, pool_kind(pool)) for pool in view.pools]
     special = [pool for pool, kind in pools if kind.key == "special"]
     rerun = [pool for pool, kind in pools if kind.key == "rerun"]
@@ -869,23 +909,31 @@ def _summary_html(view: GachaAnalysis) -> str:
     def free(group: list[PoolAnalysis]) -> int:
         return sum(pool.free_pull_count for pool in group)
 
+    tiles = {
+        "special": lambda: metric("特许寻访", special, (f"付费 {paid(special)}", f"免费 {free(special)}"),
+                                  _expectation_rows(_expectation(view, "special"), "角色")),
+        "rerun": lambda: metric("重构寻访", rerun, (f"付费 {paid(rerun)}", f"加急招募 {free(rerun)}"),
+                                _expectation_rows(_expectation(view, "rerun"), "角色")),
+        "weapon": lambda: metric("武器申领", weapon, (f"付费 {paid(weapon)}", f"含常驻 {constant}"),
+                                 _expectation_rows(_expectation(view, "weapon"), "武器")),
+    }
     return (
-        '<section class="summary">'
+        f'<section class="summary" style="grid-template-columns:minmax(0,.8fr) repeat({len(columns)},minmax(0,1fr))">'
         f'<div class="total"><span>卡池总数</span><strong>{view.total}</strong><small>{_meta(detail)}</small>'
         f'<small>{_meta(type_totals)}</small></div>'
-        + metric("特许寻访", special, (f"付费 {paid(special)}", f"免费 {free(special)}"),
-                 _expectation_rows(_expectation(view, "special"), "角色"))
-        + metric("重构寻访", rerun, (f"付费 {paid(rerun)}", f"加急招募 {free(rerun)}"),
-                 _expectation_rows(_expectation(view, "rerun"), "角色"))
-        + metric("武器申领", weapon, (f"付费 {paid(weapon)}", f"含常驻 {constant}"),
-                 _expectation_rows(_expectation(view, "weapon"), "武器"))
+        + "".join(tiles[column.spec.key]() for column in columns)
         + "</section>"
     )
 
 
+def _grid_style(columns: Sequence[GachaColumn]) -> str:
+    return "grid-template-columns:" + " ".join(f"minmax(0,{column.spec.share:g}fr)" for column in columns)
+
+
 def _card_html(
     view: GachaAnalysis,
-    three: str,
+    columns: Sequence[GachaColumn],
+    body: str,
     *,
     uid: str,
     page_no: int,
@@ -913,15 +961,16 @@ def _card_html(
         f'<header><div><small>ENDFIELD / GACHA ARCHIVE</small><h1>{title}</h1>'
         f'<p>{_esc(server_name)} · {_esc(uid)}</p></div><div class="sync-state"><b>{_esc(state)}</b>'
         f'<span>同步 {_esc(format_timestamp(view.last_sync_at))}</span></div></header>'
-        f'<main>{"" if cont else _summary_html(view)}{warning}'
-        f'<section class="three-column">{three}</section>'
+        f'<main>{"" if cont else _summary_html(view, columns)}{warning}'
+        f'<section class="pool-columns" data-cols="{len(columns)}" style="{_grid_style(columns)}">{body}</section>'
         f'<footer class="gacha-source"><span>{_esc(source)}</span>'
         f'<span>免费十连 / 加急招募单列展示，不计入任何保底{page_tail}</span></footer></main></div>'
     )
 
 
 def _document(body: str) -> str:
-    return (f"<!doctype html><html><head><meta charset='utf-8'><style>{GACHA_CSS}</style></head>"
+    return (f"<!doctype html><html><head><meta charset='utf-8'>"
+            f"<style>:root{{--gacha-width:{GACHA_CARD_WIDTH}px}}{GACHA_CSS}</style></head>"
             f"<body>{body}</body></html>")
 
 
@@ -935,10 +984,10 @@ def render_gacha_page_html(
     page_no: int,
     page_count: int,
 ) -> str:
-    three = "".join(
+    body = "".join(
         _column_html(column, units, rows, page_no=page_no) for column, units in zip(columns, page_units)
     )
-    return _document(_card_html(view, three, uid=uid, page_no=page_no, page_count=page_count))
+    return _document(_card_html(view, columns, body, uid=uid, page_no=page_no, page_count=page_count))
 
 
 def render_measure_html(
@@ -951,7 +1000,8 @@ def render_measure_html(
     """测量页：一个文档里放两张卡。
 
     * 首页卡：每栏放入该栏全部池的完整卡片（``data-mp``）与续页池头样本（``data-mc``，数字取最宽的
-      99/999，结果偏保守），以及分组标题、隐藏说明、空态、提示块、“已展示完毕”块（``data-m``）；
+      99/999，结果偏保守）；含「其他寻访」分组的那一栏（重构侧栏，两栏时为特许栏）另放分组标题、
+      隐藏说明、空态、提示块、“已展示完毕”块（``data-m``）——它在三栏里最窄，量出的高度偏保守；
     * 续页卡：只有续页外壳与续页栏头，用来量续页开销。
     两张卡的页眉都按 99/99 页渲染（右上角最宽），长昵称换行只会被高估。
     """
@@ -963,19 +1013,19 @@ def render_measure_html(
                 card_rows = rows[card.key]
                 count = len(card_rows)
                 full = render_pool_piece(card, card_rows, 0, count, cont=False, open_end=False,
-                                         show_kind=column.index != 0)
+                                         show_kind=section.spec.show_kind)
                 sample = render_pool_piece(card, card_rows, count - 1, count, cont=True, open_end=False,
-                                           show_kind=column.index != 0, prev_page=99)
+                                           show_kind=section.spec.show_kind, prev_page=99)
                 sample = sample.replace(f"第 {count}–{count} / {count} 条", "第 999–999 / 999 条")
                 blocks.append(f'<div data-mp="{_esc(card.key)}">{full}</div>')
                 blocks.append(f'<div data-mc="{_esc(card.key)}">{sample}</div>')
-        if column.index == 1:
-            section = column.sections[-1]
+        section = next((section for section in column.sections if section.spec.divider), None)
+        if section is not None:
             note = hidden_note(section) if section.hidden else \
                 "基础寻访已按设置隐藏：99999 抽 · 999 个六星，仍计入总数与角色寻访"
-            blocks.append(f'<div data-m="divider">{_render_unit(GachaUnit("divider", section=section), column, rows, 1, [])}</div>')
+            blocks.append(f'<div data-m="divider">{_render_unit(GachaUnit("divider", section=section), rows, 1, [])}</div>')
             blocks.append('<div data-m="divider_cont">'
-                          f'{_render_unit(GachaUnit("divider", section=section, cont=True), column, rows, 99, [])}</div>')
+                          f'{_render_unit(GachaUnit("divider", section=section, cont=True), rows, 99, [])}</div>')
             blocks.append(f'<div data-m="note"><div class="empty slim note">{_esc(note)}</div></div>')
             blocks.append('<div data-m="empty"><div class="empty slim">暂无重构寻访记录</div></div>')
             blocks.append('<div data-m="hint"><div class="continue-hint">本池未完 · 续见第 99 页</div></div>')
@@ -987,8 +1037,8 @@ def render_measure_html(
         for column in columns
     )
     return _document(
-        _card_html(view, "".join(stacks), uid=uid, page_no=1, page_count=99, attrs=' data-measure="first"')
-        + _card_html(view, cont_columns, uid=uid, page_no=99, page_count=99, attrs=' data-measure="cont"')
+        _card_html(view, columns, "".join(stacks), uid=uid, page_no=1, page_count=99, attrs=' data-measure="first"')
+        + _card_html(view, columns, cont_columns, uid=uid, page_no=99, page_count=99, attrs=' data-measure="cont"')
     )
 
 
@@ -996,7 +1046,7 @@ MEASURE_JS = """
 () => {
   const h = el => el ? el.getBoundingClientRect().height : 0;
   const read = card => {
-    const cols = [...card.querySelectorAll(':scope > main > .three-column > .pool-column')];
+    const cols = [...card.querySelectorAll(':scope > main > .pool-columns > .pool-column')];
     return {card: h(card), cols: cols.map(h), heads: cols.map(c => h(c.querySelector('.column-head')))};
   };
   const first = document.querySelector('[data-measure="first"]');
@@ -1078,7 +1128,8 @@ async def draw_gacha_analysis_cards(view: GachaAnalysis, *, uid: str) -> tuple[b
             )
             return await _cards._draw_gacha_analysis_cards_v1(view, uid=uid)
         logger.info(
-            f"[endfield-gacha] v3 pages={len(pages)} level={info.get('level')} tries={info.get('tries')} "
+            f"[endfield-gacha] v3 pages={len(pages)} columns={'|'.join(column.spec.key for column in columns)} "
+            f"width={GACHA_CARD_WIDTH} level={info.get('level')} tries={info.get('tries')} "
             f"safety={safety} measure={measured_at - started:.2f}s total={perf_counter() - started:.2f}s"
         )
         return tuple(pngs)
@@ -1150,12 +1201,14 @@ def _cached_icon_data_url(path: str, _mtime_ns: int, _size: int) -> str:
     return f"data:{mime};base64,{base64.b64encode(target.read_bytes()).decode('ascii')}"
 
 
-# 外壳 token 复制自 cards._draw_neutral_card；卡片样式按三栏窄列（约 388px）调整。
+# 外壳 token 复制自 cards._draw_neutral_card；宽度取 --gacha-width（_document 按 GACHA_CARD_WIDTH 写入）。
+# 1600 宽时主栏约 518px、重构侧栏约 446px、两栏各约 747px；记录行的名称列取行宽 36%（120–260px），
+# 两行名称用 text-wrap:balance 均分，CURRENT 标签最长 300px（两栏时不会拉成一整条黑带）。
 # 没有任何 text-overflow:ellipsis / line-clamp：长文本一律 overflow-wrap:anywhere 换行。
 GACHA_CSS = """
 :root{--card-header-rule:5px solid rgba(223,236,50,.5)}
-*{box-sizing:border-box}html,body{margin:0;width:1280px;background:#d8d8d8;color:#181818;font-family:'Microsoft YaHei','PingFang SC','Noto Sans SC',Arial,sans-serif}
-.gacha-analysis-card{width:1280px;min-height:420px;padding:28px;background:linear-gradient(90deg,rgba(0,0,0,.055) 1px,transparent 1px) 0 0/32px 32px,linear-gradient(0deg,rgba(0,0,0,.055) 1px,transparent 1px) 0 0/32px 32px,#ededed}
+*{box-sizing:border-box}html,body{margin:0;width:var(--gacha-width);background:#d8d8d8;color:#181818;font-family:'Microsoft YaHei','PingFang SC','Noto Sans SC',Arial,sans-serif}
+.gacha-analysis-card{width:var(--gacha-width);min-height:420px;padding:28px;background:linear-gradient(90deg,rgba(0,0,0,.055) 1px,transparent 1px) 0 0/32px 32px,linear-gradient(0deg,rgba(0,0,0,.055) 1px,transparent 1px) 0 0/32px 32px,#ededed}
 .gacha-analysis-card[data-measure]{min-height:0}
 header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;padding:22px 25px;background:#292929;color:#fff;border-bottom:5px solid #000}
 header small{font-size:13px;letter-spacing:.2em;color:#c7c7c7}header h1{margin:5px 0 0;font-size:36px;line-height:1.1}header time{color:#d0d0d0}
@@ -1178,7 +1231,7 @@ header p{margin:8px 0 0;color:#d0d0d0;font-size:16px;overflow-wrap:anywhere}.syn
 .expectation-row b{color:#111;font-size:12px;white-space:nowrap}.expectation-row b.pending{color:#999;font-size:11px}
 .warning{margin:0 0 16px;padding:12px 16px;border:2px dashed #555;background:#f2f2f2;font-weight:800}
 
-.three-column{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-items:start;gap:12px}
+.pool-columns{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-items:start;gap:12px}
 .pool-column{min-width:0;border:1px solid #777;background:#e4e4e4}
 .column-head{display:flex;justify-content:space-between;align-items:flex-end;gap:10px;padding:12px 14px;border-bottom:4px solid #222;background:#fff}
 .column-head>div,.stack-divider>div{min-width:0}
@@ -1204,10 +1257,10 @@ header p{margin:8px 0 0;color:#d0d0d0;font-size:16px;overflow-wrap:anywhere}.syn
 .pool-banner.multi-banner img.character-banner{width:43px}
 .pool-banner img.weapon-banner{width:78px;height:100%;object-fit:contain;-webkit-mask-image:radial-gradient(ellipse 86% 82% at center,#000 58%,rgba(0,0,0,.82) 72%,transparent 100%);mask-image:radial-gradient(ellipse 86% 82% at center,#000 58%,rgba(0,0,0,.82) 72%,transparent 100%)}
 .pool-banner.multi-banner img.weapon-banner{width:43px}
-.pool-title{min-width:0}.pool-title strong{display:block;font-size:17px;line-height:1.3;overflow-wrap:anywhere}
+.pool-title{min-width:0}.pool-title strong{display:block;font-size:17px;line-height:1.3;overflow-wrap:anywhere;text-wrap:balance}
 .pool-title strong em{margin-left:2px;color:#888;font-size:13px;font-style:normal;white-space:nowrap}
 .pool-title .pool-meta{display:block;margin-top:3px;color:#777;font-size:11px;line-height:1.35;overflow-wrap:anywhere}.pool-meta .mp{white-space:nowrap}
-.current-tag{display:block;margin-bottom:4px;padding:2px 6px;border:1px solid #222;background:#222;color:#8a8a8a;font-size:10px;letter-spacing:.12em;line-height:1.2}
+.current-tag{display:block;max-width:300px;margin-bottom:4px;padding:2px 6px;border:1px solid #222;background:#222;color:#8a8a8a;font-size:10px;letter-spacing:.12em;line-height:1.2}
 .pool-total{text-align:right}.pool-total b{display:block;font-size:22px;line-height:1.15}.pool-total span{display:block;color:#777;font-size:10px;line-height:1.4;white-space:nowrap}
 .pity-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-bottom:1px solid #aaa;background:#ececec}.pity-grid.pity-two{grid-template-columns:repeat(2,minmax(0,1fr))}
 .pity-item{min-width:0;padding:7px 9px;border-right:1px solid #bbb}.pity-item:last-child{border-right:0}
@@ -1215,11 +1268,11 @@ header p{margin:8px 0 0;color:#d0d0d0;font-size:16px;overflow-wrap:anywhere}.syn
 .pity-item span{display:block;color:#666;font-size:9px;font-weight:900;white-space:nowrap}.pity-item b{display:block;margin-top:2px;font-size:15px;white-space:nowrap}
 .pity-item small{display:block;margin-top:1px;color:#777;font-size:9px;line-height:1.35;overflow-wrap:anywhere}.pity-item small+small{margin-top:0}
 .pull-bars{display:grid;grid-template-columns:minmax(0,1fr);gap:6px;padding:9px 10px 10px}
-.pull-row{display:grid;grid-template-columns:40px 120px minmax(0,1fr);align-items:center;gap:7px;min-width:0}
+.pull-row{display:grid;grid-template-columns:40px clamp(120px,36%,260px) minmax(0,1fr);align-items:center;gap:7px;min-width:0}
 .gacha-thumb,.current-marker{width:40px;height:40px;display:grid;place-items:center;overflow:hidden;border:1px solid #777;background:#eee}
 .gacha-thumb{border:2px solid #222}.gacha-thumb img{width:100%;height:100%;object-fit:contain}.gacha-thumb span{font-size:11px;font-weight:950}.gacha-thumb.gift span{font-size:10px}
 .current-marker{color:#555;font-size:11px;font-weight:900}
-.pull-copy{min-width:0}.pull-copy strong{display:block;font-size:13.5px;line-height:1.3;overflow-wrap:anywhere}
+.pull-copy{min-width:0}.pull-copy strong{display:block;font-size:13.5px;line-height:1.3;overflow-wrap:anywhere;text-wrap:balance}
 .pull-copy time{display:block;margin-top:3px;color:#777;font-size:9px;line-height:1.35;overflow-wrap:anywhere}
 .bar-track{position:relative;min-width:0;min-height:34px;border:1px solid #999;background:#ededed}
 .bar-fill{position:absolute;top:0;bottom:0;left:0;min-width:58px;max-width:100%;background:#333}.bar-fill.current{background:#777}
