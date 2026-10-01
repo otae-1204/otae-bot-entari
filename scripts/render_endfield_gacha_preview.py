@@ -4,10 +4,17 @@ No credentials and no network: records, item names, icons and pool banners are a
 synthetic (grayscale placeholder PNGs drawn locally). Every account goes through the
 real code path ``build_gacha_analysis`` → ``rendering.cards.draw_gacha_analysis_cards``;
 the page HTML the renderer screenshots is captured and re-checked in the same browser
-(width, height limit, horizontal overflow, clipping, every record rendered exactly once),
-and the report is written to ``<output-dir>/validation.json``.
+(width, height limit, horizontal overflow, clipping, column order, every record rendered
+exactly once), and the report is written to ``<output-dir>/validation.json``.
 
     python scripts/render_endfield_gacha_preview.py --output-dir output/gacha-preview
+
+Extra variants in the same run (width / height cap / rerun side are patched for that render only):
+
+    --both-sides normal no-rerun          also render these as <prefix>-<account>-right / -left
+    --candidate-widths 1600 1920 1920x5120
+                                          render --candidate-accounts (default: normal) at each width
+                                          (optionally WxH = width x page height cap) as <prefix>-cand-<W>-<account>
 """
 
 from __future__ import annotations
@@ -15,6 +22,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import random
 import sys
 import tempfile
@@ -39,7 +47,9 @@ from plugins.endfield.gacha.assets import GachaItemMetadata, GachaPoolBanner, Ga
 from plugins.endfield.gacha.service import build_gacha_analysis  # noqa: E402
 from plugins.endfield.rendering import cards  # noqa: E402
 
-ACCOUNTS = ("normal", "heavy", "sparse", "stress", "standard-hidden")
+ACCOUNTS = ("normal", "heavy", "sparse", "stress", "standard-hidden", "no-rerun")
+UIDS = {"normal": "100000001234", "standard-hidden": "100000001234", "sparse": "100000005678",
+        "no-rerun": "100000004321"}
 FORWARD_ABOVE = 3                       # 与 handlers.py 默认的 ENDFIELD_GACHA_FORWARD_ABOVE 一致，只用于报告
 NOW = datetime(2026, 9, 30, 8, 23)
 SPECIAL, RERUN, JOINT, STANDARD, BEGINNER = (
@@ -295,6 +305,28 @@ def _build(slug: str, assets: Path):
             for record in synth.records
         ]
         nickname = "示例新玩家"
+    elif slug == "no-rerun":
+        # 从不抽重构寻访：版面应折叠为两栏（特许寻访 + 其他寻访 | 武器申领），不留空列
+        synth = Synth(20261003, assets)
+        a = synth.up("chr_up_a", "示例UP角色", "角色")
+        b = synth.up("chr_up_b", "示例UP角色B", "角色")
+        wa = synth.up("wpn_up_a", "示例UP武器", "武器")
+        wb = synth.up("wpn_up_b", "示例UP武器B", "武器")
+        synth.timeline([
+            _char("special_b", "特许寻访·示例B", SPECIAL, 160, 8, b),
+            _char("special_a", "特许寻访·示例A", SPECIAL, 96, 6, a, banner=True),
+        ])
+        synth.timeline([_char("joint_glow", "辉光庆典", JOINT, 60, 6, synth.up("chr_up_joint", "示例联合UP", "角色",
+                                                                              keepsake=False))],
+                       end=NOW - timedelta(days=20))
+        synth.timeline([_char("beginner", "启程寻访", BEGINNER, 40, 1)], end=NOW - timedelta(days=40))
+        synth.timeline([_char("standard", "基础寻访", STANDARD, 150, 25)], end=NOW - timedelta(days=3))
+        synth.timeline([
+            _weapon("weaponbox_constant_a", "常驻武库申领", 4, 3),
+            _weapon("weponbox_b", "武库申领·示例B", 5, 2, wb),
+            _weapon("weponbox_a", "武库申领·示例A", 7, 2, wa, banner=True),
+        ])
+        nickname = "示例无重构玩家"
     else:
         stress = slug == "stress"
         synth = Synth(20261001 + (7 if stress else 0), assets)
@@ -374,8 +406,7 @@ def _build(slug: str, assets: Path):
         ]
         synth.timeline(weapons)
         nickname = "示例压力测试账号" if stress else "示例玩家名字特别特别长的重度测试账号昵称再长一点"
-    uid = "100000001234" if slug in ("normal", "standard-hidden") else ("100000005678" if slug == "sparse" else "100000009876")
-    role = EndfieldRole(1, 1, "preview", "preview", uid, "1", nickname, "示例服务器", True)
+    role = EndfieldRole(1, 1, "preview", "preview", UIDS.get(slug, "100000009876"), "1", nickname, "示例服务器", True)
     return role, synth, show_standard
 
 
@@ -426,7 +457,7 @@ VALIDATE_JS = """
         issues.escapes.push(desc(el) + ' ⊄ ' + desc(box).slice(0, 30));
     }
   }
-  const groups = '.summary,.metric-head,.expectation-row,.expectation-values,.three-column,.column-head,.pool-stack,.stack-divider,'
+  const groups = '.summary,.metric-head,.expectation-row,.expectation-values,.pool-columns,.column-head,.pool-stack,.stack-divider,'
     + '.pool-head,.pool-title,.pool-total,.pity-grid,.pity-item,.pull-bars,.pull-row,.pull-copy,.bar-value,.pity-hits,.free-row,'
     + 'header,header h1,.gacha-source';
   for (const g of card.querySelectorAll(groups)) {
@@ -449,7 +480,11 @@ VALIDATE_JS = """
           broken_images: images.filter(i => !i.naturalWidth).map(desc),
           external_images: images.filter(i => !/^(data|file):/.test(i.getAttribute('src') || '')).map(desc),
           folded_elements: card.querySelectorAll('.fold-card,.fold-row,.fold-head,.pool-more').length,
-          columns: [...card.querySelectorAll('.pool-column')].map(c => Math.round(c.getBoundingClientRect().height)),
+          columns: [...card.querySelectorAll('.pool-column')].map(c => {
+            const r = c.getBoundingClientRect();
+            return {key: c.dataset.key, width: Math.round(r.width), height: Math.round(r.height)};
+          }),
+          summary_tiles: [...card.querySelectorAll('.summary .metric-head span')].map(s => s.textContent.trim()),
           ...issues};
 }
 """
@@ -459,18 +494,31 @@ def _png_size(content: bytes) -> tuple[int, int]:
     return int.from_bytes(content[16:20], "big"), int.from_bytes(content[20:24], "big")
 
 
-async def _validate(document: str) -> dict:
+@dataclass(frozen=True)
+class Variant:
+    slug: str
+    stem: str               # 输出文件名前缀：<stem>.png 或 <stem>-<n>.png
+    width: int
+    max_height: int
+    rerun_side: str
+
+
+async def _validate(document: str, width: int) -> dict:
     with tempfile.NamedTemporaryFile("w", suffix=".html", encoding="utf-8", delete=False) as file:
         file.write(document)
         path = Path(file.name)
     try:
-        return await evaluate_web_page(path.as_uri(), VALIDATE_JS, viewport=(gacha_draw.GACHA_CARD_WIDTH, 900))
+        return await evaluate_web_page(path.as_uri(), VALIDATE_JS, viewport=(width, 900))
     finally:
         path.unlink(missing_ok=True)
 
 
-async def render_account(slug: str, output_dir: Path, assets: Path, prefix: str, keep_html: bool) -> dict:
+async def render_account(variant: Variant, output_dir: Path, assets: Path, keep_html: bool) -> dict:
+    slug = variant.slug
     analysis = build_preview_analysis(slug, assets)
+    layout = gacha_draw.build_gacha_columns(analysis, rerun_side=variant.rerun_side)
+    expected_columns = [column.spec.key for column in layout]
+    expected_tiles = [column.spec.title for column in layout]        # 总览格顺序与栏序一致
     documents: list[str] = []
     original_write = gacha_draw._write_temp_html
 
@@ -479,22 +527,28 @@ async def render_account(slug: str, output_dir: Path, assets: Path, prefix: str,
         return original_write(document)
 
     started = perf_counter()
-    with patch.object(gacha_draw, "_write_temp_html", capture):
+    with (
+        patch.object(gacha_draw, "_write_temp_html", capture),
+        patch.object(gacha_draw, "GACHA_CARD_WIDTH", variant.width),
+        patch.object(gacha_draw, "GACHA_PAGE_MAX_HEIGHT", variant.max_height),
+        patch.dict(os.environ, {gacha_draw.GACHA_RERUN_SIDE_ENV: variant.rerun_side}),
+    ):
         pngs = await cards.draw_gacha_analysis_cards(analysis, uid=analysis.role.masked_uid)
     elapsed = perf_counter() - started
     page_documents = [doc for doc in documents if 'data-measure="first"' not in doc]
-    for stale in [*output_dir.glob(f"{prefix}-{slug}.png"), *output_dir.glob(f"{prefix}-{slug}-[0-9]*.png"),
-                  *output_dir.glob(f"{prefix}-{slug}.html"), *output_dir.glob(f"{prefix}-{slug}-[0-9]*.html")]:
+    for stale in [*output_dir.glob(f"{variant.stem}.png"), *output_dir.glob(f"{variant.stem}-[0-9]*.png"),
+                  *output_dir.glob(f"{variant.stem}.html"), *output_dir.glob(f"{variant.stem}-[0-9]*.html")]:
         stale.unlink()
 
     results = []
     for index, png in enumerate(pngs, start=1):
-        stem = f"{prefix}-{slug}" if len(pngs) == 1 else f"{prefix}-{slug}-{index}"
+        stem = variant.stem if len(pngs) == 1 else f"{variant.stem}-{index}"
         (output_dir / f"{stem}.png").write_bytes(png)
         document = page_documents[index - 1] if index - 1 < len(page_documents) else ""
         if keep_html and document:
             (output_dir / f"{stem}.html").write_text(document, encoding="utf-8")
-        report = await _validate(document) if document else {"rows": [], "pieces": [], "missing_html": True}
+        report = await _validate(document, variant.width) if document else \
+            {"rows": [], "pieces": [], "missing_html": True}
         pixels = _png_size(png)
         css_height = report.get("height", pixels[1] / 2)
         report.update({
@@ -502,12 +556,14 @@ async def render_account(slug: str, output_dir: Path, assets: Path, prefix: str,
             "png_pixels": pixels,
             "png_bytes": len(png),
             "css_size": [round(report.get("width", pixels[0] / 2), 1), round(css_height, 1)],
-            "width_ok": pixels[0] == 2 * gacha_draw.GACHA_CARD_WIDTH,
-            "within_height_limit": pixels[1] <= 2 * gacha_draw.GACHA_PAGE_MAX_HEIGHT
-                                   and css_height <= gacha_draw.GACHA_PAGE_MAX_HEIGHT,
+            "width_ok": pixels[0] == 2 * variant.width,
+            "within_height_limit": pixels[1] <= 2 * variant.max_height and css_height <= variant.max_height,
+            "columns_ok": [column["key"] for column in report.get("columns", [])] == expected_columns,
+            "summary_ok": report.get("summary_tiles") == (expected_tiles if index == 1 else []),
         })
         report["ok"] = bool(
             not report.get("missing_html") and report["width_ok"] and report["within_height_limit"]
+            and report["columns_ok"] and report["summary_ok"]
             and not any(report.get(key) for key in (
                 "overflow_x", "clipped", "escapes", "overlaps", "ellipsis_styles", "broken_images",
                 "external_images", "folded_elements",
@@ -550,7 +606,12 @@ async def render_account(slug: str, output_dir: Path, assets: Path, prefix: str,
     heights = [report["css_size"][1] for report in results]
     return {
         "account": slug,
+        "stem": variant.stem,
         "variant": "GACHA_SHOW_STANDARD=False" if not analysis.show_standard_pools else "default",
+        "width": variant.width,
+        "max_height": variant.max_height,
+        "rerun_side": variant.rerun_side,
+        "columns": expected_columns,
         "facts": {
             "nickname": analysis.role.nickname,
             "pools": len(analysis.pools),
@@ -569,6 +630,7 @@ async def render_account(slug: str, output_dir: Path, assets: Path, prefix: str,
         "delivery": "合并转发" if len(pngs) > FORWARD_ABOVE else "普通消息",
         "page_heights": heights,
         "page_height_spread": round(max(heights) - min(heights), 1) if heights else 0,
+        "png_bytes_total": sum(report["png_bytes"] for report in results),
         "completeness": completeness,
         "render_seconds": round(elapsed, 2),
         "ok": all(report["ok"] for report in results) and completeness["truncated_or_omitted"] == 0,
@@ -576,42 +638,88 @@ async def render_account(slug: str, output_dir: Path, assets: Path, prefix: str,
     }
 
 
+def _size_token(value: str) -> tuple[int, int | None]:
+    """候选尺寸：``1920`` 或 ``1920x5120``（宽 x 单页高度上限）。"""
+    width, _, height = value.lower().partition("x")
+    try:
+        return int(width), (int(height) if height else None)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected WIDTH or WIDTHxHEIGHT, got {value!r}") from None
+
+
+def build_variants(args) -> list[Variant]:
+    width, max_height, side = args.width, args.max_height, args.rerun_side
+    variants = [Variant(slug, f"{args.prefix}-{slug}", width, max_height, side) for slug in args.accounts]
+    variants += [
+        Variant(slug, f"{args.prefix}-{slug}-{each}", width, max_height, each)
+        for slug in args.both_sides for each in gacha_draw.GACHA_RERUN_SIDES
+    ]
+    for cand_width, cand_height in args.candidate_widths:
+        size = f"{cand_width}" if cand_height in (None, max_height) else f"{cand_width}x{cand_height}"
+        variants += [
+            Variant(slug, f"{args.prefix}-cand-{size}-{slug}", cand_width, cand_height or max_height, side)
+            for slug in args.candidate_accounts
+        ]
+    return variants
+
+
 async def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--output-dir", type=Path, default=ROOT / "output/gacha-preview")
     parser.add_argument("--accounts", nargs="*", choices=ACCOUNTS, default=list(ACCOUNTS))
     parser.add_argument("--prefix", default="gacha-impl")
+    parser.add_argument("--width", type=int, default=gacha_draw.GACHA_CARD_WIDTH)
+    parser.add_argument("--max-height", type=int, default=gacha_draw.GACHA_PAGE_MAX_HEIGHT)
+    parser.add_argument("--rerun-side", choices=gacha_draw.GACHA_RERUN_SIDES, default=gacha_draw.gacha_rerun_side())
+    parser.add_argument("--both-sides", nargs="*", choices=ACCOUNTS, default=[],
+                        help="这些账号另按 right / left 各渲染一份（<prefix>-<account>-right / -left）")
+    parser.add_argument("--candidate-widths", nargs="*", type=_size_token, default=[],
+                        help="候选宽度（可写 WxH 同时改单页高度上限），文件名 <prefix>-cand-<W>-<account>")
+    parser.add_argument("--candidate-accounts", nargs="*", choices=ACCOUNTS, default=["normal"])
     parser.add_argument("--keep-html", action="store_true", help="同时保存每页 HTML，便于排查")
     args = parser.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
     report = []
     with tempfile.TemporaryDirectory(prefix="gacha-preview-assets-") as assets:
         try:
-            for slug in args.accounts:
-                entry = await render_account(slug, args.output_dir, Path(assets), args.prefix, args.keep_html)
+            for variant in build_variants(args):
+                entry = await render_account(variant, args.output_dir, Path(assets), args.keep_html)
                 report.append(entry)
                 c = entry["completeness"]
-                print(f"[{slug}] pages={entry['pages']} delivery={entry['delivery']} heights={entry['page_heights']} "
+                print(f"[{variant.stem}] {variant.width}w/{variant.max_height}h {'|'.join(entry['columns'])} "
+                      f"pages={entry['pages']} delivery={entry['delivery']} heights={entry['page_heights']} "
                       f"records={c['records_rendered']}/{c['records_expected']} truncated_or_omitted={c['truncated_or_omitted']} "
                       f"ok={entry['ok']} ({entry['render_seconds']}s)", flush=True)
                 for result in entry["results"]:
                     problems = [key for key in ("overflow_x", "clipped", "escapes", "overlaps", "ellipsis_styles",
                                                 "broken_images", "external_images") if result.get(key)]
-                    print(f"    {result['file']:32} {result['png_pixels'][0]}x{result['png_pixels'][1]} "
-                          f"css {result['css_size'][0]:.0f}x{result['css_size'][1]:.0f} ok={result['ok']} {problems}",
-                          flush=True)
+                    problems += [key for key in ("columns_ok", "summary_ok") if not result.get(key, True)]
+                    print(f"    {result['file']:40} {result['png_pixels'][0]}x{result['png_pixels'][1]} "
+                          f"css {result['css_size'][0]:.0f}x{result['css_size'][1]:.0f} "
+                          f"{result['png_bytes'] / 1e6:.2f}MB ok={result['ok']} {problems}", flush=True)
         finally:
             await close_browser()
     summary = {
         "all_ok": all(entry["ok"] for entry in report),
         "rules": {
-            "GACHA_CARD_WIDTH": gacha_draw.GACHA_CARD_WIDTH,
-            "GACHA_PAGE_MAX_HEIGHT": gacha_draw.GACHA_PAGE_MAX_HEIGHT,
+            "GACHA_CARD_WIDTH": args.width,
+            "GACHA_PAGE_MAX_HEIGHT": args.max_height,
+            "GACHA_RERUN_SIDE": args.rerun_side,
+            "SIDE_COLUMN_SHARE": gacha_draw.SIDE_COLUMN_SHARE,
             "GACHA_PAGE_SAFETY": gacha_draw.GACHA_PAGE_SAFETY,
             "SPLIT_MIN_ROWS": gacha_draw.SPLIT_MIN_ROWS,
             "SPLIT_KEEP_ROWS": gacha_draw.SPLIT_KEEP_ROWS,
             "FORWARD_ABOVE": FORWARD_ABOVE,
         },
+        "overview": [
+            {"stem": entry["stem"], "account": entry["account"], "width": entry["width"],
+             "max_height": entry["max_height"], "rerun_side": entry["rerun_side"], "columns": entry["columns"],
+             "column_widths": [column["width"] for column in entry["results"][0].get("columns", [])],
+             "pages": entry["pages"], "page_heights": entry["page_heights"],
+             "png_pixels": [result["png_pixels"] for result in entry["results"]],
+             "png_bytes_total": entry["png_bytes_total"], "ok": entry["ok"]}
+            for entry in report
+        ],
         "accounts": report,
     }
     (args.output_dir / "validation.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
