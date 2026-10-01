@@ -1,11 +1,11 @@
 {
   "schema": 2,
-  "head": "efbdf96",
+  "head": "18baf07",
   "generated_from": {
     "first_commit": "8e1b455",
     "first_date": "2026-06-17",
     "last_date": "2026-10-01",
-    "commit_count": 209,
+    "commit_count": 210,
     "merge_commit_count": 16,
     "version_count": 20
   },
@@ -22,6 +22,14 @@
         "B站"
       ],
       "highlights": [
+        {
+          "date": "2026-10-01",
+          "kind": "chore",
+          "text": "活动公告与帮助卡片预览脚本改为默认写入 data 下各自功能的预览目录，并同步使用说明。",
+          "commits": [
+            "18baf07"
+          ]
+        },
         {
           "date": "2026-10-01",
           "kind": "feat",
