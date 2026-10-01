@@ -124,6 +124,22 @@ def test_version_and_updates_require_stronger_identity():
     assert window_event("活动已开启", "", "activity", "started", NOW, START) is None
 
 
+@pytest.mark.parametrize(
+    "suffix,phase",
+    [("玩法介绍", "guide"), ("参与指南", "guide"), ("活动回顾", "recap")],
+)
+def test_activity_guides_and_recaps_do_not_hide_new_content(suffix, phase):
+    first = classify(f"「融合！山团团！」活动{suffix}", BODY, NOW).units[0].event
+    second = (
+        classify(f"「融合！山团团！」活动{suffix}", BODY + "\n补充另一种玩法。", NOW)
+        .units[0]
+        .event
+    )
+    assert first.phase == phase
+    assert not equivalent(first, event())
+    assert not equivalent(first, second)
+
+
 def test_receipt_only_after_ack_retry_restart_and_destinations(tmp_path):
     path = tmp_path / "receipts.db"
     store = ReceiptStore(path)
