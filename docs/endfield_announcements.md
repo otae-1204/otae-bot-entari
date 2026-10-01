@@ -99,3 +99,30 @@
 默认输出 `data/endfield/announcements/previews/activity-digest.png`，预览产物不纳入 Git。旧版纯文本消息演示保存在同目录的 `legacy-text/`，仅用于回看早期效果。`--file` 可重复指定；未指定时只读获取官网公告。`--limit` 只限制本地预览的活动数量，不改变群推送的合并范围。预览脚本不连接机器人、不发送消息，也不修改订阅数据。
 
 官网接口已进行只读实测；真实 QQ 群和私聊投递仍需部署配置后验收。
+
+## 业务验收与预览（2026-10-01）
+
+Windows / Python 3.13 相关回归为 **249 passed、3 skipped、47 subtests passed**。跳过的三项需要同时加载 B 站功能分支，用于独立的双来源联合验证；有一条第三方 `creart` 事件循环弃用警告。本次只读调用生产采集器，成功解析当前采集范围内的 9 篇官网公告。
+
+业务回放使用官网已保存快照，时间固定在 2026-10-01 12:00，经过真实订阅、排程、发送记录、图片渲染和发送入口，接收端为模拟群：
+
+| 场景 | 图片内容 | 发送次数 | 重启后重发 |
+| --- | --- | --- | --- |
+| 同时开启 | 跑者运动会、陵水渡秋、融合！山团团！ | 1 张，3 项 | 0 |
+| 另一来源已送达同阶段提醒 | 跑者运动会、陵水渡秋 | 1 张，2 项 | 0 |
+
+第二行预置的是模拟回执，不表示官号实际在这一时刻发过“山团团”开启动态。公告预告与到点开启属于不同阶段，不会互相删除。
+
+```powershell
+.\.venv\Scripts\python.exe scripts/replay_endfield_announcements.py --file data/endfield/announcements/research/2026-08-01_to_2026-10-01/article-2653.json --file data/endfield/announcements/research/2026-08-01_to_2026-10-01/article-5987.json --at 2026-10-01T12:00
+```
+
+`--file` 接受官网详情 JSON，可重复指定；`--at` 应选择至少两项活动同时开启的时刻。脚本输出 PNG 和 `business-preview.json` 至 `data/endfield/announcements/previews/pr-2026-10-01/`，不改动正式订阅或发送记录。
+
+![同期开启三项活动](images/endfield-announcements/opening-activities.png)
+
+![逐项去重后保留两项活动](images/endfield-announcements/opening-after-dedup.png)
+
+另用 2026-09-16 12:00 的历史时刻回放“集成援助·泡泡出击”，核对有明确截止时间的倒计时为 **14 天 4 小时**。未公布截止时刻的活动继续显示“截止时间待定”。
+
+![已知截止时间的倒计时](images/endfield-announcements/countdown.png)
