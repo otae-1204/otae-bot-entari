@@ -1,11 +1,11 @@
 {
   "schema": 2,
-  "head": "f3cc418",
+  "head": "025425b",
   "generated_from": {
     "first_commit": "8e1b455",
     "first_date": "2026-06-17",
     "last_date": "2026-10-01",
-    "commit_count": 214,
+    "commit_count": 215,
     "merge_commit_count": 16,
     "version_count": 20
   },
@@ -26,7 +26,7 @@
           "date": "2026-10-01",
           "kind": "feat",
           "text": "官网公告保存内容类别与附加标签，列表显示主类别；与官号动态按活动和阶段共享发送记录。同阶段通知间隔不足 24 小时时保留先成功送达的一路，多活动图片只移除重复项，版本整篇公告、玩法指南和后续更新分别保留。",
-          "commits": ["cd76cb7", "cb8dd36", "66f1d8a", "f3cc418"]
+          "commits": ["cd76cb7", "cb8dd36", "66f1d8a", "f3cc418", "025425b"]
         },
         {
           "date": "2026-10-01",
