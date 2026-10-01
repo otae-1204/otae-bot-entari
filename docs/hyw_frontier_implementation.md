@@ -1,7 +1,7 @@
 # HYW 接入 Hyw-Frontier —— 实现说明
 
 > 2026-10-01：适配层已接入 `plugins/hyw/`。回滚用 `git checkout d80759d -- plugins/hyw tests/test_hyw.py tests/test_hyw_evidence.py docs/hyw_plugin.md`。
-> 核心库以可编辑方式安装自 `C:\Code\qqbot\Hyw-Frontier`（含 Windows 与 fake-ip 修补）。重启机器人后生效。
+> 核心库已收进 `vendor/hyw-frontier/`（含 Windows 与 fake-ip 修补），由 `requirements.txt` 以可编辑方式安装。重启机器人后生效。
 
 基线：[kumoSleeping/Hyw-Frontier](https://github.com/kumoSleeping/Hyw-Frontier) `0a1fede`（2026-09-20，`Add image-free request telemetry and per-stage timing`）。
 现状：`plugins/hyw` 是 [entari-plugin-hyw 4.0.11](https://github.com/kumoSleeping/entari-plugin-hyw/tree/0ca5b645ba63de5f637be4df2358d55aeeaaa17d) 的本地适配，XML 工具协议，Playwright 卡片，DuckDuckGo HTML 抓取。
@@ -37,7 +37,7 @@ Hyw-Frontier 要求 Python ≥ 3.11。本仓库 `pyproject.toml` 现为 `>=3.10,
 
 不要安装上游的 `entari_plugin_hyw_frontier` wheel。那个包按 Entari 0.18.6 编写，本仓库是 0.17.4。命令、会话、群功能开关和发图都留在 `plugins/hyw/`，只调用核心库的 `answer()`。
 
-`md2png` 与 `hyw_frontier` 在上游仓库里是路径依赖，不假定 PyPI 上有同版本。实施时把 `0a1fede` 的 `md2png/` 与 `hyw_frontier/` 以锁定提交引入，用本仓库的包管理器安装。引入前核对两份许可证，更新 `plugins/hyw/NOTICE.md`。调试网页 `hyw_frontier/server.py` 和 `static/` 不参与本机器人的安装。
+`md2png` 与 `hyw_frontier` 在上游仓库里是路径依赖，不假定 PyPI 上有同版本。两者都不发布到 PyPI，所以 `0a1fede` 的 `md2png/` 与 `hyw_frontier/` 已按锁定提交收进 `vendor/hyw-frontier/`，由 `requirements.txt` 以 `-e` 安装；换机器只需 `git clone` 加 `pip install -r requirements.txt`。调试网页 `hyw_frontier/server.py`、`static/` 与 `dev_reload.py` 没有收进来。本地补丁逐条记在 `plugins/hyw/NOTICE.md`，同步上游时必须保留。
 
 需要的可选依赖：`pydantic-ai-slim[openai]`，以及服务账号模式用的 `pydantic-ai-slim[google]`。搜索默认使用 `ddgs`，无搜索密钥即可运行。
 

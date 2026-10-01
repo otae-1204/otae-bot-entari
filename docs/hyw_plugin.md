@@ -1,6 +1,6 @@
 # HYW 搜索问答
 
-本地命令在 `plugins/hyw/`。问答、搜索、读网页和 Markdown 出图由 [Hyw-Frontier](https://github.com/kumoSleeping/Hyw-Frontier) `0a1fede` 完成，本仓库不安装它的 Entari 插件包。
+本地命令在 `plugins/hyw/`。问答、搜索、读网页和 Markdown 出图由 [Hyw-Frontier](https://github.com/kumoSleeping/Hyw-Frontier) `0a1fede` 完成，本仓库不安装它的 Entari 插件包。核心库源码收在 `vendor/hyw-frontier/`，由 `requirements.txt` 以可编辑方式安装，不需要额外 clone。
 
 2026-10-01 之前的 XML / Playwright 实现已从仓库移除，仍留在提交 `d80759d` 里；回滚用 `git checkout d80759d -- plugins/hyw tests/test_hyw.py tests/test_hyw_evidence.py docs/hyw_plugin.md`。
 

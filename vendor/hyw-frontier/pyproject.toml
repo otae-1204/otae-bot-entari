@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hyw-frontier"
+version = "0.1.0"
+description = "Python-native AI search with task-owned Pydantic AI model transport"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "ddgs>=9.16,<10",
+    "httpx>=0.28,<1",
+    "jsonschema>=4.23,<5",
+    "markdown-it-py>=3,<5",
+    "md2png[hyw,math]==0.1.0",
+    "pydantic-ai-slim[openai]==2.42.0",
+    "urllib3>=2.7,<3",
+]
+
+[tool.uv.sources]
+md2png = { path = "md2png", editable = true }
+
+[project.scripts]
+hyw-frontier = "hyw_frontier.cli:main"
+
+[project.optional-dependencies]
+anthropic = [
+    "pydantic-ai-slim[anthropic]==2.42.0",
+]
+google = [
+    "pydantic-ai-slim[google]==2.42.0",
+]
+
+[tool.hatch.build.targets.sdist]
+include = ["/hyw_frontier", "/pyproject.toml", "/README.md", "/docs/library.md"]
+exclude = ["__pycache__", "hyw_frontier/static", "hyw_frontier/server.py", "hyw_frontier/dev_reload.py"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["hyw_frontier"]
+# The local development server/UI are not library payload.
+exclude = ["__pycache__", "hyw_frontier/static", "hyw_frontier/server.py", "hyw_frontier/dev_reload.py"]
