@@ -173,6 +173,7 @@ from .views.medals import (
     build_akedata_medal_snapshot as build_akedata_medal_snapshot,
     build_fz_medal_item as build_fz_medal_item,
     build_fz_medal_snapshot_view as build_fz_medal_snapshot_view,
+    parse_player_medal_wall as parse_player_medal_wall,
 )
 from .views.archives import (
     build_akedata_archive_snapshot as build_akedata_archive_snapshot,
@@ -816,8 +817,12 @@ class EndfieldService:
         关联键：``md5(FZ.medal_id) == 森空岛 achievementData.id``（2026-07-28 实测 115/115），
         比按 name 关联可靠——不受命名滞后影响（如「武陵调度专家奖章·Ⅳ/·Ⅴ」撞名）。
         FZ 条目缺 ``achv_`` id 时回退按规范化 name（实测 FZ 单件档案均含 achv_ id，兜底基本不触发）。
+
+        另附带账号在游戏名片里公开展示的奖章墙（``achieve.display``），见
+        ``parse_player_medal_wall``；图标优先取 AKEData 高清图（森空岛只回 126×126）。
         """
         progress_by_hex, progress_by_name = _parse_player_medal_progress(raw_progress)
+        wall = parse_player_medal_wall(raw_progress, medals=snapshot.medals)
         not_obtained: list[MedalItemView] = []
         not_maxed: list[MedalItemView] = []
         not_plated: list[MedalItemView] = []
@@ -892,6 +897,7 @@ class EndfieldService:
             truncated=truncated,
             shown_count=len(not_obtained) + len(not_maxed) + len(not_plated),
             level_counts=owned_level_counts,
+            wall=wall,
         )
 
     async def fetch_archive_snapshot_akedata(self, *, fetched_at: int | None = None) -> ArchiveSnapshotView:
