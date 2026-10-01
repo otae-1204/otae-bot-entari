@@ -60,3 +60,44 @@ class HistoryStore:
         for key in list(self._entries):
             if key[0] == scope:
                 self._remove(key)
+
+
+class SourceBook:
+    """Channel-visible source lists for /link. Continuation history stays per sender."""
+
+    def __init__(self, *, ttl: float = 3600, max_entries: int = 1280):
+        self.ttl, self.max_entries = ttl, max_entries
+        self._by_message: OrderedDict[tuple, tuple[float, str, list[dict]]] = OrderedDict()
+        self._latest: dict[tuple, str] = {}
+
+    def _prune(self):
+        now = monotonic()
+        for key, (expires, _, _) in list(self._by_message.items()):
+            if expires <= now:
+                self._by_message.pop(key, None)
+
+    def put(self, channel: tuple, sender: str, message_id: str, sources: list[dict]):
+        self._prune()
+        self._by_message[(channel, message_id)] = (monotonic() + self.ttl, sender, deepcopy(sources))
+        self._latest[(channel, sender)] = message_id
+        while len(self._by_message) > self.max_entries:
+            self._by_message.popitem(last=False)
+
+    def get(self, channel: tuple, message_id: str) -> list[dict]:
+        self._prune()
+        entry = self._by_message.get((channel, message_id))
+        return deepcopy(entry[2]) if entry else []
+
+    def latest(self, channel: tuple, sender: str) -> list[dict]:
+        self._prune()
+        message_id = self._latest.get((channel, sender))
+        if not message_id:
+            return []
+        return self.get(channel, message_id)
+
+    def clear_sender(self, channel: tuple, sender: str):
+        self._prune()
+        for key, (_, owner, _) in list(self._by_message.items()):
+            if key[0] == channel and owner == sender:
+                self._by_message.pop(key, None)
+        self._latest.pop((channel, sender), None)
