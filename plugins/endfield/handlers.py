@@ -43,6 +43,7 @@ from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_clea
 
 from .providers.warfarin import WarfarinAPIError, WarfarinClient
 from .rendering.health import track_render_health
+from .announcements.runtime import AnnouncementRuntime
 from .account.detail.names import clear_account_detail_name_map
 from .account.investment.service import clear_account_investment_catalog
 from .account.challenge.i18n import clear_challenge_locale, close_challenge_locale, fetch_challenge_locale
@@ -432,6 +433,8 @@ async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand,
         return await _finish_endfield_help(matcher)
     if command.action == "source":
         return await matcher.finish(format_source())
+    if command.action == "announcements":
+        return await matcher.finish(await announcement_runtime.command(event, command.args, bot))
     if command.action == "calendar":
         try:
             png = await _render_current_version_calendar()
@@ -3559,6 +3562,22 @@ def _parse_query(rest: str) -> tuple[str, str]:
 
 _ownership_startup_started = False
 _ownership_startup_task: asyncio.Task | None = None
+announcement_runtime = AnnouncementRuntime()
+
+
+@on_ready
+async def _start_announcement_reminders(_bot=None) -> None:
+    announcement_runtime.ready(_bot)
+
+
+async def _poll_announcement_reminders() -> None:
+    await announcement_runtime.tick()
+
+
+timer.add_job(
+    _poll_announcement_reminders, "interval", minutes=1,
+    id="endfield_announcement_reminders", replace_existing=True, max_instances=1,
+)
 
 
 @on_ready
@@ -3619,6 +3638,7 @@ timer.add_job(
 
 @listen(Cleanup)
 async def _close_ownership_startup_task() -> None:
+    await announcement_runtime.close()
     if _ownership_startup_task is not None and not _ownership_startup_task.done():
         _ownership_startup_task.cancel()
         await asyncio.gather(_ownership_startup_task, return_exceptions=True)

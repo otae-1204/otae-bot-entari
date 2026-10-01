@@ -169,6 +169,7 @@ assert not missing, missing
 jobs = sorted(timer._jobs)
 for name in ('bili_live_check', 'bili_video_check', 'bili_dynamic_check',
              'endfield_ownership_refresh', 'endfield_ownership_catalog_refresh',
+             'endfield_announcement_reminders',
              'tibo_radar_refresh'):
     assert name in jobs, (name, jobs)
 for job in timer._jobs.values():
@@ -329,6 +330,35 @@ async def check_group_switches():
         parse_link.assert_awaited_once()
 
 asyncio.get_event_loop().run_until_complete(check_group_switches())
+
+async def check_announcement_dispatch():
+    current = group_session()
+    endfield = plugin_service.plugins['plugins.endfield'].module
+    runtime = endfield.announcement_runtime
+    await run_command(current, '/ef 公告 帮助')
+    current.send.assert_awaited_once()
+    assert '国服公告提醒' in str(current.send.await_args.args[0])
+    await run_command(current, '/ef 公告 订阅 活动 签到')
+    assert '已订阅' in str(current.send.await_args.args[0]), current.send.await_args_list
+    saved = runtime.store.subscriptions()
+    assert len(saved) == 1
+    assert saved[0].destination.account_id == 'test-bot'
+    assert set(saved[0].kinds) == {'activity', 'signin'}
+    await run_command(current, '/ef 公告 提前 开始 30')
+    assert runtime.store.subscriptions()[0].start_minutes == 30
+    member = group_session(user='ordinary-member')
+    await run_command(member, '/ef 公告 取消订阅')
+    assert '仅群主' in str(member.send.await_args.args[0])
+    scope = scope_from_event(current.account, current.event)
+    feature_store.set_enabled(scope, 'endfield', False)
+    await run_command(current, '/ef 公告 取消订阅')
+    current.send.assert_not_awaited()
+    assert len(runtime.store.subscriptions()) == 1
+    feature_store.set_enabled(scope, 'endfield', True)
+    await run_command(current, '/ef 公告 取消订阅')
+    assert not runtime.store.subscriptions()
+
+asyncio.get_event_loop().run_until_complete(check_announcement_dispatch())
 
 # Exercise the actual incoming-event path, including quote lookup and the
 # prefix filter. CommandExecute alone skips the prefix filter that caused this bug.
