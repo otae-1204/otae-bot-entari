@@ -1,15 +1,44 @@
 {
   "schema": 2,
-  "head": "391aed1",
+  "head": "01ed45d",
   "generated_from": {
     "first_commit": "8e1b455",
     "first_date": "2026-06-17",
-    "last_date": "2026-09-28",
-    "commit_count": 204,
+    "last_date": "2026-10-01",
+    "commit_count": 207,
     "merge_commit_count": 16,
-    "version_count": 19
+    "version_count": 20
   },
   "releases": [
+    {
+      "version": "v1.19.0",
+      "date": "2026-10-01",
+      "from": "2026-09-29",
+      "to": "2026-10-01",
+      "title": "终末地官号动态过滤与 B 站投递修复",
+      "summary": "终末地 B 站官号动态订阅自动过滤抽奖发起和开奖结算，保留前瞻预告与普通活动；修复单群投递失败影响其他群的问题，并补充 RSSHub 自建部署说明。",
+      "tags": ["终末地", "B站"],
+      "highlights": [
+        {
+          "date": "2026-10-01",
+          "kind": "feat",
+          "text": "订阅终末地官号动态后，自动发送非抽奖内容的图片卡片，过滤抽奖发起、开奖结算及含抽奖原文的转发；支持新版图文正文，RSS 回退时通过官方详情核验后再分类。",
+          "commits": ["01ed45d"]
+        },
+        {
+          "date": "2026-09-29",
+          "kind": "fix",
+          "text": "B 站通知按接收目标隔离失败重试，单个群发送失败不再阻塞其他群的通知。",
+          "commits": ["7bc4269"]
+        },
+        {
+          "date": "2026-09-29",
+          "kind": "docs",
+          "text": "新增 RSSHub 自建部署说明，供 B 站接口受限时配置备用采集来源。",
+          "commits": ["d80759d"]
+        }
+      ]
+    },
     {
       "version": "v1.18.0",
       "date": "2026-09-28",
