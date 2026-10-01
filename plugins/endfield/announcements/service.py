@@ -55,40 +55,40 @@ class AnnouncementService:
             # stale snapshot after a long upstream outage.
             if now - int(health.get("last_success", 0)) > 3 * POLL_SECONDS:
                 return
-            jobs = await asyncio.to_thread(self.store.due, now)
+            jobs = await asyncio.to_thread(self.store.due, now, None)
             semaphore = asyncio.Semaphore(4)
 
             async def deliver_group(group):
                 async with semaphore:
-                    for job in group:
-                        current = int(self.clock())
-                        sub = await asyncio.to_thread(
-                            self.store.subscription, job.subscription_key
+                    current = int(self.clock())
+                    sub = await asyncio.to_thread(
+                        self.store.subscription, group[0].subscription_key
+                    )
+                    pending = await asyncio.to_thread(
+                        self.store.pending_jobs, group, current
+                    )
+                    if sub is None or not pending:
+                        return
+                    try:
+                        # One image per destination per cycle, with all due
+                        # activities. Receipts commit together after its ack.
+                        await asyncio.wait_for(
+                            self.sender(sub.destination, pending), 120
                         )
-                        if sub is None or not await asyncio.to_thread(
-                            self.store.is_pending, job.key, current
-                        ):
-                            continue
-                        try:
-                            await asyncio.wait_for(
-                                self.sender(sub.destination, job.text), 20
-                            )
-                        except DeliveryDeferred:
-                            return
-                        except Exception as exc:  # noqa: BLE001 - retry one destination without blocking others
-                            await asyncio.to_thread(
-                                self.store.failed,
-                                job.key,
-                                int(self.clock()),
-                                job.attempts,
-                            )
-                            logger.warning(
-                                "[endfield-announcements] delivery failed error_type={}",
-                                type(exc).__name__,
-                            )
-                            return
-                        else:
-                            await asyncio.to_thread(self.store.sent, job.key)
+                    except DeliveryDeferred:
+                        await asyncio.to_thread(
+                            self.store.defer_many, pending, int(self.clock())
+                        )
+                    except Exception as exc:  # noqa: BLE001 - isolate retry state per destination
+                        await asyncio.to_thread(
+                            self.store.failed_many, pending, int(self.clock())
+                        )
+                        logger.warning(
+                            "[endfield-announcements] delivery failed error_type={}",
+                            type(exc).__name__,
+                        )
+                    else:
+                        await asyncio.to_thread(self.store.sent_many, pending)
 
             groups: dict[str, list] = {}
             for job in jobs:

@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import re
 import time
+from dataclasses import replace
 from datetime import datetime
+from urllib.parse import urlsplit
 
 from lxml import html
 
@@ -126,8 +128,130 @@ def parse_windows(cid: str, title: str, lines: list[str]) -> tuple[ActivityWindo
         signature = digest([identity, kind])[:24]
         index = labels.get(signature, 0)
         labels[signature] = index + 1
-        windows.append(ActivityWindow(f"{signature}:{index}", label, kind, start, end))
+        windows.append(
+            ActivityWindow(
+                f"{signature}:{index}",
+                label,
+                kind,
+                start,
+                end,
+                start_hint="版本更新维护后" if not start and "后" in line else "",
+                end_hint="版本更新维护前" if not end and "维护前" in line else "",
+                schedule_label="物资兑换"
+                if "兑换" in context + line[: matches[0].start()]
+                else "",
+            )
+        )
     return tuple(windows)
+
+
+def image_url(value: object) -> str:
+    """Only fetch official artwork URLs, never arbitrary URLs from CMS markup."""
+    if not isinstance(value, str):
+        return ""
+    try:
+        parsed = urlsplit(value)
+        host = (parsed.hostname or "").lower()
+        allowed = any(
+            host == domain or host.endswith("." + domain)
+            for domain in ("hycdn.cn", "hypergryph.com")
+        )
+        if (
+            parsed.scheme == "https"
+            and allowed
+            and not parsed.username
+            and not parsed.password
+            and parsed.port in (None, 443)
+        ):
+            return value
+    except ValueError:
+        pass
+    return ""
+
+
+def _summary(lines: list[str], title: str) -> str:
+    """Use readable body paragraphs instead of the CMS's glued/truncated brief."""
+    parts = []
+    for line in lines:
+        clean = re.sub(r"^[·•\s]+", "", line).strip()
+        if (
+            not clean
+            or clean == title
+            or clean.startswith(
+                (
+                    "▼",
+                    "■",
+                    "※",
+                    "亲爱的",
+                    "开放条件",
+                    "参与条件",
+                    "发放条件",
+                    "发放说明",
+                )
+            )
+            or DATE.search(clean)
+            or TIME_LABEL.search(clean)
+            or re.match(r"^\d+[.、]", clean)
+        ):
+            continue
+        if "全部可能出现" in clean or "可使用" in clean:
+            if "概率提升" not in clean:
+                continue
+            clean = clean.split("全部可能出现", 1)[0].rstrip("，、； ") + "。"
+        clean = re.sub(r"^(?:活动说明|寻访说明|申领说明|更新说明)[：:]\s*", "", clean)
+        if clean not in parts:
+            parts.append(clean)
+        if len(parts) >= 2 or sum(map(len, parts)) >= 120:
+            break
+    text = " ".join(parts)
+    return text if len(text) <= 150 else text[:149].rstrip("，、； ") + "…"
+
+
+def _window_details(
+    window: ActivityWindow, lines: list[str], root, cover: str
+) -> ActivityWindow:
+    normalized = [re.sub(r"^[▼■/\s\d.、]+", "", line) for line in lines]
+    try:
+        index = normalized.index(window.title)
+    except ValueError:
+        index = -1
+    section = []
+    for line in lines[index + 1 :]:
+        clean = re.sub(r"^[▼■/\s\d.、]+", "", line)
+        if (
+            section
+            and "「" in clean
+            and (line.startswith(("▼", "■", "○")) or re.match(r"^\d+[.、]", line))
+        ):
+            break
+        section.append(line)
+    picture = cover
+    # A version overview may contain artwork per activity. Use the first image
+    # within that named section; a dedicated article falls back to its cover.
+    if index >= 0:
+        in_section = False
+        for node in root.iter():
+            if node.tag in {"p", "h1", "h2", "h3", "h4"}:
+                label = " ".join(node.text_content().split())
+                clean = re.sub(r"^[▼■/\s\d.、]+", "", label)
+                if (
+                    in_section
+                    and (
+                        label.startswith(("▼", "■", "○"))
+                        or re.match(r"^\d+[.、]", label)
+                    )
+                    and "「" in clean
+                    and clean != window.title
+                ):
+                    break
+                if clean == window.title:
+                    in_section = True
+            elif in_section and node.tag == "img":
+                candidate = image_url(node.get("src"))
+                if candidate:
+                    picture = candidate
+                    break
+    return replace(window, summary=_summary(section, window.title), image_url=picture)
 
 
 def parse_article(payload: dict, expected_id: str = "") -> Announcement:
@@ -151,7 +275,15 @@ def parse_article(payload: dict, expected_id: str = "") -> Announcement:
     ):
         raise AnnouncementSourceError("官网公告发布时间无效")
     lines = body_lines(body)
-    windows = parse_windows(cid, title, lines)
+    root = html.fragment_fromstring(body, create_parent="div")
+    cover = image_url(data.get("cover")) or next(
+        (url for node in root.xpath(".//img") if (url := image_url(node.get("src")))),
+        "",
+    )
+    windows = tuple(
+        _window_details(window, lines, root, cover)
+        for window in parse_windows(cid, title, lines)
+    )
     headings = [line for line in lines if line.startswith(("▼", "■"))]
     kind_set = {
         _kind(title),
@@ -161,7 +293,10 @@ def parse_article(payload: dict, expected_id: str = "") -> Announcement:
     if len(kind_set) > 1:
         kind_set.discard("notice")
     kinds = tuple(sorted(kind_set))
-    summary = " ".join(body_lines(str(data.get("brief") or ""))) or " ".join(lines[:3])
+    legacy_summary = " ".join(body_lines(str(data.get("brief") or ""))) or " ".join(
+        lines[:3]
+    )
+    summary = _summary(lines, title)
     # Include image/link changes too, but exclude cover, sticky and frontend
     # presentation fields which do not change the announcement's substance.
     return Announcement(
@@ -172,7 +307,10 @@ def parse_article(payload: dict, expected_id: str = "") -> Announcement:
         summary[:240],
         kinds,
         windows,
-        digest([title, int(published), body, summary]),
+        # Preserve the previous content hash when only our display formatter
+        # changes, so deployment does not resend every saved announcement.
+        digest([title, int(published), body, legacy_summary]),
+        cover,
     )
 
 

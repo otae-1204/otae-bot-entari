@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from .models import KINDS
 
 HELP = """终末地国服公告提醒（北京时间）
+订阅后自动推送图片，同一轮到点的活动合并展示配图、摘要、起止时间和倒计时。
 /ef 公告 订阅 [全部|活动|维护|卡池|签到|其他]：可同时选择多种类型
 /ef 公告 取消订阅
 /ef 公告 状态：查看当前群或本人的订阅与采集状态

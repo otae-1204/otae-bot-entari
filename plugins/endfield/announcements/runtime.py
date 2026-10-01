@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from dataclasses import replace
+from dataclasses import asdict, replace
 
 from loguru import logger
 
@@ -15,23 +15,29 @@ from otae_bot.adapters.entari import (
     get_channel_id,
     get_group_id,
     is_group,
+    make_image,
 )
 from otae_bot.group_features import feature_store, group_scope, scope_from_event
 from otae_bot.group_permissions import can_manage
+from otae_bot.infrastructure.cache import AsyncTTLCache
 
 from .commands import HELP, parse
-from .models import KINDS, Destination, Subscription, local_time
+from .models import KINDS, Delivery, Destination, Subscription, digest, local_time
 from .service import AnnouncementService, DeliveryDeferred
 from .source import OfficialAnnouncementSource
 from .store import AnnouncementStore
 
 
 class AnnouncementRuntime:
-    def __init__(self, store=None, source=None, *, clock=time.time):
+    def __init__(self, store=None, source=None, *, clock=time.time, renderer=None):
         self.store = store or AnnouncementStore()
         self.clock = clock
         self.accounts = {}
         self.tasks: set[asyncio.Task] = set()
+        self.renderer = renderer
+        self.images = AsyncTTLCache(
+            ttl_seconds=60, max_bytes=32 * 1024 * 1024, max_entries=16, sizeof=len
+        )
         self.service = AnnouncementService(
             self.store, source or OfficialAnnouncementSource(), self.send, clock=clock
         )
@@ -64,8 +70,9 @@ class AnnouncementRuntime:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         self.accounts.clear()
+        await self.images.close()
 
-    async def send(self, destination: Destination, text: str):
+    def _delivery_account(self, destination: Destination):
         bot = self.accounts.get((destination.platform, destination.account_id))
         connected = getattr(bot, "connected", None)
         if bot is None or (connected is not None and not connected.is_set()):
@@ -74,7 +81,41 @@ class AnnouncementRuntime:
             group_scope(bot, destination.target_id), "endfield"
         ):
             raise DeliveryDeferred()
-        result = await ChainMsg.text(text).send(
+        return bot
+
+    async def send(self, destination: Destination, jobs: list[Delivery]):
+        self._delivery_account(destination)
+        if any(job.subscription_key != destination.key for job in jobs):
+            raise ValueError("Announcement jobs do not belong to this destination")
+        subscription = await asyncio.to_thread(self.store.subscription, destination.key)
+        bulletin = await asyncio.to_thread(self.store.digest, jobs, int(self.clock()))
+        if bulletin is None or not bulletin.cards:
+            raise DeliveryDeferred()
+        if self.renderer is None:
+            from .rendering import draw_digest
+
+            renderer = draw_digest
+        else:
+            renderer = self.renderer
+        key = digest(
+            [
+                tuple(asdict(card) for card in bulletin.cards),
+                bulletin.generated_at // 60,
+            ]
+        )
+        png = await self.images.get_or_create(key, lambda: renderer(bulletin))
+        # Rendering can take seconds; respect unsubscriptions, revised lead
+        # times, expiry, account disconnects and group switches before sending.
+        pending = await asyncio.to_thread(
+            self.store.pending_jobs, jobs, int(self.clock())
+        )
+        current_subscription = await asyncio.to_thread(
+            self.store.subscription, destination.key
+        )
+        if len(pending) != len(jobs) or current_subscription != subscription:
+            raise DeliveryDeferred()
+        bot = self._delivery_account(destination)
+        result = await ChainMsg([make_image(raw=png)]).send(
             SendDest(
                 id=destination.target_id
                 if destination.private

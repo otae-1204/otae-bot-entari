@@ -9,6 +9,7 @@ from dataclasses import asdict, replace
 from pathlib import Path
 
 from .models import Announcement, Delivery, Destination, Subscription, digest, message
+from .presentation import build_digest
 
 RETENTION_SECONDS = 90 * 86400
 CATCHUP_SECONDS = 2 * 3600
@@ -48,7 +49,8 @@ class AnnouncementStore:
                     article_id TEXT NOT NULL, text TEXT NOT NULL, due_at INTEGER NOT NULL,
                     expires_at INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
                     next_at INTEGER NOT NULL DEFAULT 0, state TEXT NOT NULL DEFAULT 'pending',
-                    reminder INTEGER NOT NULL DEFAULT 0
+                    reminder INTEGER NOT NULL DEFAULT 0,
+                    window_key TEXT NOT NULL DEFAULT '', phase TEXT NOT NULL DEFAULT 'news'
                 );
                 CREATE INDEX IF NOT EXISTS outbox_due ON outbox(state,next_at,due_at);
             """)
@@ -56,6 +58,18 @@ class AnnouncementStore:
             # SQLite's default deferred BEGIN starts too late for that.
             conn.execute("BEGIN IMMEDIATE")
             with conn:
+                columns = {
+                    row["name"] for row in conn.execute("PRAGMA table_info(outbox)")
+                }
+                for name, default in (("window_key", ""), ("phase", "news")):
+                    if name not in columns:
+                        conn.execute(
+                            f"ALTER TABLE outbox ADD COLUMN {name} TEXT NOT NULL DEFAULT '{default}'"
+                        )
+                if "phase" not in columns:
+                    conn.execute(
+                        "UPDATE outbox SET phase='updated' WHERE reminder=0 AND text LIKE '%公告更新%'"
+                    )
                 yield conn
         finally:
             conn.close()
@@ -170,10 +184,11 @@ class AnnouncementStore:
     def _queue(conn, job: Delivery, *, reminder: bool = False):
         conn.execute(
             """
-            INSERT INTO outbox(key,subscription_key,article_id,text,due_at,expires_at,reminder)
-            VALUES (?,?,?,?,?,?,?) ON CONFLICT(key) DO UPDATE SET
+            INSERT INTO outbox(key,subscription_key,article_id,text,due_at,expires_at,reminder,window_key,phase)
+            VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(key) DO UPDATE SET
                 text=excluded.text, due_at=excluded.due_at, expires_at=excluded.expires_at,
-                article_id=excluded.article_id, state='pending'
+                article_id=excluded.article_id, window_key=excluded.window_key,
+                phase=excluded.phase, state='pending'
             WHERE outbox.state IN ('pending','cancelled')
         """,
             (
@@ -184,6 +199,8 @@ class AnnouncementStore:
                 job.due_at,
                 job.expires_at,
                 int(reminder),
+                job.window_key,
+                job.phase,
             ),
         )
 
@@ -246,6 +263,7 @@ class AnnouncementStore:
                                 message(article, updated=changed),
                                 now,
                                 now + CATCHUP_SECONDS,
+                                phase="updated" if changed else "news",
                             ),
                         )
                 retire_at = (
@@ -337,6 +355,8 @@ class AnnouncementStore:
                                 ),
                                 due,
                                 expires,
+                                window_key=window.key,
+                                phase=phase,
                             ),
                             reminder=True,
                         )
@@ -353,18 +373,32 @@ class AnnouncementStore:
                 (now - RETENTION_SECONDS,),
             )
 
-    def due(self, now: int, per_subscription: int = 3) -> list[Delivery]:
+    def due(self, now: int, per_subscription: int | None = 3) -> list[Delivery]:
         with self.connect() as conn:
             # One broken destination cannot occupy the entire global batch.
-            rows = conn.execute(
-                """
+            if per_subscription is None:
+                # Limit destinations, never activities within a destination:
+                # simultaneous events must be rendered into the same image.
+                rows = conn.execute(
+                    """WITH targets AS (
+                        SELECT subscription_key FROM outbox
+                        WHERE state='pending' AND due_at<=? AND next_at<=? AND expires_at>?
+                        GROUP BY subscription_key ORDER BY MIN(next_at),MIN(due_at),subscription_key LIMIT 16
+                    ) SELECT outbox.* FROM outbox JOIN targets USING(subscription_key)
+                    WHERE state='pending' AND due_at<=? AND next_at<=? AND expires_at>?
+                    ORDER BY subscription_key,due_at,key""",
+                    (now, now, now, now, now, now),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
                 SELECT * FROM (
                     SELECT *, ROW_NUMBER() OVER(PARTITION BY subscription_key ORDER BY due_at,key) AS position
                     FROM outbox WHERE state='pending' AND due_at<=? AND next_at<=? AND expires_at>?
                 ) WHERE position<=? ORDER BY position,due_at,key LIMIT 48
             """,
-                (now, now, now, per_subscription),
-            ).fetchall()
+                    (now, now, now, per_subscription),
+                ).fetchall()
             return [
                 Delivery(
                     *(
@@ -377,11 +411,69 @@ class AnnouncementStore:
                             "due_at",
                             "expires_at",
                             "attempts",
+                            "window_key",
+                            "phase",
                         )
                     )
                 )
                 for row in rows
             ]
+
+    def digest(self, jobs: list[Delivery], now: int):
+        if not jobs:
+            return None
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT payload FROM subscriptions WHERE key=?",
+                (jobs[0].subscription_key,),
+            ).fetchone()
+            if row is None:
+                return None
+            sub = _subscription(row[0])
+            articles = [
+                Announcement.loads(row[0])
+                for row in conn.execute("SELECT payload FROM articles")
+            ]
+            withdrawn = dict(
+                conn.execute("SELECT key,published_at FROM withdrawn_windows")
+            )
+            return build_digest(articles, jobs, sub.kinds, now, withdrawn)
+
+    def pending_jobs(self, jobs: list[Delivery], now: int) -> list[Delivery]:
+        with self.connect() as conn:
+            return [
+                job
+                for job in jobs
+                if conn.execute(
+                    """SELECT 1 FROM outbox WHERE key=? AND state='pending'
+                AND due_at<=? AND next_at<=? AND expires_at>?""",
+                    (job.key, now, now, now),
+                ).fetchone()
+            ]
+
+    def sent_many(self, jobs: list[Delivery]):
+        with self.connect() as conn:
+            conn.executemany(
+                "UPDATE outbox SET state='sent' WHERE key=? AND state='pending'",
+                ((job.key,) for job in jobs),
+            )
+
+    def failed_many(self, jobs: list[Delivery], now: int):
+        with self.connect() as conn:
+            conn.executemany(
+                "UPDATE outbox SET attempts=attempts+1,next_at=? WHERE key=? AND state='pending'",
+                (
+                    (now + min(1800, 60 * 2 ** min(job.attempts, 5)), job.key)
+                    for job in jobs
+                ),
+            )
+
+    def defer_many(self, jobs: list[Delivery], now: int):
+        with self.connect() as conn:
+            conn.executemany(
+                "UPDATE outbox SET next_at=? WHERE key=? AND state='pending'",
+                ((now + 60, job.key) for job in jobs),
+            )
 
     def is_pending(self, key: str, now: int) -> bool:
         with self.connect() as conn:

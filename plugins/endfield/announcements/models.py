@@ -34,6 +34,11 @@ class ActivityWindow:
     kind: str
     start_at: int = 0
     end_at: int = 0
+    summary: str = ""
+    image_url: str = ""
+    start_hint: str = ""
+    end_hint: str = ""
+    schedule_label: str = ""
 
 
 @dataclass(frozen=True)
@@ -46,6 +51,7 @@ class Announcement:
     kinds: tuple[str, ...]
     windows: tuple[ActivityWindow, ...]
     fingerprint: str
+    image_url: str = ""
 
     def dumps(self) -> str:
         return json.dumps(asdict(self), ensure_ascii=False)
@@ -94,6 +100,31 @@ class Delivery:
     due_at: int
     expires_at: int
     attempts: int = 0
+    window_key: str = ""
+    phase: str = "news"
+
+
+@dataclass(frozen=True)
+class ActivityCard:
+    key: str
+    title: str
+    kind: str
+    summary: str
+    image_url: str
+    start_at: int
+    end_at: int
+    start_hint: str
+    end_hint: str
+    published_at: int
+    url: str
+    phases: tuple[str, ...]
+    image_caption: str = "活动配图"
+
+
+@dataclass(frozen=True)
+class AnnouncementDigest:
+    cards: tuple[ActivityCard, ...]
+    generated_at: int
 
 
 def message(
