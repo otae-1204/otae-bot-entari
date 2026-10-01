@@ -969,6 +969,177 @@ class EndfieldForwardSendTests(unittest.TestCase):
         self.assertEqual(onebot.await_args.args[2], pages)
 
 
+class EndfieldGachaDeliveryTests(unittest.TestCase):
+    """抽卡分析投递：≤3 张照常；>3 张合并转发（Satori → OneBot → 每条 ≤3 张分批）；影拓规则不变。"""
+
+    BOT = SimpleNamespace(self_id="10001")
+    EVENT = SimpleNamespace()
+
+    def _run(self, pngs, *, satori=None, onebot=None, env=None, max_nodes=None):
+        import plugins.endfield.handlers as handlers
+
+        matcher = SimpleNamespace(finish=AsyncMock(), send=AsyncMock())
+        satori = satori or AsyncMock()
+        onebot = onebot or AsyncMock()
+        finish_pngs = AsyncMock()
+        environ = {"ENDFIELD_GACHA_FORWARD_ABOVE": ""} | (env or {})
+
+        async def run():
+            with (
+                patch.dict("os.environ", environ),
+                patch.object(handlers, "send_forward", satori),
+                patch.object(handlers, "send_forward_images", onebot),
+                patch.object(handlers, "_finish_pngs", finish_pngs),
+                patch.object(handlers, "_png_image", lambda png: handlers.make_image(url=f"file:///tmp/{png.decode()}.png")),
+                patch.object(handlers, "FORWARD_MAX_NODES", max_nodes or handlers.FORWARD_MAX_NODES),
+            ):
+                await handlers._finish_gacha_pngs(matcher, self.EVENT, self.BOT, pngs)
+
+        asyncio.run(run())
+        return matcher, satori, onebot, finish_pngs
+
+    @staticmethod
+    def _pages(count: int) -> tuple[bytes, ...]:
+        return tuple(f"p{index}".encode() for index in range(1, count + 1))
+
+    def test_three_pages_are_sent_as_one_normal_message(self):
+        matcher, satori, onebot, finish_pngs = self._run(self._pages(3))
+        finish_pngs.assert_awaited_once_with(matcher, self._pages(3))
+        satori.assert_not_awaited()
+        onebot.assert_not_awaited()
+
+    def test_four_pages_become_one_forward_with_one_image_per_node(self):
+        matcher, satori, onebot, finish_pngs = self._run(self._pages(4))
+        finish_pngs.assert_not_awaited()
+        onebot.assert_not_awaited()
+        satori.assert_awaited_once()
+        nodes = satori.await_args.args[0]
+        self.assertEqual([node.src for node in nodes], [f"file:///tmp/p{index}.png" for index in range(1, 5)])
+        self.assertEqual(satori.await_args.kwargs, {"name": "终末地抽卡分析", "uin": "10001"})
+        matcher.finish.assert_awaited_once_with()
+        matcher.send.assert_not_awaited()
+
+    def test_satori_failure_falls_back_to_onebot_with_file_uris_and_long_timeout(self):
+        matcher, satori, onebot, _ = self._run(self._pages(5), satori=AsyncMock(side_effect=RuntimeError("no forward")))
+        onebot.assert_awaited_once()
+        self.assertEqual(onebot.await_args.args, (self.BOT, self.EVENT, self._pages(5)))
+        self.assertEqual(onebot.await_args.kwargs["name"], "终末地抽卡分析")
+        self.assertEqual(onebot.await_args.kwargs["timeout"], 60)
+        self.assertEqual(onebot.await_args.kwargs["file_uris"], [f"file:///tmp/p{index}.png" for index in range(1, 6)])
+        matcher.finish.assert_awaited_once_with()
+
+    def test_both_forward_paths_failing_send_batches_of_three(self):
+        matcher, _, _, finish_pngs = self._run(
+            self._pages(4),
+            satori=AsyncMock(side_effect=RuntimeError("no forward")),
+            onebot=AsyncMock(side_effect=RuntimeError("no onebot")),
+        )
+        finish_pngs.assert_not_awaited()
+        self.assertEqual(matcher.send.await_count, 2)
+        first, second = (call.args[0] for call in matcher.send.await_args_list)
+        self.assertIn("抽卡分析共 4 页，合并转发不可用，分 2 条发送。", str(first))
+        self.assertEqual([getattr(item, "src", "") for item in first][1:],
+                         ["file:///tmp/p1.png", "file:///tmp/p2.png", "file:///tmp/p3.png"])
+        self.assertEqual([item.src for item in second], ["file:///tmp/p4.png"])
+        matcher.finish.assert_awaited_once_with()
+
+    def test_exit_exception_from_forward_is_not_swallowed(self):
+        from arclet.letoderea.exceptions import _ExitException
+
+        with self.assertRaises(_ExitException):
+            self._run(self._pages(4), satori=AsyncMock(side_effect=_ExitException()))
+
+    def test_environment_switch(self):
+        _, satori, _, finish_pngs = self._run(self._pages(10), env={"ENDFIELD_GACHA_FORWARD_ABOVE": "0"})
+        finish_pngs.assert_awaited_once()
+        satori.assert_not_awaited()
+        _, satori, _, finish_pngs = self._run(self._pages(5), env={"ENDFIELD_GACHA_FORWARD_ABOVE": "5"})
+        finish_pngs.assert_awaited_once()
+        satori.assert_not_awaited()
+        _, satori, _, finish_pngs = self._run(self._pages(4), env={"ENDFIELD_GACHA_FORWARD_ABOVE": "abc"})
+        finish_pngs.assert_not_awaited()
+        satori.assert_awaited_once()
+
+    def test_forward_is_split_above_node_limit(self):
+        matcher, satori, _, _ = self._run(self._pages(5), max_nodes=2)
+        self.assertEqual([len(call.args[0]) for call in satori.await_args_list], [2, 2, 1])
+        matcher.finish.assert_awaited_once_with()
+
+    def test_partial_forward_failure_only_batches_the_rest(self):
+        satori = AsyncMock(side_effect=[None, RuntimeError("second chunk failed")])
+        matcher, _, onebot, _ = self._run(
+            self._pages(5), satori=satori, onebot=AsyncMock(side_effect=RuntimeError("no onebot")), max_nodes=2,
+        )
+        self.assertEqual(matcher.send.await_count, 1)
+        sent = matcher.send.await_args.args[0]
+        self.assertIn("第 3–5 页合并转发失败", str(sent))
+        self.assertEqual([getattr(item, "src", "") for item in sent][1:],
+                         ["file:///tmp/p3.png", "file:///tmp/p4.png", "file:///tmp/p5.png"])
+
+    def test_gacha_handler_receives_event_and_bot(self):
+        import plugins.endfield.handlers as handlers
+
+        source = (Path(handlers.__file__)).read_text(encoding="utf-8")
+        self.assertIn("matcher, qq_user_id, command, cipher, group=is_group(event), event=event, bot=bot,", source)
+        self.assertIn("return await _finish_gacha_pngs(matcher, event, bot, pngs)", source)
+
+    def test_challenge_history_rule_is_unchanged(self):
+        import plugins.endfield.handlers as handlers
+
+        matcher = SimpleNamespace(finish=AsyncMock())
+        finish_pngs = AsyncMock()
+        satori = AsyncMock(side_effect=RuntimeError("no forward"))
+        onebot = AsyncMock(side_effect=RuntimeError("no onebot"))
+
+        async def run(pngs):
+            with (
+                patch.object(handlers, "_finish_pngs", finish_pngs),
+                patch.object(handlers, "send_forward", satori),
+                patch.object(handlers, "send_forward_images", onebot),
+                patch.object(handlers, "_png_image", lambda png: png),
+            ):
+                await handlers._finish_challenge_pages(matcher, self.EVENT, self.BOT, pngs, "/ef 影拓 历史 第N页")
+
+        asyncio.run(run((b"1", b"2")))
+        finish_pngs.assert_awaited_once()
+        satori.assert_not_awaited()
+        asyncio.run(run((b"1", b"2", b"3")))
+        self.assertEqual(satori.await_args.kwargs["name"], "Endfield")
+        self.assertEqual(onebot.await_args.args[2], (b"1", b"2", b"3"))
+        self.assertEqual(onebot.await_args.kwargs, {})
+        self.assertIn("当前连接不支持合并转发", matcher.finish.await_args.args[0])
+
+    def test_onebot_nodes_use_file_uri_when_given_and_keep_defaults_otherwise(self):
+        from otae_bot.adapters import onebot as onebot_module
+
+        file_node = onebot_module._forward_node(b"png", name="终末地抽卡分析", uin="1", file_uri="file:///tmp/a.png")
+        self.assertEqual(file_node["data"]["content"][0]["data"]["file"], "file:///tmp/a.png")
+        self.assertEqual(file_node["data"]["name"], "终末地抽卡分析")
+        inline = onebot_module._forward_node(b"png", name="Endfield", uin="1")
+        self.assertTrue(inline["data"]["content"][0]["data"]["file"].startswith("base64://"))
+
+        action = AsyncMock()
+        event = SimpleNamespace()
+
+        async def run(**kwargs):
+            with (
+                patch.object(onebot_module, "call_onebot_action", action),
+                patch.object(onebot_module, "get_group_id", lambda _event: "42"),
+                patch.object(onebot_module, "event_user_id", lambda _event: "7"),
+            ):
+                await onebot_module.send_forward_images(self.BOT, event, (b"a", b"b"), **kwargs)
+
+        asyncio.run(run())
+        self.assertEqual(action.await_args.args[1], "send_group_forward_msg")
+        self.assertEqual(action.await_args.kwargs["http_timeout"], 10)
+        self.assertEqual({node["data"]["name"] for node in action.await_args.kwargs["messages"]}, {"Endfield"})
+        asyncio.run(run(name="终末地抽卡分析", file_uris=["file:///tmp/a.png"], timeout=60))
+        self.assertEqual(action.await_args.kwargs["http_timeout"], 60)
+        files = [node["data"]["content"][0]["data"]["file"] for node in action.await_args.kwargs["messages"]]
+        self.assertEqual(files[0], "file:///tmp/a.png")
+        self.assertTrue(files[1].startswith("base64://"))
+
+
 class EndfieldChallengeClientTests(unittest.TestCase):
     def test_personal_endpoints_return_challenge_data_and_sign_query(self):
         async def run():

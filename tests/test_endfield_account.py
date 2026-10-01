@@ -54,6 +54,7 @@ aliases_module = _load(f"{PACKAGE}.catalog.aliases", "plugins/endfield/catalog/a
 sources_module = _load(f"{PACKAGE}.providers.registry", "plugins/endfield/providers/registry.py")
 commands_module = _load(f"{PACKAGE}.catalog.commands", "plugins/endfield/catalog/commands.py")
 draw_module = _load(f"{PACKAGE}.rendering.cards", "plugins/endfield/rendering/cards.py")
+gacha_draw_module = _load(f"{PACKAGE}.gacha.draw", "plugins/endfield/gacha/draw.py")
 account_detail_models_module = _load(
     f"{PACKAGE}.account.detail.models", "plugins/endfield/account/detail/models.py"
 )
@@ -2921,7 +2922,7 @@ class EndfieldGachaServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertAlmostEqual(weapon_value.up_after, 53.5389, places=4)
         self.assertEqual((weapon_value.actual_up, weapon_value.up_outcomes), (40, 2))
 
-    def test_analysis_hides_standard_from_card_but_keeps_it_in_totals(self):
+    def test_analysis_shows_standard_by_default_and_hides_it_only_by_setting(self):
         records = [
             store_module.GachaRecord("role", "server", "standard", "基础寻访", "E_CharacterGachaPoolType_Standard", "s1", 1, "s", "基础角色", 6, "角色"),
             store_module.GachaRecord("role", "server", "old", "旧限定", "special", "o1", 10, "o1", "旧六星", 6, "角色"),
@@ -2947,10 +2948,23 @@ class EndfieldGachaServiceTests(unittest.IsolatedAsyncioTestCase):
         rules = {
             "current": gacha_assets_module.GachaPoolRule("current", ("free-5",), 120),
         }
-        result = gacha_module.build_gacha_analysis(self.role, records, [], pool_rules=rules)
+        result = gacha_module.build_gacha_analysis(self.role, records, [], pool_rules=rules, show_standard=True)
+        hidden = gacha_module.build_gacha_analysis(self.role, records, [], pool_rules=rules, show_standard=False)
         pools = {item.pool_id: item for item in result.pools}
 
+        def other_section(view):
+            return gacha_draw_module.build_gacha_columns(view)[1].sections[1]
+
         self.assertIn("standard", pools)
+        self.assertIn("standard", {card.pool.pool_id for card in other_section(result).cards})
+        self.assertNotIn("standard", {card.pool.pool_id for card in other_section(hidden).cards})
+        self.assertEqual([card.pool.pool_id for card in other_section(hidden).hidden], ["standard"])
+        self.assertIn("基础寻访已按设置隐藏：1 抽 · 1 个六星", gacha_draw_module.hidden_note(other_section(hidden)))
+        self.assertEqual(
+            (hidden.total, hidden.paid_total, hidden.free_pull_count, hidden.free_ten_count),
+            (result.total, result.paid_total, result.free_pull_count, result.free_ten_count),
+        )
+        # v1 旧版两栏仍按旧规则把基础寻访排除在卡片外（ENDFIELD_GACHA_LAYOUT=v1 回滚时的行为）
         self.assertNotIn(
             "standard",
             {item.pool_id for item in draw_module._recent_gacha_pools(result, "角色")},
@@ -3963,7 +3977,9 @@ class EndfieldNeutralCardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sum(len(item.free_batches) for item in pieces), len(free_batches))
         self.assertIn("（续 2）", pieces[1].name)
 
-    async def test_gacha_cards_fall_back_to_multiple_pages_only_after_height_overflow(self):
+    async def test_gacha_v1_cards_fall_back_to_multiple_pages_only_after_height_overflow(self):
+        # v1 只在 ENDFIELD_GACHA_LAYOUT=v1 或 v3 失败回退时使用；v3 的“测量 1 次 + 每页截图 1 次”见
+        # tests/test_endfield_gacha_layout.py。
         events = tuple(
             gacha_module.SixStarEvent(f"六星 {index}", "超长武器池", "武器", index)
             for index in range(90)
@@ -3980,7 +3996,7 @@ class EndfieldNeutralCardTests(unittest.IsolatedAsyncioTestCase):
         ])
 
         with mock.patch.object(draw_module, "draw_gacha_analysis_card", renderer):
-            pages = await draw_module.draw_gacha_analysis_cards(view, uid="****1234")
+            pages = await draw_module._draw_gacha_analysis_cards_v1(view, uid="****1234")
 
         self.assertEqual(pages, (b"page-1", b"page-2"))
         self.assertEqual(renderer.await_count, 3)
