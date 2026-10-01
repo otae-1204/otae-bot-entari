@@ -32,7 +32,7 @@ plugins/
       investment/              当前档案可见养成投入
       currency/                资源流水
       challenge/               挑战记录模型、解析、绘图、翻译
-    gacha/                     抽卡同步、分析、素材、小黑盒导入
+    gacha/                     抽卡同步、分析、素材、小黑盒导入、分析图（draw.py）
     stages/                    公开关卡模型、来源和卡片
     calendar/                  AkeData 与官方版本日历
     medals/                    奖章快照存储
