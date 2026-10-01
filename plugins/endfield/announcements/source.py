@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 
 from lxml import html
 
+from otae_bot.endfield_notifications.classification import classify
 from otae_bot.infrastructure.http.client import fetch_json
 
 from .models import BEIJING, ActivityWindow, Announcement, digest
@@ -297,6 +298,8 @@ def parse_article(payload: dict, expected_id: str = "") -> Announcement:
         lines[:3]
     )
     summary = _summary(lines, title)
+    content_text = "\n".join(lines)
+    classification = classify(title, content_text, int(published))
     # Include image/link changes too, but exclude cover, sticky and frontend
     # presentation fields which do not change the announcement's substance.
     return Announcement(
@@ -311,6 +314,9 @@ def parse_article(payload: dict, expected_id: str = "") -> Announcement:
         # changes, so deployment does not resend every saved announcement.
         digest([title, int(published), body, legacy_summary]),
         cover,
+        classification.category,
+        classification.tags,
+        content_text,
     )
 
 

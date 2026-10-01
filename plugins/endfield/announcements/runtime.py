@@ -17,20 +17,28 @@ from otae_bot.adapters.entari import (
     is_group,
     make_image,
 )
+from otae_bot.endfield_notifications.classification import LABELS
+from otae_bot.endfield_notifications.receipts import ReceiptStore
 from otae_bot.group_features import feature_store, group_scope, scope_from_event
 from otae_bot.group_permissions import can_manage
 from otae_bot.infrastructure.cache import AsyncTTLCache
 
 from .commands import HELP, parse
 from .models import KINDS, Delivery, Destination, Subscription, digest, local_time
+from .notification_rules import events_for, retain_events
 from .service import AnnouncementService, DeliveryDeferred
 from .source import OfficialAnnouncementSource
 from .store import AnnouncementStore
 
 
 class AnnouncementRuntime:
-    def __init__(self, store=None, source=None, *, clock=time.time, renderer=None):
+    def __init__(
+        self, store=None, source=None, *, clock=time.time, renderer=None, receipts=None
+    ):
         self.store = store or AnnouncementStore()
+        self.receipts = receipts or ReceiptStore(
+            self.store.path.parent / "notification_receipts.db"
+        )
         self.clock = clock
         self.accounts = {}
         self.tasks: set[asyncio.Task] = set()
@@ -91,6 +99,25 @@ class AnnouncementRuntime:
         bulletin = await asyncio.to_thread(self.store.digest, jobs, int(self.clock()))
         if bulletin is None or not bulletin.cards:
             raise DeliveryDeferred()
+        claim = await asyncio.to_thread(
+            self.receipts.reserve,
+            destination.key,
+            "website",
+            events_for(bulletin),
+            int(self.clock()),
+        )
+        if claim.busy:
+            raise DeliveryDeferred()
+        try:
+            selected = retain_events(bulletin, claim.accepted)
+            if not selected.cards:
+                return
+            await self._send_digest(destination, jobs, subscription, selected)
+            await asyncio.to_thread(self.receipts.finish, claim, int(self.clock()))
+        finally:
+            await asyncio.shield(asyncio.to_thread(self.receipts.release, claim))
+
+    async def _send_digest(self, destination, jobs, subscription, bulletin):
         if self.renderer is None:
             from .rendering import draw_digest
 
@@ -213,7 +240,7 @@ class AnnouncementRuntime:
             for article in articles[:5]:
                 lines.extend(
                     [
-                        f"{local_time(article.published_at)}  {article.title}",
+                        f"{local_time(article.published_at)}  [{LABELS.get(article.category, '其他资讯')}] {article.title}",
                         article.url,
                     ]
                 )

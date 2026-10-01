@@ -7,6 +7,8 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 
+from otae_bot.endfield_notifications.classification import Event
+
 BEIJING = timezone(timedelta(hours=8))
 KINDS = {
     "activity": "活动",
@@ -52,6 +54,9 @@ class Announcement:
     windows: tuple[ActivityWindow, ...]
     fingerprint: str
     image_url: str = ""
+    category: str = ""
+    tags: tuple[str, ...] = ()
+    content_text: str = ""
 
     def dumps(self) -> str:
         return json.dumps(asdict(self), ensure_ascii=False)
@@ -61,6 +66,7 @@ class Announcement:
         data = json.loads(value)
         data["kinds"] = tuple(data["kinds"])
         data["windows"] = tuple(ActivityWindow(**item) for item in data["windows"])
+        data["tags"] = tuple(data.get("tags", ()))
         return cls(**data)
 
 
@@ -120,6 +126,7 @@ class ActivityCard:
     url: str
     phases: tuple[str, ...]
     image_caption: str = "活动配图"
+    notification_events: tuple[Event | None, ...] = ()
 
 
 @dataclass(frozen=True)

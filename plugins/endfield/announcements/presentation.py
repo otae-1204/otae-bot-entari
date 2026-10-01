@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 from .models import ActivityCard, Announcement, AnnouncementDigest, Delivery
+from .notification_rules import event_for
 
 
 def build_digest(
@@ -72,13 +73,23 @@ def build_digest(
                 and len(details.windows) > 1
                 and window.image_url == details.image_url
                 else "活动配图",
+                notification_events=(
+                    event_for(
+                        article if job.phase in {"news", "updated"} else details,
+                        window,
+                        job.phase,
+                    ),
+                ),
             )
             previous = cards.get(key)
             if previous:
                 phases = tuple(sorted(set(previous.phases + card.phases)))
+                events = dict(zip(previous.phases, previous.notification_events))
+                events.update(zip(card.phases, card.notification_events))
                 card = replace(
                     card if card.published_at >= previous.published_at else previous,
                     phases=phases,
+                    notification_events=tuple(events.get(phase) for phase in phases),
                 )
             cards[key] = card
     return AnnouncementDigest(
