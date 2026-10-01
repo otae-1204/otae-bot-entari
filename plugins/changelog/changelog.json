@@ -1,15 +1,69 @@
 {
   "schema": 2,
-  "head": "d80759d",
+  "head": "74e8b19",
   "generated_from": {
     "first_commit": "8e1b455",
     "first_date": "2026-06-17",
-    "last_date": "2026-09-29",
-    "commit_count": 206,
+    "last_date": "2026-10-01",
+    "commit_count": 211,
     "merge_commit_count": 16,
-    "version_count": 20
+    "version_count": 21
   },
   "releases": [
+    {
+      "version": "v1.20.0",
+      "date": "2026-10-01",
+      "from": "2026-10-01",
+      "to": "2026-10-01",
+      "title": "HYW 换成 Hyw-Frontier，终末地补冷启动提示",
+      "summary": "搜索问答的问答循环、搜索、读网页和出图整体换成 Hyw-Frontier，出图改用 md2png；终末地首次加载资料时先发一条提示，命令不再安静地卡十几秒。",
+      "tags": [
+        "HYW",
+        "终末地"
+      ],
+      "highlights": [
+        {
+          "date": "2026-10-01",
+          "kind": "feat",
+          "text": "HYW 搜索问答接入 Hyw-Frontier：问答循环、搜索、读网页、看图与 Markdown 出图改由核心库完成，卡片改用 md2png 绘制，服务账号由库的 Google 提供商处理。命令、群开关、并发、取消、来源查询与引用续聊保持不变；新增分享卡片、XML 卡片与合并转发的展开。Python 下限提到 3.11。",
+          "commits": [
+            "05b0df1"
+          ]
+        },
+        {
+          "date": "2026-10-01",
+          "kind": "feat",
+          "text": "终末地命令在首次加载公共资料或远程素材前先发一条提示，说明可能要十几秒，之后再继续查询与出图。同一次命令只发一次；判断只读内存与磁盘元数据，不把十几 MB 的表或立绘读出来。签到、日常这类本地命令不提醒。",
+          "commits": [
+            "b96d851"
+          ]
+        },
+        {
+          "date": "2026-10-01",
+          "kind": "docs",
+          "text": "重写 HYW 使用文档，只保留当前用得到的配置、用法与隐私边界，并新增一份接入实现说明，记录模块边界、代理分路、提示词、图片预算、来源与续聊和运行边界；回滚改走 git 历史。",
+          "commits": [
+            "477c7bd"
+          ]
+        },
+        {
+          "date": "2026-10-01",
+          "kind": "chore",
+          "text": "本地回滚副本目录不进版本库，回滚改用 git 历史。",
+          "commits": [
+            "716193a"
+          ]
+        },
+        {
+          "date": "2026-10-01",
+          "kind": "chore",
+          "text": "HYW 的核心库收进 vendor：hyw-frontier 与 md2png 不发布到 PyPI，原先靠机器上一份外部 checkout 安装，本地补丁没进版本库，换机器就会缺库。现在随仓库分发，requirements.txt 直接装，补丁逐条记进 NOTICE。",
+          "commits": [
+            "74e8b19"
+          ]
+        }
+      ]
+    },
     {
       "version": "v1.19.0",
       "date": "2026-09-29",
