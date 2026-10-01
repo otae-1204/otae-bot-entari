@@ -1,6 +1,6 @@
 """Reusable browser process, resource loading and HTML screenshots."""
 
-from typing import Literal
+from typing import Any, Literal
 from otae_bot.config.paths import TEMP_PATH
 from otae_bot.config.settings import SYSTEM_PROXY
 import base64
@@ -249,6 +249,75 @@ def _screenshot_web_element_sync(
         if screenshot_timeout_ms is not None:
             kwargs["timeout"] = max(1, int(screenshot_timeout_ms))
         return page.screenshot(**kwargs)
+    finally:
+        context.close()
+
+
+async def evaluate_web_page(
+    web_url: str,
+    script: str,
+    *,
+    viewport: tuple[int, int] = (1280, 900),
+    device_scale_factor: float = 2.0,
+    timeout_ms: int = 15000,
+    wait_for_images: bool = True,
+    wait_for_fonts: bool = True,
+    resource_wait_timeout_ms: int = 5000,
+) -> Any:
+    """Load a page in the reusable browser and return the JSON result of ``script``.
+
+    Meant for layout measurement before screenshots: it shares the single
+    Playwright thread with :func:`screenshot_web_element` and applies the same
+    request routing, so measured sizes match what a screenshot would see.
+    """
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        _get_browser_executor(),
+        _evaluate_web_page_sync,
+        web_url,
+        script,
+        viewport,
+        device_scale_factor,
+        timeout_ms,
+        wait_for_images,
+        wait_for_fonts,
+        resource_wait_timeout_ms,
+    )
+
+
+def _evaluate_web_page_sync(
+    web_url: str,
+    script: str,
+    viewport: tuple[int, int],
+    device_scale_factor: float,
+    timeout_ms: int,
+    wait_for_images: bool,
+    wait_for_fonts: bool,
+    resource_wait_timeout_ms: int,
+) -> Any:
+    browser = _get_browser()
+    context = browser.new_context(
+        viewport={"width": viewport[0], "height": viewport[1]},
+        device_scale_factor=device_scale_factor,
+    )
+    page = context.new_page()
+    try:
+        def _route_handler(route):
+            if route.request.resource_type in {"media", "font"}:
+                route.abort()
+            else:
+                route.continue_()
+
+        page.route("**/*", _route_handler)
+        page.goto(web_url, wait_until="domcontentloaded", timeout=timeout_ms)
+        if wait_for_images or wait_for_fonts:
+            _settle_page_resources(
+                page,
+                wait_for_images=wait_for_images,
+                wait_for_fonts=wait_for_fonts,
+                timeout_ms=resource_wait_timeout_ms,
+            )
+        return page.evaluate(script)
     finally:
         context.close()
 
