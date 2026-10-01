@@ -1,15 +1,44 @@
 {
   "schema": 2,
-  "head": "391aed1",
+  "head": "d80759d",
   "generated_from": {
     "first_commit": "8e1b455",
     "first_date": "2026-06-17",
-    "last_date": "2026-09-28",
-    "commit_count": 204,
+    "last_date": "2026-09-29",
+    "commit_count": 206,
     "merge_commit_count": 16,
-    "version_count": 19
+    "version_count": 20
   },
   "releases": [
+    {
+      "version": "v1.19.0",
+      "date": "2026-09-29",
+      "from": "2026-09-29",
+      "to": "2026-09-29",
+      "title": "B 站通知不再被单群拖停",
+      "summary": "一个群的 B 站通知发送失败不再堵住其他群；补上 RSSHub 自建部署手册。",
+      "tags": [
+        "B站"
+      ],
+      "highlights": [
+        {
+          "date": "2026-09-29",
+          "kind": "fix",
+          "text": "B 站通知：单个群发送失败不再拖停其他群。重试收紧到大约 3.5 分钟，坏记录丢弃后该群后续通知照常送达；同一群连续丢掉 3 条时会打出告警。被群功能开关拦住的投递改为记一条警告，不再静默丢掉。",
+          "commits": [
+            "7bc4269"
+          ]
+        },
+        {
+          "date": "2026-09-29",
+          "kind": "docs",
+          "text": "新增 RSSHub 自建部署手册，覆盖 Docker Compose 与裸机两种方案，并写明插件对每个实例的单次请求预算是 8 秒，以及自建实例走服务器自己的 IP、绕不开 B 站对该 IP 的风控。",
+          "commits": [
+            "d80759d"
+          ]
+        }
+      ]
+    },
     {
       "version": "v1.18.0",
       "date": "2026-09-28",
