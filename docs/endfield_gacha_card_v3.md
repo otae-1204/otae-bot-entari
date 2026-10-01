@@ -45,6 +45,20 @@
   真实账号（只读导出）重度 5 → 5 页、无重构 4 → 4 页，页高基本不变——页数由记录行数决定，加宽换来的是可读性。
 - 预览脚本可以直接对比：`--candidate-widths 1600 1760 1920 1920x5120`（见文末）。
 
+## 字体与字号
+
+- 抽卡卡片自带 HarmonyOS Sans SC（`plugins/endfield/assets/fonts/` 的 Regular / Medium / Bold → 400 / 500 / 700）：
+  `gacha_font_face_css()` 读盘编码成 `data:` URL（进程内缓存一次），由 `_document` 写在每页 `<style>` 最前；
+  `font-family` 第一位是 `EndfieldGachaSans`，后面保留原系统字体栈。字体文件缺失时跳过该字重并记 warning。
+  只作用于抽卡卡片，`_draw_neutral_card` 等其他卡片不变。
+- 不用 `file://`：共享浏览器拦截全部请求（字体、媒体默认中止），被拦截的 `file://` 字体放行或 fulfill 都是
+  `net::ERR_FAILED`；`data:` URL 不走拦截，与雷达、更新日志卡做法一致。代价是每次加载页面约多 2 s
+  （约 1 s 解析 33 MB 内联 CSS、约 1 s 解码三个字重），测量 1 次 + 每页截图 1 次都要付。
+- 字重只用字体实际有的 400 / 500 / 700，并设 `font-synthesis:none`；不写 800–950（只有 Regular / Bold 的机器上
+  它们都会落到 Bold，不同机器结果不一）。
+- 总览格：格标题 17、副标题 13、期望行标签 16 / 范围说明 12 / 数值行 14 / 加粗数字 17（px），数字 `tabular-nums`，
+  标签列 96 px。1600 宽三栏时数值列宽 218 px，最宽的「综合期望 123.4 → 120.0 抽」实测 198 px，不换行、不溢出。
+
 ## 分栏与排序
 
 后端只给出 `kind_key`、`series_key`、`series_index`、`is_current`、`latest_ts` 等字段（不排序、不分栏），

@@ -29,6 +29,7 @@ from loguru import logger
 from otae_bot.infrastructure.rendering.browser import evaluate_web_page, screenshot_web_element
 from otae_bot.infrastructure.rendering.executor import run_image_render
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
+from otae_bot.paths import PROJECT_ROOT
 
 from ..account.i18n import server_label
 from ..rendering import cards as _cards
@@ -60,6 +61,15 @@ SPLIT_MIN_ROWS = 4                    # 记录行 ≥ 4 的池卡片才允许跨
 SPLIT_KEEP_ROWS = 2                   # 拆分后每一段至少保留 2 行
 FREE_ICON_LIMIT = 3                   # 免费十连行最多叠放 3 个头像（名字全部写在标题里）
 GACHA_OVERFLOW_SELECTORS = (".pool-column", ".pool-card", ".pull-row", ".free-row", "header")
+# 抽卡卡片自带字体（只作用于本卡）：渲染结果不再取决于机器上装了哪些中文字体。共享浏览器拦截所有请求，
+# 被拦截的 file:// 字体会以 net::ERR_FAILED 失败，所以与雷达 / 更新日志卡一样内嵌为 data: URL。
+GACHA_FONT_FAMILY = "EndfieldGachaSans"
+GACHA_FONT_DIR = PROJECT_ROOT / "plugins/endfield/assets/fonts"
+GACHA_FONT_FILES = (
+    (400, "HarmonyOS_Sans_SC_Regular.ttf"),
+    (500, "HarmonyOS_Sans_SC_Medium.ttf"),
+    (700, "HarmonyOS_Sans_SC_Bold.ttf"),
+)
 # 当期卡（CURRENT 标签、当前累计行、保底格）只给有共享保底链或累计奖励的类型；
 # 其他寻访、常驻申领即使是该类最新一期，也按历史池样式展示（垫抽数仍在池头）。
 FEATURED_KINDS = frozenset({"special", "rerun", "weapon_limited", "weapon_rerun"})
@@ -970,8 +980,24 @@ def _card_html(
 
 def _document(body: str) -> str:
     return (f"<!doctype html><html><head><meta charset='utf-8'>"
-            f"<style>:root{{--gacha-width:{GACHA_CARD_WIDTH}px}}{GACHA_CSS}</style></head>"
+            f"<style>{gacha_font_face_css()}:root{{--gacha-width:{GACHA_CARD_WIDTH}px}}{GACHA_CSS}</style></head>"
             f"<body>{body}</body></html>")
+
+
+@lru_cache(maxsize=1)
+def gacha_font_face_css() -> str:
+    """HarmonyOS Sans SC 400 / 500 / 700 的 @font-face（data: URL，进程内只读盘编码一次）。
+    缺文件时跳过该字重并记 warning，版面回退到 GACHA_CSS 里的系统字体栈。"""
+    faces = []
+    for weight, name in GACHA_FONT_FILES:
+        try:
+            data = base64.b64encode((GACHA_FONT_DIR / name).read_bytes()).decode("ascii")
+        except OSError as exc:
+            logger.warning(f"[endfield-gacha] font {name} unavailable, falling back to system fonts: {exc}")
+            continue
+        faces.append(f'@font-face{{font-family:"{GACHA_FONT_FAMILY}";font-weight:{weight};font-style:normal;'
+                     f'font-display:block;src:url(data:font/ttf;base64,{data}) format("truetype")}}')
+    return "".join(faces)
 
 
 def render_gacha_page_html(
@@ -1205,9 +1231,12 @@ def _cached_icon_data_url(path: str, _mtime_ns: int, _size: int) -> str:
 # 1600 宽时主栏约 518px、重构侧栏约 446px、两栏各约 747px；记录行的名称列取行宽 36%（120–260px），
 # 两行名称用 text-wrap:balance 均分，CURRENT 标签最长 300px（两栏时不会拉成一整条黑带）。
 # 没有任何 text-overflow:ellipsis / line-clamp：长文本一律 overflow-wrap:anywhere 换行。
+# 字体：内置 HarmonyOS Sans SC（GACHA_FONT_FAMILY）排第一，后面是原系统字体栈；字重只用字体实际有的
+# 400 / 500 / 700，并关掉 font-synthesis，避免 800–950 在不同机器上被映射成不同的粗体或合成加粗。
+# 总览格小字：标签 16 / 范围说明 12 / 数值行 14 / 加粗数字 17 / 副标题 13（px），数字等宽。
 GACHA_CSS = """
 :root{--card-header-rule:5px solid rgba(223,236,50,.5)}
-*{box-sizing:border-box}html,body{margin:0;width:var(--gacha-width);background:#d8d8d8;color:#181818;font-family:'Microsoft YaHei','PingFang SC','Noto Sans SC',Arial,sans-serif}
+*{box-sizing:border-box}html,body{margin:0;width:var(--gacha-width);background:#d8d8d8;color:#181818;font-family:'EndfieldGachaSans','Microsoft YaHei','PingFang SC','Noto Sans SC',Arial,sans-serif;font-synthesis:none}
 .gacha-analysis-card{width:var(--gacha-width);min-height:420px;padding:28px;background:linear-gradient(90deg,rgba(0,0,0,.055) 1px,transparent 1px) 0 0/32px 32px,linear-gradient(0deg,rgba(0,0,0,.055) 1px,transparent 1px) 0 0/32px 32px,#ededed}
 .gacha-analysis-card[data-measure]{min-height:0}
 header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;padding:22px 25px;background:#292929;color:#fff;border-bottom:5px solid #000}
@@ -1220,29 +1249,31 @@ header p{margin:8px 0 0;color:#d0d0d0;font-size:16px;overflow-wrap:anywhere}.syn
 .summary{display:grid;grid-template-columns:minmax(0,.8fr) repeat(3,minmax(0,1fr));gap:10px;margin-bottom:16px}
 .total,.metric{min-width:0;min-height:172px;padding:15px 16px;border:1px solid #999;background:#fff}
 .total{display:flex;flex-direction:column;justify-content:center;border:3px solid #222}
-.total>span,.metric-head span{color:#666;font-size:15px}.total strong{font-size:48px;line-height:1}
-.metric-head{display:flex;align-items:flex-end;justify-content:space-between;gap:12px}.metric-head strong{font-size:31px;line-height:1}
-.total small,.metric>small{display:block;margin-top:8px;color:#777;font-size:11px;font-weight:800;overflow-wrap:anywhere}.total small+small{margin-top:4px}
+.total>span,.metric-head span{color:#555;font-size:17px;font-weight:500;line-height:1.3}
+.total strong{margin-top:4px;font-size:48px;line-height:1;font-variant-numeric:tabular-nums}
+.metric-head{display:flex;align-items:flex-end;justify-content:space-between;gap:12px}.metric-head strong{font-size:31px;line-height:1;font-variant-numeric:tabular-nums}
+.total small,.metric>small{display:block;margin-top:10px;color:#666;font-size:13px;font-weight:500;line-height:1.5;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}.total small+small{margin-top:4px}
 .total .mp,.metric>small .mp{white-space:nowrap}
-.expectation-summary{display:grid;grid-template-columns:minmax(0,1fr);gap:5px;margin-top:10px}
-.expectation-row{display:grid;grid-template-columns:64px minmax(0,1fr);gap:8px;padding:6px 8px;border-left:4px solid #333;background:#ededed;color:#444;font-size:10px;font-weight:850;line-height:1.35}
-.expectation-label strong,.expectation-label small{display:block}.expectation-label strong{color:#111;font-size:12px}.expectation-label small{margin-top:2px;color:#777;font-size:8px;white-space:nowrap}
-.expectation-values{display:flex;flex-direction:column;justify-content:center;gap:1px;min-width:0}.expectation-values span{white-space:nowrap}
-.expectation-row b{color:#111;font-size:12px;white-space:nowrap}.expectation-row b.pending{color:#999;font-size:11px}
-.warning{margin:0 0 16px;padding:12px 16px;border:2px dashed #555;background:#f2f2f2;font-weight:800}
+.expectation-summary{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;margin-top:14px}
+.expectation-row{display:grid;grid-template-columns:96px minmax(0,1fr);align-items:center;gap:12px;padding:10px 12px;border-left:4px solid #333;background:#ededed;color:#555;font-size:14px;font-weight:500;line-height:1.5;font-variant-numeric:tabular-nums}
+.expectation-label strong,.expectation-label small{display:block}.expectation-label strong{color:#111;font-size:16px;font-weight:700;line-height:1.3}
+.expectation-label small{margin-top:3px;color:#777;font-size:12px;font-weight:400;line-height:1.35;white-space:nowrap}
+.expectation-values{display:flex;flex-direction:column;justify-content:center;gap:4px;min-width:0}.expectation-values span{white-space:nowrap}
+.expectation-row b{margin:0 2px;color:#111;font-size:17px;font-weight:700;line-height:1.2;white-space:nowrap}.expectation-row b.pending{color:#999;font-size:14px;font-weight:500}
+.warning{margin:0 0 16px;padding:12px 16px;border:2px dashed #555;background:#f2f2f2;font-weight:700}
 
 .pool-columns{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-items:start;gap:12px}
 .pool-column{min-width:0;border:1px solid #777;background:#e4e4e4}
 .column-head{display:flex;justify-content:space-between;align-items:flex-end;gap:10px;padding:12px 14px;border-bottom:4px solid #222;background:#fff}
 .column-head>div,.stack-divider>div{min-width:0}
-.column-kicker{display:block;color:#888;font-size:10px;font-weight:800;letter-spacing:.04em;overflow-wrap:anywhere}
+.column-kicker{display:block;color:#888;font-size:10px;font-weight:500;letter-spacing:.04em;overflow-wrap:anywhere}
 .column-head h2{margin:3px 0 0;font-size:24px;line-height:1.15;white-space:nowrap}.column-head h2 em,.stack-divider h3 em{margin-left:2px;color:#888;font-size:15px;font-style:normal}
 .column-head p,.stack-divider p{flex:none;margin:0;color:#666;font-size:12px;line-height:1.45;text-align:right;white-space:nowrap}
 .pool-stack{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;padding:10px}
 .stack-divider{display:flex;justify-content:space-between;align-items:flex-end;gap:10px;margin-top:6px;padding:9px 12px;border-bottom:3px solid #222;background:#fff}
 .stack-divider h3{margin:2px 0 0;font-size:19px;line-height:1.15;white-space:nowrap}.stack-divider p{font-size:11px}
 .empty.slim{padding:16px 12px;font-size:12px}.empty.slim.note{padding:10px 12px;font-size:11px;line-height:1.45;text-align:left;overflow-wrap:anywhere}
-.continue-hint{padding:7px 10px;border:1px dashed #888;background:#f3f3f3;color:#666;font-size:11px;font-weight:800;text-align:center}
+.continue-hint{padding:7px 10px;border:1px dashed #888;background:#f3f3f3;color:#666;font-size:11px;font-weight:500;text-align:center}
 
 .pool-card{min-width:0;border:1px solid #888;background:#fff}
 .pool-card.is-open{border-bottom-style:dashed}.pool-card.is-cont{border-top-style:dashed}
@@ -1265,20 +1296,20 @@ header p{margin:8px 0 0;color:#d0d0d0;font-size:16px;overflow-wrap:anywhere}.syn
 .pity-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-bottom:1px solid #aaa;background:#ececec}.pity-grid.pity-two{grid-template-columns:repeat(2,minmax(0,1fr))}
 .pity-item{min-width:0;padding:7px 9px;border-right:1px solid #bbb}.pity-item:last-child{border-right:0}
 .pity-grid.pity-four{grid-template-columns:repeat(2,minmax(0,1fr))}.pity-four .pity-item:nth-child(2n){border-right:0}.pity-four .pity-item:nth-child(-n+2){border-bottom:1px solid #bbb}
-.pity-item span{display:block;color:#666;font-size:9px;font-weight:900;white-space:nowrap}.pity-item b{display:block;margin-top:2px;font-size:15px;white-space:nowrap}
+.pity-item span{display:block;color:#666;font-size:9px;font-weight:700;white-space:nowrap}.pity-item b{display:block;margin-top:2px;font-size:15px;white-space:nowrap}
 .pity-item small{display:block;margin-top:1px;color:#777;font-size:9px;line-height:1.35;overflow-wrap:anywhere}.pity-item small+small{margin-top:0}
 .pull-bars{display:grid;grid-template-columns:minmax(0,1fr);gap:6px;padding:9px 10px 10px}
 .pull-row{display:grid;grid-template-columns:40px clamp(120px,36%,260px) minmax(0,1fr);align-items:center;gap:7px;min-width:0}
 .gacha-thumb,.current-marker{width:40px;height:40px;display:grid;place-items:center;overflow:hidden;border:1px solid #777;background:#eee}
-.gacha-thumb{border:2px solid #222}.gacha-thumb img{width:100%;height:100%;object-fit:contain}.gacha-thumb span{font-size:11px;font-weight:950}.gacha-thumb.gift span{font-size:10px}
-.current-marker{color:#555;font-size:11px;font-weight:900}
+.gacha-thumb{border:2px solid #222}.gacha-thumb img{width:100%;height:100%;object-fit:contain}.gacha-thumb span{font-size:11px;font-weight:700}.gacha-thumb.gift span{font-size:10px}
+.current-marker{color:#555;font-size:11px;font-weight:700}
 .pull-copy{min-width:0}.pull-copy strong{display:block;font-size:13.5px;line-height:1.3;overflow-wrap:anywhere;text-wrap:balance}
 .pull-copy time{display:block;margin-top:3px;color:#777;font-size:9px;line-height:1.35;overflow-wrap:anywhere}
 .bar-track{position:relative;min-width:0;min-height:34px;border:1px solid #999;background:#ededed}
 .bar-fill{position:absolute;top:0;bottom:0;left:0;min-width:58px;max-width:100%;background:#333}.bar-fill.current{background:#777}
 .bar-value{position:relative;display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;min-height:32px;padding:4px 9px}.bar-value b{flex:0 0 auto;color:#fff;white-space:nowrap;font-size:15px}
 .pity-hits{display:flex;flex-wrap:wrap;align-items:center;gap:4px;min-width:0}
-.pity-hit{padding:3px 6px;border:2px solid #111;background:#fff;color:#111;font-size:10px;font-weight:950;line-height:1;white-space:nowrap;box-shadow:0 0 0 1px #fff}
+.pity-hit{padding:3px 6px;border:2px solid #111;background:#fff;color:#111;font-size:10px;font-weight:700;line-height:1;white-space:nowrap;box-shadow:0 0 0 1px #fff}
 .pity-hit-small{border-color:#3f6078;background:#e5eef4;color:#29485d;box-shadow:0 0 0 1px #f7fbfd}
 .pity-hit-large{border-color:#7a5c2e;background:#f4ead7;color:#5d421d;box-shadow:0 0 0 1px #fffaf0}
 .pity-hit-miss{padding:3px 7px;border:2px solid #f8e9e9;background:#8a3f46;color:#fff;font-size:11px;letter-spacing:.12em;box-shadow:0 0 0 1px #5a2328}
@@ -1286,9 +1317,9 @@ header p{margin:8px 0 0;color:#d0d0d0;font-size:16px;overflow-wrap:anywhere}.syn
 .free-row{display:grid;grid-template-columns:72px minmax(0,1fr) auto;align-items:center;gap:7px;min-height:46px;padding:4px 6px;border:1px dashed #777;background:#f0f0f0}
 .free-icons{display:flex;align-items:center;min-width:0;min-height:36px}.free-icons .gacha-thumb{flex:none;width:34px;height:34px;margin-right:-6px;background:#fff}
 .free-icons.many .gacha-thumb{margin-right:-16px}.free-icons .gacha-thumb:last-child{margin-right:0}
-.free-marker{width:68px;height:34px;display:grid;place-items:center;border:2px solid #555;color:#444;font-size:10px;font-weight:950;letter-spacing:.06em;white-space:nowrap}
-.free-count{padding:4px 6px;border:1px solid #777;background:#fff;font-size:10.5px;font-weight:900;white-space:nowrap}
+.free-marker{width:68px;height:34px;display:grid;place-items:center;border:2px solid #555;color:#444;font-size:10px;font-weight:700;letter-spacing:.06em;white-space:nowrap}
+.free-count{padding:4px 6px;border:1px solid #777;background:#fff;font-size:10.5px;font-weight:700;white-space:nowrap}
 
-.gacha-source{display:flex;justify-content:space-between;gap:20px;margin-top:12px;padding-top:10px;border-top:2px solid #222;color:#777;font-size:12px;font-weight:800}
+.gacha-source{display:flex;justify-content:space-between;gap:20px;margin-top:12px;padding-top:10px;border-top:2px solid #222;color:#777;font-size:12px;font-weight:500}
 [data-m],[data-mp],[data-mc]{display:grid;grid-template-columns:minmax(0,1fr);min-width:0}
 """
