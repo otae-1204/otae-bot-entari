@@ -40,7 +40,7 @@ def equivalent(a: Event, b: Event) -> bool:
         return False
     if a.end_at and b.end_at and a.end_at != b.end_at:
         return False
-    if a.phase == "update":
+    if a.phase in {"update", "guide", "recap"}:
         return bool(a.fingerprint and a.fingerprint == b.fingerprint)
     return bool(
         a.kind.startswith("document:")

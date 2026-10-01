@@ -176,6 +176,10 @@ def _schedule(text: str) -> tuple[int, int]:
 def _phase(title: str, text: str, published_at: int, start_at: int) -> str:
     if UPDATE.search(title + "\n" + text[:160]):
         return "update"
+    if re.search(r"攻略|参与指南|玩法教学|玩法介绍|机制详解|玩法演示", title):
+        return "guide"
+    if re.search(r"活动回顾|活动成果|活动总结", title):
+        return "recap"
     if re.search(r"即将结束|即将截止|结束提醒", title):
         return "ending"
     if re.search(r"已开启|现已开启|正式开启|今日开启", title) and (
