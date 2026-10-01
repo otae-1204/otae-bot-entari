@@ -1,15 +1,53 @@
 {
   "schema": 2,
-  "head": "391aed1",
+  "head": "bd9b547",
   "generated_from": {
     "first_commit": "8e1b455",
     "first_date": "2026-06-17",
-    "last_date": "2026-09-28",
-    "commit_count": 204,
+    "last_date": "2026-10-01",
+    "commit_count": 207,
     "merge_commit_count": 16,
-    "version_count": 19
+    "version_count": 20
   },
   "releases": [
+    {
+      "version": "v1.19.0",
+      "date": "2026-10-01",
+      "from": "2026-09-29",
+      "to": "2026-10-01",
+      "title": "终末地公告提醒与 B 站投递修复",
+      "summary": "新增终末地国服官网公告订阅，支持群聊、私聊、类型筛选及活动开始、结束、维护前的提醒；修复 B 站单群投递失败影响其他群的问题，补充 RSSHub 自建部署手册。",
+      "tags": [
+        "终末地",
+        "B站"
+      ],
+      "highlights": [
+        {
+          "date": "2026-10-01",
+          "kind": "feat",
+          "text": "新增 /ef 公告：订阅官网活动、维护、卡池、签到等公告，可筛选类型并设置提前提醒时间；订阅、待发消息和发送记录重启后保留。群订阅由本群管理员管理，只按官网明确给出的时间安排提醒。",
+          "commits": [
+            "bd9b547"
+          ]
+        },
+        {
+          "date": "2026-09-29",
+          "kind": "fix",
+          "text": "修复 B 站单个群投递失败导致其他群通知积压的问题，失败目标单独重试。",
+          "commits": [
+            "7bc4269"
+          ]
+        },
+        {
+          "date": "2026-09-29",
+          "kind": "docs",
+          "text": "补充 RSSHub 自建部署手册。",
+          "commits": [
+            "d80759d"
+          ]
+        }
+      ]
+    },
     {
       "version": "v1.18.0",
       "date": "2026-09-28",
