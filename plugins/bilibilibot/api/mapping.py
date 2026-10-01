@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from otae_bot.endfield_notifications.classification import classify
+
 from ..dynamic_filter import ENDFIELD_OFFICIAL_UID, dynamic_lottery_reason
 from ..models import BiliCard, KIND_DYNAMIC, KIND_VIDEO
 
@@ -79,6 +81,12 @@ def dynamic_item_to_card(item: dict[str, Any], uid: str) -> BiliCard:
         title = next((line[:40] for line in lines if line), text.splitlines()[0][:40])
     if url.startswith("//"):
         url = "https:" + url
+    lottery_reason = dynamic_lottery_reason(item)
+    published_at = int(author.get("pub_ts") or 0)
+    classification = (
+        classify(title, text, published_at, lottery=bool(lottery_reason))
+        if uid == ENDFIELD_OFFICIAL_UID else None
+    )
     return BiliCard(
         KIND_DYNAMIC,
         title=title,
@@ -94,8 +102,10 @@ def dynamic_item_to_card(item: dict[str, Any], uid: str) -> BiliCard:
             if uid == ENDFIELD_OFFICIAL_UID
             else bvid_from_url(url) or str(item.get("id_str") or "")
         ),
-        published_at=int(author.get("pub_ts") or 0),
-        lottery_reason=dynamic_lottery_reason(item),
+        published_at=published_at,
+        lottery_reason=lottery_reason,
+        content_category=classification.category if classification else "",
+        content_tags=classification.tags if classification else (),
     )
 
 

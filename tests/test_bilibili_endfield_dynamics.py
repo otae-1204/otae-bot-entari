@@ -92,6 +92,7 @@ def test_reservation_prize_metadata_is_not_a_giveaway_post(bili):
         "随机选出三名幸运观众赠送奖品",
         "转发有奖",
         "评论赢周边",
+        "参与限时活动，还有机会抽取iPad Air、游戏手柄、京东卡等丰厚奖励。",
         "https://www.bilibili.com/h5/lottery/result?business_id=123",
     ],
 )

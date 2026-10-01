@@ -110,3 +110,5 @@ class BiliCard:
     live_started_at: int = 0
     live_duration_seconds: int | None = None  # Estimated at the poll detecting the end.
     lottery_reason: str = ""  # Persist the raw dynamic classification through outbox retries.
+    content_category: str = ""
+    content_tags: tuple[str, ...] = ()

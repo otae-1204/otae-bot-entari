@@ -7,6 +7,8 @@ import re
 import unicodedata
 from typing import Any
 
+from otae_bot.endfield_notifications.classification import SOCIAL_LOTTERY
+
 from .models import KIND_DYNAMIC, BiliCard
 
 ENDFIELD_OFFICIAL_UID = "1265652806"
@@ -37,7 +39,7 @@ def text_lottery_reason(text: str) -> str:
     text = _normalized(text)
     if LOTTERY_WORDS.search(text):
         return "lottery-text"
-    if DRAW_PEOPLE.search(text) or FORWARD_PRIZE.search(text):
+    if DRAW_PEOPLE.search(text) or FORWARD_PRIZE.search(text) or SOCIAL_LOTTERY.search(text):
         return "giveaway-text"
     if LOTTERY_URL.search(text):
         return "lottery-link"

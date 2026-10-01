@@ -22,10 +22,13 @@ from otae_bot.adapters.entari import (
 from plugins.bilibilibot.api import BiliApi
 from plugins.bilibilibot.draw import draw_bili_card
 from plugins.bilibilibot.models import BiliCard
+from plugins.bilibilibot.dynamic_filter import ENDFIELD_OFFICIAL_UID
 from plugins.bilibilibot.notifier import Notifier, SenderUnavailable
+from plugins.bilibilibot.official_delivery import OfficialDelivery
 from plugins.bilibilibot.poller import Poller
 from plugins.bilibilibot.service import BiliService, expand_kinds
 from plugins.bilibilibot.store import BiliStore
+from otae_bot.endfield_notifications.receipts import destination_key
 
 
 store = BiliStore()
@@ -42,6 +45,7 @@ client = BiliApi(
     ],
 )
 service = BiliService(store, client)
+official_delivery = OfficialDelivery()
 
 
 def _send_dest(subscriber_type: str, subscriber_id: str, bot: Bot) -> SendDest:
@@ -64,9 +68,27 @@ async def _send(row, png: bytes) -> None:
     if bot is None:
         raise SenderUnavailable("bot is not connected")
     destination = _send_dest(row.subscriber_type, row.subscriber_id, bot)
+    card = row.card()
+    if row.uid == ENDFIELD_OFFICIAL_UID and card.card_type == "dynamic":
+        try:
+            scope = destination_key(
+                str(getattr(bot, "platform", "") or ""),
+                str(getattr(bot, "self_id", "") or ""),
+                row.subscriber_id, row.subscriber_type != "group",
+            )
+        except ValueError as exc:
+            raise SenderUnavailable(str(exc)) from exc
+
+        async def send_selected(selected: BiliCard) -> None:
+            selected_png = png if selected is card else await _render(selected)
+            result = await ChainMsg([make_image(raw=selected_png)]).send(destination, bot)
+            if not result:
+                raise RuntimeError("official dynamic image was not acknowledged")
+
+        await official_delivery.deliver(card, scope, send_selected)
+        return
     # Bytes go straight to the adapter: no temporary file to clean up.
     await ChainMsg([make_image(raw=png)]).send(destination, bot)
-    card = row.card()
     if card.card_type == "live_on" and card.url.strip():
         # Keep the image and the clickable link together per recipient.
         await ChainMsg.text(card.url.strip()).send(destination, bot)
