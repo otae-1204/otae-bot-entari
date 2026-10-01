@@ -154,7 +154,7 @@ class AnnouncementRuntime:
         )
         self.remember(bot)
         if (
-            command.action in {"subscribe", "unsubscribe", "lead"}
+            command.action in {"subscribe", "unsubscribe", "lead", "started"}
             and not private
             and not await can_manage(bot, event, scope_from_event(bot, event))
         ):
@@ -184,6 +184,14 @@ class AnnouncementRuntime:
                 + "、".join(KINDS[kind] for kind in saved.kinds)
                 + "。\n首次成功采集建立基线；未来提醒生效。使用 /ef 公告 状态 查看设置。"
             )
+        if command.action == "started":
+            if sub is None:
+                return "请先使用 /ef 公告 订阅 开启当前会话的提醒。"
+            await asyncio.to_thread(
+                self.store.subscribe, replace(sub, notify_started=command.enabled)
+            )
+            await asyncio.to_thread(self.store.plan, int(self.clock()))
+            return "到点开始推送已" + ("开启" if command.enabled else "关闭") + "。"
         if command.action == "lead":
             if sub is None:
                 return "请先使用 /ef 公告 订阅 开启当前会话的提醒。"
@@ -194,7 +202,7 @@ class AnnouncementRuntime:
             return "提醒设置已保存：" + (
                 f"提前 {command.minutes} 分钟。"
                 if command.minutes
-                else "已关闭此类定时提醒。"
+                else "已关闭此类提前提醒。"
             )
         if command.action == "list":
             await self.service.tick(read_only=True)
@@ -219,6 +227,7 @@ class AnnouncementRuntime:
             lines.append("当前会话未订阅。")
         else:
             lines.append("类型：" + "、".join(KINDS[kind] for kind in sub.kinds))
+            lines.append("到点开始推送：" + ("开启" if sub.notify_started else "关闭"))
             for label, minutes in (
                 ("开始", sub.start_minutes),
                 ("结束", sub.end_minutes),

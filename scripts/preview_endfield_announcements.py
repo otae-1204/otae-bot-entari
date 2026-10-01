@@ -3,6 +3,7 @@
 Examples:
     python scripts/preview_endfield_announcements.py
     python scripts/preview_endfield_announcements.py --file bulletin.json --at 2026-10-01T11:00 --phase start
+    python scripts/preview_endfield_announcements.py --file bulletin.json --at 2026-10-01T12:00 --phase started
 """
 
 from __future__ import annotations
@@ -54,6 +55,26 @@ async def render(args):
                 )
                 continue
             for window in article.windows:
+                if args.phase == "started":
+                    if (
+                        window.kind in {"activity", "banner", "signin"}
+                        and not window.schedule_label
+                        and window.start_at == now
+                        and (not window.end_at or window.end_at > now)
+                    ):
+                        jobs.append(
+                            models.Delivery(
+                                window.key,
+                                "preview",
+                                article.cid,
+                                "",
+                                now,
+                                min(now + 7200, window.end_at or now + 7200),
+                                window_key=window.key,
+                                phase="started",
+                            )
+                        )
+                    continue
                 target = window.end_at if args.phase == "end" else window.start_at
                 lead = 1440 if args.phase == "end" else 60
                 phase = "maintenance" if window.kind == "maintenance" else args.phase
@@ -99,7 +120,9 @@ def main():
     parser.add_argument(
         "--at", help="Preview timestamp in ISO format; defaults to now in Beijing"
     )
-    parser.add_argument("--phase", choices=("news", "start", "end"), default="news")
+    parser.add_argument(
+        "--phase", choices=("news", "start", "started", "end"), default="news"
+    )
     parser.add_argument(
         "--limit", type=int, default=0, help="Limit preview entries only; 0 keeps all"
     )

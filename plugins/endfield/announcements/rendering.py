@@ -28,6 +28,7 @@ PHASE_LABELS = {
     "news": "新公告",
     "updated": "公告更新",
     "start": "开始提醒",
+    "started": "活动开启",
     "end": "结束提醒",
     "maintenance": "维护提醒",
 }
@@ -90,6 +91,15 @@ def render_digest_html(
     # height bounded without dropping entries or splitting their receipts.
     columns = len(rows) > 8
     width = 1600 if columns else CARD_WIDTH
+    opening = all(card.phases == ("started",) for card in digest.cards)
+    title = "终末地 · 活动开启" if opening else "终末地 · 活动公告"
+    start_times = {card.start_at for card in digest.cards}
+    subtitle = (
+        f"{local_time(digest.cards[0].start_at)} 开启 · 北京时间"
+        if opening and len(start_times) == 1
+        else f"截至 {local_time(digest.generated_at)} · 北京时间"
+    )
+    total = "同期开启" if opening else "本轮"
     return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: https://endfield.local; font-src https://endfield.local; style-src 'unsafe-inline'">
 <style>
@@ -116,7 +126,7 @@ h1{{position:relative;font-size:48px;letter-spacing:3px;line-height:1.35;margin:
 .source{{padding:12px 20px 15px;display:flex;justify-content:space-between;gap:12px;color:#82888a;font-size:12px;line-height:1.5;overflow-wrap:anywhere}}.source span{{min-width:0}}
 footer{{padding:2px 32px 24px;font-size:14px;color:#747a7b;display:flex;justify-content:space-between;gap:20px}}footer b{{color:#303637;letter-spacing:2px;font-size:13px}}
 </style></head><body><main class="announcement-digest">
-<header class="masthead"><div class="watermark">ENDFIELD</div><div class="kicker"><b>◼</b>ENDFIELD / ACTIVITY BULLETIN</div><h1>终末地 · 活动公告</h1><div class="subline"><span>截至 {_esc(local_time(digest.generated_at))} · 北京时间</span><span class="total">本轮 {len(rows)} 项</span></div></header>
+<header class="masthead"><div class="watermark">ENDFIELD</div><div class="kicker"><b>◼</b>ENDFIELD / ACTIVITY BULLETIN</div><h1>{_esc(title)}</h1><div class="subline"><span>{_esc(subtitle)}</span><span class="total">{total} {len(rows)} 项</span></div></header>
 <section class="activities">{"".join(rows)}</section><footer><span>日期以官方公告为准 · 未明确的时间不推算倒计时</span><b>OTAE BOT × ENDFIELD</b></footer>
 </main></body></html>"""
 

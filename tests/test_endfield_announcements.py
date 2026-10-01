@@ -111,6 +111,8 @@ def test_type_filter_and_lead_validation():
     )
     assert commands.parse(("提前", "结束", "10080")).minutes == 10080
     assert commands.parse(("提前", "维护", "关闭")).minutes == 0
+    assert commands.parse(("开始推送", "开启")).enabled
+    assert not commands.parse(("开始推送", "关闭")).enabled
 
 
 @pytest.mark.parametrize(
@@ -127,6 +129,9 @@ def test_type_filter_and_lead_validation():
         ("状态", "100"),
         ("退订", "100"),
         ("help", "x"),
+        ("开始推送",),
+        ("开始推送", "60"),
+        ("开始推送", "关闭", "100"),
     ],
 )
 def test_invalid_commands_do_not_mutate(args):
@@ -395,7 +400,7 @@ def test_settings_cancel_disabled_reminders_and_preserve_sent(store):
     store.subscribe(replace(sub, start_minutes=30))
     store.plan(NOW)
     assert not store.due(NOW)
-    store.subscribe(replace(sub, start_minutes=0, end_minutes=0))
+    store.subscribe(replace(sub, start_minutes=0, end_minutes=0, notify_started=False))
     store.plan(NOW)
     assert store.pending_count(sub.destination.key) == 0
 
@@ -440,7 +445,7 @@ def test_unsubscribe_cancels_and_private_group_bot_scopes_are_distinct(store):
 
 
 def test_expired_reminders_and_old_receipts_are_cleaned(store):
-    subscribe(store)
+    subscribe(store, notify_started=False)
     store.apply_snapshot([article(start=NOW + 1800, end=0)], NOW)
     store.plan(NOW)
     assert store.due(NOW)
@@ -624,6 +629,23 @@ def test_runtime_permissions_private_scope_and_invalid_input(store, monkeypatch)
         assert len(store.subscriptions()) == 2
         assert "设置已保存" in await runtime.command(
             fake_event(admin=True), ("提前", "结束", "30"), bot
+        )
+        assert "仅群主" in await runtime.command(
+            fake_event(), ("开始推送", "关闭"), bot
+        )
+        assert store.subscription(destination().key).notify_started
+        assert "已关闭" in await runtime.command(
+            fake_event(admin=True), ("开始推送", "关闭"), bot
+        )
+        assert not store.subscription(destination().key).notify_started
+        assert "到点开始推送：关闭" in await runtime.command(
+            fake_event(), ("状态",), bot
+        )
+        assert "已开启" in await runtime.command(
+            fake_event(admin=True), ("开始推送", "开启"), bot
+        )
+        assert "到点开始推送：开启" in await runtime.command(
+            fake_event(), ("状态",), bot
         )
         assert "仅群主" in await runtime.command(fake_event(), ("取消订阅",), bot)
         assert "已取消" in await runtime.command(
@@ -865,11 +887,12 @@ def test_legacy_database_adds_payload_columns_without_losing_pending_jobs(store)
     assert not store_module.AnnouncementStore(store.path).due(NOW, None)
 
 
-@pytest.mark.parametrize("change", ["unsubscribe", "settings"])
+@pytest.mark.parametrize("change", ["unsubscribe", "settings", "opening-disabled"])
 def test_runtime_rechecks_subscription_after_rendering(store, monkeypatch, change):
     async def run():
         sub = subscribe(store)
-        store.apply_snapshot([article(start=NOW + 1800)], NOW)
+        start = NOW if change == "opening-disabled" else NOW + 1800
+        store.apply_snapshot([article(start=start)], NOW)
         store.plan(NOW)
 
         async def render(_digest):
@@ -877,7 +900,11 @@ def test_runtime_rechecks_subscription_after_rendering(store, monkeypatch, chang
                 store.unsubscribe(sub.destination.key)
             else:
                 current = store.subscription(sub.destination.key)
-                store.subscribe(replace(current, end_minutes=60))
+                store.subscribe(
+                    replace(current, notify_started=False)
+                    if change == "opening-disabled"
+                    else replace(current, end_minutes=60)
+                )
                 store.plan(NOW)
             return PNG
 
@@ -1012,5 +1039,220 @@ def test_empty_delivery_ack_is_retried(store, monkeypatch):
             await runtime.send(destination(), store.due(NOW))
         assert store.due(NOW)
         await runtime.close()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("kind", ["activity", "banner", "signin"])
+def test_opening_push_at_start_without_advance_reminders(store, kind):
+    subscribe(store, start_minutes=0, end_minutes=0)
+    store.apply_snapshot([article(start=NOW + 60, kind=kind)], NOW)
+    store.plan(NOW + 59)
+    assert not store.due(NOW + 59)
+    store.plan(NOW + 60)
+    jobs = store.due(NOW + 60)
+    assert len(jobs) == 1
+    job = jobs[0]
+    assert job.phase == "started" and "活动开启" in job.text
+    assert job.due_at == NOW + 60 and job.expires_at == NOW + 60 + 7200
+    store.sent_many(jobs)
+    restarted = store_module.AnnouncementStore(store.path)
+    restarted.plan(NOW + 120)
+    assert not restarted.due(NOW + 120)
+
+
+@pytest.mark.parametrize(
+    "start,end,now,expected",
+    [
+        (NOW + 60, 0, NOW + 61, True),  # a normal scheduler delay
+        (NOW + 60, 0, NOW + 7259, True),
+        (NOW + 60, 0, NOW + 7260, False),  # catch-up expires after two hours
+        (NOW + 60, NOW + 80, NOW + 80, False),  # already ended
+        (NOW - 60, 0, NOW, False),  # began before this subscription
+        (0, NOW + 3600, NOW, False),  # unknown opening time
+    ],
+)
+def test_opening_catchup_boundaries_and_no_history(store, start, end, now, expected):
+    subscribe(store, start_minutes=0, end_minutes=0)
+    # Even the first snapshot may arrive after the start if the source was down.
+    store.apply_snapshot([article(start=start, end=end)], now)
+    store.plan(now)
+    jobs = store.due(now)
+    assert bool(jobs) is expected
+    assert all(job.phase == "started" for job in jobs)
+
+
+def test_opening_excludes_maintenance_exchange_and_unselected_types(store):
+    subscribe(store, kinds=("activity", "maintenance"), start_minutes=0, end_minutes=0)
+    exchange = article("exchange", start=NOW + 60)
+    exchange = replace(
+        exchange, windows=(replace(exchange.windows[0], schedule_label="物资兑换"),)
+    )
+    store.apply_snapshot(
+        [
+            exchange,
+            article("maintenance", start=NOW + 60, kind="maintenance"),
+            article("banner", start=NOW + 60, kind="banner"),
+        ],
+        NOW,
+    )
+    store.plan(NOW + 60)
+    assert not store.due(NOW + 60)
+
+
+def test_opening_toggle_preserves_receipts_and_advance_settings(store):
+    sub = subscribe(store)
+    store.apply_snapshot([article(start=NOW + 60)], NOW)
+    sub = store.subscription(sub.destination.key)
+    store.subscribe(replace(sub, notify_started=False))
+    store.plan(NOW)
+    assert [job.phase for job in store.due(NOW)] == ["start"]
+    store.plan(NOW + 60)
+    assert not store.due(NOW + 60)
+    store.subscribe(replace(sub, notify_started=True))
+    store.plan(NOW + 61)
+    jobs = store.due(NOW + 61)
+    assert [job.phase for job in jobs] == ["started"]
+    store.sent_many(jobs)
+    store.subscribe(replace(sub, notify_started=False))
+    store.subscribe(replace(sub, notify_started=True))
+    store.plan(NOW + 62)
+    assert not store.due(NOW + 62)
+
+
+def test_old_subscription_defaults_to_opening_push(store):
+    import json
+
+    sub = subscribe(store)
+    with store.connect() as conn:
+        raw = json.loads(
+            conn.execute("SELECT payload FROM subscriptions").fetchone()[0]
+        )
+        del raw["notify_started"]
+        conn.execute("UPDATE subscriptions SET payload=?", (json.dumps(raw),))
+    assert store.subscription(sub.destination.key).notify_started
+
+
+def test_opening_reschedule_and_withdrawal_supersede_overview(store):
+    subscribe(store, start_minutes=0, end_minutes=0)
+    overview = article(start=NOW + 60)
+    dedicated = replace(overview, cid="2", published_at=NOW - 50)
+    store.apply_snapshot([overview, dedicated], NOW)
+    store.plan(NOW)
+    delayed = replace(
+        dedicated,
+        fingerprint="delayed",
+        windows=(replace(dedicated.windows[0], start_at=NOW + 300),),
+    )
+    store.apply_snapshot([overview, delayed], NOW + 30)
+    store.plan(NOW + 60)
+    assert not [job for job in store.due(NOW + 60) if job.phase == "started"]
+    store.plan(NOW + 300)
+    opening = [job for job in store.due(NOW + 300) if job.phase == "started"]
+    assert len(opening) == 1 and opening[0].article_id == "2"
+    withdrawn = replace(delayed, fingerprint="withdrawn", windows=())
+    store.apply_snapshot([overview, withdrawn], NOW + 301)
+    store.plan(NOW + 301)
+    assert not [job for job in store.due(NOW + 301) if job.phase == "started"]
+
+
+def test_recent_openings_stay_watched_during_catchup(store):
+    store.apply_snapshot([article(start=NOW + 60, end=0)], NOW)
+    assert store.watch_ids(NOW + 7259) == ("1",)
+    assert not store.watch_ids(NOW + 7260)
+
+
+def test_opening_batches_by_start_time_and_retries_without_mixing_other_jobs(store):
+    async def run():
+        subscribe(store)
+        articles = [article(str(i), start=NOW + 600) for i in range(7)] + [
+            article("later", start=NOW + 1200),
+            article("future", start=NOW + 2400),
+        ]
+        store.apply_snapshot(articles, NOW)
+        new = replace(article("news", published=NOW + 1200), windows=())
+        store.apply_snapshot([new], NOW + 1200)
+        received = []
+
+        async def sender(dest, jobs):
+            received.append(jobs)
+            if jobs[0].phase == "started" and jobs[0].due_at == NOW + 600:
+                raise OSError("temporary send failure")
+
+        clock = [NOW + 1260]
+        source = SimpleNamespace(fetch=AsyncMock(return_value=[*articles, new]))
+        service = service_module.AnnouncementService(
+            store, source, sender, clock=lambda: clock[0]
+        )
+        await service.tick()
+        assert len(received) == 3
+        first, second, other = received
+        assert len(first) == 7
+        assert {(job.phase, job.due_at) for job in first} == {("started", NOW + 600)}
+        assert [(job.phase, job.article_id) for job in second] == [("started", "later")]
+        assert {(job.phase, job.article_id) for job in other} == {
+            ("start", "future"),
+            ("news", "news"),
+        }
+        bulletin = store.digest(first, clock[0])
+        assert len(bulletin.cards) == 7
+        assert {card.start_at for card in bulletin.cards} == {NOW + 600}
+        rendering = importlib.import_module(f"{PACKAGE}.announcements.rendering")
+        html = rendering.render_digest_html(bulletin)
+        assert "终末地 · 活动开启" in html and "同期开启 7 项" in html
+        assert "2030-01-01 08:10 开启" in html
+        assert not store.due(clock[0])
+        clock[0] += 60
+        delivered = AsyncMock()
+        restart = service_module.AnnouncementService(
+            store_module.AnnouncementStore(store.path),
+            source,
+            delivered,
+            clock=lambda: clock[0],
+        )
+        await restart.tick()
+        delivered.assert_awaited_once()
+        jobs = delivered.await_args.args[1]
+        assert {job.key for job in jobs} == {job.key for job in first}
+        assert all(job.attempts == 1 for job in jobs)
+        await restart.tick()
+        delivered.assert_awaited_once()
+
+    asyncio.run(run())
+
+
+def test_runtime_sends_one_group_image_for_simultaneous_openings(store, monkeypatch):
+    async def run():
+        subscribe(store, start_minutes=0, end_minutes=0)
+        clock = [NOW]
+        source = SimpleNamespace(
+            fetch=AsyncMock(
+                return_value=[article(str(i), start=NOW + 60) for i in range(3)]
+            )
+        )
+        renderer = AsyncMock(return_value=PNG)
+        runtime = runtime_module.AnnouncementRuntime(
+            store, source, clock=lambda: clock[0], renderer=renderer
+        )
+        bot = fake_bot()
+        runtime.remember(bot)
+        monkeypatch.setattr(runtime_module.feature_store, "is_enabled", lambda *_: True)
+        try:
+            await runtime.service.tick()
+            bot.protocol.send_message.assert_not_awaited()
+            clock[0] += 60
+            await runtime.service.tick()
+            bot.protocol.send_message.assert_awaited_once()
+            sent_elements = bot.protocol.send_message.await_args.args[1]
+            assert len(sent_elements) == 1
+            assert sent_elements[0].src.startswith("data:image/png;base64,")
+            bulletin = renderer.await_args.args[0]
+            assert len(bulletin.cards) == 3
+            assert all(card.phases == ("started",) for card in bulletin.cards)
+            clock[0] += 60
+            await runtime.service.tick()
+            bot.protocol.send_message.assert_awaited_once()
+        finally:
+            await runtime.close()
 
     asyncio.run(run())

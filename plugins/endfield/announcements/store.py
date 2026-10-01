@@ -165,7 +165,8 @@ class AnnouncementStore:
             article.cid
             for article in self.articles()
             if any(
-                max(window.start_at, window.end_at) >= now for window in article.windows
+                window.end_at >= now or window.start_at > now - CATCHUP_SECONDS
+                for window in article.windows
             )
         )
 
@@ -336,11 +337,27 @@ class AnnouncementStore:
                             ("end", window.end_at, sub.end_minutes),
                         ]
                     )
+                    if (
+                        sub.notify_started
+                        and window.kind in {"activity", "banner", "signin"}
+                        and not window.schedule_label
+                        and window.start_at >= sub.created_at
+                    ):
+                        phases.append(("started", window.start_at, 0))
                     for phase, target, minutes in phases:
-                        if not target or not minutes or target <= now:
+                        if not target:
                             continue
-                        due = target - minutes * 60
-                        expires = min(target, due + CATCHUP_SECONDS)
+                        if phase == "started":
+                            due = target
+                            expires = min(
+                                target + CATCHUP_SECONDS,
+                                window.end_at or target + CATCHUP_SECONDS,
+                            )
+                        else:
+                            if not minutes or target <= now:
+                                continue
+                            due = target - minutes * 60
+                            expires = min(target, due + CATCHUP_SECONDS)
                         if expires <= now:
                             continue
                         key = digest([sub.destination.key, window.key, phase, target])

@@ -60,35 +60,42 @@ class AnnouncementService:
 
             async def deliver_group(group):
                 async with semaphore:
-                    current = int(self.clock())
-                    sub = await asyncio.to_thread(
-                        self.store.subscription, group[0].subscription_key
+                    batches = {}
+                    for job in group:
+                        # Catch-up may contain several distinct opening times.
+                        # Keep each one separate from news and advance reminders.
+                        key = (0, job.due_at) if job.phase == "started" else (1, 0)
+                        batches.setdefault(key, []).append(job)
+                    for key in sorted(batches):
+                        await deliver_batch(batches[key])
+
+            async def deliver_batch(group):
+                current = int(self.clock())
+                sub = await asyncio.to_thread(
+                    self.store.subscription, group[0].subscription_key
+                )
+                pending = await asyncio.to_thread(
+                    self.store.pending_jobs, group, current
+                )
+                if sub is None or not pending:
+                    return
+                try:
+                    # Receipts for an entire image commit after its ack.
+                    await asyncio.wait_for(self.sender(sub.destination, pending), 120)
+                except DeliveryDeferred:
+                    await asyncio.to_thread(
+                        self.store.defer_many, pending, int(self.clock())
                     )
-                    pending = await asyncio.to_thread(
-                        self.store.pending_jobs, group, current
+                except Exception as exc:  # noqa: BLE001 - isolate retry state per destination
+                    await asyncio.to_thread(
+                        self.store.failed_many, pending, int(self.clock())
                     )
-                    if sub is None or not pending:
-                        return
-                    try:
-                        # One image per destination per cycle, with all due
-                        # activities. Receipts commit together after its ack.
-                        await asyncio.wait_for(
-                            self.sender(sub.destination, pending), 120
-                        )
-                    except DeliveryDeferred:
-                        await asyncio.to_thread(
-                            self.store.defer_many, pending, int(self.clock())
-                        )
-                    except Exception as exc:  # noqa: BLE001 - isolate retry state per destination
-                        await asyncio.to_thread(
-                            self.store.failed_many, pending, int(self.clock())
-                        )
-                        logger.warning(
-                            "[endfield-announcements] delivery failed error_type={}",
-                            type(exc).__name__,
-                        )
-                    else:
-                        await asyncio.to_thread(self.store.sent_many, pending)
+                    logger.warning(
+                        "[endfield-announcements] delivery failed error_type={}",
+                        type(exc).__name__,
+                    )
+                else:
+                    await asyncio.to_thread(self.store.sent_many, pending)
 
             groups: dict[str, list] = {}
             for job in jobs:

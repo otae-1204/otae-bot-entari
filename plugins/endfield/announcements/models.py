@@ -89,6 +89,7 @@ class Subscription:
     maintenance_minutes: int = 60
     created_at: int = 0
     initialized: bool = False
+    notify_started: bool = True
 
 
 @dataclass(frozen=True)
@@ -137,9 +138,12 @@ def message(
 ) -> str:
     label = "公告更新" if updated else "新公告"
     if window:
-        label = {"start": "即将开始", "end": "即将结束", "maintenance": "维护提醒"}[
-            phase
-        ]
+        label = {
+            "start": "即将开始",
+            "started": "活动开启",
+            "end": "即将结束",
+            "maintenance": "维护提醒",
+        }[phase]
     lines = [f"【终末地·{label}】", article.title]
     if window:
         if window.title != article.title:

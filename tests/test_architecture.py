@@ -346,7 +346,15 @@ async def check_announcement_dispatch():
     assert set(saved[0].kinds) == {'activity', 'signin'}
     await run_command(current, '/ef 公告 提前 开始 30')
     assert runtime.store.subscriptions()[0].start_minutes == 30
+    assert runtime.store.subscriptions()[0].notify_started
+    await run_command(current, '/ef 公告 开始推送 关闭')
+    assert not runtime.store.subscriptions()[0].notify_started
+    await run_command(current, '/ef 公告 开始推送 开启')
+    assert runtime.store.subscriptions()[0].notify_started
     member = group_session(user='ordinary-member')
+    await run_command(member, '/ef 公告 开始推送 关闭')
+    assert '仅群主' in str(member.send.await_args.args[0])
+    assert runtime.store.subscriptions()[0].notify_started
     await run_command(member, '/ef 公告 取消订阅')
     assert '仅群主' in str(member.send.await_args.args[0])
     scope = scope_from_event(current.account, current.event)
