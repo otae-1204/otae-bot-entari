@@ -52,6 +52,8 @@ NextReward = models.NextReward
 GachaRecord = store_module.GachaRecord
 TS = 1_790_000_000
 DAY = 86_400
+# 三个池格的标题（不含卡池总数格）：kicker 用 <small>，标题是 .metric-title 里唯一的 <span>
+SUMMARY_TITLE = r'<div class="metric-head"><div class="metric-title"><small>[^<]*</small><span>([^<]+)</span>'
 
 
 def _role(nickname: str = "示例玩家"):
@@ -476,6 +478,35 @@ class GachaTypographyTests(unittest.TestCase):
         self.assertTrue(sizes)
         self.assertGreaterEqual(min(sizes), 12)
 
+    def test_summary_titles_are_dark_bold_and_share_one_heading_block(self):
+        rules = {selectors.strip(): body for selectors, body in re.findall(r"([^{}]+)\{([^{}]*)\}", draw.GACHA_CSS)}
+
+        def size(selector: str) -> float:
+            return float(re.search(r"font-size:([\d.]+)px", rules[selector]).group(1))
+
+        title = rules[".metric-title span"]
+        self.assertIn("font-weight:700", title)
+        self.assertIn("color:#181818", title)
+        self.assertGreaterEqual(size(".metric-title span"), 18)
+        # 层级：标题明显大于下方副标题与期望行标签，kicker 最小
+        self.assertGreater(size(".metric-title span"), size(".total>small,.metric>small") + 4)
+        self.assertGreater(size(".metric-title span"), size(".expectation-label strong"))
+        self.assertLess(size(".metric-title small"), size(".metric-title span"))
+        # 总数与标题底边对齐，而不是标题贴在大数字底下当说明文字
+        self.assertIn("align-items:flex-end", rules[".total-head,.metric-head"])
+        self.assertIn("line-height:1", rules[".metric-head strong"])
+
+        view = _view([
+            _pool("special_a#0", "特许", "special", current=True),
+            _pool("rerun_a#1", "重构", "rerun", series_key="rerun:a"),
+            _pool("weponbox_a#0", "限时", "weapon_limited", item_type="武器"),
+        ])
+        columns, _ = _layout(view)
+        summary = draw._summary_html(view, columns)
+        self.assertEqual(re.findall(r'<div class="metric-title"><small>[^<]+</small><span>([^<]+)</span>', summary),
+                         ["卡池总数", "特许寻访", "武器申领", "重构寻访"])
+        self.assertIn('<div class="total-head"><div class="metric-title">', summary)
+
 
 class GachaPaginationTests(unittest.TestCase):
     def _paginate(self, view, **measure_kwargs):
@@ -674,8 +705,7 @@ class GachaRenderTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("含常驻 30", summary)
         self.assertNotIn("待确认", summary)
         # 总览格顺序跟随栏序（默认重构在右）
-        self.assertEqual(re.findall(r'<div class="metric-head"><span>([^<]+)</span>', summary),
-                         ["特许寻访", "武器申领", "重构寻访"])
+        self.assertEqual(re.findall(SUMMARY_TITLE, summary), ["特许寻访", "武器申领", "重构寻访"])
 
     async def test_pages_use_the_gacha_width_and_both_rerun_sides(self):
         view = _heavy_view()
@@ -692,7 +722,7 @@ class GachaRenderTests(unittest.IsolatedAsyncioTestCase):
                     self.assertIn(f"--gacha-width:{draw.GACHA_CARD_WIDTH}px", document)
                     self.assertIn('data-cols="3"', document)
                     self.assertEqual(re.findall(r'data-key="(\w+)"', document), order)
-                titles = re.findall(r'<div class="metric-head"><span>([^<]+)</span>', documents[0])
+                titles = re.findall(SUMMARY_TITLE, documents[0])
                 self.assertEqual(titles, [{"special": "特许寻访", "weapon": "武器申领", "rerun": "重构寻访"}[key]
                                           for key in order])
 
