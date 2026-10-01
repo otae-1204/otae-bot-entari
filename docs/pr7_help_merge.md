@@ -20,7 +20,7 @@ PR 基于 `53a80e9`，只有两个提交，边界清楚：
 | `render_endfield_help.py` 只渲染终末地一页，采用独立的深灰加黄绿配色、1200px 宽 | `scripts/render_help_cards.py` 渲染所有帮助页，沿用原有蓝色标题条和磨砂面板，新增插画立绘窗，宽 1325px |
 | spec 使用 `groups` + `sections`，条目为 `command` / `description` / `badge`，分区带 `access` 和 `notes`，页面带 `subtitle`、`legend` | 保留结构化条目和 `badge`、`access`、`notes`、`subtitle`；`groups` 改为 `columns`（左栏为账号相关，右栏为资料与工具）；`legend` 并入 `footnote`。解析器也接受 `command` / `description` 键名 |
 | 浏览器内检查文字超框、分区重叠、页脚位置、字体加载、外部请求；`--stress` 测长内容 | 保留同类检查（`LAYOUT_CHECK` / `layout_problems`），另加标题与装饰碰撞、插画加载、高度上限检查；`--stress` 对每一页都测 |
-| `--write-asset`：校验全部通过才覆盖正式图片；输出 `output/endfield-help/` | `--write`，规则相同；输出到 `output/help-cards/`（HTML、PNG、`validation.json`） |
+| `--write-asset`：校验全部通过才覆盖正式图片；输出 `output/endfield-help/` | `--write`，规则相同；输出到 `data/help/previews/`（HTML、PNG、`validation.json`） |
 | 测试：结构化断言关键命令、仅私聊命令带标签、分区数量 | 保留并扩展（`tests/test_endfield.py`）；新增 `tests/test_help_cards.py`，用 PNG 内的 spec 哈希检测图片是否过期 |
 | `docs/endfield_help_card.md` | `docs/help_cards.md` |
 | 600px 窄版布局检查 | 不需要：帮助图固定宽度，不存在窄屏排版 |

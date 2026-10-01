@@ -105,13 +105,13 @@
 在项目根目录运行（需要已安装 Playwright Chromium，或本机的 Chrome/Edge）：
 
 ```powershell
-.venv/Scripts/python.exe scripts/render_help_cards.py --stress          # 全部页面出图到 output/help-cards 并校验
+.venv/Scripts/python.exe scripts/render_help_cards.py --stress          # 全部页面出图到 data/help/previews 并校验
 .venv/Scripts/python.exe scripts/render_help_cards.py --page endfield   # 只出某几页，可重复
 .venv/Scripts/python.exe scripts/render_help_cards.py --write           # 校验全部通过后写入 assets/image/help
 .venv/Scripts/python.exe scripts/render_help_cards.py --check           # 不开浏览器，只列出过期、缺失或多余的图片
 ```
 
-`output/help-cards/` 里有每张图的 HTML、PNG 和 `validation.json`。校验在浏览器实际排版后进行，检查：
+`data/help/previews/` 保存每张图的 HTML、PNG 和 `validation.json`，这些预览和校验产物不纳入 Git；通过 `--write` 发布的正式图片仍位于 `assets/image/help/`。校验在浏览器实际排版后进行，检查：
 
 - 文字是否超出所在面板或标题条；
 - 标题和副标题是否撞上标题条右侧的圆点装饰；
