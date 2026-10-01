@@ -67,7 +67,9 @@ class ReceiptStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self.path, timeout=5)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
+        # BEGIN also serializes first-time schema creation across both plugins.
+        # Changing journal_mode on concurrent first opens can fail immediately.
+        conn.execute("BEGIN IMMEDIATE")
         conn.execute("""CREATE TABLE IF NOT EXISTS delivery_receipts (
             id INTEGER PRIMARY KEY, destination TEXT NOT NULL, source TEXT NOT NULL,
             event_key TEXT NOT NULL, payload TEXT NOT NULL, token TEXT NOT NULL,
@@ -76,8 +78,6 @@ class ReceiptStore:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS receipts_match ON delivery_receipts(destination,event_key)"
         )
-        conn.commit()
-        conn.execute("BEGIN IMMEDIATE")
         return conn
 
     def reserve(
