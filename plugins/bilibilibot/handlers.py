@@ -137,7 +137,8 @@ async def handle_bili(event: Event, rest: ArgVal):
             "/bili unfollow <all|live|video|dynamic> <UID 或 room:直播间号>\n"
             "/bili list [all|live|video|dynamic]\n"
             "/bili refresh <all|live|video|dynamic> <UID 或 room:直播间号>\n"
-            "提示：纯数字一律按 UID 处理；按直播间号操作请加 room: 前缀。"
+            "提示：纯数字一律按 UID 处理；按直播间号操作请加 room: 前缀。\n"
+            "/bili follow dynamic 1265652806：自动推送终末地官号非抽奖动态，过滤抽奖发起与开奖结算。"
         )
 
     action = parts[0].lower()

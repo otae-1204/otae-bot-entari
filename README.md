@@ -5,6 +5,8 @@
 
 代码结构、模块职责及扩展方式见 [代码结构说明](docs/code_structure.md)。
 
+终末地 B 站官号动态：`/bili follow dynamic 1265652806`，自动推送非抽奖动态，过滤抽奖发起和开奖结算。规则与数据源说明见 [官号动态推送](docs/bilibili_endfield_dynamics.md)。
+
 End 插件的公共资料默认优先 AKEData；账号接口仍用官方，缺失资料保留兼容回退。
 覆盖范围、缓存变化与实测见 [AKE 迁移记录](docs/endfield_ake_migration_execution.md)。
 
