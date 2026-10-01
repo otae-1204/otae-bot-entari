@@ -90,6 +90,6 @@
 .\.venv\Scripts\python.exe scripts/preview_endfield_announcements.py --file bulletin.json --at 2026-10-01T12:00 --phase started
 ```
 
-默认输出 `output/endfield-announcements-preview/activity-digest.png`。`--file` 可重复指定；未指定时只读获取官网公告。`--limit` 只限制本地预览的活动数量，不改变群推送的合并范围。预览脚本不连接机器人、不发送消息，也不修改订阅数据。
+默认输出 `data/endfield/announcements/previews/activity-digest.png`，预览产物不纳入 Git。旧版纯文本消息演示保存在同目录的 `legacy-text/`，仅用于回看早期效果。`--file` 可重复指定；未指定时只读获取官网公告。`--limit` 只限制本地预览的活动数量，不改变群推送的合并范围。预览脚本不连接机器人、不发送消息，也不修改订阅数据。
 
 官网接口已进行只读实测；真实 QQ 群和私聊投递仍需部署配置后验收。

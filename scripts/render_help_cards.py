@@ -1,6 +1,6 @@
 """Render the /help images from scripts/help_pages.json and assets/image/help/art/gallery.json.
 
-    python scripts/render_help_cards.py                  # render every page to output/help-cards and validate
+    python scripts/render_help_cards.py                  # render every page to data/help/previews and validate
     python scripts/render_help_cards.py --page endfield  # only some pages (repeatable)
     python scripts/render_help_cards.py --stress         # also check long text for each page
     python scripts/render_help_cards.py --write          # validate, then replace the shipped PNGs
@@ -37,7 +37,7 @@ STRESS_SECTION = {
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--page", action="append", default=[], help="page id to render (default: all)")
-    parser.add_argument("--output-dir", type=Path, default=ROOT / "output/help-cards")
+    parser.add_argument("--output-dir", type=Path, default=ROOT / "data/help/previews")
     parser.add_argument("--write", action="store_true", help="replace shipped PNGs after validation")
     parser.add_argument("--stress", action="store_true", help="also validate an extra long section per page")
     parser.add_argument("--check", action="store_true", help="only report stale or missing shipped images")

@@ -129,7 +129,7 @@ def main():
     parser.add_argument(
         "--output",
         type=Path,
-        default=ROOT / "output/endfield-announcements-preview/activity-digest.png",
+        default=ROOT / "data/endfield/announcements/previews/activity-digest.png",
     )
     args = parser.parse_args()
     if args.limit < 0:
