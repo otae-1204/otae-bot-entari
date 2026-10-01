@@ -35,12 +35,13 @@ ROOT = Path(__file__).resolve().parents[1]
 PLUGIN_DIR = ROOT / "plugins" / "endfield"
 sys.path.insert(0, str(ROOT))
 
-# 仅加载 account_store（只依赖 account_crypto），避免拉起 service / http 层。
+# 仅加载 account_store（只依赖 account_crypto）与 gacha.pools（只依赖标准库），避免拉起 service / http 层。
 _PACKAGE = "endfield_stats_runtime"
 _package = types.ModuleType(_PACKAGE)
 _package.__path__ = [str(PLUGIN_DIR)]
 sys.modules[_PACKAGE] = _package
 account_store = importlib.import_module(f"{_PACKAGE}.account.store")
+pools_module = importlib.import_module(f"{_PACKAGE}.gacha.pools")
 
 EndfieldStore = account_store.EndfieldStore
 EndfieldRole = account_store.EndfieldRole
@@ -62,7 +63,7 @@ BASELINE = {
 }
 
 
-# --- 以下四个纯函数对齐 gacha.py，保持算法一致（gacha.py 为准） ---
+# --- 排序对齐 gacha/service.py；池族判定直接复用 gacha/pools.py 注册表（无 AKE 时走枚举 / 前缀路径） ---
 def _seq_sort(value: str) -> tuple[int, str]:
     text = str(value or "")
     return (0, text.zfill(24)) if text.isdigit() else (1, text)
@@ -72,27 +73,14 @@ def _record_sort_key(record: GachaRecord) -> tuple[int, tuple[int, str]]:
     return (record.gacha_ts, _seq_sort(record.seq_id))
 
 
-def _is_joint_character_pool(record: GachaRecord) -> bool:
-    return "joint" in f"{record.pool_type} {record.pool_id}".casefold()
-
-
-def _is_beginner_character_pool(record: GachaRecord) -> bool:
-    return "beginner" in f"{record.pool_type} {record.pool_id}".casefold()
-
-
-def _is_standard_character_pool(record: GachaRecord) -> bool:
-    identity = f"{record.pool_type} {record.pool_id}".casefold()
-    return "standard" in identity or record.pool_name.strip() == "基础寻访"
-
-
 def _character_pity_family(record: GachaRecord) -> str:
-    if _is_joint_character_pool(record):
-        return f"joint:{record.pool_id.casefold()}"
-    if _is_beginner_character_pool(record):
-        return f"beginner:{record.pool_id.casefold()}"
-    if _is_standard_character_pool(record):
-        return "standard"
-    return "special"
+    return pools_module.pity_family(pools_module.kind_for_record(record, None), record.pool_id)
+
+
+def _xhh_pool_has_up(item_type: str, pool_type: str, pool_id: str) -> bool:
+    """歪率只统计有 UP 判定的角色池（特许、重构）。"""
+    kind = pools_module.resolve_pool_kind(pool_id=pool_id, pool_type=pool_type, item_type=item_type)
+    return kind.item_type == "角色" and kind.has_up
 
 
 def parse_args() -> argparse.Namespace:
@@ -306,8 +294,7 @@ def collect(store: EndfieldStore) -> dict[str, Any]:
             if six.is_free:
                 continue
             item_type, pool_type = pool_kind.get(six.pool_id, ("角色", ""))
-            identity = f"{pool_type} {six.pool_id}".casefold()
-            if item_type != "角色" or "joint" in identity or "beginner" in identity:
+            if not _xhh_pool_has_up(item_type, pool_type, six.pool_id):
                 continue
             char_acc.limited_up_six += 1
             char_acc.limited_miss_up += 1 if six.miss_up else 0
