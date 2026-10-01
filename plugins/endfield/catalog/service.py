@@ -373,6 +373,14 @@ class EndfieldService:
                     pool_kind=kind,
                     up_item_ids=tuple(row.get(field) or ()),
                     revision=data.revision,
+                    type_code=_pool_table_int(row.get("type"), -1),
+                    sort_id=_pool_table_int(row.get("sortId"), 0),
+                    pool_version=_pool_table_int(row.get("gachaPoolVersion"), 0),
+                    client_top_time_id=str(row.get("clientTopTimeId") or ""),
+                    ui_prefab=str(row.get("uiPrefab") or ""),
+                    interval_auto_reward_ids=tuple(
+                        str(item) for item in (row.get("intervalAutoRewardIds") or ()) if item
+                    ),
                 )
         return result
 
