@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from .dynamic_filter import ENDFIELD_OFFICIAL_UID, suppress_dynamic
 from .models import BiliCard
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -348,6 +349,11 @@ class Notifier:
     async def _handle_row(self, row: Any) -> None:
         recipient = f"{row.subscriber_type}:{row.subscriber_id}"
         try:
+            # Apply the current policy to persisted rows too, including rows
+            # queued before this filter was installed.
+            if row.uid == ENDFIELD_OFFICIAL_UID and suppress_dynamic(_card_from_row(row), uid=row.uid):
+                await _resolve(self.store.outbox_done(row.id))
+                return
             png = await self._render(row)
             await self.send(row, png)
         except asyncio.CancelledError:

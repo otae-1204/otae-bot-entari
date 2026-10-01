@@ -16,6 +16,7 @@ from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_clea
 
 from .api import BiliAPIError, BiliApi
 from .draw import draw_bili_card
+from .dynamic_filter import ENDFIELD_OFFICIAL_UID
 from .models import BiliCard, KIND_DYNAMIC, KIND_LIVE, KIND_VIDEO, SUPPORTED_KINDS, TargetInfo
 from .refs import parse_target_ref
 from .store import BiliStore
@@ -71,10 +72,19 @@ class BiliService:
                         else await self.resolve_target_by_uid(kind, uid)
                     )
                     self._assert_uid_matches(kind, uid, target)
-                    await self.store.upsert_target(target)
+                    existing = None
+                    if kind == KIND_DYNAMIC and uid == ENDFIELD_OFFICIAL_UID:
+                        # Adding a second chat must not advance the shared feed
+                        # cursor and make existing subscribers miss new posts.
+                        existing = await self.store.get_target(kind, uid)
+                    if existing is None:
+                        await self.store.upsert_target(target)
+                    else:
+                        target = existing
                     added = await self.store.add_subscription(kind, target.uid, subscriber_type, subscriber_id)
                     label = self._describe(kind, target, by_room=by_room)
-                    ok.append(label + ("已订阅" if added else "已存在"))
+                    filtering = "（自动过滤抽奖及开奖动态）" if kind == KIND_DYNAMIC and uid == ENDFIELD_OFFICIAL_UID else ""
+                    ok.append(label + ("已订阅" if added else "已存在") + filtering)
                 except Exception as exc:
                     logger.warning(f"[bilibilibot] follow {kind} {raw} failed: {exc}")
                     failed.append(f"{self._kind_name(kind)} {raw}: {exc}")
@@ -219,6 +229,8 @@ class BiliService:
             for sub, target in rows:
                 name = target.name if target else sub.target_uid
                 extra = f" room {target.room_id}" if target and target.room_id else ""
+                if kind == KIND_DYNAMIC and sub.target_uid == ENDFIELD_OFFICIAL_UID:
+                    extra += "；过滤抽奖及开奖"
                 lines.append(f"  - {name} ({sub.target_uid}{extra})")
         return lines
 

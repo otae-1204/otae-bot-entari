@@ -1,0 +1,68 @@
+{
+  "source": "https://b23.tv/aiWOiYa",
+  "captured_on": "2026-10-01",
+  "note": "仅保留判定与绘图所需字段；正文节选，开奖正文省略中奖用户。",
+  "item": {
+    "id_str": "1253757649430773778",
+    "type": "DYNAMIC_TYPE_DRAW",
+    "modules": {
+      "module_author": {
+        "mid": 1265652806,
+        "name": "明日方舟终末地",
+        "pub_ts": 1790751600,
+        "face": "https://i2.hdslb.com/bfs/face/84152816c725e6d38128336d0f99d7c7c258cfa4.jpg"
+      },
+      "module_dynamic": {
+        "additional": {
+          "common": {
+            "button": {
+              "jump_style": {
+                "icon_url": "",
+                "text": "进入"
+              },
+              "jump_url": "https://www.biligame.com/detail?id=108406&sourceFrom=1005&biz_scene=dynamic",
+              "type": 1
+            },
+            "cover": "https://i0.hdslb.com/bfs/game/6b41d58f3cef6f452e4d460e4cde5faf85ac3be0.png",
+            "desc1": "角色扮演/模拟经营/二次元",
+            "desc2": "新版本「雪凇幽梦」现已开启！",
+            "head_text": "相关游戏",
+            "id_str": "108406",
+            "jump_url": "https://www.biligame.com/detail?id=108406&sourceFrom=1005&biz_scene=dynamic",
+            "style": 1,
+            "sub_type": "game",
+            "title": "明日方舟：终末地"
+          },
+          "type": "ADDITIONAL_TYPE_COMMON"
+        },
+        "desc": null,
+        "major": {
+          "opus": {
+            "fold_action": [
+              "展开",
+              "收起"
+            ],
+            "jump_url": "//www.bilibili.com/opus/1253757649430773778",
+            "pics": [
+              {
+                "aigc": null,
+                "height": 900,
+                "live_url": null,
+                "size": 1918.5712890625,
+                "url": "http://i0.hdslb.com/bfs/new_dyn/c3ed774f39298ce8e630299a9f43c7d01265652806.png",
+                "width": 1600
+              }
+            ],
+            "summary": {
+              "text": "「融合！山团团！」趣味活动说明\n活动期间完成任务，可获得【嵌晶玉】【折金票】活动奖励。",
+              "rich_text_nodes": []
+            },
+            "title": null
+          },
+          "type": "MAJOR_TYPE_OPUS"
+        },
+        "topic": null
+      }
+    }
+  }
+}

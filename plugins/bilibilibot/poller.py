@@ -18,6 +18,7 @@ from loguru import logger
 
 from .api.mapping import dynamic_item_to_card
 from .detect import detect_dynamic, detect_live, detect_video, seen_items_of
+from .dynamic_filter import ENDFIELD_OFFICIAL_UID
 from .models import BiliEvent, KIND_DYNAMIC, KIND_LIVE, KIND_VIDEO, SeenItem, TargetInfo
 from .store import BiliStore
 
@@ -239,7 +240,9 @@ class Poller:
             )
             return updated, events, seen_items_of(events)
         items = await self.api.dynamic_items(target.uid, deadline=self._deadline())
-        cards = [dynamic_item_to_card(item, target.uid) for item in items[:DYNAMIC_CARD_LIMIT]]
+        # Lottery posts must not crowd valid posts out of the five-card limit.
+        selected = items if target.uid == ENDFIELD_OFFICIAL_UID else items[:DYNAMIC_CARD_LIMIT]
+        cards = [dynamic_item_to_card(item, target.uid) for item in selected]
         seen_ids = await self.store.seen_ids(
             KIND_DYNAMIC, target.uid, [card.item_id for card in cards if card.item_id]
         )
@@ -247,7 +250,9 @@ class Poller:
             target,
             cards,
             seen_ids=seen_ids,
-            video_subscribed=await self._video_subscribed(target.uid),
+            video_subscribed=(
+                target.uid != ENDFIELD_OFFICIAL_UID and await self._video_subscribed(target.uid)
+            ),
         )
         # Video dynamics are marked as seen without being pushed.
         return updated, events, seen_items_of(events) + marked

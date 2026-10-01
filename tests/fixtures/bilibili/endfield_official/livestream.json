@@ -1,0 +1,85 @@
+{
+  "source": "https://b23.tv/poDSIOq",
+  "captured_on": "2026-10-01",
+  "note": "仅保留判定与绘图所需字段；正文节选，开奖正文省略中奖用户。",
+  "item": {
+    "id_str": "1253695825563877448",
+    "type": "DYNAMIC_TYPE_DRAW",
+    "modules": {
+      "module_author": {
+        "mid": 1265652806,
+        "name": "明日方舟终末地",
+        "pub_ts": 1790737206,
+        "face": "https://i2.hdslb.com/bfs/face/84152816c725e6d38128336d0f99d7c7c258cfa4.jpg"
+      },
+      "module_dynamic": {
+        "additional": {
+          "reserve": {
+            "button": {
+              "check": {
+                "icon_url": "",
+                "text": "已预约"
+              },
+              "status": 1,
+              "type": 2,
+              "uncheck": {
+                "icon_url": "https://i0.hdslb.com/bfs/album/1d6af68e116985828780dd843ef435ccd6307e63.png",
+                "text": "预约",
+                "toast": "预约成功，已参与抽奖"
+              }
+            },
+            "desc1": {
+              "style": 0,
+              "text": "10-06 19:30 直播"
+            },
+            "desc2": {
+              "style": 0,
+              "text": "5.8万人预约",
+              "visible": true
+            },
+            "desc3": {
+              "jump_url": "https://www.bilibili.com/h5/lottery/result?business_id=5797125&business_type=10",
+              "style": 1,
+              "text": "预约有奖：明日方舟：终末地-石墩子摆件-文武双全*10份"
+            },
+            "jump_url": "",
+            "reserve_total": 58243,
+            "rid": 5797125,
+            "state": 0,
+            "stype": 2,
+            "title": "直播预约：「丹青渡」版本前瞻特别节目",
+            "up_mid": 1265652806
+          },
+          "type": "ADDITIONAL_TYPE_RESERVE"
+        },
+        "desc": null,
+        "major": {
+          "opus": {
+            "fold_action": [
+              "展开",
+              "收起"
+            ],
+            "jump_url": "//www.bilibili.com/opus/1253695825563877448",
+            "pics": [
+              {
+                "aigc": null,
+                "height": 1080,
+                "live_url": null,
+                "size": 1770.796875,
+                "url": "http://i0.hdslb.com/bfs/new_dyn/8b351da34a4d4c9d1df4b234ed06b0761265652806.jpg",
+                "width": 1920
+              }
+            ],
+            "summary": {
+              "text": "「丹青渡」版本前瞻特别节目即将于10月6日19:30播出。",
+              "rich_text_nodes": []
+            },
+            "title": null
+          },
+          "type": "MAJOR_TYPE_OPUS"
+        },
+        "topic": null
+      }
+    }
+  }
+}

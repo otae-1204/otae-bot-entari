@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any, Awaitable, Callable
+from urllib.parse import urlparse
 
 from loguru import logger
 
+from ..dynamic_filter import ENDFIELD_OFFICIAL_UID
 from ..models import BiliCard, KIND_DYNAMIC, KIND_VIDEO
 from .mapping import (
     bvid_from_card,
@@ -28,6 +30,7 @@ USER_INFO_URL = "https://api.bilibili.com/x/space/wbi/acc/info"
 VIDEO_LIST_URL = "https://api.bilibili.com/x/space/wbi/arc/search"
 VIDEO_VIEW_URL = "https://api.bilibili.com/x/web-interface/view"
 DYNAMIC_URL = "https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space"
+DYNAMIC_DETAIL_URL = "https://api.bilibili.com/x/polymer/web-dynamic/v1/detail"
 
 VIDEO_ROUTE = "/bilibili/user/video/{uid}"
 DYNAMIC_ROUTE = "/bilibili/user/dynamic/{uid}"
@@ -233,6 +236,14 @@ async def latest_dynamic(
     items = await api.dynamic_items(uid, deadline=deadline)
     if not items:
         return BiliCard(KIND_DYNAMIC, "暂无动态", uid=uid)
+    if uid == ENDFIELD_OFFICIAL_UID:
+        # A pinned older post can be first. Establish the subscription baseline
+        # from the newest publication, including filtered lottery posts.
+        items = sorted(
+            items,
+            key=lambda item: int(((item.get("modules") or {}).get("module_author") or {}).get("pub_ts") or 0),
+            reverse=True,
+        )
     return dynamic_item_to_card(items[0], uid)
 
 
@@ -247,11 +258,28 @@ async def dynamic_items(
             lambda: api._get_json_with_risk_retry(
                 DYNAMIC_URL,
                 label,
-                params={"host_mid": uid, "timezone_offset": -480},
+                params={"host_mid": uid, "timezone_offset": -480, "features": "itemOpusStyle"},
             ),
         )
-        return list((data.get("data") or {}).get("items") or [])
+        items = list((data.get("data") or {}).get("items") or [])
+        if uid == ENDFIELD_OFFICIAL_UID:
+            for item in items:
+                validate_official_dynamic(item)
+        return items
     except BiliAPIError as primary_error:
+        if uid == ENDFIELD_OFFICIAL_UID:
+            # RSS is discovery only: reconstruct the original structured posts
+            # before classification, including reservation widgets and forwards.
+            try:
+                return await api._within(
+                    "endfield dynamic fallback", deadline,
+                    lambda: official_rss_dynamics(api, deadline=deadline),
+                )
+            except Exception as fallback_error:
+                raise BiliAPIError(
+                    f"终末地官号动态采集失败，保留进度等待重试：{compact_error(primary_error)}; "
+                    f"{compact_error(fallback_error)}"
+                ) from fallback_error
         # Bound to a fresh name: the except target is unbound when the block ends,
         # which would break the deferred lambda below.
         reason = primary_error
@@ -261,6 +289,73 @@ async def dynamic_items(
             lambda: api._rsshub_latest_dynamic(uid, reason, deadline=deadline),
         )
         return [api._rss_card_to_dynamic_item(card, uid)]
+
+
+async def official_dynamic_detail(api, item_id: str, *, deadline=None) -> dict[str, Any]:
+    data = await api._within(
+        f"dynamic detail {item_id}", deadline,
+        lambda: api._get_json_with_risk_retry(
+            DYNAMIC_DETAIL_URL, f"dynamic detail {item_id}",
+            params={"id": item_id, "features": "itemOpusStyle"},
+        ),
+    )
+    item = (data.get("data") or {}).get("item") or {}
+    author = (item.get("modules") or {}).get("module_author") or {}
+    if str(item.get("id_str")) != item_id or str(author.get("mid")) != ENDFIELD_OFFICIAL_UID:
+        raise BiliAPIError("官号动态详情的 ID 或发布者不匹配")
+    validate_official_dynamic(item)
+    return item
+
+
+def validate_official_dynamic(item: dict[str, Any]) -> None:
+    """Reject legacy picture-only payloads that silently omit Opus text."""
+    while isinstance(item, dict):
+        dynamic = (item.get("modules") or {}).get("module_dynamic")
+        if not isinstance(dynamic, dict):
+            raise BiliAPIError("官号动态缺少正文结构")
+        major = dynamic.get("major") or {}
+        if major.get("type") == "MAJOR_TYPE_DRAW" and dynamic.get("desc") is None:
+            raise BiliAPIError("官号图文缺少 Opus 正文，暂不判定为普通动态")
+        if major.get("type") == "MAJOR_TYPE_OPUS" and not isinstance((major.get("opus") or {}).get("summary"), dict):
+            raise BiliAPIError("官号 Opus 缺少正文摘要")
+        if item.get("type") == "DYNAMIC_TYPE_FORWARD" and not item.get("orig"):
+            raise BiliAPIError("官号转发动态缺少原动态")
+        item = item.get("orig")
+
+
+async def official_rss_dynamics(api, *, deadline=None) -> list[dict[str, Any]]:
+    hints = await api.rsshub_items(DYNAMIC_ROUTE.format(uid=ENDFIELD_OFFICIAL_UID), deadline=deadline)
+    ids = []
+    for hint in hints[:20]:
+        parsed = urlparse(str(hint.get("link") or ""))
+        parts = parsed.path.strip("/").split("/")
+        if parsed.hostname == "t.bilibili.com" and len(parts) == 1:
+            item_id = parts[0]
+        elif parsed.hostname in {"www.bilibili.com", "bilibili.com"} and len(parts) == 2 and parts[0] == "opus":
+            item_id = parts[1]
+        else:
+            raise BiliAPIError("RSS 未提供可验证的动态链接")
+        if not item_id.isascii() or not item_id.isdigit():
+            raise BiliAPIError("RSS 动态 ID 无效")
+        if item_id not in ids:
+            ids.append(item_id)
+    if not ids:
+        raise BiliAPIError("RSS 未提供动态")
+    semaphore = asyncio.Semaphore(3)
+
+    async def fetch(item_id):
+        async with semaphore:
+            return await api.official_dynamic_detail(item_id, deadline=deadline)
+
+    # A partially resolved page must not move the cursor past an unknown post.
+    tasks = [asyncio.create_task(fetch(item_id)) for item_id in ids]
+    try:
+        return await asyncio.gather(*tasks)
+    finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 async def rsshub_latest_video(

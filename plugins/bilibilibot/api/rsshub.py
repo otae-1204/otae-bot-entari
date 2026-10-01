@@ -142,6 +142,26 @@ def compact_failures(errors: list[str]) -> str:
     return compact
 
 
+def parse_items(xml_text: str, limit: int = 20) -> list[dict[str, Any]]:
+    """Read a bounded page while retaining the existing RSS/Atom normalizer."""
+    root = ET.fromstring(xml_text)
+    entries = root.findall(".//item")
+    atom = not entries
+    if atom:
+        entries = root.findall(f".//{ATOM_NS}entry")
+    if not entries:
+        raise BiliAPIError("RSSHub feed contains no item")
+    title = first_text(root, f"{ATOM_NS}title" if atom else ".//channel/title")
+    result = []
+    for entry in entries[:limit]:
+        wrapper = ET.Element(f"{ATOM_NS}feed" if atom else "rss")
+        container = wrapper if atom else ET.SubElement(wrapper, "channel")
+        ET.SubElement(container, f"{ATOM_NS}title" if atom else "title").text = title
+        container.append(entry)
+        result.append(parse_first_item(ET.tostring(wrapper, encoding="unicode")))
+    return result
+
+
 async def first_item(
     fetch: FetchFirstItem,
     base_urls: list[str],
@@ -194,6 +214,7 @@ async def fetch_first_item(
     *,
     timeout: float,
     deadline: float | None = None,
+    all_items: bool = False,
 ) -> dict[str, Any]:
     """Fetch one instance's feed under the shared absolute deadline."""
     url = base_url.rstrip("/") + route
@@ -202,7 +223,8 @@ async def fetch_first_item(
         budget = min(budget, max(0.0, deadline - asyncio.get_running_loop().time()))
     try:
         text = await session.get_text(url, timeout=budget)
-        return {"base_url": base_url.rstrip("/"), "item": parse_first_item(text)}
+        item = {"feed_items": parse_items(text)} if all_items else parse_first_item(text)
+        return {"base_url": base_url.rstrip("/"), "item": item}
     except Exception as exc:
         logger.debug(f"[bilibilibot] RSSHub fallback failed for {url}: {exc}")
         raise BiliAPIError(f"{base_url.rstrip('/')}: {exc}") from exc

@@ -1,0 +1,75 @@
+{
+  "source": "https://b23.tv/hOq2yiT",
+  "captured_on": "2026-10-01",
+  "note": "仅保留判定与绘图所需字段；正文节选，开奖正文省略中奖用户。",
+  "item": {
+    "id_str": "1251840442645872665",
+    "type": "DYNAMIC_TYPE_DRAW",
+    "modules": {
+      "module_author": {
+        "mid": 1265652806,
+        "name": "明日方舟终末地",
+        "pub_ts": 1790305216,
+        "face": "https://i2.hdslb.com/bfs/face/84152816c725e6d38128336d0f99d7c7c258cfa4.jpg"
+      },
+      "module_dynamic": {
+        "additional": {
+          "common": {
+            "button": {
+              "jump_style": {
+                "icon_url": "",
+                "text": "进入"
+              },
+              "jump_url": "https://www.biligame.com/detail?id=108406&sourceFrom=1005&biz_scene=dynamic",
+              "type": 1
+            },
+            "cover": "https://i0.hdslb.com/bfs/game/6b41d58f3cef6f452e4d460e4cde5faf85ac3be0.png",
+            "desc1": "角色扮演/模拟经营/二次元",
+            "desc2": "新版本「雪凇幽梦」现已开启！",
+            "head_text": "相关游戏",
+            "id_str": "108406",
+            "jump_url": "https://www.biligame.com/detail?id=108406&sourceFrom=1005&biz_scene=dynamic",
+            "style": 1,
+            "sub_type": "game",
+            "title": "明日方舟：终末地"
+          },
+          "type": "ADDITIONAL_TYPE_COMMON"
+        },
+        "desc": null,
+        "major": {
+          "opus": {
+            "fold_action": [
+              "展开",
+              "收起"
+            ],
+            "jump_url": "//www.bilibili.com/opus/1251840442645872665",
+            "pics": [
+              {
+                "aigc": null,
+                "height": 1080,
+                "live_url": null,
+                "size": 2285.1083984375,
+                "url": "http://i0.hdslb.com/bfs/new_dyn/f90fb191ea52e578e11d6b6e905c089e1265652806.jpg",
+                "width": 1920
+              }
+            ],
+            "summary": {
+              "rich_text_nodes": [
+                {
+                  "orig_text": "互动抽奖",
+                  "rid": "426374",
+                  "text": "互动抽奖",
+                  "type": "RICH_TEXT_NODE_TYPE_LOTTERY"
+                }
+              ],
+              "text": "互动抽奖"
+            },
+            "title": null
+          },
+          "type": "MAJOR_TYPE_OPUS"
+        },
+        "topic": null
+      }
+    }
+  }
+}

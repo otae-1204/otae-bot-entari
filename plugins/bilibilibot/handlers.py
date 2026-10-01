@@ -3,30 +3,35 @@ from __future__ import annotations
 import os
 
 from arclet.alconna import Alconna, Args, MultiVar
-from arclet.entari import Cleanup, listen
-from nepattern import AnyString
-from otae_bot.adapters.entari import close_scheduled_jobs, listen_message, on_ready, get_plaintext
-from arclet.entari import Account as Bot, Event
+from arclet.entari import Account as Bot
+from arclet.entari import Cleanup, Event, listen
 from loguru import logger
-from otae_bot.adapters.entari import Pred
+from nepattern import AnyString
+
 from otae_bot.adapters.entari import (
     ArgVal,
     ChainMsg,
+    Pred,
     SendDest,
     account_adapter_name,
+    close_scheduled_jobs,
     get_bot,
+    get_plaintext,
+    listen_message,
     make_image,
     on_alconna,
+    on_ready,
 )
-
+from otae_bot.endfield_notifications.receipts import destination_key
 from plugins.bilibilibot.api import BiliApi
 from plugins.bilibilibot.draw import draw_bili_card
+from plugins.bilibilibot.dynamic_filter import ENDFIELD_OFFICIAL_UID
 from plugins.bilibilibot.models import BiliCard
 from plugins.bilibilibot.notifier import Notifier, SenderUnavailable
+from plugins.bilibilibot.official_delivery import OfficialDelivery
 from plugins.bilibilibot.poller import Poller
 from plugins.bilibilibot.service import BiliService, expand_kinds
 from plugins.bilibilibot.store import BiliStore
-
 
 store = BiliStore()
 client = BiliApi(
@@ -42,6 +47,7 @@ client = BiliApi(
     ],
 )
 service = BiliService(store, client)
+official_delivery = OfficialDelivery()
 
 
 def _send_dest(subscriber_type: str, subscriber_id: str, bot: Bot) -> SendDest:
@@ -64,9 +70,27 @@ async def _send(row, png: bytes) -> None:
     if bot is None:
         raise SenderUnavailable("bot is not connected")
     destination = _send_dest(row.subscriber_type, row.subscriber_id, bot)
+    card = row.card()
+    if row.uid == ENDFIELD_OFFICIAL_UID and card.card_type == "dynamic":
+        try:
+            scope = destination_key(
+                str(getattr(bot, "platform", "") or ""),
+                str(getattr(bot, "self_id", "") or ""),
+                row.subscriber_id, row.subscriber_type != "group",
+            )
+        except ValueError as exc:
+            raise SenderUnavailable(str(exc)) from exc
+
+        async def send_selected(selected: BiliCard) -> None:
+            selected_png = png if selected is card else await _render(selected)
+            result = await ChainMsg([make_image(raw=selected_png)]).send(destination, bot)
+            if not result:
+                raise RuntimeError("official dynamic image was not acknowledged")
+
+        await official_delivery.deliver(card, scope, send_selected)
+        return
     # Bytes go straight to the adapter: no temporary file to clean up.
     await ChainMsg([make_image(raw=png)]).send(destination, bot)
-    card = row.card()
     if card.card_type == "live_on" and card.url.strip():
         # Keep the image and the clickable link together per recipient.
         await ChainMsg.text(card.url.strip()).send(destination, bot)
@@ -137,7 +161,8 @@ async def handle_bili(event: Event, rest: ArgVal):
             "/bili unfollow <all|live|video|dynamic> <UID 或 room:直播间号>\n"
             "/bili list [all|live|video|dynamic]\n"
             "/bili refresh <all|live|video|dynamic> <UID 或 room:直播间号>\n"
-            "提示：纯数字一律按 UID 处理；按直播间号操作请加 room: 前缀。"
+            "提示：纯数字一律按 UID 处理；按直播间号操作请加 room: 前缀。\n"
+            "/bili follow dynamic 1265652806：自动推送终末地官号非抽奖动态，过滤抽奖发起与开奖结算。"
         )
 
     action = parts[0].lower()
@@ -213,7 +238,6 @@ async def _startup():
 on_ready(_startup)
 
 from otae_bot.adapters.entari import timer
-
 
 timer.add_job(poller.tick_live, "interval", minutes=1, id="bili_live_check", replace_existing=True, misfire_grace_time=90)
 timer.add_job(poller.tick_video, "interval", minutes=2, id="bili_video_check", replace_existing=True, misfire_grace_time=90)

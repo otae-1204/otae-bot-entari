@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
-
 KIND_LIVE = "live"
 KIND_VIDEO = "video"
 KIND_DYNAMIC = "dynamic"
@@ -109,3 +108,6 @@ class BiliCard:
     published_at: int = 0
     live_started_at: int = 0
     live_duration_seconds: int | None = None  # Estimated at the poll detecting the end.
+    lottery_reason: str = ""  # Persist the raw dynamic classification through outbox retries.
+    content_category: str = ""
+    content_tags: tuple[str, ...] = ()

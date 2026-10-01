@@ -1,0 +1,74 @@
+# 终末地官号非抽奖动态推送
+
+在目标群发送 `/bili follow dynamic 1265652806`，订阅“明日方舟终末地”的动态。机器人沿用 B 站动态卡片自动发送新内容，并过滤抽奖发起、开奖结算和包含抽奖原文的转发。规则按 UID 生效，不依赖账号昵称。
+
+```text
+/bili follow dynamic 1265652806
+/bili list dynamic
+/bili unfollow dynamic 1265652806
+```
+
+首次订阅以当前最新动态建立基线，不补发历史动态。新增其他群的订阅时保留已有采集进度。正常情况下每分钟检查一次；请求错开执行，接口失败时按原轮询策略退避，最长间隔 30 分钟。发送继续使用持久化队列、图片缓存和按接收目标隔离的失败重试。
+
+## 判断范围
+
+同时检查动态正文、新版 Opus 摘要、富文本抽奖节点、内容中的抽奖链接及转发原文。正文中的“抽奖”“开奖”“中奖”“兑奖”，以及“抽取若干位管理员送出周边”等描述会触发过滤。被过滤的动态仍保存已处理标识并推进游标，重启后不会反复投递。发送队列中的官号动态也会再次检查已保存的分类和文本。
+
+用户提供的四条示例已于 2026-10-01 读取官方详情接口并验证：
+
+| 示例 | 处理 | 判断依据 |
+| --- | --- | --- |
+| [前瞻直播](https://www.bilibili.com/opus/1253695825563877448) | 保留 | 正文为版本前瞻预告；附带的直播预约卡片含有奖提示 |
+| [活动说明](https://www.bilibili.com/opus/1253757649430773778) | 保留 | 游戏内完成任务获得奖励 |
+| [抽奖发起](https://www.bilibili.com/opus/1251840442645872665) | 过滤 | 富文本含互动抽奖节点，正文说明抽取参与者 |
+| [开奖结算](https://t.bilibili.com/1253719009796292674) | 过滤 | 正文公布中奖结果，转发原文也是抽奖动态 |
+
+“预约有奖”的附属卡片本身不触发过滤，否则会误删上述前瞻直播示例。若动态正文或转发原文明确涉及抽奖，仍会过滤。普通活动奖励、签到福利、寻访概率提升不作为抽奖证据。
+
+这套判断读取文本和结构化字段，不识别图片内的文字。纯图片中的抽奖信息、未出现已知表达的新文案需要补充识别规则。规则仅用于此 UID 的自动动态推送；其他账号、直播通知、独立视频订阅和用户手动发送链接的预览保持原行为。为完整保留官号的视频动态，官号动态订阅不受其他群的视频订阅去重影响；同群同时订阅 `all` 可能收到视频和动态两种通知。
+
+## 数据与失败处理
+
+官号内容保存主类别和附加标签，例如“干员演示＋抽奖”。抽奖过滤仍优先执行；其他内容在发送前按[共享分类与去重规则](endfield_notification_rules.md)核对官网已发送记录。同一活动、同一阶段且原始发布时间相差不足 24 小时，只保留先成功送达的一路；预告、到点开启和结束提醒分别保留。不同群、机器人账号和私聊互不影响。
+
+两功能共用 `data/endfield/notification_receipts.db`。只有图片获得发送回执才写入成功记录。多活动动态能可靠分节时，只重新渲染未发送的部分，并移除可能包含重复活动的原始合并配图；无法可靠分节时保留整条。手动链接预览不写入自动通知记录。
+
+空间动态接口请求 `features=itemOpusStyle`，读取新版正文及配图。官号处理本轮返回的全部动态，避免前五条都是抽奖时漏掉后面的普通动态。视频动态用动态 ID 去重，同一视频对应的不同动态不会被合并。
+
+空间接口不可用时，RSSHub 仅提供最多 20 条动态链接；随后通过官方详情接口补齐正文、原动态和预约卡片，核对动态 ID 与发布者 UID 后再分类。详情查询并发为 3，同一条详情缓存 5 分钟，最多 64 条、4 MiB。任一详情无法读取或缺少必要结构时，本轮保留原进度等待重试，不直接推送 RSS 的简化摘要。
+
+轮询沿用既有 30 秒目标处理时限。较长离线期间超出接口或 RSS 返回范围的动态不保证补齐。部署可沿用 `BILI_SESSDATA`、`BILI_BUVID3` 和 `BILI_RSSHUB_BASE_URLS`；RSSHub 配置见 [自建部署说明](rsshub_selfhost.md)。
+
+本地匿名实测可读取四条官方详情；空间列表返回 HTTP 412，默认公共 RSSHub 实例也未能完成采集。因此分类和队列流程已通过离线验证，持续线上采集及真实群投递仍需可用的数据源配置后验收。
+
+## 实现与验证
+
+业务代码位于 `plugins/bilibilibot/`：`dynamic_filter.py` 负责分类，`api/` 负责正文映射和详情回退，`detect.py` 在入队前过滤，`notifier.py` 在发送前复核。订阅和状态查询继续使用现有 `/bili` 命令。
+
+`tests/fixtures/bilibili/endfield_official/` 保存四条官方样本的必要字段和正文节选，省略中奖用户。回归测试覆盖样本分类、预约奖励误判、富文本、转发原文、重启去重、旧队列过滤、其他账号隔离、RSS 多条发现、详情校验和采集失败不推进游标。
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q tests/test_bilibili_endfield_dynamics.py tests/test_bilibili_detect.py tests/test_bilibili_poller.py tests/test_bilibili_notifier.py
+```
+
+本地采集样本位于 `data/bilibilibot/research/endfield-official/`，预览图片位于 `data/bilibilibot/previews/endfield-official/`，均不纳入 Git。
+
+## 业务验收与预览（2026-10-01）
+
+Windows / Python 3.13 相关回归为 **399 passed、1 deselected、47 subtests passed**。未纳入的用例是既有文档图片的逐像素一致性检查；本次新增业务测试全部通过。有一条第三方 `creart` 事件循环弃用警告。
+
+新增业务预览脚本回放四条官号样本，使用真实轮询器、持久化队列、过滤器、跨来源发送记录和 PNG 渲染器，接收端为两个模拟群。结果：前瞻、活动两条保留，抽奖发起、开奖两条过滤，共生成 4 次模拟投递；队列关闭重开后成功恢复，重查同批动态没有重复入队。
+
+```powershell
+.\.venv\Scripts\python.exe scripts/preview_bilibili_endfield.py
+# 若已有之前采集的四条完整详情，可回放原始正文：
+.\.venv\Scripts\python.exe scripts/preview_bilibili_endfield.py --captured data/bilibilibot/research/endfield-official
+```
+
+默认使用仓库中的公开样本节选，配图由现有渲染器读取。输出 PNG 与 `business-preview.json` 至 `data/bilibilibot/previews/pr-2026-10-01/`，临时业务数据库在测试后清理。下图使用已核实的完整官方响应回放，未向真实群聊发送消息。
+
+![前瞻直播动态预览](images/bilibili-endfield/livestream.png)
+
+![活动动态预览](images/bilibili-endfield/activity.png)
+
+本次匿名只读接口检查：空间动态列表返回 HTTP 412；活动单条详情返回 HTTP 200、业务码 0。样本回放通过不代表生产环境的持续采集已验收，部署仍需验证可用的 B 站凭据或 RSSHub 回退来源。
