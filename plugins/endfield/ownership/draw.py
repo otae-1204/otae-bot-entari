@@ -10,6 +10,7 @@ from __future__ import annotations
 import math
 import time
 
+from ..cold_start import REMOTE_ASSET_NAMESPACE, note_remote_assets
 from ..rendering.cards import (
     ASSET_DIR,
     PreparedCardHtml,
@@ -85,6 +86,7 @@ async def prepare_ownership_stats_html(
     regions: tuple[str, ...] | None = None,
 ) -> PreparedCardHtml:
     urls = _avatar_urls(report, regions)
+    await note_remote_assets(urls, namespace=REMOTE_ASSET_NAMESPACE)
     assets = await _prepare_assets(urls, inline=False)
     return PreparedCardHtml(
         _render_page(report, assets.urls, _select_segments(report, regions)),
@@ -101,7 +103,9 @@ async def render_ownership_stats_html(
 ) -> str:
     """完整页面 HTML;icon_map 供离线渲染(测试/预览)传入内联资源。"""
     if icon_map is None:
-        assets = await _prepare_assets(_avatar_urls(report, regions), inline=True)
+        urls = _avatar_urls(report, regions)
+        await note_remote_assets(urls, namespace=REMOTE_ASSET_NAMESPACE)
+        assets = await _prepare_assets(urls, inline=True)
         icon_map = assets.urls
     return _render_page(report, icon_map, _select_segments(report, regions))
 

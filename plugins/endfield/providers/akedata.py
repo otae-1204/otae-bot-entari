@@ -44,6 +44,51 @@ AKEDATA_HEADERS = {
 }
 # I18nTextTable_CN 约 18MB，超过 fetch_json 默认 10MB 上限。
 _I18N_MAX_BYTES = 64 * 1024 * 1024
+_I18N_SUFFIX = "/I18nTextTable_CN.json"
+# Path of the I18n table successfully loaded into memory in this process.
+# None until that read returns; cleared when /ef dev drops the akedata cache.
+_i18n_loaded_path: str | None = None
+
+
+def normalize_table_path(path: str) -> str:
+    return "/" + str(path or "").lstrip("/")
+
+
+def i18n_loaded_path() -> str | None:
+    return _i18n_loaded_path
+
+
+def i18n_process_warm() -> bool:
+    return _i18n_loaded_path is not None
+
+
+def clear_i18n_process_warm() -> None:
+    global _i18n_loaded_path
+    _i18n_loaded_path = None
+
+
+def remember_i18n_loaded(path: str) -> None:
+    global _i18n_loaded_path
+    normalized = normalize_table_path(path)
+    if normalized.endswith(_I18N_SUFFIX):
+        _i18n_loaded_path = normalized
+
+
+def i18n_path_from_manifest(manifest: dict[str, Any]) -> str | None:
+    """Current version's I18n path, or None when the manifest has no table path."""
+    latest = manifest.get("latest")
+    entry = next(
+        (
+            item
+            for item in manifest.get("versions") or []
+            if isinstance(item, dict) and item.get("id") == latest
+        ),
+        None,
+    )
+    table_cfg = str((entry or {}).get("tableCfgPath") or "").strip("/")
+    if not latest or not table_cfg:
+        return None
+    return f"/{table_cfg}{_I18N_SUFFIX}"
 
 
 async def _get(
@@ -52,7 +97,7 @@ async def _get(
     max_bytes: int = 10 * 1024 * 1024,
     ttl_seconds: float | None = None,
 ) -> Any:
-    return await fetch_json(
+    payload = await fetch_json(
         f"{AKEDATA_DATA_BASE}{path}",
         namespace="akedata",
         headers=AKEDATA_HEADERS,
@@ -61,6 +106,8 @@ async def _get(
         read_only=True,
         **({"ttl_seconds": ttl_seconds} if ttl_seconds is not None else {}),
     )
+    remember_i18n_loaded(path)
+    return payload
 
 
 async def fetch_akedata_manifest() -> dict[str, Any]:

@@ -26,6 +26,8 @@ from loguru import logger
 from PIL import Image
 
 from otae_bot.infrastructure.http.client import fetch_many_resilient
+
+from ..cold_start import note_remote_assets
 from otae_bot.infrastructure.rendering.executor import run_image_render
 from otae_bot.infrastructure.rendering.browser import BrowserResource, screenshot_web_element
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
@@ -1321,7 +1323,9 @@ async def _draw_medal_stats_page(
     page_count: int,
 ) -> bytes:
     current = view.current
-    icon_map = await _image_data_urls([medal.icon_url for medal in medals if medal.icon_url])
+    medal_icons = [medal.icon_url for medal in medals if medal.icon_url]
+    await note_remote_assets(medal_icons, namespace=REMOTE_ASSET_NAMESPACE)
+    icon_map = await _image_data_urls(medal_icons)
     new_total = len(view.new_medals)
     stats = _medal_stats_block(
         "蚀刻章总数", current.total_count, current.level_counts,
@@ -1810,6 +1814,7 @@ async def draw_archive_stats_card(view: ArchiveDiffView) -> tuple[bytes, ...]:
     new_items = _archive_preview_items(view.new_items, ARCHIVE_PREVIEW_LIMIT)
     urls = [item.icon_url for item in new_items if item.icon_url]
     urls.extend(f"{_ARCHIVE_PAGE_ICON_BASE}/{icon}.png" for _, icon, _ in _ARCHIVE_PAGE_LAYOUT)
+    await note_remote_assets(urls, namespace=REMOTE_ASSET_NAMESPACE)
     icon_map = await _image_data_urls(urls)
     if not new_items:
         return (await _draw_archive_stats_page(view, [], 1, 1, icon_map, 0),)
@@ -3660,6 +3665,7 @@ async def _resolve_asset_groups(
             continue
         first_batch.append(candidates[0])
         pending[key] = candidates
+    await note_remote_assets(first_batch, namespace=REMOTE_ASSET_NAMESPACE)
     assets = await _prepare_assets(first_batch, inline=inline)
     retry_urls: list[str] = []
     retry_keys: list[str] = []
@@ -3676,6 +3682,7 @@ async def _resolve_asset_groups(
         else:
             chosen_source[key] = ""
     if retry_urls:
+        await note_remote_assets(retry_urls, namespace=REMOTE_ASSET_NAMESPACE)
         extra = await _prepare_assets(retry_urls, inline=inline)
         assets = _merge_prepared_assets(assets, extra)
         for key in retry_keys:

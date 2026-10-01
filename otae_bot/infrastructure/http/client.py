@@ -249,18 +249,29 @@ async def _request_resource(
         )
 
 
-async def _fetch_resource(
+def _disk_metadata_reusable(
+    meta, *, ttl_seconds: float, now: float | None = None
+) -> bool:
+    """True for an unexpired row or one that can be revalidated with 304."""
+    if meta is None or ttl_seconds <= 0:
+        return False
+    current = time.time() if now is None else now
+    fresh_for = min(float(ttl_seconds), float(meta.max_age))
+    if current < meta.validated_at + fresh_for:
+        return True
+    return bool(meta.etag or meta.modified)
+
+
+async def _cache_coordinates(
     url: str,
     *,
     namespace: str,
     response_kind: str,
     params: Mapping[str, Any] | Sequence[tuple[str, Any]] | None,
     headers: Mapping[str, str] | None,
-    timeout_seconds: float,
     ttl_seconds: float,
-    max_bytes: int,
-    validator: Callable[[HttpResource], object] | None = None,
-) -> HttpResource:
+) -> tuple[RequestKey, bool, str, float]:
+    """Build the same cache identity ``_fetch_resource`` will use. Does not fetch."""
     client = await _get_owned_client()
     # Client-level Auth flows may add credentials only during send. Do not
     # publish or reuse those responses using a pre-authentication cache key.
@@ -276,12 +287,9 @@ async def _fetch_resource(
         _header_fingerprint(effective_headers),
         response_kind,
     )
-
-    disk_key = hashlib.sha256(repr(key).encode()).hexdigest()
     table_eligible = public_table_request(
         url, namespace, headers, params, response_kind
     )
-    disk = public_tables if table_eligible else public_images
     disk_policy = public_table_request if table_eligible else public_image_request
     eligible = (
         ttl_seconds > 0
@@ -297,6 +305,68 @@ async def _fetch_resource(
             )
         )
     )
+    disk_key = hashlib.sha256(repr(key).encode()).hexdigest()
+    return key, eligible, disk_key, ttl_seconds
+
+
+async def cached_public_resource(
+    url: str,
+    *,
+    namespace: str,
+    response_kind: str,
+    params: Mapping[str, Any] | Sequence[tuple[str, Any]] | None = None,
+    headers: Mapping[str, str] | None = None,
+    ttl_seconds: float = DEFAULT_CACHE_TTL_SECONDS,
+) -> bool:
+    """True when memory or disk metadata can serve this request without a body read."""
+    key, eligible, disk_key, ttl_seconds = await _cache_coordinates(
+        url,
+        namespace=namespace,
+        response_kind=response_kind,
+        params=params,
+        headers=headers,
+        ttl_seconds=ttl_seconds,
+    )
+    if _pool_for(url, response_kind).contains(key):
+        return True
+    if not eligible:
+        return False
+    table_eligible = public_table_request(
+        url, namespace, headers, params, response_kind
+    )
+    disk = public_tables if table_eligible else public_images
+    try:
+        meta = await asyncio.to_thread(disk.metadata, disk_key)
+    except (OSError, sqlite3.Error):
+        return False
+    return _disk_metadata_reusable(meta, ttl_seconds=ttl_seconds)
+
+
+async def _fetch_resource(
+    url: str,
+    *,
+    namespace: str,
+    response_kind: str,
+    params: Mapping[str, Any] | Sequence[tuple[str, Any]] | None,
+    headers: Mapping[str, str] | None,
+    timeout_seconds: float,
+    ttl_seconds: float,
+    max_bytes: int,
+    validator: Callable[[HttpResource], object] | None = None,
+) -> HttpResource:
+    key, eligible, disk_key, ttl_seconds = await _cache_coordinates(
+        url,
+        namespace=namespace,
+        response_kind=response_kind,
+        params=params,
+        headers=headers,
+        ttl_seconds=ttl_seconds,
+    )
+    table_eligible = public_table_request(
+        url, namespace, headers, params, response_kind
+    )
+    disk = public_tables if table_eligible else public_images
+    disk_policy = public_table_request if table_eligible else public_image_request
     # Capture before the factory is scheduled: a clear must invalidate queued
     # work too, not only requests that already reached the network.
     generation = disk.register(namespace) if eligible else None

@@ -80,6 +80,16 @@ class DiskImage:
     max_age: float
 
 
+@dataclass(frozen=True)
+class DiskImageMeta:
+    """Cache-row metadata. Never includes the stored body."""
+
+    validated_at: float
+    max_age: float
+    etag: str
+    modified: str
+
+
 class PublicImageDiskCache:
     def __init__(self, path: Path, budget: int, max_entries: int = 4096):
         self.path = path
@@ -117,6 +127,25 @@ class PublicImageDiskCache:
             if self._connection is not None:
                 self._connection.close()
                 self._connection = None
+
+    def metadata(self, key) -> DiskImageMeta | None:
+        """Return freshness metadata for one key without reading the body."""
+        if self.budget <= 0 or not self.path.exists():
+            return None
+        with self._lock:
+            connection = self._connect()
+            try:
+                row = connection.execute(
+                    "SELECT validated_at, max_age, etag, modified "
+                    "FROM public_images_v1 WHERE key=?",
+                    (key,),
+                ).fetchone()
+                if row is None:
+                    return None
+                return DiskImageMeta(row[0], row[1], row[2], row[3])
+            finally:
+                if connection.in_transaction:
+                    connection.rollback()
 
     def get(self, key, max_bytes):
         if self.budget <= 0 or not self.path.exists():

@@ -10,6 +10,7 @@ from otae_bot.infrastructure.rendering.executor import run_image_render
 from otae_bot.infrastructure.rendering.browser import BrowserResource, screenshot_web_element
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
 
+from ..cold_start import REMOTE_ASSET_NAMESPACE, note_remote_assets
 from ..rendering.cards import (
     _prepare_assets,
     _write_temp_html,
@@ -66,7 +67,9 @@ _CATALOG_OVERFLOW_SELECTORS = (".stage-family", ".catalog-item")
 
 
 async def draw_stage_card(view: StageCardView) -> bytes:
-    prepared = await _prepare_assets(_stage_icon_urls(view.stage), inline=False)
+    icon_urls = _stage_icon_urls(view.stage)
+    await note_remote_assets(icon_urls, namespace=REMOTE_ASSET_NAMESPACE)
+    prepared = await _prepare_assets(icon_urls, inline=False)
     return await _draw_stage_html(
         render_stage_card_html(view, prepared.urls),
         _CARD_OVERFLOW_SELECTORS,

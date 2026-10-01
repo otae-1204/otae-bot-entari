@@ -203,7 +203,13 @@ from .ownership.service import (
     render_ownership_stats,
 )
 from .ownership.draw import draw_ownership_stats
+from .providers.akedata import clear_i18n_process_warm
 from .providers.registry import source_label, source_order
+from .cold_start import (
+    cold_start_command,
+    notice_before_public_data,
+    notice_default_ake_public,
+)
 from .calendar.akedata import AkeDataVersionCalendarSource, VersionCalendarError
 from .paths import HELP_IMAGE_PATH as ENDFIELD_HELP_IMAGE_PATH
 from .providers.repository import AkeDataIncomplete, query_snapshot
@@ -441,17 +447,19 @@ async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand,
     if command.action == "source":
         return await matcher.finish(format_source())
     if command.action == "calendar":
-        try:
-            png = await _render_current_version_calendar()
-            return await _finish_png(matcher, png)
-        except _ExitException:
-            raise
-        except (VersionCalendarError, WarfarinAPIError, StageDataIncomplete) as exc:
-            logger.error(f"[endfield] version calendar unavailable: {exc}")
-            return await matcher.finish("当前版本日历暂不可用，请稍后重试")
-        except Exception:
-            logger.exception("[endfield] version calendar render failed")
-            return await matcher.finish("当前版本日历生成失败，请稍后重试")
+        with cold_start_command(matcher):
+            await notice_default_ake_public()
+            try:
+                png = await _render_current_version_calendar()
+                return await _finish_png(matcher, png)
+            except _ExitException:
+                raise
+            except (VersionCalendarError, WarfarinAPIError, StageDataIncomplete) as exc:
+                logger.error(f"[endfield] version calendar unavailable: {exc}")
+                return await matcher.finish("当前版本日历暂不可用，请稍后重试")
+            except Exception:
+                logger.exception("[endfield] version calendar render failed")
+                return await matcher.finish("当前版本日历生成失败，请稍后重试")
     if command.action == "dev":
         if not dev_visible_for_user(str(event_user_id(event)), Config.SUPERUSERS):
             return await matcher.finish(format_unknown())
@@ -517,58 +525,65 @@ async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand,
 
     started = perf_counter()
     try:
-        candidate_started = perf_counter()
-        candidates = await _collect_candidates(command.scope, command.query, command.source, command.rarity)
-        fallback = await _item_scope_fallback(command, candidates)
-        if fallback == "medal":
-            return await matcher.finish("奖章请用 /ef 奖章")
-        if fallback is not None:
-            candidates = fallback
-        candidate_seconds = perf_counter() - candidate_started
-        if command.action == "search":
-            title = "搜索结果" if candidates else "未找到相关结果"
-            logger.info(
-                f"[endfield] perf action=search scope={command.scope} "
-                f"candidate={candidate_seconds:.3f}s total={perf_counter() - started:.3f}s"
-            )
-            return await matcher.finish(format_candidates(candidates, title=title))
+        with cold_start_command(matcher):
+            if command.scope != "archive_entry":
+                await notice_before_public_data(
+                    source=command.source or "",
+                    scope=command.scope,
+                    query=command.query,
+                )
+            candidate_started = perf_counter()
+            candidates = await _collect_candidates(command.scope, command.query, command.source, command.rarity)
+            fallback = await _item_scope_fallback(command, candidates)
+            if fallback == "medal":
+                return await matcher.finish("奖章请用 /ef 奖章")
+            if fallback is not None:
+                candidates = fallback
+            candidate_seconds = perf_counter() - candidate_started
+            if command.action == "search":
+                title = "搜索结果" if candidates else "未找到相关结果"
+                logger.info(
+                    f"[endfield] perf action=search scope={command.scope} "
+                    f"candidate={candidate_seconds:.3f}s total={perf_counter() - started:.3f}s"
+                )
+                return await matcher.finish(format_candidates(candidates, title=title))
 
-        selected, ambiguous = choose_candidate(candidates)
-        if ambiguous:
-            options = candidate_options(ambiguous, query=command.query)
-            if not options:
+            selected, ambiguous = choose_candidate(candidates)
+            if ambiguous:
+                options = candidate_options(ambiguous, query=command.query)
+                if not options:
+                    return await matcher.finish(format_not_found(command.scope, command.query))
+                answer = await prompt_silently(format_candidates(options, interactive=True), timeout=60)
+                if answer is None:
+                    return await matcher.finish()
+                text = answer.extract_plain_text() if hasattr(answer, "extract_plain_text") else str(answer or "")
+                text = text.strip()
+                if text.casefold() in {"取消", "cancel", "q", "quit"}:
+                    return await matcher.finish("已取消候选查询。")
+                selection = parse_candidate_selection(text, len(options))
+                if selection is None:
+                    return await matcher.finish(f"编号无效，请输入 1-{len(options)}。")
+                selected = options[selection]
+            if selected is None:
                 return await matcher.finish(format_not_found(command.scope, command.query))
-            answer = await prompt_silently(format_candidates(options, interactive=True), timeout=60)
-            if answer is None:
-                return await matcher.finish()
-            text = answer.extract_plain_text() if hasattr(answer, "extract_plain_text") else str(answer or "")
-            text = text.strip()
-            if text.casefold() in {"取消", "cancel", "q", "quit"}:
-                return await matcher.finish("已取消候选查询。")
-            selection = parse_candidate_selection(text, len(options))
-            if selection is None:
-                return await matcher.finish(f"编号无效，请输入 1-{len(options)}。")
-            selected = options[selection]
-        if selected is None:
-            return await matcher.finish(format_not_found(command.scope, command.query))
 
-        render_started = perf_counter()
-        pngs = await _render_candidate(selected, command.source)
-        render_seconds = perf_counter() - render_started
-        if pngs is None:
-            return await matcher.finish(format_not_found(selected.kind, command.query))
-        logger.info(
-            f"[endfield] perf action=query scope={command.scope} kind={selected.kind} "
-            f"candidate={candidate_seconds:.3f}s render={render_seconds:.3f}s "
-            f"pages={len(pngs)} total_before_send={perf_counter() - started:.3f}s"
-        )
-        try:
-            return await _finish_pngs(matcher, pngs)
-        except _ExitException:
-            raise
-        except Exception as exc:
-            logger.exception(f"[endfield] send failed for {selected.kind} {command.query}: {exc}")
-            return await matcher.finish("图片发送失败，请稍后重试")
+            render_started = perf_counter()
+            pngs = await _render_candidate(selected, command.source)
+            render_seconds = perf_counter() - render_started
+            if pngs is None:
+                return await matcher.finish(format_not_found(selected.kind, command.query))
+            logger.info(
+                f"[endfield] perf action=query scope={command.scope} kind={selected.kind} "
+                f"candidate={candidate_seconds:.3f}s render={render_seconds:.3f}s "
+                f"pages={len(pngs)} total_before_send={perf_counter() - started:.3f}s"
+            )
+            try:
+                return await _finish_pngs(matcher, pngs)
+            except _ExitException:
+                raise
+            except Exception as exc:
+                logger.exception(f"[endfield] send failed for {selected.kind} {command.query}: {exc}")
+                return await matcher.finish("图片发送失败，请稍后重试")
     except _ExitException:
         raise
     except WarfarinAPIError as exc:
@@ -633,7 +648,11 @@ async def _handle_medal(matcher, command: ParsedEndfieldCommand) -> None:
     baseline = medal_store.load_baseline_view()
     try:
         diff = service.build_medal_diff(current, baseline)
-        pngs = await draw_medal_stats_card(diff)
+        if command.action == "medal_view":
+            with cold_start_command(matcher):
+                pngs = await draw_medal_stats_card(diff)
+        else:
+            pngs = await draw_medal_stats_card(diff)
     except WarfarinAPIError as exc:
         logger.warning(f"[endfield] medal card data failed: {exc}")
         return await matcher.finish("数据源暂时不可用。")
@@ -687,7 +706,11 @@ async def _handle_archive(matcher, command: ParsedEndfieldCommand) -> None:
     baseline = archive_store.load_baseline_view()
     try:
         diff = service.build_archive_diff(current, baseline)
-        pngs = await draw_archive_stats_card(diff)
+        if command.action == "archive_view":
+            with cold_start_command(matcher):
+                pngs = await draw_archive_stats_card(diff)
+        else:
+            pngs = await draw_archive_stats_card(diff)
     except Exception as exc:
         logger.exception(f"[endfield] archive card failed: {exc}")
         return await matcher.finish("档案库图片生成失败")
@@ -745,19 +768,21 @@ async def _handle_ownership_stats(
     if command.action == "ownership_refresh":
         try:
             cipher = CredentialCipher.from_env()
-            refresh = await ownership_stats_service.refresh_roles(
-                roles,
-                cipher,
-                force=True,
-                trigger=f"manual-{scope}",
-            )
+            with cold_start_command(matcher):
+                refresh = await ownership_stats_service.refresh_roles(
+                    roles,
+                    cipher,
+                    force=True,
+                    trigger=f"manual-{scope}",
+                )
         except CredentialKeyError as exc:
             return await matcher.finish(str(exc))
         return await matcher.finish(_format_ownership_refresh_result(scope, refresh))
 
     report = ownership_stats_service.build_report(scope, roles, refresh=refresh)
     try:
-        rendered = await render_ownership_stats(report)
+        with cold_start_command(matcher):
+            rendered = await render_ownership_stats(report)
     except OwnershipStatsRendererUnavailable:
         return await matcher.finish("持有率统计数据已生成，但展示组件尚未接入。")
     if isinstance(rendered, bytes):
@@ -1051,6 +1076,32 @@ async def _handle_challenge(
         updated_at=datetime.now().strftime("%Y-%m-%d %H:%M"),
     )
     variant = "b"
+    with cold_start_command(matcher):
+        await notice_default_ake_public()
+        return await _render_challenge_cards(
+            matcher,
+            event,
+            command,
+            bot,
+            role,
+            token,
+            identity,
+            group_chat,
+            variant,
+        )
+
+
+async def _render_challenge_cards(
+    matcher,
+    event,
+    command,
+    bot,
+    role,
+    token,
+    identity,
+    group_chat: bool,
+    variant: str,
+) -> None:
     async def load_data(kind: str) -> dict:
         key = (str(role.role_id), str(role.server_id), kind)
         if kind == "monument":
@@ -1576,45 +1627,47 @@ async def _card_detail_with_snapshot(token: str, role: EndfieldRole) -> dict:
 async def _render_account_detail(
     matcher, role: EndfieldRole, cipher: CredentialCipher, *, group: bool
 ) -> None:
-    token = account_store.decrypt_token(role, cipher)
-    async def load_currency_balances() -> dict[int, int]:
-        try:
-            return await official_client.currency_balances(token, role)
-        except EndfieldAPIError as exc:
-            logger.warning(f"[endfield] account currency unavailable operation={exc.operation}")
-            return {}
+    with cold_start_command(matcher):
+        token = account_store.decrypt_token(role, cipher)
+        await notice_default_ake_public()
+        async def load_currency_balances() -> dict[int, int]:
+            try:
+                return await official_client.currency_balances(token, role)
+            except EndfieldAPIError as exc:
+                logger.warning(f"[endfield] account currency unavailable operation={exc.operation}")
+                return {}
 
-    async def load_name_map():
-        try:
-            return await fetch_account_detail_name_map()
-        except Exception as exc:
-            logger.warning(f"[endfield] account AKE name map unavailable: {exc}")
-            return None
+        async def load_name_map():
+            try:
+                return await fetch_account_detail_name_map()
+            except Exception as exc:
+                logger.warning(f"[endfield] account AKE name map unavailable: {exc}")
+                return None
 
-    detail, currency_balances, name_map = await asyncio.gather(
-        _card_detail_with_snapshot(token, role),
-        load_currency_balances(),
-        load_name_map(),
-    )
-    view = build_account_detail_view(
-        detail,
-        uid=role.masked_uid if group else role.role_id,
-        nickname=role.nickname,
-        server_name=role.server_name or role.server_id,
-        currency_balances=currency_balances,
-        name_map=name_map,
-    )
-    if re.search(r"[A-Za-z]", view.main_mission) and not re.search(r"[\u3400-\u9fff]", view.main_mission):
-        # Some official profiles omit the mission ID and ignore the CN locale.
-        # Reuse the existing versioned CN/EN reverse map; never guess a title
-        # from similar English wording or write it into the account payload.
-        try:
-            locale = await fetch_challenge_locale()
-            view = replace(view, main_mission=locale.text(view.main_mission))
-        except Exception as exc:
-            logger.warning("[endfield] account mission localization unavailable ({})", type(exc).__name__)
-    pages = await _render_account_pages("detail", role, group, view, lambda: draw_account_detail_cards(view))
-    return await _finish_pngs(matcher, pages)
+        detail, currency_balances, name_map = await asyncio.gather(
+            _card_detail_with_snapshot(token, role),
+            load_currency_balances(),
+            load_name_map(),
+        )
+        view = build_account_detail_view(
+            detail,
+            uid=role.masked_uid if group else role.role_id,
+            nickname=role.nickname,
+            server_name=role.server_name or role.server_id,
+            currency_balances=currency_balances,
+            name_map=name_map,
+        )
+        if re.search(r"[A-Za-z]", view.main_mission) and not re.search(r"[\u3400-\u9fff]", view.main_mission):
+            # Some official profiles omit the mission ID and ignore the CN locale.
+            # Reuse the existing versioned CN/EN reverse map; never guess a title
+            # from similar English wording or write it into the account payload.
+            try:
+                locale = await fetch_challenge_locale()
+                view = replace(view, main_mission=locale.text(view.main_mission))
+            except Exception as exc:
+                logger.warning("[endfield] account mission localization unavailable ({})", type(exc).__name__)
+        pages = await _render_account_pages("detail", role, group, view, lambda: draw_account_detail_cards(view))
+        return await _finish_pngs(matcher, pages)
 
 
 async def _handle_account_investment(
@@ -1664,28 +1717,30 @@ async def _render_account_investment(
     if provider == ACCOUNT_PROVIDER_SKPORT or is_asia_role(role):
         return await matcher.finish("养成统计目前仅支持国服账号，亚服暂不支持。")
 
-    async def load_name_map():
-        try:
-            return await fetch_account_detail_name_map()
-        except Exception as exc:
-            logger.warning(f"[endfield] investment AKE name map unavailable: {exc}")
-            return None
+    with cold_start_command(matcher):
+        await notice_default_ake_public()
+        async def load_name_map():
+            try:
+                return await fetch_account_detail_name_map()
+            except Exception as exc:
+                logger.warning(f"[endfield] investment AKE name map unavailable: {exc}")
+                return None
 
-    detail, catalog, name_map = await asyncio.gather(
-        _card_detail_with_snapshot(token, role),
-        fetch_account_investment_catalog(),
-        load_name_map(),
-    )
-    view = build_account_investment_view(
-        detail,
-        uid=role.masked_uid if group else role.role_id,
-        nickname=role.nickname,
-        server_name=role.server_name or role.server_id,
-        catalog=catalog,
-        name_map=name_map,
-    )
-    pages = await _render_account_pages("investment", role, group, view, lambda: draw_account_investment_cards(view))
-    return await _finish_pngs(matcher, pages)
+        detail, catalog, name_map = await asyncio.gather(
+            _card_detail_with_snapshot(token, role),
+            fetch_account_investment_catalog(),
+            load_name_map(),
+        )
+        view = build_account_investment_view(
+            detail,
+            uid=role.masked_uid if group else role.role_id,
+            nickname=role.nickname,
+            server_name=role.server_name or role.server_id,
+            catalog=catalog,
+            name_map=name_map,
+        )
+        pages = await _render_account_pages("investment", role, group, view, lambda: draw_account_investment_cards(view))
+        return await _finish_pngs(matcher, pages)
 
 
 async def _handle_account_currency(
@@ -1867,33 +1922,35 @@ async def _render_account_base(
     *,
     group: bool,
 ) -> None:
-    token = account_store.decrypt_token(role, cipher)
+    with cold_start_command(matcher):
+        token = account_store.decrypt_token(role, cipher)
+        await notice_default_ake_public()
 
-    async def load_name_map():
-        try:
-            return await fetch_account_detail_name_map()
-        except Exception as exc:
-            logger.warning(f"[endfield] account AKE name map unavailable: {exc}")
-            return None
+        async def load_name_map():
+            try:
+                return await fetch_account_detail_name_map()
+            except Exception as exc:
+                logger.warning(f"[endfield] account AKE name map unavailable: {exc}")
+                return None
 
-    detail, name_map = await asyncio.gather(
-        _card_detail_with_snapshot(token, role),
-        load_name_map(),
-    )
-    view = build_account_base_view(
-        detail,
-        uid=role.masked_uid if group else role.role_id,
-        role_id=role.role_id,
-        server_id=role.server_id,
-        nickname=role.nickname,
-        server_name=role.server_name or role.server_id,
-        store=account_store,
-        name_map=name_map,
-    )
-    async def render():
-        return (await draw_account_base_card(view),)
+        detail, name_map = await asyncio.gather(
+            _card_detail_with_snapshot(token, role),
+            load_name_map(),
+        )
+        view = build_account_base_view(
+            detail,
+            uid=role.masked_uid if group else role.role_id,
+            role_id=role.role_id,
+            server_id=role.server_id,
+            nickname=role.nickname,
+            server_name=role.server_name or role.server_id,
+            store=account_store,
+            name_map=name_map,
+        )
+        async def render():
+            return (await draw_account_base_card(view),)
 
-    return await _finish_pngs(matcher, await _render_account_pages("base", role, group, view, render))
+        return await _finish_pngs(matcher, await _render_account_pages("base", role, group, view, render))
 
 
 class _IncompletePages(Exception):
@@ -2195,49 +2252,51 @@ async def _handle_loadout(matcher, command: ParsedEndfieldCommand) -> None:
         if error or spec is None:
             return await matcher.finish(f"配装参数错误：{error or '已取消'}")
 
-        resolved: list[tuple[EndfieldCandidate, tuple[tuple[int, int], ...]]] = []
-        for index, item in enumerate(spec.items):
-            candidate_kind = "operator" if index == 0 else "gear"
-            candidate = await _resolve_loadout_candidate(candidate_kind, item.name)
-            if candidate is None:
-                label = "干员" if index == 0 else "武器或装备"
-                return await matcher.finish(f"未找到{label}：{item.name}")
-            if item.forge_levels and candidate.kind != "equipment":
-                return await matcher.finish(f"只有装备可以设置词条锻造：{item.name}")
-            resolved.append((candidate, item.forge_levels))
+        with cold_start_command(matcher):
+            await notice_default_ake_public()
+            resolved: list[tuple[EndfieldCandidate, tuple[tuple[int, int], ...]]] = []
+            for index, item in enumerate(spec.items):
+                candidate_kind = "operator" if index == 0 else "gear"
+                candidate = await _resolve_loadout_candidate(candidate_kind, item.name)
+                if candidate is None:
+                    label = "干员" if index == 0 else "武器或装备"
+                    return await matcher.finish(f"未找到{label}：{item.name}")
+                if item.forge_levels and candidate.kind != "equipment":
+                    return await matcher.finish(f"只有装备可以设置词条锻造：{item.name}")
+                resolved.append((candidate, item.forge_levels))
 
-        operators = [item for item, _ in resolved if item.kind == "operator"]
-        weapons = [item for item, _ in resolved if item.kind == "weapon"]
-        if len(operators) != 1:
-            return await matcher.finish("配装命令需要且只能包含一个干员")
-        if len(weapons) > 1:
-            return await matcher.finish("配装命令最多包含一把武器")
-        operator = operators[0]
-        weapon_title = weapons[0].key if weapons else await service.get_recommended_weapon_title(operator.key)
-        equipment = [
-            (candidate.key, command.enhance, forge_levels)
-            for candidate, forge_levels in resolved
-            if candidate.kind == "equipment"
-        ]
+            operators = [item for item, _ in resolved if item.kind == "operator"]
+            weapons = [item for item, _ in resolved if item.kind == "weapon"]
+            if len(operators) != 1:
+                return await matcher.finish("配装命令需要且只能包含一个干员")
+            if len(weapons) > 1:
+                return await matcher.finish("配装命令最多包含一把武器")
+            operator = operators[0]
+            weapon_title = weapons[0].key if weapons else await service.get_recommended_weapon_title(operator.key)
+            equipment = [
+                (candidate.key, command.enhance, forge_levels)
+                for candidate, forge_levels in resolved
+                if candidate.kind == "equipment"
+            ]
 
-        started = perf_counter()
-        view = await service.get_loadout_view(
-            operator.key,
-            weapon_title,
-            equipment,
-            operator_level=command.char_level,
-            operator_potential=command.char_potential,
-            weapon_level=command.weapon_level,
-            weapon_potential=command.weapon_potential,
-            weapon_skill_levels=command.weapon_skill_levels,
-        )
-        data_seconds = perf_counter() - started
-        png = await _render_loadout_view(view)
-        logger.info(
-            f"[endfield] perf action=loadout data={data_seconds:.3f}s "
-            f"draw={perf_counter() - started - data_seconds:.3f}s"
-        )
-        return await _finish_png(matcher, png)
+            started = perf_counter()
+            view = await service.get_loadout_view(
+                operator.key,
+                weapon_title,
+                equipment,
+                operator_level=command.char_level,
+                operator_potential=command.char_potential,
+                weapon_level=command.weapon_level,
+                weapon_potential=command.weapon_potential,
+                weapon_skill_levels=command.weapon_skill_levels,
+            )
+            data_seconds = perf_counter() - started
+            png = await _render_loadout_view(view)
+            logger.info(
+                f"[endfield] perf action=loadout data={data_seconds:.3f}s "
+                f"draw={perf_counter() - started - data_seconds:.3f}s"
+            )
+            return await _finish_png(matcher, png)
     except _ExitException:
         raise
     except (WarfarinAPIError, ValueError) as exc:
@@ -3508,6 +3567,7 @@ async def _clear_endfield_caches(scope: str) -> int:
         removed += await service.clear_query_caches()
         removed += await clear_http_cache("endfield-")
         removed += await clear_http_cache("akedata")
+        clear_i18n_process_warm()
         removed += stage_service.clear_caches()
         removed += calendar_source.clear_caches()
         removed += clear_account_detail_name_map()
@@ -3534,6 +3594,7 @@ async def _clear_endfield_caches(scope: str) -> int:
         removed += await _CARD_CACHE.clear(lambda key: key[1] in cache_kinds)
         removed += await clear_http_cache("endfield-api")
         removed += await clear_http_cache("akedata")
+        clear_i18n_process_warm()
         removed += clear_account_detail_name_map()
         removed += clear_account_investment_catalog()
         if scope == "stage":

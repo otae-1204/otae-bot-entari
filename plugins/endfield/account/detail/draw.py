@@ -12,6 +12,7 @@ from .models import (
     AccountOperatorView,
     AccountSkillView,
 )
+from ...cold_start import REMOTE_ASSET_NAMESPACE, note_remote_assets
 from ...rendering.cards import (
     PreparedCardHtml,
     _draw_gallery_catalog,
@@ -120,7 +121,9 @@ async def render_account_detail_card_html(view: AccountDetailView) -> str:
 
 
 async def _prepare_account_detail_html(view: AccountDetailView, *, inline: bool) -> PreparedCardHtml:
-    prepared = await _prepare_assets(_account_detail_icon_urls(view), inline=inline)
+    icon_urls = _account_detail_icon_urls(view)
+    await note_remote_assets(icon_urls, namespace=REMOTE_ASSET_NAMESPACE)
+    prepared = await _prepare_assets(icon_urls, inline=inline)
     return PreparedCardHtml(
         _render_account_detail_html(view, prepared.urls),
         prepared.resources,
