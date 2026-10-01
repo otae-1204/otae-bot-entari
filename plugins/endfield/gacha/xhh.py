@@ -15,6 +15,7 @@ from Crypto.Cipher import PKCS1_v1_5
 from Crypto.PublicKey import RSA
 
 from ..account.store import XhhGachaImport, XhhGachaPool, XhhSixStar
+from .pools import XHH_RERUN_POOL_TYPE, kind_for_xhh_pool
 
 
 LOGIN_URL = "https://login.xiaoheihe.cn/"
@@ -430,9 +431,12 @@ def _walk_dicts(value: object):
 
 
 def _mark_current_pools(pools: list[XhhGachaPool], order: dict[str, int]) -> list[XhhGachaPool]:
+    """每个 (item_type, 池类型) 各标一个当期池，避免重构寻访抢走特许的当期位（或反之）。"""
     result = list(pools)
-    for item_type in {item.item_type for item in pools}:
-        indexes = [index for index, item in enumerate(result) if item.item_type == item_type]
+    groups: dict[tuple[str, str], list[int]] = {}
+    for index, item in enumerate(result):
+        groups.setdefault((item.item_type, kind_for_xhh_pool(item).key), []).append(index)
+    for indexes in groups.values():
         if any(result[index].is_current for index in indexes):
             continue
         current_index = max(
@@ -535,7 +539,7 @@ def _parse_timestamp(value: object) -> int:
 def _infer_item_type(raw: dict[str, Any], pool_id: str, pool_name: str) -> str:
     value = str(_first(raw, "item_type", "itemType", "gacha_type", "pool_category", "type") or "")
     identity = f"{value} {pool_id} {pool_name}".casefold()
-    if any(marker in identity for marker in ("weapon", "wepon", "wpn", "武器", "申领")):
+    if any(marker in identity for marker in ("weapon", "wepon", "wpn", "武器", "申领", "武库")):
         return "武器"
     return "角色"
 
@@ -544,6 +548,8 @@ def _infer_pool_type(pool_id: str, pool_name: str, item_type: str) -> str:
     identity = f"{pool_id} {pool_name}".casefold()
     if item_type == "武器":
         return "weapon"
+    if "rerun" in identity or "重构" in identity:
+        return XHH_RERUN_POOL_TYPE
     if "joint" in identity or "庆典" in identity:
         return "E_CharacterGachaPoolType_Joint"
     if "standard" in identity or "constant" in identity or "基础" in identity or "常驻" in identity:

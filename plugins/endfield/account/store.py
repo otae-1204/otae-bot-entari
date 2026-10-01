@@ -60,6 +60,7 @@ class GachaRecord:
     weapon_type: str = ""
     is_new: bool = False
     is_free: bool = False
+    pool_version: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -274,6 +275,7 @@ class EndfieldStore:
                     weapon_type TEXT NOT NULL DEFAULT '',
                     is_new INTEGER NOT NULL DEFAULT 0,
                     is_free INTEGER NOT NULL DEFAULT 0,
+                    pool_version INTEGER NOT NULL DEFAULT 0,
                     created_at INTEGER NOT NULL,
                     UNIQUE(role_id, server_id, pool_id, seq_id)
                 );
@@ -378,6 +380,12 @@ class EndfieldStore:
                     "ALTER TABLE gacha_records ADD COLUMN is_free INTEGER NOT NULL DEFAULT 0"
                 )
                 self.conn.execute("DELETE FROM sync_states")
+            if "pool_version" not in columns:
+                # 复刻期号：旧行保持 0；新流首拉即写入，存量武器重构记录在 --full 时由 upsert 回填。
+                # 不清空 sync_states（Rerun 是新流，本来就会全量拉取）。
+                self.conn.execute(
+                    "ALTER TABLE gacha_records ADD COLUMN pool_version INTEGER NOT NULL DEFAULT 0"
+                )
             xhh_pool_columns = {
                 str(row["name"])
                 for row in self.conn.execute("PRAGMA table_info(xhh_gacha_pools)").fetchall()
@@ -1163,33 +1171,45 @@ class EndfieldStore:
         records = tuple(records)
         if not records:
             return 0
-        groups: dict[tuple[str, str, str], set[str]] = {}
+        groups: dict[tuple[str, str, str], dict[str, int]] = {}
         for record in records:
             groups.setdefault(
-                (record.role_id, record.server_id, record.pool_id), set()
-            ).add(record.seq_id)
+                (record.role_id, record.server_id, record.pool_id), {}
+            )[record.seq_id] = int(record.gacha_ts)
         inserted = sum(map(len, groups.values()))
+        collisions = 0
         with self._lock:
             try:
                 self.conn.execute("BEGIN")
-                for identity, seq_ids in groups.items():
-                    sequences = tuple(seq_ids)
+                for identity, seq_timestamps in groups.items():
+                    sequences = tuple(seq_timestamps)
                     for offset in range(0, len(sequences), 400):
                         batch = sequences[offset : offset + 400]
                         placeholders = ",".join("?" for _ in batch)
-                        inserted -= self.conn.execute(
-                            "SELECT count(*) FROM gacha_records WHERE role_id=? "
+                        rows = self.conn.execute(
+                            "SELECT seq_id, gacha_ts FROM gacha_records WHERE role_id=? "
                             "AND server_id=? AND pool_id=? AND seq_id IN ("
                             + placeholders
                             + ")",
                             (*identity, *batch),
-                        ).fetchone()[0]
+                        ).fetchall()
+                        inserted -= len(rows)
+                        for row in rows:
+                            # 碰撞探针：同 poolId 复刻若重置 seqId，会命中唯一键覆盖旧行；只记日志。
+                            seq_id = str(row["seq_id"])
+                            if abs(int(row["gacha_ts"]) - seq_timestamps.get(seq_id, 0)) > 86_400:
+                                collisions += 1
+                                logger.warning(
+                                    "[endfield] gacha seq collision pool={} seq={} stored_ts={} new_ts={}",
+                                    identity[2], seq_id, int(row["gacha_ts"]), seq_timestamps.get(seq_id, 0),
+                                )
                 self.conn.executemany(
                     """
                     INSERT INTO gacha_records(
                         role_id, server_id, pool_id, pool_name, pool_type, seq_id, gacha_ts,
-                        item_id, item_name, rarity, item_type, weapon_type, is_new, is_free, created_at
-                    ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        item_id, item_name, rarity, item_type, weapon_type, is_new, is_free,
+                        pool_version, created_at
+                    ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(role_id, server_id, pool_id, seq_id) DO UPDATE SET
                         pool_name = excluded.pool_name,
                         pool_type = excluded.pool_type,
@@ -1200,7 +1220,8 @@ class EndfieldStore:
                         item_type = excluded.item_type,
                         weapon_type = excluded.weapon_type,
                         is_new = excluded.is_new,
-                        is_free = excluded.is_free
+                        is_free = excluded.is_free,
+                        pool_version = excluded.pool_version
                     """,
                     [
                         (
@@ -1218,6 +1239,7 @@ class EndfieldStore:
                             record.weapon_type,
                             1 if record.is_new else 0,
                             1 if record.is_free else 0,
+                            int(record.pool_version or 0),
                             now,
                         )
                         for record in records
@@ -1528,4 +1550,5 @@ class EndfieldStore:
             gacha_ts=int(row["gacha_ts"]), item_id=str(row["item_id"]), item_name=str(row["item_name"]),
             rarity=int(row["rarity"]), item_type=str(row["item_type"]), weapon_type=str(row["weapon_type"]),
             is_new=bool(row["is_new"]), is_free=bool(row["is_free"]),
+            pool_version=int(row["pool_version"] or 0) if "pool_version" in row.keys() else 0,
         )

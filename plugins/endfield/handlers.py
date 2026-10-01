@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import re
 import tempfile
 from collections.abc import Awaitable, Callable
@@ -13,7 +14,7 @@ from time import perf_counter
 
 import aiohttp
 from arclet.alconna import Alconna, Args, MultiVar
-from arclet.entari import At, Cleanup, Event, listen
+from arclet.entari import At, Cleanup, Event, Text, listen
 from arclet.letoderea.exceptions import _ExitException
 from loguru import logger
 from nepattern import AnyString
@@ -228,6 +229,13 @@ _MEDAL_LOCK = asyncio.Lock()
 archive_store = ArchiveSnapshotStore()
 _ARCHIVE_LOCK = asyncio.Lock()
 _FORWARD_SENDER_NAME = "Endfield"
+# 抽卡分析：超过 N 张图改为一条合并转发（每节点 1 张）；ENDFIELD_GACHA_FORWARD_ABOVE=0 关闭转发。
+GACHA_FORWARD_ABOVE_ENV = "ENDFIELD_GACHA_FORWARD_ABOVE"
+GACHA_FORWARD_ABOVE_DEFAULT = 3
+GACHA_FALLBACK_BATCH = 3                # 合并转发不可用时，每条消息最多几张图
+GACHA_FORWARD_TIMEOUT_SECONDS = 60.0    # OneBot 回退（多页大图）的 HTTP 超时
+FORWARD_MAX_NODES = 50                  # 单条合并转发的节点上限，超出拆成多条
+_GACHA_FORWARD_SENDER_NAME = "终末地抽卡分析"
 CARD_CACHE_TTL_SECONDS = 600.0
 CARD_CACHE_MAX_BYTES = 48 * 1024 * 1024
 CARD_RENDER_VERSION = "endfield-card-v50"
@@ -910,7 +918,9 @@ async def _handle_personal_command(matcher, event: Event, command: ParsedEndfiel
             return await _handle_archive_progress(matcher, qq_user_id, command, cipher, group=is_group(event))
         if command.action in {"gacha", "gacha_sync"}:
             cipher = CredentialCipher.from_env()
-            return await _handle_gacha(matcher, qq_user_id, command, cipher, group=is_group(event))
+            return await _handle_gacha(
+                matcher, qq_user_id, command, cipher, group=is_group(event), event=event, bot=bot,
+            )
         if command.action == "gacha_import":
             return await _handle_xhh_import(matcher, qq_user_id, command)
         if command.action == "gacha_history":
@@ -1214,31 +1224,110 @@ async def _finish_challenge_pages(matcher, event, bot, pngs: tuple[bytes, ...], 
     return await matcher.finish()
 
 
-async def _send_forward_pngs(bot, event, pngs: tuple[bytes, ...]) -> None:
-    """Send PNG pages as one merged forward.
+async def _send_forward_pngs(
+    bot,
+    event,
+    pngs: tuple[bytes, ...],
+    *,
+    sender_name: str = _FORWARD_SENDER_NAME,
+    log_tag: str = "endfield-challenge",
+    onebot_timeout: float | None = None,
+) -> str:
+    """Send PNG pages as one merged forward; returns the path used (``satori`` / ``onebot``).
 
     Satori's standard ``<message forward>`` element is tried first: LLOneBot's
     Satori encoder turns it into a native QQ merged forward, so no OneBot
     action is needed.  Implementations that ignore ``forward`` would silently
     fan the pages out as separate messages, so a raised error (or a missing
     session) falls back to the OneBot ``send_*_forward_msg`` action.
+
+    ``onebot_timeout`` opts a caller into the large-forward fallback: nodes
+    reference the temp files already written for Satori (``file://``) instead
+    of base64, under ``sender_name`` and the given HTTP timeout.  Without it
+    the fallback is the original base64 action (challenge history).
     """
     uin = str(getattr(bot, "self_id", "") or getattr(bot, "id", "") or "") or None
+    images: list = []
     try:
-        await send_forward(
-            [_png_image(png) for png in pngs],
-            name=_FORWARD_SENDER_NAME,
-            uin=uin,
-        )
-        return
+        images = [_png_image(png) for png in pngs]
+        await send_forward(images, name=sender_name, uin=uin)
+        return "satori"
     except _ExitException:
         raise
     except Exception as exc:
         logger.warning(
-            f"[endfield-challenge] satori forward element failed, "
+            f"[{log_tag}] satori forward element failed, "
             f"falling back to OneBot action: {type(exc).__name__}: {exc}"
         )
-    await send_forward_images(bot, event, pngs)
+    if onebot_timeout is None:
+        await send_forward_images(bot, event, pngs)
+    else:
+        await send_forward_images(
+            bot, event, pngs, name=sender_name, timeout=onebot_timeout,
+            file_uris=[str(getattr(image, "src", "") or "") for image in images],
+        )
+    return "onebot"
+
+
+def _gacha_forward_above() -> int:
+    """抽卡分析超过多少张图改为合并转发；0 = 关闭合并转发（回滚开关）。"""
+    raw = os.getenv(GACHA_FORWARD_ABOVE_ENV, "").strip()
+    if not raw:
+        return GACHA_FORWARD_ABOVE_DEFAULT
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        logger.warning(f"[endfield-gacha] invalid {GACHA_FORWARD_ABOVE_ENV}={raw!r}, using {GACHA_FORWARD_ABOVE_DEFAULT}")
+        return GACHA_FORWARD_ABOVE_DEFAULT
+
+
+async def _finish_gacha_pngs(matcher, event, bot, pngs: tuple[bytes, ...]) -> None:
+    """抽卡分析投递：≤ 阈值与其他命令一样一条消息发出；超过阈值发 QQ 合并转发（每节点 1 张）。
+
+    回退链：Satori ``<message forward>`` → OneBot ``send_*_forward_msg`` → 每条 ≤3 张分批发送。
+    抽卡没有分页命令，所以最后一级是分批而不是文字提示（影拓历史仍按原规则：>2 页转发，失败回文字）。
+    """
+    threshold = _gacha_forward_above()
+    if not threshold or len(pngs) <= threshold:
+        return await _finish_pngs(matcher, pngs)
+    started = perf_counter()
+    sent = 0
+    vias: list[str] = []
+    try:
+        for start in range(0, len(pngs), FORWARD_MAX_NODES):
+            chunk = pngs[start:start + FORWARD_MAX_NODES]
+            vias.append(await _send_forward_pngs(
+                bot, event, chunk, sender_name=_GACHA_FORWARD_SENDER_NAME, log_tag="endfield-gacha",
+                onebot_timeout=GACHA_FORWARD_TIMEOUT_SECONDS,
+            ))
+            sent += len(chunk)
+    except _ExitException:
+        raise
+    except Exception as exc:
+        logger.warning(
+            f"[endfield-gacha] merged forward unavailable, fallback=batches sent={sent}/{len(pngs)}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+    else:
+        logger.info(
+            f"[endfield-gacha] deliver mode=forward via={'+'.join(vias)} pages={len(pngs)} forwards={len(vias)} "
+            f"bytes={sum(map(len, pngs))} elapsed={perf_counter() - started:.2f}s"
+        )
+        return await matcher.finish()
+    remaining = pngs[sent:]
+    batches = [remaining[index:index + GACHA_FALLBACK_BATCH] for index in range(0, len(remaining), GACHA_FALLBACK_BATCH)]
+    notice = (
+        f"抽卡分析共 {len(pngs)} 页，合并转发不可用，分 {len(batches)} 条发送。" if not sent
+        else f"抽卡分析共 {len(pngs)} 页，第 {sent + 1}–{len(pngs)} 页合并转发失败，分 {len(batches)} 条发送。"
+    )
+    for index, batch in enumerate(batches):
+        prefix = [Text(notice)] if index == 0 else []
+        await matcher.send(ChainMsg([*prefix, *(_png_image(png) for png in batch)]))
+    logger.info(
+        f"[endfield-gacha] deliver mode=batches pages={len(pngs)} forwarded={sent} batches={len(batches)} "
+        f"elapsed={perf_counter() - started:.2f}s"
+    )
+    return await matcher.finish()
 
 
 async def _one_page(page) -> tuple[bytes, ...]:
@@ -1937,7 +2026,8 @@ async def _handle_daily(
 
 
 async def _handle_gacha(
-    matcher, qq_user_id: str, command: ParsedEndfieldCommand, cipher: CredentialCipher, *, group: bool
+    matcher, qq_user_id: str, command: ParsedEndfieldCommand, cipher: CredentialCipher, *, group: bool,
+    event=None, bot=None,
 ) -> None:
     role = account_store.resolve_role(qq_user_id, command.account_selector)
     if role is None:
@@ -1971,7 +2061,7 @@ async def _handle_gacha(
         role, metadata, pool_rules, xhh_metadata, keepsake_metadata, pool_banners,
     )
     pngs = await draw_gacha_analysis_cards(analysis, uid=role.masked_uid)
-    return await _finish_pngs(matcher, pngs)
+    return await _finish_gacha_pngs(matcher, event, bot, pngs)
 
 
 async def _handle_gacha_history(matcher, qq_user_id: str, command: ParsedEndfieldCommand, *, group: bool) -> None:
