@@ -1,11 +1,11 @@
 {
   "schema": 2,
-  "head": "5ffea99",
+  "head": "4127cb5",
   "generated_from": {
     "first_commit": "8e1b455",
     "first_date": "2026-06-17",
     "last_date": "2026-10-01",
-    "commit_count": 210,
+    "commit_count": 212,
     "merge_commit_count": 16,
     "version_count": 20
   },
@@ -23,7 +23,7 @@
           "date": "2026-10-01",
           "kind": "feat",
           "text": "官号动态保存内容类别和抽奖等标签；同一群内，活动与官网通知在同阶段且发布时间相差不足 24 小时时，只发送先成功送达的一路。多活动动态能可靠分节时只推送未发送的部分，失败与重启后仍可重试。",
-          "commits": ["a99e6f5", "72632aa", "5ffea99"]
+          "commits": ["a99e6f5", "72632aa", "5ffea99", "4ffa932", "4127cb5"]
         },
         {
           "date": "2026-10-01",
