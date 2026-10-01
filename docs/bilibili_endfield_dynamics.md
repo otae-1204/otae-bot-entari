@@ -52,3 +52,23 @@
 ```
 
 本地采集样本位于 `data/bilibilibot/research/endfield-official/`，预览图片位于 `data/bilibilibot/previews/endfield-official/`，均不纳入 Git。
+
+## 业务验收与预览（2026-10-01）
+
+Windows / Python 3.13 相关回归为 **399 passed、1 deselected、47 subtests passed**。未纳入的用例是既有文档图片的逐像素一致性检查；本次新增业务测试全部通过。有一条第三方 `creart` 事件循环弃用警告。
+
+新增业务预览脚本回放四条官号样本，使用真实轮询器、持久化队列、过滤器、跨来源发送记录和 PNG 渲染器，接收端为两个模拟群。结果：前瞻、活动两条保留，抽奖发起、开奖两条过滤，共生成 4 次模拟投递；队列关闭重开后成功恢复，重查同批动态没有重复入队。
+
+```powershell
+.\.venv\Scripts\python.exe scripts/preview_bilibili_endfield.py
+# 若已有之前采集的四条完整详情，可回放原始正文：
+.\.venv\Scripts\python.exe scripts/preview_bilibili_endfield.py --captured data/bilibilibot/research/endfield-official
+```
+
+默认使用仓库中的公开样本节选，配图由现有渲染器读取。输出 PNG 与 `business-preview.json` 至 `data/bilibilibot/previews/pr-2026-10-01/`，临时业务数据库在测试后清理。下图使用已核实的完整官方响应回放，未向真实群聊发送消息。
+
+![前瞻直播动态预览](images/bilibili-endfield/livestream.png)
+
+![活动动态预览](images/bilibili-endfield/activity.png)
+
+本次匿名只读接口检查：空间动态列表返回 HTTP 412；活动单条详情返回 HTTP 200、业务码 0。样本回放通过不代表生产环境的持续采集已验收，部署仍需验证可用的 B 站凭据或 RSSHub 回退来源。
