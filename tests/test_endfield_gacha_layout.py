@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import importlib
 import importlib.util
 import os
@@ -431,6 +432,49 @@ class GachaRowTests(unittest.TestCase):
         meta = draw._meta(("重构寻访", "第 2 期", "12 个付费六星"))
         self.assertEqual(meta.count('class="mp"'), 3)
         self.assertNotIn(" · <", meta)       # 「·」贴着前一段，不会出现在行首
+
+
+class GachaTypographyTests(unittest.TestCase):
+    def test_css_only_uses_weights_the_bundled_font_has(self):
+        weights = set(re.findall(r"font-weight:\s*(\d+)", draw.GACHA_CSS))
+        self.assertTrue(weights)
+        self.assertLessEqual(weights, {"400", "500", "700"})
+        self.assertIsNone(re.search(r"font-weight:\s*(800|850|900|950)", draw.GACHA_CSS))
+        self.assertIn("font-synthesis:none", draw.GACHA_CSS)
+
+    def test_harmonyos_font_face_is_embedded_and_first_in_the_stack(self):
+        family = draw.GACHA_FONT_FAMILY
+        self.assertIn(f"font-family:'{family}','Microsoft YaHei','PingFang SC','Noto Sans SC',Arial,sans-serif",
+                      draw.GACHA_CSS)
+        faces = draw.gacha_font_face_css()
+        self.assertEqual(re.findall(rf'@font-face\{{font-family:"{family}";font-weight:(\d+)', faces),
+                         ["400", "500", "700"])
+        for _weight, name in draw.GACHA_FONT_FILES:
+            path = draw.GACHA_FONT_DIR / name
+            self.assertTrue(name.startswith("HarmonyOS_Sans_SC_") and path.is_file(), path)
+            head = base64.b64encode(path.read_bytes()[:48]).decode("ascii")
+            self.assertIn(f"url(data:font/ttf;base64,{head}", faces)
+        document = draw._document("<div></div>")
+        self.assertLess(document.index("@font-face"), document.index(draw.GACHA_CSS))
+
+    def test_missing_font_files_fall_back_to_the_system_stack(self):
+        draw.gacha_font_face_css.cache_clear()
+        try:
+            with mock.patch.object(draw, "GACHA_FONT_DIR", Path("/nonexistent/fonts")):
+                self.assertEqual(draw.gacha_font_face_css(), "")
+                self.assertIn("'Microsoft YaHei'", draw._document("<div></div>"))
+        finally:
+            draw.gacha_font_face_css.cache_clear()
+
+    def test_summary_small_text_is_at_least_12px(self):
+        sizes = [
+            float(size)
+            for selectors, body in re.findall(r"([^{}]+)\{([^{}]*)\}", draw.GACHA_CSS)
+            if re.search(r"\.(total|metric|expectation)", selectors)
+            for size in re.findall(r"font-size:([\d.]+)px", body)
+        ]
+        self.assertTrue(sizes)
+        self.assertGreaterEqual(min(sizes), 12)
 
 
 class GachaPaginationTests(unittest.TestCase):
