@@ -32,6 +32,7 @@ UPDATE = re.compile(r"改期|延期|时间调整|调整说明|补充说明|更�
 SOCIAL_LOTTERY = re.compile(
     r"抽[奖獎]|[开開中兑兌][奖獎]|(?:转发|轉發|评论|評論)(?:有奖|有獎|抽|赢|贏)|"
     r"(?:抽取|抽出|随机选出|随机挑选)[^。！？]{0,60}(?:位|名)[^。！？]{0,30}(?:送出|赠送|获得|玩家|管理员)|"
+    r"(?:抽取|抽出)[^。！？\n]{0,80}(?:周边|京东卡|iPad|手机|手柄)|"
     r"(?:bilibili\.com|b23\.tv)/[^\s]*lottery",
     re.IGNORECASE,
 )
@@ -52,6 +53,11 @@ def core_text(text: str) -> str:
 
 def headline(title: str, text: str) -> str:
     fallback = title.strip()
+    if QUOTED.search(fallback) or re.search(
+        r"研发|封禁|封停|违规|更新|预下载|前瞻|干员|演示|单曲|音乐|联名|高校|征集|开奖|中奖",
+        fallback,
+    ):
+        return fallback
     for line in core_text(text).splitlines():
         line = re.sub(r"#[^#]+#", "", line).strip()
         if not line or line.startswith(("亲爱的", "管理员：", "互动抽奖")):
@@ -251,6 +257,7 @@ def classify(
     )
     # Split only unambiguous section boundaries. Shared schedules stay together.
     sections = [(title, body)]
+    splittable = False
     if len(headings) > 1 and all(
         _schedule(
             body[
@@ -261,6 +268,7 @@ def classify(
         )[0]
         for i, h in enumerate(headings)
     ):
+        splittable = True
         sections = [
             (
                 h[1].strip(),
@@ -289,7 +297,9 @@ def classify(
                     start,
                     end,
                     version,
-                ),
+                )
+                if len(headings) <= 1 or splittable
+                else None,
             )
         )
     return Classification(category, tuple(sorted(tags)), tuple(units))

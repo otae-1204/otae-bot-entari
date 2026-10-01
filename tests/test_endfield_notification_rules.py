@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -16,6 +18,20 @@ NOW = 1790751600
 START = 1790827200
 BODY = "「融合！山团团！」趣味活动说明\n活动时间\n2026/10/01 12:00 - 2026/10/15 12:00\n完成任务领取奖励"
 DEST = destination_key("qq", "bot", "group")
+
+
+@pytest.mark.parametrize(
+    "sample",
+    json.loads(
+        (
+            Path(__file__).parent / "fixtures/endfield_notification_categories.json"
+        ).read_text(encoding="utf-8")
+    )["samples"],
+    ids=lambda item: item["source"].rsplit("/", 1)[-1],
+)
+def test_verified_website_and_bilibili_category_samples(sample):
+    result = classify(sample["title"], sample["text_excerpt"], sample["published_at"])
+    assert result.category == sample["category"]
 
 
 @pytest.mark.parametrize(
@@ -66,6 +82,9 @@ def test_multisection_units_and_unspecified_date_are_conservative():
     assert "乙" not in result.units[0].text
     assert "multiple_activities" in result.tags
     assert classify("活动已开启", "活动已开启", NOW).units[0].event is None
+    ambiguous = text.replace("2026/10/01 12:00 - 2026/10/16 12:00", "版本更新后")
+    uncertain = classify("活动一览", ambiguous, NOW)
+    assert len(uncertain.units) == 1 and uncertain.units[0].event is None
 
 
 def event():
