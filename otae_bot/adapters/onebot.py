@@ -52,8 +52,12 @@ def _access_token() -> str:
     return ""
 
 
-async def call_onebot_action(bot: Any, action: str, **params: Any) -> Any:
-    """Call an action through Satori internal API, then configured HTTP."""
+async def call_onebot_action(bot: Any, action: str, *, http_timeout: float = 10, **params: Any) -> Any:
+    """Call an action through Satori internal API, then configured HTTP.
+
+    ``http_timeout`` only applies to the HTTP fallback; large merged forwards
+    pass a longer value, every other caller keeps the 10 s default.
+    """
     internal_error: Exception | None = None
     if bot is not None and hasattr(bot, "internal"):
         try:
@@ -72,7 +76,9 @@ async def call_onebot_action(bot: Any, action: str, **params: Any) -> Any:
     if token:
         headers["Authorization"] = f"Bearer {token}"
     errors: list[str] = []
-    async with httpx.AsyncClient(timeout=10, trust_env=False, verify=await ashared_ssl_context(trust_env=False)) as client:
+    async with httpx.AsyncClient(
+        timeout=http_timeout, trust_env=False, verify=await ashared_ssl_context(trust_env=False),
+    ) as client:
         for base in urls:
             for suffix in (f"/{action}", f"/api/{action}"):
                 try:
@@ -90,20 +96,34 @@ async def call_onebot_action(bot: Any, action: str, **params: Any) -> Any:
     raise RuntimeError("; ".join(errors[-4:]) or "OneBot action failed") from internal_error
 
 
-def _forward_node(png: bytes, *, name: str, uin: str) -> dict[str, Any]:
-    encoded = base64.b64encode(png).decode("ascii")
+def _forward_node(png: bytes, *, name: str, uin: str, file_uri: str = "") -> dict[str, Any]:
+    """One image node; a local ``file://`` URI is referenced directly instead of inlining base64."""
+    source = file_uri if file_uri.startswith("file://") else f"base64://{base64.b64encode(png).decode('ascii')}"
     return {
         "type": "node",
         "data": {
             "name": name,
             "uin": str(uin or "0"),
-            "content": [{"type": "image", "data": {"file": f"base64://{encoded}"}}],
+            "content": [{"type": "image", "data": {"file": source}}],
         },
     }
 
 
-async def send_forward_images(bot: Any, event: Any, pages: Sequence[bytes]) -> None:
-    """Send PNG pages as one private/group merged-forward message."""
+async def send_forward_images(
+    bot: Any,
+    event: Any,
+    pages: Sequence[bytes],
+    *,
+    name: str = "Endfield",
+    file_uris: Sequence[str] = (),
+    timeout: float = 10,
+) -> None:
+    """Send PNG pages as one private/group merged-forward message.
+
+    ``file_uris`` (aligned with ``pages``) lets LLOneBot read already-written
+    temp files, keeping a many-page forward small; pages without a URI fall back
+    to base64.  ``timeout`` bounds the HTTP fallback of the action call.
+    """
     group = get_group_id(event)
     if group:
         action = "send_group_forward_msg"
@@ -112,5 +132,7 @@ async def send_forward_images(bot: Any, event: Any, pages: Sequence[bytes]) -> N
         action = "send_private_forward_msg"
         target = {"user_id": event_user_id(event)}
     self_id = str(getattr(bot, "self_id", "") or getattr(bot, "id", "") or event_user_id(event) or "0")
-    messages = [_forward_node(page, name="Endfield", uin=self_id) for page in pages]
-    await call_onebot_action(bot, action, **target, messages=messages)
+    uris = list(file_uris)[:len(pages)]
+    uris += [""] * (len(pages) - len(uris))
+    messages = [_forward_node(page, name=name, uin=self_id, file_uri=uri) for page, uri in zip(pages, uris)]
+    await call_onebot_action(bot, action, **target, messages=messages, http_timeout=timeout)
