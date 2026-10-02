@@ -19,11 +19,11 @@ from loguru import logger
 from .session import BiliAPIError
 
 
+# rsshub.moeyy.cn 已 DNS 解析失败，移出内置备用源；需要更多实例请用 BILI_RSSHUB_BASE_URLS。
 DEFAULT_BASE_URLS = [
     "https://rss.materium.io",
     "https://rsshub.app",
     "https://rsshub.rssforever.com",
-    "https://rsshub.moeyy.cn",
     "https://rsshub.ktachibana.party",
 ]
 

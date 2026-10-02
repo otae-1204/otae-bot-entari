@@ -22,7 +22,7 @@ B站官方 API  →  RSSHub  →  动态流接口
 |---|---|
 | `rsshub.app` | HTTP 403 |
 | `rsshub.rssforever.com` | HTTP 503 |
-| `rsshub.moeyy.cn` | 连接失败 |
+| `rsshub.moeyy.cn` | 连接失败（后续 DNS 解析失败，已移出内置备用源） |
 | `rss.materium.io` | 时好时坏（1/3 ~ 3/4） |
 | `rss.starfreedomx.top` | 1/6（动态路由全挂） |
 | 其余 6 个 | 超时 / 连接失败 |
