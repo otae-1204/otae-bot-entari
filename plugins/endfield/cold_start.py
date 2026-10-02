@@ -185,6 +185,7 @@ async def remote_assets_cold(urls: Iterable[Any], *, namespace: str) -> bool:
             url,
             namespace=namespace,
             response_kind="bytes",
+            asset=True,
         ):
             return True
     return False

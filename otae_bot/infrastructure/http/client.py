@@ -27,6 +27,7 @@ from .asset_policy import (
     asset_settings,
     batch_deadline,
     configure_asset_settings,
+    rewrite_asset_url,
 )
 from .json_values import freeze_json, freeze_json_object, json_memory_size, mutable_json
 from .tls import shared_ssl_context
@@ -175,12 +176,38 @@ def _build_asset_client(settings: AssetFetchSettings) -> httpx.AsyncClient:
         max_connections=settings.concurrency,
         max_keepalive_connections=settings.concurrency,
     )
-    return httpx.AsyncClient(
+    verify = shared_ssl_context(trust_env=settings.trust_env)
+    options = dict(
         follow_redirects=True,
-        trust_env=False,
-        verify=shared_ssl_context(trust_env=False),
+        trust_env=settings.trust_env,
+        verify=verify,
         limits=limits,
     )
+    if not settings.proxy:
+        return httpx.AsyncClient(**options)
+    try:
+        if settings.proxy_hosts:
+            # httpx 的 mounts 按主机路由：只有列出的素材主机走代理，其余直连。
+            mounts = {
+                f"all://{host}": httpx.AsyncHTTPTransport(
+                    proxy=settings.proxy, verify=verify, limits=limits
+                )
+                for host in settings.proxy_hosts
+            }
+            client = httpx.AsyncClient(mounts=mounts, **options)
+        else:
+            client = httpx.AsyncClient(proxy=settings.proxy, **options)
+    except (ImportError, ValueError) as exc:
+        logger.warning(
+            f"[http-assets] asset proxy unusable ({type(exc).__name__}); connecting directly"
+        )
+        return httpx.AsyncClient(**options)
+    proxy = urlsplit(settings.proxy)
+    logger.info(
+        f"[http-assets] asset proxy enabled via {proxy.scheme}://{proxy.hostname}:{proxy.port or ''} "
+        f"hosts={','.join(settings.proxy_hosts) or '*'}"
+    )
+    return client
 
 
 def _get_asset_client() -> httpx.AsyncClient:
@@ -389,8 +416,11 @@ async def cached_public_resource(
     params: Mapping[str, Any] | Sequence[tuple[str, Any]] | None = None,
     headers: Mapping[str, str] | None = None,
     ttl_seconds: float = DEFAULT_CACHE_TTL_SECONDS,
+    asset: bool = False,
 ) -> bool:
     """True when memory or disk metadata can serve this request without a body read."""
+    if asset:
+        url = rewrite_asset_url(url)
     key, eligible, disk_key, ttl_seconds = await _cache_coordinates(
         url,
         namespace=namespace,
@@ -562,9 +592,13 @@ async def fetch_bytes(
     max_bytes: int = DEFAULT_MAX_RESOURCE_BYTES,
     asset: bool = False,
 ) -> HttpResource:
-    """``asset=True`` 走素材通道：独立并发、短连接超时、按主机熔断。"""
-    if timeout_seconds is None:
-        timeout_seconds = asset_settings().read_timeout if asset else 10.0
+    """``asset=True`` 走素材通道：独立并发、短连接超时、按主机熔断、可选代理与主机改写。"""
+    if asset:
+        url = rewrite_asset_url(url)
+        if timeout_seconds is None:
+            timeout_seconds = asset_settings().read_timeout
+    elif timeout_seconds is None:
+        timeout_seconds = 10.0
     return await _fetch_resource(
         url,
         namespace=namespace,

@@ -1,13 +1,15 @@
-"""素材通道（图片/图标/头像）的策略：超时、重试、按主机熔断、整卡截止时间。
+"""素材通道（图片/图标/头像）的策略：超时、重试、按主机熔断、代理与主机改写、整卡截止时间。
 
 素材与 API 请求分走两条通道（见 client.py）：一个图床不可达时，素材请求只占自己的
 并发槽位，签到、绑定等 API 请求不受影响。这里只放策略与状态，不发网络请求。
 
-配置全部来自环境变量（.env 由 otae_bot.config.settings 载入 os.environ），首次使用时读取。
+配置全部来自环境变量（.env 由 otae_bot.config.settings 载入 os.environ），首次使用时
+读取；默认值保持原有安全行为：不走代理、trust_env=False、不改写主机。
 """
 
 from __future__ import annotations
 
+import json
 import os
 import time
 from contextlib import contextmanager
@@ -15,12 +17,14 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from threading import RLock
 from typing import Callable, Iterator, Mapping
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 from loguru import logger
 
 
 ENV_PREFIX = "OTAE_HTTP_ASSET_"
+_PROXY_SCHEMES = ("http", "https", "socks5", "socks5h")
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +36,10 @@ class AssetFetchSettings:
     breaker_threshold: int = 3
     breaker_cooldown: float = 300.0
     render_budget: float = 25.0
+    proxy: str = ""
+    proxy_hosts: tuple[str, ...] = ()
+    trust_env: bool = False
+    host_rewrites: tuple[tuple[str, str], ...] = ()
 
     @property
     def attempts(self) -> int:
@@ -51,6 +59,61 @@ def _number(environ: Mapping[str, str], name: str, default, cast, minimum, maxim
     return value if maximum is None else min(maximum, value)
 
 
+def _flag(environ: Mapping[str, str], name: str, default: bool) -> bool:
+    raw = str(environ.get(ENV_PREFIX + name, "") or "").strip().lower()
+    if not raw:
+        return default
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _hosts(raw: str) -> tuple[str, ...]:
+    return tuple(
+        dict.fromkeys(
+            item.strip().lower().rstrip(".")
+            for item in raw.replace(";", ",").split(",")
+            if item.strip()
+        )
+    )
+
+
+def _rewrites(raw: str) -> tuple[tuple[str, str], ...]:
+    """``a.example=b.example,c=d`` 或 JSON 对象；只改写主机名，不改路径。"""
+    raw = raw.strip()
+    if not raw:
+        return ()
+    pairs: list[tuple[str, str]] = []
+    if raw.startswith("{"):
+        try:
+            mapping = json.loads(raw)
+        except json.JSONDecodeError:
+            logger.warning(f"[http-assets] {ENV_PREFIX}HOST_REWRITE is not valid JSON; ignored")
+            return ()
+        if isinstance(mapping, dict):
+            pairs = [(str(key), str(value)) for key, value in mapping.items()]
+    else:
+        for item in raw.replace(";", ",").split(","):
+            source, sep, target = item.partition("=")
+            if sep:
+                pairs.append((source, target))
+    cleaned = {
+        source.strip().lower(): target.strip().lower()
+        for source, target in pairs
+        if source.strip() and target.strip() and source.strip().lower() != target.strip().lower()
+    }
+    return tuple(cleaned.items())
+
+
+def _proxy(raw: str) -> str:
+    raw = raw.strip()
+    if not raw:
+        return ""
+    if urlsplit(raw).scheme.lower() not in _PROXY_SCHEMES:
+        # 不把取值写进日志：代理地址可能带口令。
+        logger.warning(f"[http-assets] {ENV_PREFIX}PROXY has an unsupported scheme; ignored")
+        return ""
+    return raw
+
+
 def load_asset_settings(environ: Mapping[str, str] | None = None) -> AssetFetchSettings:
     env = os.environ if environ is None else environ
     defaults = AssetFetchSettings()
@@ -62,6 +125,10 @@ def load_asset_settings(environ: Mapping[str, str] | None = None) -> AssetFetchS
         breaker_threshold=_number(env, "BREAKER_THRESHOLD", defaults.breaker_threshold, int, 0),
         breaker_cooldown=_number(env, "BREAKER_COOLDOWN", defaults.breaker_cooldown, float, 1.0),
         render_budget=_number(env, "RENDER_BUDGET", defaults.render_budget, float, 0.0),
+        proxy=_proxy(str(env.get(ENV_PREFIX + "PROXY", "") or "")),
+        proxy_hosts=_hosts(str(env.get(ENV_PREFIX + "PROXY_HOSTS", "") or "")),
+        trust_env=_flag(env, "TRUST_ENV", defaults.trust_env),
+        host_rewrites=_rewrites(str(env.get(ENV_PREFIX + "HOST_REWRITE", "") or "")),
     )
 
 
@@ -83,6 +150,19 @@ def configure_asset_settings(settings: AssetFetchSettings | None) -> None:
     with _settings_lock:
         _settings = settings
         _breaker = None
+
+
+def rewrite_asset_url(url: str, settings: AssetFetchSettings | None = None) -> str:
+    rewrites = (settings or asset_settings()).host_rewrites
+    if not rewrites:
+        return url
+    parts = urlsplit(url)
+    host = (parts.hostname or "").lower()
+    target = dict(rewrites).get(host)
+    if not target:
+        return url
+    netloc = target if parts.port is None else f"{target}:{parts.port}"
+    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
 
 
 # ---------------------------------------------------------------- 按主机熔断
