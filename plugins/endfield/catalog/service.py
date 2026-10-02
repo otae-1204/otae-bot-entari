@@ -1351,3 +1351,11 @@ def _best_slug_match(query: str, records: list[dict[str, Any]]) -> str | None:
     if len(scored) > 1 and scored[0][0] - scored[1][0] < AMBIGUITY_MARGIN:
         return None
     return scored[0][1]
+
+
+def _pool_table_int(value: Any, default: int) -> int:
+    """AKE 卡池表的数字列可能缺失或为空串；解析失败时回到调用方给的默认值。"""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
