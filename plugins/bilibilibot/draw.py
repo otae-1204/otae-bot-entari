@@ -290,8 +290,9 @@ async def _fetch_image_bytes(url: str) -> bytes | None:
     if not url:
         return None
     try:
+        # 头像 / 封面走素材通道：不占 API 并发，不可达的图床会被熔断跳过。
         resource = await fetch_bytes(
-            url, namespace="bilibilibot-assets", timeout_seconds=8.0
+            url, namespace="bilibilibot-assets", timeout_seconds=8.0, asset=True
         )
         return resource.content
     except Exception:  # noqa: BLE001 - failed optional assets must not block a notification

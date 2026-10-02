@@ -26,8 +26,6 @@ CATALOG_TTL_SECONDS = 24 * 60 * 60
 IMAGE_NAMESPACE = "endfield-gacha-images"
 POOL_ARTICLE_PREFIX = "卡池/"
 KEEPSAKE_ARTICLE_PREFIX = "物品/干员信物/"
-IMAGE_FETCH_TIMEOUT_SECONDS = 20.0
-IMAGE_FETCH_ATTEMPTS = 3
 IMAGE_FETCH_MAX_BYTES = 24 * 1024 * 1024
 
 
@@ -509,11 +507,10 @@ class EndfieldGachaAssetCache:
         return result
 
     async def _fetch_image_urls(self, urls: Iterable[str]) -> dict[str, object]:
+        # 超时、重试与按主机熔断取素材通道配置（OTAE_HTTP_ASSET_*）。
         fetched = await fetch_many_resilient(
             urls,
             namespace=IMAGE_NAMESPACE,
-            timeout_seconds=IMAGE_FETCH_TIMEOUT_SECONDS,
-            attempts=IMAGE_FETCH_ATTEMPTS,
             max_bytes=IMAGE_FETCH_MAX_BYTES,
             log_prefix="[endfield-gacha]",
         )

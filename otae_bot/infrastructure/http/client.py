@@ -20,6 +20,13 @@ import httpx
 from loguru import logger
 
 from otae_bot.infrastructure.cache import AsyncTTLCache, CacheStats
+from .asset_policy import (
+    AssetFetchSettings,
+    HostCircuitOpen,
+    asset_breaker,
+    asset_settings,
+    configure_asset_settings,
+)
 from .json_values import freeze_json, freeze_json_object, json_memory_size, mutable_json
 from .tls import shared_ssl_context
 from .disk import (
@@ -90,6 +97,12 @@ _stats_lock = RLock()
 _namespace_metrics: dict[str, dict[str, float]] = {}
 _semaphore_loop: asyncio.AbstractEventLoop | None = None
 _request_semaphore: asyncio.Semaphore | None = None
+# 素材（图片/图标/头像）走独立的客户端与信号量：图床不可达时只占素材自己的槽位，
+# API 请求仍按原有的 Semaphore(DEFAULT_CONCURRENCY) 排队，互不阻塞。
+_asset_client: httpx.AsyncClient | None = None
+_asset_client_lifetime = None
+_asset_semaphore_loop: asyncio.AbstractEventLoop | None = None
+_asset_semaphore: asyncio.Semaphore | None = None
 
 
 def _cache_event(key: RequestKey, event: str, value: float) -> None:
@@ -156,8 +169,36 @@ async def _own_client(client):
         await client.aclose()
 
 
-async def _get_owned_client():
-    global _client_lifetime
+def _build_asset_client(settings: AssetFetchSettings) -> httpx.AsyncClient:
+    limits = httpx.Limits(
+        max_connections=settings.concurrency,
+        max_keepalive_connections=settings.concurrency,
+    )
+    return httpx.AsyncClient(
+        follow_redirects=True,
+        trust_env=False,
+        verify=shared_ssl_context(trust_env=False),
+        limits=limits,
+    )
+
+
+def _get_asset_client() -> httpx.AsyncClient:
+    global _asset_client
+    with _client_lock:
+        if _asset_client is None or _asset_client.is_closed:
+            _asset_client = _build_asset_client(asset_settings())
+        return _asset_client
+
+
+async def _get_owned_client(*, asset: bool = False):
+    global _client_lifetime, _asset_client_lifetime
+    if asset:
+        client = _get_asset_client()
+        if _asset_client_lifetime is None or _asset_client_lifetime[0] is not client:
+            lifetime = _own_client(client)
+            await anext(lifetime)
+            _asset_client_lifetime = (client, lifetime)
+        return client
     client = _get_client()
     if _client_lifetime is None or _client_lifetime[0] is not client:
         lifetime = _own_client(client)
@@ -173,6 +214,15 @@ def _get_semaphore() -> asyncio.Semaphore:
         _semaphore_loop = loop
         _request_semaphore = asyncio.Semaphore(DEFAULT_CONCURRENCY)
     return _request_semaphore
+
+
+def _get_asset_semaphore() -> asyncio.Semaphore:
+    global _asset_semaphore_loop, _asset_semaphore
+    loop = asyncio.get_running_loop()
+    if _asset_semaphore is None or _asset_semaphore_loop is not loop:
+        _asset_semaphore_loop = loop
+        _asset_semaphore = asyncio.Semaphore(asset_settings().concurrency)
+    return _asset_semaphore
 
 
 def _normalized_params(
@@ -202,20 +252,41 @@ async def _request_resource(
     timeout_seconds: float,
     max_bytes: int,
     cached_image: DiskImage | None = None,
+    asset: bool = False,
 ) -> HttpResource:
-    async with _get_semaphore():
+    timeout: float | httpx.Timeout = timeout_seconds
+    if asset:
+        breaker = asset_breaker()
+        host = (urlsplit(url).hostname or "").lower()
+        # 熔断中的主机连信号量都不排，直接判缺失。
+        if breaker.blocked(host):
+            raise HostCircuitOpen(f"asset host cooling down: {host}")
+        timeout = httpx.Timeout(
+            timeout_seconds,
+            connect=min(asset_settings().connect_timeout, timeout_seconds),
+        )
+    async with _get_asset_semaphore() if asset else _get_semaphore():
+        # 排队期间熔断可能已经打开；半开时这里只放行一个探测请求。
+        if asset and not breaker.acquire(host):
+            raise HostCircuitOpen(f"asset host cooling down: {host}")
         _install_request_log_filter()
         log_token = _suppress_request_log.set(True)
         try:
-            client = await _get_owned_client()
+            client = await _get_owned_client(asset=asset)
             response = await client.get(
                 url,
                 params=params,
                 headers=headers,
-                timeout=timeout_seconds,
+                timeout=timeout,
             )
+        except BaseException as exc:
+            if asset:
+                breaker.record(host, exc)
+            raise
         finally:
             _suppress_request_log.reset(log_token)
+        if asset:
+            breaker.record(host, None)
         if response.status_code == 304 and cached_image is not None:
             content = cached_image.content
         else:
@@ -353,6 +424,7 @@ async def _fetch_resource(
     ttl_seconds: float,
     max_bytes: int,
     validator: Callable[[HttpResource], object] | None = None,
+    asset: bool = False,
 ) -> HttpResource:
     key, eligible, disk_key, ttl_seconds = await _cache_coordinates(
         url,
@@ -416,6 +488,7 @@ async def _fetch_resource(
             timeout_seconds=timeout_seconds,
             max_bytes=max_bytes,
             cached_image=cached,
+            asset=asset,
         )
         resource = validate(resource)  # Never persist malformed JSON.
         if eligible:
@@ -483,10 +556,14 @@ async def fetch_bytes(
     namespace: str,
     params: Mapping[str, Any] | Sequence[tuple[str, Any]] | None = None,
     headers: Mapping[str, str] | None = None,
-    timeout_seconds: float = 10.0,
+    timeout_seconds: float | None = None,
     ttl_seconds: float = DEFAULT_CACHE_TTL_SECONDS,
     max_bytes: int = DEFAULT_MAX_RESOURCE_BYTES,
+    asset: bool = False,
 ) -> HttpResource:
+    """``asset=True`` 走素材通道：独立并发、短连接超时、按主机熔断。"""
+    if timeout_seconds is None:
+        timeout_seconds = asset_settings().read_timeout if asset else 10.0
     return await _fetch_resource(
         url,
         namespace=namespace,
@@ -496,6 +573,7 @@ async def fetch_bytes(
         timeout_seconds=timeout_seconds,
         ttl_seconds=ttl_seconds,
         max_bytes=max_bytes,
+        asset=asset,
     )
 
 
@@ -504,9 +582,10 @@ async def fetch_many(
     *,
     namespace: str,
     headers: Mapping[str, str] | None = None,
-    timeout_seconds: float = 10.0,
+    timeout_seconds: float | None = None,
     ttl_seconds: float = DEFAULT_CACHE_TTL_SECONDS,
     max_bytes: int = DEFAULT_MAX_RESOURCE_BYTES,
+    asset: bool = False,
 ) -> dict[str, HttpResource | None]:
     unique_urls = tuple(dict.fromkeys(str(url) for url in urls if url))
     results = await asyncio.gather(
@@ -518,6 +597,7 @@ async def fetch_many(
                 timeout_seconds=timeout_seconds,
                 ttl_seconds=ttl_seconds,
                 max_bytes=max_bytes,
+                asset=asset,
             )
             for url in unique_urls
         ),
@@ -534,8 +614,10 @@ def classify_failure(exc: BaseException) -> tuple[bool, str]:
 
     图床（bbs.hycdn.cn）实测：同一批头像 URL 一组 15 次全 404、另一组 12 个全 200
     ——404 是**间歇**的（边缘节点对象不一致），不能当永久失败，否则会把原有容错削掉。
-    只有确定性的失败才放弃：体积超过上限，重取也不会变小。
+    只有确定性的失败才放弃：体积超过上限，重取也不会变小；主机熔断中，冷却期内重试也不会发请求。
     """
+    if isinstance(exc, HostCircuitOpen):
+        return True, "circuit_open"
     if isinstance(exc, httpx.HTTPStatusError):
         return False, f"http {exc.response.status_code}"
     if isinstance(exc, httpx.TimeoutException):
@@ -553,21 +635,24 @@ async def fetch_many_resilient(
     *,
     namespace: str,
     headers: Mapping[str, str] | None = None,
-    timeout_seconds: float = 10.0,
+    timeout_seconds: float | None = None,
     ttl_seconds: float = DEFAULT_CACHE_TTL_SECONDS,
     max_bytes: int = DEFAULT_MAX_RESOURCE_BYTES,
-    attempts: int = 3,
+    attempts: int | None = None,
     base_delay_seconds: float = 0.25,
     log_prefix: str = "[assets]",
 ) -> tuple[dict[str, HttpResource | None], dict[str, str]]:
-    """并发取多个资源，对间歇性失败退避重试，并返回失败原因。
+    """并发取多个素材，对间歇性失败退避重试，并返回失败原因。
 
-    与 fetch_many 的区别只有两点，都是为图床的抖动服务：
-    1. 失败会重试（默认 3 轮，0.25s / 0.5s 退避）——hycdn 的 404 与超时都是间歇的；
-    2. 放弃的原因会写进日志，调用方不再只看到「少了几张图」。
+    与 fetch_many 的区别，都是为图床的抖动与不可达服务：
+    1. 走素材通道（独立并发、短连接超时、按主机熔断），不占 API 请求的并发；
+    2. 失败会重试（默认重试 1 次，0.25s 退避）——hycdn 的 404 与超时都是间歇的；
+    3. 放弃的原因会写进日志，调用方不再只看到「少了几张图」。
     第一项覆盖**每一个**请求过的 url（失败为 None），第二项只保留最终失败原因，
     调用方既不会悄悄少图，也能决定是否把失败详情带入诊断信息。
     """
+    if attempts is None:
+        attempts = asset_settings().attempts
     unique_urls = tuple(dict.fromkeys(str(url) for url in urls if url))
     resolved: dict[str, HttpResource] = {}
     failures: dict[str, str] = {}
@@ -584,6 +669,7 @@ async def fetch_many_resilient(
                     timeout_seconds=timeout_seconds,
                     ttl_seconds=ttl_seconds,
                     max_bytes=max_bytes,
+                    asset=True,
                 )
                 for url in pending
             ),
@@ -732,18 +818,25 @@ async def get_http_cache_diagnostics() -> dict[str, Any]:
 
 async def close_http_client() -> None:
     global _client, _client_lifetime, _request_semaphore, _semaphore_loop
+    global _asset_client, _asset_client_lifetime, _asset_semaphore, _asset_semaphore_loop
     await asyncio.gather(*(pool.close() for pool in _cache_pools))
     with _client_lock:
-        client = _client
-        _client = None
-        lifetime = _client_lifetime
-        _client_lifetime = None
-    if lifetime is not None:
-        await lifetime[1].aclose()
-    if client is not None:
-        await client.aclose()
+        clients = (_client, _asset_client)
+        lifetimes = (_client_lifetime, _asset_client_lifetime)
+        _client = _asset_client = None
+        _client_lifetime = _asset_client_lifetime = None
+    for lifetime in lifetimes:
+        if lifetime is not None:
+            await lifetime[1].aclose()
+    for client in clients:
+        if client is not None:
+            await client.aclose()
     _request_semaphore = None
     _semaphore_loop = None
+    _asset_semaphore = None
+    _asset_semaphore_loop = None
+    # 熔断状态与素材配置随客户端一起重置；下次使用时重新读取环境变量。
+    configure_asset_settings(None)
     await clear_http_cache(include_disk=False)
     await asyncio.to_thread(public_images.close)
     await asyncio.to_thread(public_tables.close)

@@ -3562,8 +3562,6 @@ def _centered_png_data_url(data_url: str) -> str:
         return ""
 
 
-ASSET_FETCH_TIMEOUT_SECONDS = 20.0
-ASSET_FETCH_ATTEMPTS = 3
 ASSET_RETRY_BASE_DELAY_SECONDS = 0.25
 ASSET_FETCH_MAX_BYTES = 24 * 1024 * 1024
 
@@ -3574,12 +3572,12 @@ async def _prepare_assets(urls: Iterable[str], *, inline: bool) -> _PreparedAsse
     remote_urls = [url for url in unique if not url.startswith("data:")]
     # 图床（hycdn / assets.fz.wiki）的 404 与超时都是间歇的，交给共享的
     # fetch_many_resilient 退避重试；成功的走缓存命中，避免单次抖动导致渲染「无图」。
+    # 超时、重试次数与按主机熔断都取素材通道的配置（OTAE_HTTP_ASSET_*），
+    # 没取到的按缺失处理，沿用各卡片原有的占位 / 留空逻辑。
     # 缺图原因由它自己写日志，这里不再重复一遍。
     fetched = await fetch_many_resilient(
         remote_urls,
         namespace=REMOTE_ASSET_NAMESPACE,
-        timeout_seconds=ASSET_FETCH_TIMEOUT_SECONDS,
-        attempts=ASSET_FETCH_ATTEMPTS,
         base_delay_seconds=ASSET_RETRY_BASE_DELAY_SECONDS,
         max_bytes=ASSET_FETCH_MAX_BYTES,
         log_prefix="[endfield]",
