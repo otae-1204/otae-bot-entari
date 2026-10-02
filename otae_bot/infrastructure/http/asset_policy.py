@@ -107,6 +107,8 @@ def _proxy(raw: str) -> str:
     raw = raw.strip()
     if not raw:
         return ""
+    if "://" not in raw:
+        raw = f"http://{raw}"  # 与 httpx 处理 HTTP(S)_PROXY 的方式一致，如 127.0.0.1:7897
     if urlsplit(raw).scheme.lower() not in _PROXY_SCHEMES:
         # 不把取值写进日志：代理地址可能带口令。
         logger.warning(f"[http-assets] {ENV_PREFIX}PROXY has an unsupported scheme; ignored")
