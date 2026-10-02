@@ -1,4 +1,4 @@
-"""素材通道（图片/图标/头像）的策略：超时、重试、按主机熔断。
+"""素材通道（图片/图标/头像）的策略：超时、重试、按主机熔断、整卡截止时间。
 
 素材与 API 请求分走两条通道（见 client.py）：一个图床不可达时，素材请求只占自己的
 并发槽位，签到、绑定等 API 请求不受影响。这里只放策略与状态，不发网络请求。
@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import os
 import time
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from threading import RLock
-from typing import Callable, Mapping
+from typing import Callable, Iterator, Mapping
 
 import httpx
 from loguru import logger
@@ -29,6 +31,7 @@ class AssetFetchSettings:
     concurrency: int = 8
     breaker_threshold: int = 3
     breaker_cooldown: float = 300.0
+    render_budget: float = 25.0
 
     @property
     def attempts(self) -> int:
@@ -58,6 +61,7 @@ def load_asset_settings(environ: Mapping[str, str] | None = None) -> AssetFetchS
         concurrency=_number(env, "CONCURRENCY", defaults.concurrency, int, 1, 64),
         breaker_threshold=_number(env, "BREAKER_THRESHOLD", defaults.breaker_threshold, int, 0),
         breaker_cooldown=_number(env, "BREAKER_COOLDOWN", defaults.breaker_cooldown, float, 1.0),
+        render_budget=_number(env, "RENDER_BUDGET", defaults.render_budget, float, 0.0),
     )
 
 
@@ -218,3 +222,42 @@ def reset_asset_breaker() -> None:
     global _breaker
     with _settings_lock:
         _breaker = None
+
+
+# ---------------------------------------------------------------- 整卡截止时间
+
+_render_deadline: ContextVar[float | None] = ContextVar(
+    "asset_render_deadline", default=None
+)
+
+
+@contextmanager
+def asset_render_budget(seconds: float | None = None) -> Iterator[None]:
+    """Share one wall-clock budget across every asset batch fetched in this block.
+
+    嵌套时只会收紧，不会延长外层的截止时间；预算 <= 0 表示不限时。
+    """
+    budget = asset_settings().render_budget if seconds is None else float(seconds)
+    current = _render_deadline.get()
+    deadline = current
+    if budget > 0:
+        deadline = time.monotonic() + budget
+        if current is not None:
+            deadline = min(deadline, current)
+    token = _render_deadline.set(deadline)
+    try:
+        yield
+    finally:
+        _render_deadline.reset(token)
+
+
+def batch_deadline(budget_seconds: float | None = None) -> float | None:
+    """Absolute ``time.monotonic()`` deadline for one batch: card budget or a fresh one."""
+    current = _render_deadline.get()
+    budget = asset_settings().render_budget if budget_seconds is None else budget_seconds
+    own = time.monotonic() + budget if budget > 0 else None
+    if current is None:
+        return own
+    if own is None or budget_seconds is None:
+        return current
+    return min(current, own)

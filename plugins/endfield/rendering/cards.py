@@ -25,6 +25,7 @@ import numpy as np
 from loguru import logger
 from PIL import Image
 
+from otae_bot.infrastructure.http.asset_policy import asset_render_budget
 from otae_bot.infrastructure.http.client import fetch_many_resilient
 
 from ..cold_start import note_remote_assets
@@ -1418,15 +1419,16 @@ async def draw_medal_missing_card(view: MedalMissingView) -> tuple[bytes, ...]:
     _icon_urls += [m.next_icon_url for m in view.not_maxed if m.next_icon_url]
     _icon_urls += [m.next_icon_url for m in view.not_plated if m.next_icon_url]
     _icon_urls += [m.icon_url for m in view.wall if m.icon_url]
-    icon_map = await _image_data_urls(_icon_urls)
-    # 只在高清图缺失时加载同一档位/镀层的备用图，正常路径不增加请求。
-    fallback_urls = [
-        m.fallback_icon_url for m in view.wall
-        if not icon_map.get(m.icon_url) and m.fallback_icon_url
-        and m.fallback_icon_url != m.icon_url
-    ]
-    if fallback_urls:
-        icon_map.update(await _image_data_urls(fallback_urls))
+    with asset_render_budget():
+        icon_map = await _image_data_urls(_icon_urls)
+        # 只在高清图缺失时加载同一档位/镀层的备用图，正常路径不增加请求。
+        fallback_urls = [
+            m.fallback_icon_url for m in view.wall
+            if not icon_map.get(m.icon_url) and m.fallback_icon_url
+            and m.fallback_icon_url != m.icon_url
+        ]
+        if fallback_urls:
+            icon_map.update(await _image_data_urls(fallback_urls))
     try:
         return (await _draw_medal_missing_page(view, icon_map),)
     except RuntimeError as exc:
@@ -3572,8 +3574,8 @@ async def _prepare_assets(urls: Iterable[str], *, inline: bool) -> _PreparedAsse
     remote_urls = [url for url in unique if not url.startswith("data:")]
     # 图床（hycdn / assets.fz.wiki）的 404 与超时都是间歇的，交给共享的
     # fetch_many_resilient 退避重试；成功的走缓存命中，避免单次抖动导致渲染「无图」。
-    # 超时、重试次数与按主机熔断都取素材通道的配置（OTAE_HTTP_ASSET_*），
-    # 没取到的按缺失处理，沿用各卡片原有的占位 / 留空逻辑。
+    # 超时、重试次数、按主机熔断与整批预算都取素材通道的配置（OTAE_HTTP_ASSET_*），
+    # 到点没取到的按缺失处理，沿用各卡片原有的占位 / 留空逻辑。
     # 缺图原因由它自己写日志，这里不再重复一遍。
     fetched = await fetch_many_resilient(
         remote_urls,
@@ -3652,7 +3654,19 @@ async def _resolve_asset_groups(
     *,
     inline: bool,
 ) -> tuple[_PreparedAssets, dict[str, str], dict[str, str]]:
-    """先拉每组首选 URL，失败的再补拉备用源，避免目录页一次打出大量空链。"""
+    """先拉每组首选 URL，失败的再补拉备用源，避免目录页一次打出大量空链。
+
+    首选与备用两批共用一个素材预算，备用源不会把等待时间再翻一倍。
+    """
+    with asset_render_budget():
+        return await _resolve_asset_groups_within_budget(groups, inline=inline)
+
+
+async def _resolve_asset_groups_within_budget(
+    groups: dict[str, Sequence[str]],
+    *,
+    inline: bool,
+) -> tuple[_PreparedAssets, dict[str, str], dict[str, str]]:
     normalized = {key: unique_urls(*candidates) for key, candidates in groups.items()}
     chosen_source: dict[str, str] = {}
     first_batch: list[str] = []

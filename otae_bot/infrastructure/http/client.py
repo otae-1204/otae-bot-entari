@@ -25,6 +25,7 @@ from .asset_policy import (
     HostCircuitOpen,
     asset_breaker,
     asset_settings,
+    batch_deadline,
     configure_asset_settings,
 )
 from .json_values import freeze_json, freeze_json_object, json_memory_size, mutable_json
@@ -630,6 +631,34 @@ def classify_failure(exc: BaseException) -> tuple[bool, str]:
     return False, type(exc).__name__.lower()
 
 
+# 截止时间已过时，仍给内存 / 磁盘缓存命中留的一点时间；网络请求赶不上就判缺失。
+DEADLINE_GRACE_SECONDS = 0.5
+_DEADLINE = object()
+
+
+async def _gather_until(coros: Iterable[Any], deadline: float | None) -> list[Any]:
+    """Like gather(return_exceptions=True), but unfinished items become ``_DEADLINE``."""
+    tasks = [asyncio.ensure_future(coro) for coro in coros]
+    try:
+        if tasks:
+            timeout = None
+            if deadline is not None:
+                timeout = max(DEADLINE_GRACE_SECONDS, deadline - time.monotonic())
+            _done, late = await asyncio.wait(tasks, timeout=timeout)
+            for task in late:
+                task.cancel()
+            if late:
+                await asyncio.gather(*late, return_exceptions=True)
+    finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+    return [
+        _DEADLINE if task.cancelled() else (task.exception() or task.result())
+        for task in tasks
+    ]
+
+
 async def fetch_many_resilient(
     urls: Iterable[str],
     *,
@@ -641,27 +670,35 @@ async def fetch_many_resilient(
     attempts: int | None = None,
     base_delay_seconds: float = 0.25,
     log_prefix: str = "[assets]",
+    budget_seconds: float | None = None,
 ) -> tuple[dict[str, HttpResource | None], dict[str, str]]:
     """并发取多个素材，对间歇性失败退避重试，并返回失败原因。
 
     与 fetch_many 的区别，都是为图床的抖动与不可达服务：
     1. 走素材通道（独立并发、短连接超时、按主机熔断），不占 API 请求的并发；
     2. 失败会重试（默认重试 1 次，0.25s 退避）——hycdn 的 404 与超时都是间歇的；
-    3. 放弃的原因会写进日志，调用方不再只看到「少了几张图」。
+    3. 整批有总预算（默认取 OTAE_HTTP_ASSET_RENDER_BUDGET，或外层 asset_render_budget
+       设定的整卡截止时间），到点不再等待，未取到的按缺失返回；
+    4. 放弃的原因会写进日志，调用方不再只看到「少了几张图」。
     第一项覆盖**每一个**请求过的 url（失败为 None），第二项只保留最终失败原因，
     调用方既不会悄悄少图，也能决定是否把失败详情带入诊断信息。
     """
     if attempts is None:
         attempts = asset_settings().attempts
+    deadline = batch_deadline(budget_seconds)
     unique_urls = tuple(dict.fromkeys(str(url) for url in urls if url))
     resolved: dict[str, HttpResource] = {}
     failures: dict[str, str] = {}
     pending = list(unique_urls)
+    expired = False
     for attempt in range(max(1, attempts)):
         if not pending:
             break
-        results = await asyncio.gather(
-            *(
+        if attempt and deadline is not None and time.monotonic() >= deadline:
+            expired = True
+            break
+        results = await _gather_until(
+            (
                 fetch_bytes(
                     url,
                     namespace=namespace,
@@ -673,10 +710,14 @@ async def fetch_many_resilient(
                 )
                 for url in pending
             ),
-            return_exceptions=True,
+            deadline,
         )
         retry: list[str] = []
         for url, outcome in zip(pending, results):
+            if outcome is _DEADLINE:
+                failures[url] = "deadline"
+                expired = True
+                continue
             if isinstance(outcome, BaseException):
                 give_up, reason = classify_failure(outcome)
                 failures[url] = reason
@@ -687,7 +728,10 @@ async def fetch_many_resilient(
             failures.pop(url, None)
         pending = retry
         if pending and attempt + 1 < attempts:
-            await asyncio.sleep(base_delay_seconds * (2**attempt))
+            delay = base_delay_seconds * (2**attempt)
+            if deadline is not None:
+                delay = min(delay, max(0.0, deadline - time.monotonic()))
+            await asyncio.sleep(delay)
     if failures:
         summary = ", ".join(
             f"{url.rsplit('/', 1)[-1][:12]}={failures[url]}"
@@ -696,7 +740,7 @@ async def fetch_many_resilient(
         logger.warning(
             f"{log_prefix} fetch incomplete "
             f"namespace={namespace} requested={len(unique_urls)} resolved={len(resolved)} "
-            f"failed={len(failures)} detail={summary}"
+            f"failed={len(failures)}{' deadline=hit' if expired else ''} detail={summary}"
         )
     return {url: resolved.get(url) for url in unique_urls}, failures
 

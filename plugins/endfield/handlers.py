@@ -39,6 +39,7 @@ from otae_bot.adapters.entari import (
 )
 from otae_bot.adapters.onebot import send_forward_images
 from otae_bot.infrastructure.rendering.help_runtime import cached_help_image
+from otae_bot.infrastructure.http.asset_policy import asset_render_budget
 from otae_bot.infrastructure.http.client import clear_http_cache, get_http_cache_stats
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
 
@@ -1152,7 +1153,8 @@ async def _render_challenge_cards(
             ).encode()).hexdigest(),
         )
         async def render_complete():
-            with track_render_health() as health:
+            # 数据已就绪，这里只剩出图：整张卡共用一个素材预算，到点按已取到的图出图。
+            with track_render_health() as health, asset_render_budget():
                 pages = tuple(await factory())
                 if not health.complete or locale is None:
                     raise _IncompletePages(pages)
@@ -1981,7 +1983,8 @@ async def _render_account_pages(
     )
 
     async def create_pages():
-        with track_render_health() as health:
+        # 整张卡共用一个素材预算；到点未取到的素材留空，页面照常出图（不进缓存）。
+        with track_render_health() as health, asset_render_budget():
             pages = tuple(await render())
             if not health.complete:
                 raise _IncompletePages(pages)

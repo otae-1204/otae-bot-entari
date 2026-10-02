@@ -12,6 +12,7 @@ from typing import Iterable
 from PIL import Image
 from loguru import logger
 
+from otae_bot.infrastructure.http.asset_policy import asset_render_budget
 from otae_bot.infrastructure.http.client import fetch_many_resilient
 
 from ..account.store import GachaRecord
@@ -469,6 +470,17 @@ class EndfieldGachaAssetCache:
         missing = [item for item in items if item.item_id not in result]
         if not missing:
             return result
+        # 首选与备用两批共用一个素材预算，到点按已取到的出图。
+        with asset_render_budget():
+            return await self._download_images(missing, result, generation, candidates)
+
+    async def _download_images(
+        self,
+        missing: list[GachaItemMetadata],
+        result: dict[str, str],
+        generation: int,
+        candidates: dict[str, tuple[str, ...]] | None,
+    ) -> dict[str, str]:
         pending: dict[str, tuple[GachaItemMetadata, tuple[str, ...]]] = {}
         first_batch: list[str] = []
         for item in missing:
