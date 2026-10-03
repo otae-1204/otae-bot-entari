@@ -37,8 +37,8 @@ sys.modules[_PACKAGE] = _package
 account_client = importlib.import_module(f"{_PACKAGE}.account.client")
 account_crypto = importlib.import_module(f"{_PACKAGE}.account.crypto")
 account_store = importlib.import_module(f"{_PACKAGE}.account.store")
+pools_module = importlib.import_module(f"{_PACKAGE}.gacha.pools")
 
-CHARACTER_POOL_TYPES = account_client.CHARACTER_POOL_TYPES
 EndfieldAPIError = account_client.EndfieldAPIError
 EndfieldOfficialClient = account_client.EndfieldOfficialClient
 CredentialCipher = account_crypto.CredentialCipher
@@ -46,12 +46,6 @@ CredentialKeyError = account_crypto.CredentialKeyError
 EndfieldStore = account_store.EndfieldStore
 RoleCandidate = account_store.RoleCandidate
 
-POOL_TYPE_LABELS = {
-    "E_CharacterGachaPoolType_Special": "限定寻访",
-    "E_CharacterGachaPoolType_Joint": "联合寻访",
-    "E_CharacterGachaPoolType_Standard": "常驻寻访",
-    "E_CharacterGachaPoolType_Beginner": "新手寻访",
-}
 MAX_PAGES = 500
 UNSAFE_FILENAME = re.compile(r"[^0-9A-Za-z_.-]")
 
@@ -171,8 +165,12 @@ async def export_role(
         summary["errors"].append(f"武器卡池列表：{exc}")
 
     streams: list[dict[str, Any]] = []
-    for pool_type in CHARACTER_POOL_TYPES:
-        label = character_names.get(pool_type) or POOL_TYPE_LABELS.get(pool_type, pool_type)
+    # 接口目录返回的池类型 ∪ 默认列表（含重构寻访）；与 gacha.service.sync 口径一致。
+    for pool_type in pools_module.resolve_character_pool_types(character_names):
+        kind = pools_module.kind_from_enum(pool_type)
+        label = character_names.get(pool_type) or (
+            kind.label if not kind.is_unknown else pool_type.rsplit("_", 1)[-1]
+        )
         records, error = await collect_stream(
             lambda cursor, pool_type=pool_type, label=label: client.character_records(
                 role, u8_token, pool_type, seq_id=cursor, pool_name=label

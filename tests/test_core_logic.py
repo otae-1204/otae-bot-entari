@@ -1011,6 +1011,8 @@ class CoreLogicTests(unittest.TestCase):
         self.assertEqual(client.rsshub_base_urls[0], "https://custom.example")
         self.assertEqual(client.rsshub_base_urls.count("https://rss.materium.io"), 1)
         self.assertIn("https://rsshub.app", client.rsshub_base_urls)
+        # 已 DNS 解析失败的实例不再作为内置备用源参与竞速。
+        self.assertNotIn("https://rsshub.moeyy.cn", client.rsshub_base_urls)
 
     def test_bili_service_all_follow_keeps_live_when_video_dynamic_fail(self):
         bili_store = _load_bili_new_module("store")

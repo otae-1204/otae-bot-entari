@@ -15,3 +15,27 @@ pypinyin
 apscheduler>=3.10.0
 PyYAML>=6.0
 pycryptodome>=3.20.0
+
+# ── HYW 搜索问答的核心库 ──
+# 这两个包不发布到 PyPI，源码收在 vendor/hyw-frontier/ 里，以可编辑方式装。
+# 必须先装 md2png，hyw-frontier 才能满足自己的 md2png[hyw,math]==0.1.0。
+-e vendor/hyw-frontier/md2png
+-e vendor/hyw-frontier
+# 上面两个包的传递依赖。列在这里是为了让 pip 一次解析完，不去 PyPI 找同名的
+# hyw-frontier / md2png。
+ddgs>=9.16,<10
+jsonschema>=4.23,<5
+markdown-it-py>=3,<5
+mdit-py-plugins>=0.4,<0.7
+Pygments>=2.19,<3
+fonttools>=4.56,<5
+regex>=2024.11.6
+uniseg>=0.10,<0.11
+aggdraw>=1.3,<2
+freetype-py>=2.5,<3
+uharfbuzz>=0.50,<1
+ziamath==0.13
+ziafont==0.11
+latex2mathml==3.81.1
+pydantic-ai-slim[openai,google]==2.42.0
+urllib3>=2.7,<3

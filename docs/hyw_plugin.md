@@ -1,313 +1,54 @@
 # HYW 搜索问答
 
-本地插件位于 `plugins/hyw/`，启动时自动发现，无需修改 `entari.yml` 或安装上游包。
-基于 [HYW 固定版本](https://github.com/kumoSleeping/entari-plugin-hyw/tree/0ca5b645ba63de5f637be4df2358d55aeeaaa17d)
-适配，沿用系统提示词、XML 工具协议和 Vue/Markdown/KaTeX 回复卡片。
-原始文件及许可说明见 [NOTICE](../plugins/hyw/NOTICE.md)。
+本地命令在 `plugins/hyw/`。问答、搜索、读网页和 Markdown 出图由 [Hyw-Frontier](https://github.com/kumoSleeping/Hyw-Frontier) `0a1fede` 完成，本仓库不安装它的 Entari 插件包。核心库源码收在 `vendor/hyw-frontier/`，由 `requirements.txt` 以可编辑方式安装，不需要额外 clone。
+
+2026-10-01 之前的 XML / Playwright 实现已从仓库移除，仍留在提交 `d80759d` 里；回滚用 `git checkout d80759d -- plugins/hyw tests/test_hyw.py tests/test_hyw_evidence.py docs/hyw_plugin.md`。
 
 ## 配置
 
-在项目根目录 `.env` 填写，重启机器人后生效：
+在项目根目录 `.env` 填写，重启机器人后生效。`HYW_CONFIG_SOURCE=llm` 或 `steam` 时，整组改用 `LLM_*` 或 `STEAM_LLM_*`。
 
 ```dotenv
 HYW_CONFIG_SOURCE=hyw
-HYW_API_KEY=你的密钥
+HYW_API_KEY=
 HYW_BASE_URL=https://openrouter.ai/api/v1
-HYW_MODEL=gpt-4o
-HYW_RENDER=true
-HYW_PROXY=
-HYW_SEARCH_PROXY=
-HYW_RETRY_ATTEMPTS=3
-HYW_RETRY_BASE_DELAY=0.5
-HYW_RETRY_MAX_DELAY=8.0
-HYW_RETRY_BUDGET=20.0
-```
-
-接口需兼容 OpenAI Chat Completions，`HYW_BASE_URL` 填 API 根地址，
-程序追加 `/chat/completions`。模型需能遵循 XML 指令；图片解释还要求视觉输入能力。
-这里的默认地址与模型沿用上游，可替换为你实际使用的供应商和模型。
-`HYW_CONFIG_SOURCE=llm` 整组复用 `LLM_API_KEY/LLM_BASE_URL/LLM_MODEL`，
-`steam` 整组复用 `STEAM_LLM_*`，不会混用不同供应商的密钥和接口。
-未配置密钥时仍能正常加载插件，调用时提示管理员配置。
-
-`HYW_PROXY` 用于模型和用户图片下载；留空时继承 `HTTPS_PROXY/HTTP_PROXY`。
-填 `HYW_PROXY=direct` 可让它们直连，其他插件继续使用原有全局代理。
-`HYW_SEARCH_PROXY` 单独控制 DuckDuckGo 搜索及 `web_fetch` 网页读取；
-留空沿用 HYW_PROXY 的有效配置，填 `direct` 表示直连。
-如果模型接口可以直连，但搜索需要代理，可设置：
-
-```dotenv
+HYW_MODEL=gemini-3.8-flash
+HYW_CREDENTIALS_FILE=
+HYW_VERTEX_LOCATION=global
+HYW_VERTEX_BASE_URL=
 HYW_PROXY=direct
-HYW_SEARCH_PROXY=http://127.0.0.1:7890
+HYW_SEARCH_PROXY=direct
+HYW_SEARCH_PROVIDER=ddgs
+HYW_RENDER=true
+HYW_TIMEOUT=300
+HYW_REQUEST_TIMEOUT=90
+HYW_MAX_CONCURRENT=2
+HYW_MAX_TOOL_IMAGES=600
+HYW_MAX_READER_IMAGES=30
+HYW_HOME=data/hyw-frontier
 ```
 
-其中 `7890` 仅为示例，需要换成机器人运行机器实际可用的代理地址和端口。
-HTTP 代理通常填写 `http://` 地址，即使目标网页是 HTTPS。
-默认搜索 DuckDuckGo Lite，失败后尝试其 HTML 接口，无需额外搜索密钥。
-目前这两个固定入口属于同一个搜索引擎，尚未接入其他搜索 API 或模型供应商自带的联网工具。
-搜索引擎可能要求验证，此时明确返回工具错误，不能保证所有网络环境都可搜索。
-开发环境最初遇到 HTTP 202 验证页，随后实测 Lite 接口在全时段和近一周筛选下均返回 5 条结果；
-仍建议在部署网络验证可用性，遇到验证页时可检查代理。
-插件不会绕过验证页，也不会把验证页当成搜索结果。
+`HYW_PROXY=direct` 与 `HYW_SEARCH_PROXY=direct` 表示模型、用户图片和 DuckDuckGo 都直连，不继承全局代理。留空才继承。
 
-卡片使用项目共用 Playwright Chromium。若尚未安装：
-
-```bash
-.venv/bin/python -m playwright install chromium
-```
-
-`HYW_RENDER=false` 可关闭卡片。渲染失败或卡片过长时回退为分段文字。
+搜索默认 `ddgs`，不需要搜索密钥。`jina` / `parallel` 需要对应的 API Key。读网页走 Jina Reader，网址会发给 Jina。
 
 ## 使用 Google 服务账号凭据（Vertex AI）
 
-除静态密钥外，插件也能直接使用 Google Cloud 服务账号密钥 JSON，走 Vertex AI 的
-OpenAI 兼容端点。只需在 `.env` 增加一行，其余键保持原样：
+把服务账号 JSON 指给 `HYW_CREDENTIALS_FILE`，或使用 `GOOGLE_APPLICATION_CREDENTIALS`。文件不要提交进 Git。
 
-```dotenv
-HYW_CREDENTIALS_FILE=data/hyw-service-account.json
-HYW_MODEL=gemini-3.8-flash
-```
+服务账号模式下 `HYW_BASE_URL` 与 `HYW_VERTEX_BASE_URL` 会被忽略，避免把凭据发给中转站。端点由 Google 提供商按凭据里的 `project_id` 和 `HYW_VERTEX_LOCATION`（默认 `global`）推导。模型名使用 `gemini-3.8-flash` 这种 id，不再把模型名写成 `google/<model>`；提供商字段本身是 `google`。
 
-- 路径支持 `~`，相对路径按启动目录（仓库根）解析；也可用标准变量
-  `GOOGLE_APPLICATION_CREDENTIALS`。建议放在已被 `.gitignore` 忽略的 `data/` 下，
-  **不要提交进 Git**，并限制文件权限。
-- 原理：用凭据中的 `private_key` 自签一个 RS256 的 JWT assertion，以
-  `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer` 表单 POST 到 `token_uri`
-  换取短期 access token，再作为 `Authorization: Bearer` 调用模型。凭据不等于密钥，
-  不能直接当作 Bearer 使用。
-- 令牌在内存中缓存，剩余寿命不足 5 分钟时自动重新交换；并发请求只会触发一次交换。
-  私钥只存在于内存中，不写入日志、不进入配置对象、不出现在聊天回复里。
-- 无需额外依赖：签名使用项目已有的 `pycryptodome`，不引入 `google-auth`。
-
-服务账号模式下的固定规则：
-
-| 项 | 行为 |
-| --- | --- |
-| `HYW_BASE_URL` | **被忽略**（避免把凭据发给 OpenAI 中转站），基址由凭据里的 `project_id` 推导为 `https://aiplatform.googleapis.com/v1/projects/<project_id>/locations/<location>/endpoints/openapi`；被忽略时日志只记一次警告，不记录该值 |
-| `HYW_VERTEX_LOCATION` | 区域段，默认 `global` |
-| `HYW_VERTEX_BASE_URL` | 需要私有域名或测试替身时用它覆盖推导结果 |
-| `HYW_MODEL` | 不带 `/` 时自动补 `google/` 前缀（`gemini-3.8-flash` → `google/gemini-3.8-flash`）；Vertex 要求发布者前缀，缺前缀会返回 400 `Malformed publisher model` |
-| 图片 | 远程图片 URL 会被 Vertex 拒绝，插件仍按原有方式先下载再以内联 base64 发送 |
-| 代理 | **必须能直连 Google**，见下 |
-
-代理注意：`googleapis.com`、搜索引擎与 OpenAI 中转站的连通性可能各不相同（本机实测：
-中转站只有直连可达，Google 与 DuckDuckGo 只有经代理可达）。切换凭据方式时如果报
-`ConnectTimeout` / `timeout`，需同步调整 `HYW_PROXY`（模型与用户图片下载）**和
-`HYW_SEARCH_PROXY`**（联网搜索）。例如：
-
-```dotenv
-HYW_CREDENTIALS_FILE=data/hyw-service-account.json
-HYW_PROXY=http://127.0.0.1:7890
-HYW_SEARCH_PROXY=http://127.0.0.1:7890
-```
-
-代理地址要写 `http://`，即使目标是 HTTPS。若把 `HYW_PROXY` 留空去继承全局
-`HTTPS_PROXY=https://127.0.0.1:7890`，httpx 会尝试对代理本身做 TLS 握手，
-表现为 `tls_handshake` 失败——这种写法需要改成 `http://`。
-
-回退很简单：删掉 `HYW_CREDENTIALS_FILE` 这一行即回到静态密钥方式，`HYW_API_KEY` 无需改动。
-未配置任何凭据时插件仍能加载，调用时提示管理员配置。
-
-服务账号模式下的错误提示（聊天中可见，均不含上游响应正文与凭据）：
-
-- `sa_signature`：私钥与凭据不匹配，需重新下载凭据 JSON。
-- `sa_account`：服务账号不存在或已被删除。
-- `sa_clock`：运行机器系统时间偏差过大，需校准系统时间（JWT 有效期窗口为 60 分钟）。
-- `sa_assertion`：凭据文件内容不完整或格式不正确。
-- `sa_token`：访问令牌被拒绝，已自动刷新一次，仍失败则检查服务账号状态。
-- `sa_project`：该服务账号无权访问此项目，或项目未启用 Vertex AI（检查 IAM 与 API 启用状态）。
-- `sa_model` / `sa_model_prefix`：模型名或区域不可用，需 `google/<model>` 形式且区域支持。
-- `sa_image`：图片无法被模型接受，改用 JPEG/PNG 重新发送。
-
-## 上游限流与自动重试
-
-模型接口（无论走中转还是 Google Vertex）都可能返回 HTTP 429。本机实测：service_account
-（Vertex）模式在 12 并发下每 12 次请求会遇到 1~2 次 429；中转 `llm.hyw.mom` 在低并发下
-未复现（24 次串行 + 10 并发 × 3 轮全为 200），但用户实际使用中会出现，故重试按 HTTP 契约
-（状态码 + `Retry-After`）判定，不依赖任何上游响应体形状。插件曾对 429 一次即弃，回复
-“模型请求过于频繁或额度不足”，而一次问答最多发起 `max_turns`（默认 10）次模型调用，
-任何一次撞上 429 都会中断整轮问答，故偶发限流会被放大成很高的问答失败率。
-
-现在 `plugins/hyw/agent.py` 的 `complete()` 会对**可重试失败**做截断指数退避：
-
-- 可重试：HTTP `408/429/500/502/503/504`，以及传输层的 `timeout`、`connection_interrupted`。
-- 不重试：`400/401/403/404/422` 等确定性错误，以及 `dns`、`tls_certificate`、`tls_handshake`、
-  `proxy`、`url_protocol`、`request_protocol`、`response_encoding`——这些是配置或信任问题，
-  重试只会拖延诊断。
-- 退避：第 n 次等待 `min(base_delay × 2^(n-1), max_delay)`，取等抖动（实际等待落在窗口的
-  一半到全长之间），避免多个请求同时恢复再次撞限流。
-- 上游若给出 `Retry-After`（秒数或 HTTP 日期），以它为准，但仍被 `max_delay` 截断。
-- 401 的“令牌被吊销”路径不变：强制刷新一次令牌后重试一次，且**不计入**重试次数，永不循环。
-
-重试同时覆盖**取令牌**与**调模型**两段网络。服务账号模式下二者是两个独立的网络跳，
-各有自己的超时（令牌交换 20 秒、模型调用 60 秒），所以令牌跳的瞬时失败会单独表达为
-`TransientTokenError` 并进入同一套退避：令牌端点返回 429/5xx 或传输层超时/断流都会重试，
-且尊重它的 `Retry-After`；而签名错误、账号不存在等确定性失败仍只换一次令牌就报错。
-若把令牌跳的异常压平成面向用户的 `HywError`，它就会静默失去可重试性——这是实测踩到的
-真实缺陷（表现为一次问答在 20.8 秒处直接失败，恰是令牌跳的 20 秒超时，而非模型侧的 60 秒）。
-
-配置项（`.env`，重启生效）：
-
-| 键 | 默认 | 说明 |
-| --- | --- | --- |
-| `HYW_RETRY_ATTEMPTS` | `3` | 单次模型调用最多尝试次数（含首次）；填 `1` 关闭重试。 |
-| `HYW_RETRY_BASE_DELAY` | `0.5` | 指数退避基准秒数。 |
-| `HYW_RETRY_MAX_DELAY` | `8.0` | 单次等待上限，也用于截断上游 `Retry-After`。 |
-| `HYW_RETRY_BUDGET` | `20.0` | **一次问答**（含全部轮次）累计等待上限；填 `0` 关闭重试。 |
-
-预算按“一次问答”而非“单次调用”计算：`ask()` 在进入轮次循环前创建一份预算并传给每轮
-`complete()`。否则每轮各自退避，最坏情况会叠加到超出 `handlers.py` 对整个问答施加的
-120 秒总时限（`HywConfig.timeout`，当前为固定值，不可用环境变量调整）。
-预算耗尽时立即报出最后一次真实失败，文案与不重试时逐字相同，
-不会泄漏上游响应正文。日志会记录 `[hyw] retrying upstream request: attempt=N wait=X.Xs`
-（`upstream` 同时涵盖取令牌与调模型两跳，见下节）。
-
-## 排查模型连接失败
-
-接口地址和模型参数填写正确，也可能因运行机器的 DNS、TLS、代理或连接中断而失败。
-旧版统一显示“无法连接模型服务”，无法仅凭这句话判断根因。
-现在聊天回复会显示错误分类和 HTTPX 异常类型，并注明当前使用代理还是直连；
-日志会记录如 `code=tls_certificate error=ConnectError route=direct`，不会输出原始异常中的密钥或代理密码。
-
-- `dns`：检查运行机器的域名解析；使用代理时也要检查代理域名。
-- `tls_certificate`：检查系统时间、Python CA 证书和接口/代理的证书链，保持证书校验开启。
-- `proxy` / `connection_refused`：检查代理是否启动、地址端口及认证；可设置 `HYW_PROXY=direct` 对比直连。
-- `connection_interrupted`：接口网关或代理连接中断，需结合服务端日志排查。
-- `request_protocol`：检查复制密钥时是否带入了换行等异常字符。
-- `timeout` / `ReadTimeout`：等待模型响应超时。当前单次模型请求的读取超时为 60 秒，
-  整个问答仍有 120 秒总时限；接口排队、生成较慢及链路延迟都可能触发。
-  旧版可能把异常链中的 `SSLWantReadError` 误判为 `tls_handshake`，
-  出现 `ReadTimeout / tls_handshake` 时应先更新并按读取超时排查，不能据此认定 TLS 协议配置错误。
-
-仅验证连通性时无需密钥。例如在 Windows 机器人运行机器上执行：
-
-```powershell
-curl.exe --noproxy "*" --connect-timeout 10 --max-time 20 -i https://llm.hyw.mom/v1/models
-```
-
-未带密钥返回 HTTP 401 表示此次直连已到达接口；它不验证密钥、模型是否可用，
-也不能代替机器人使用相同 Python 环境和代理路径时的连接测试。
-修改 `.env` 后需重启，且进程已有的环境变量优先于 `.env` 文件。
-
-## 运行机器上装了「连接改写类」代理软件会连机器人一起拖垮
-
-这不是本插件的功能，但会伪装成插件故障，务必先排除。
-
-某些透明代理软件（如 **Proxifier**）会挂钩 Winsock 并**重新发起**连接，包括到 `127.0.0.1` 的回环连接。
-后果是：客户端 `getsockname()` 报告的源端口，与服务端 `accept()` 看到的对端端口**不一致**
-（实测恒定 +1）。CPython 的 `socket.socketpair()` 在没有 `_socket.socketpair` 的 Windows 上
-走 `_fallback_socketpair`，它有一条对端认证：
-
-```python
-if (ssock.getsockname() != csock.getpeername()
-        or csock.getsockname() != ssock.getpeername()):
-    raise ConnectionError("Unexpected peer connection")
-```
-
-源端口被改写后这个条件必然不成立，于是 `socket.socketpair()` 直接抛 `ConnectionError`。
-Windows 上 asyncio 的事件循环**每个都**用 socketpair 做自管道，所以：
-
-- `asyncio.run(...)` 在裸 Python 里就失败；
-- `import arclet.entari` 失败（它在导入期创建事件循环）；
-- **`python bot.py` 起不来**，报 `ConnectionError: Unexpected peer connection`；
-- `tests/test_hyw.py` 连收集阶段都过不去。
-
-判断方法（不需要项目代码）：
-
-```powershell
-python -c "import socket; socket.socketpair()"
-```
-
-抛 `ConnectionError: Unexpected peer connection` 即命中。已验证与 Python 版本、虚拟环境无关：
-.NET 独立程序同样出现 +1 偏移，三个解释器（3.13 / 3.14 / `.venv`）与独立进程全部复现。
-
-处理办法（任选其一）：
-
-1. 退出该代理软件，或在其配置里**把回环地址加入直连/排除列表**
-   （Proxifier 是 `Profile → 规则`：给 `localhost; 127.0.0.1; ::1` 建一条 `Direct` 规则并**启用**；
-   注意默认配置里这条规则往往是「已存在但被禁用」的，而通配规则会兜住全部连接）；
-2. 若必须在它运行时做验证，可临时用 `PYTHONPATH` 指向一个只覆盖 `socket.socketpair`
-   （去掉上述对端认证、其余算法不变）的 `sitecustomize.py`——**仅用于本机验证，不要提交进仓库**。
-
-这类故障与 `HYW_*` 配置无关：改 `HYW_PROXY` 无法绕过它，因为 socketpair 走的是回环、不经过代理设置。
-
-## 排查“外部网络检索服务不可用”
-
-这句话不是预设的最终回答。上游提示词强制事实性问题优先检索，
-模型收到工具错误后可能在最终回答中转述失败情况；模型接口正常不代表搜索入口也可达。
-搜索请求由机器人运行机器发出，并不会自动使用模型供应商的联网能力。
-
-日志中的 `[hyw] request routes` 显示模型、搜索各自使用代理还是直连；
-`[hyw] search endpoint=... results=N` 表示实际检索成功（0 为没有匹配结果）。
-失败日志和工具返回值会保留 `dns`、`tls_certificate`、`connection`、`http_403`、
-`http_202`、`challenge`（验证页）、`unexpected_page`（页面格式异常）等原因。
-这样可以区分网络故障、搜索引擎验证和没有搜索结果；仅模型自行声称不能联网而没有搜索日志，
-不能作为工具不可用的证据。
+未配置密钥或凭据文件时插件仍能加载，调用时提示管理员配置。
 
 ## 用法
 
-- `/q 问题`：每次开始一个新问题。别名 `/hyw`、`/何意味`。
-- `/q 帮助` 或 `/q`：帮助。
-- 在问题后附带图片：最多 3 张、每张 5 MB、2000 万像素，缩放后作为模型视觉输入。
-- 引用其他消息后 `/q 这是什么意思`：把被引用的文字和图片一起分析。
-- 引用自己的 HYW 回答后 `/q 继续解释第二点`：恢复上下文继续追问。
-- `/q 清空`：删除自己在当前聊天中的历史。
+- `/q 问题`，别名 `/hyw`、`/何意味`。可附最多 4 张图，单张原图 20 MB，发送前会压缩。
+- 引用别人的消息再提问，会带上那段文字、图片、JSON/XML 分享卡片和合并转发。合并转发只读取当前这条，按原顺序展开，不执行小程序、不下载音视频。引用自己的 HYW 回答则继续该对话，记忆 1 小时，只在内存里。
+- 模型调用遇到 HTTP 408/429/500/502/503/504，或超时、连接中断时，会在这一次问答内重试。默认最多 3 次，累计等待不超过 20 秒（`HYW_RETRY_ATTEMPTS`、`HYW_RETRY_BASE_DELAY`、`HYW_RETRY_MAX_DELAY`、`HYW_RETRY_BUDGET`）。确定性的 4xx、DNS 和证书错误不重试。
+- `/q 清空` 清除自己在当前会话的续聊和来源记录。
+- `/qstop` 取消自己正在进行的问答。
+- 回答发出后不再自动附带参考资料。回复一条 HYW 回答再发送 `/link` 或 `/qlink`，才会收到该次的标题和链接。同频道的其他人也可以回复一条公开回答来查。
 
-引用消息自动附带的“@被引用者”会在命令前缀匹配前移除，无需手动删除。
-这只处理引用开头与原消息作者一致的提及；引用正文、图片和问题中的 @ 保留。
-LLOneBot 部分引用内嵌正文却不附带作者，Entari 此时也不会自动查询原消息。
-插件会在命令前缀匹配前，通过当前会话的引用消息 ID 补查作者（最多等待 5 秒），
-只补充作者信息，保留收到的引用正文和图片；有完整作者信息时不额外查询。
-查不到作者、返回消息 ID 不匹配时保留原有 @，日志记录失败类型；
-此时可手动移除命令前自动附带的 @ 后重试。普通群聊不触发这项补查。
+全局同时最多 2 个问答，整轮 300 秒，单次模型请求 90 秒。工具图最多尝试 600 张。卡片由 md2png 绘制；出图失败时改为文字。
 
-回复中的 `[1]` 等引用对应工具返回的真实网址；卡片之外也会发送可点击的来源链接。
-支持 `web_search(query, time_range, kl)` 和 `web_fetch(url)`，后者只提取公开网页正文。
-PDF、登录页面、需要执行脚本才能显示正文的网站暂不支持。
-
-## 运行边界
-
-允许同一用户同时发起多个问题，全局最多处理 4 个请求（按请求数计，不按用户数计）。
-每个问题独立管理上下文和引用，回复会引用对应的原始问题，便于区分并发结果。
-`/q 清空` 需等自己在当前聊天中的所有请求结束后使用。
-单次最多 120 秒、10 次模型调用、8 次工具调用，每轮最多 4 次。
-本插件不记录密钥、模型错误响应正文、完整对话或原始图片；
-HTTP 组件仍可能按应用日志配置记录请求 URL（包括搜索词）。
-历史只存内存，1 小时过期，最多 128 条/4 MB，重启即清空；
-每次最多保留最近 6 组文字问答，图片不存入续聊历史，需要再次分析时重新发送。
-历史按平台、机器人账号、群/频道和发送者隔离，不会从其他用户的回复恢复私有上下文。
-
-问题、引用内容和图片会发送至所配置模型服务；检索关键词会发送至 DuckDuckGo。
-回复卡片不加载远程图片或脚本。网页及图片下载限制大小并检查每次重定向的公开地址。
-
-## 验证记录
-
-已验证 Entari 实际加载和三个命令别名的分发、模型 XML 工具循环、
-多人并发隔离、引用追问及来源编号、图片输入、超限与错误回退。
-实际浏览器截图确认中文、Markdown 表格、代码、KaTeX 公式和引用正常显示；
-实际网络请求验证 DuckDuckGo 搜索及公开网页正文读取。
-
-服务账号模式已用真实凭据做过端到端验证（2026-09-11）：经真实命令处理器跑通
-纯文本 `/q`、带图 `/q`（正确识别颜色）、工具循环与坏模型名的错误话术，
-并确认日志中没有私钥、访问令牌或 `client_email`。
-静态密钥方式未改动，且已与改动前的实现逐字段对拍（请求方法、地址、请求头、
-请求体与返回结果在成功/401/403/429/500/异常响应下全部一致）。
-尚未在真实 QQ 会话中联调（模型与搜索需要可用的代理出口，见上文代理注意）。
-
-## 维护者注意：不要把秘密写进可能抛错的那一行
-
-Entari 把 loguru 的 handler 配成 `diagnose=True`（`arclet/entari/logger.py`），
-并把 `sys.excepthook` 接到 loguru，因此 traceback 会**渲染每一帧抛错行上被引用变量的值**——
-局部变量、属性、关键字参数、f-string、字典字面量都会原样打进日志。
-在插件里新增涉及密钥/令牌的代码时：
-
-- 秘密一律包成 `google_auth.Secret`（`repr` 为 `<hidden>`），
-  请求头/表单用 `bearer_headers()`、`form_data()` 这类打码结构；
-- 危险操作（如 `RSA.import_key`、签名）放进会吞掉异常的独立函数并返回 `None`/`Secret`，
-  由调用方在**只引用安全名字**的行上抛错——只写 `raise … from None` 不够，
-  调用方那一帧仍会被记录；
-- 凭据对象的敏感字段用 `field(repr=False)`，`pycryptodome` 的 `RsaKey.__repr__`
-  会打印含私钥指数的 `n/e/d/p/q/u`。
-
-对应的回归测试是 `test_secrets_never_appear_in_repr` 与
-`test_signing_failure_is_chat_safe_and_keeps_key_out_of_the_frame`。
+本机若把 DNS 改写成 `198.18.0.0/15`，图片下载允许连接这一段，仍拒绝局域网地址。

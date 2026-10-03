@@ -1,0 +1,11 @@
+{
+  "source": "reference/card-dist/index.html",
+  "source_sha256": "214f9d21ff8be023d1c9f78e67bb2433a1887dc1d863c86a65179b9921ee276f",
+  "fonts": {
+    "KaTeX_Main.ttf": "d0332f52868370fd83ae7fa46470f90c8f2eab2fcf12bc4f88080b340c95a830",
+    "KaTeX_Math.ttf": "08ce98e51b04d58945a301e639e02b6998af29fdfd61a7b8afdd07bbfc479d4a",
+    "KaTeX_Size1.ttf": "95b6d2f1a50173bfedb8c63e1d1c99b10427d0a4df4201cb44513b226951a22b",
+    "KaTeX_Size2.ttf": "a6b2099fb555c60e3a0db3a08842ebf1d732c6eb4e4bf44913613bed4fc4e39b"
+  },
+  "math_metrics_sha256": "5ed7885f62a669ac3884cc77be9d1c489e696da8d7b576febfbc683c5931bad2"
+}

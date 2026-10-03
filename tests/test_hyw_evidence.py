@@ -151,6 +151,8 @@ class LiveServiceAccountTests(unittest.TestCase):
         from plugins.hyw.config import HywConfig
 
         config = HywConfig.from_env()
+        if os.environ.get("HYW_LIVE_EVIDENCE") != "1":
+            self.skipTest("set HYW_LIVE_EVIDENCE=1 to run the live Vertex round trip")
         if config.auth_mode != "service_account" or not config.credentials_file:
             self.skipTest("no service-account credential configured on this host")
 
@@ -180,9 +182,9 @@ class LiveServiceAccountTests(unittest.TestCase):
 
         import asyncio
 
-        self.assertIn("aiplatform.googleapis.com", config.base_url)
+        self.assertEqual(config.provider, "google")
         self.assertNotIn("llm.hyw.mom", config.base_url)
-        self.assertTrue(config.model.startswith("google/"))
+        self.assertNotIn("/", config.model)
 
         text_replies = asyncio.run(drive([Text("用一句话回答：1+1 等于几？")]))
         self.assertTrue(text_replies, "text /q produced no reply")

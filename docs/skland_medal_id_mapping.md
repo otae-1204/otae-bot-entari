@@ -54,7 +54,7 @@ achieveMedals[i]
 └─ obtainTs         # 获得时间戳
 ```
 
-`achieve` 容器另有 `display`（展示用 10 枚）、`count`（计数）。样本：`count=136`、`achieveMedals` 长度 136、去重 name 后 135（命名滞后导致同名重复 1 枚，见 §6）。
+`achieve` 容器另有 `count`（计数）与 `display`（奖章墙，见 §2.1）。样本：`count=111`、`achieveMedals` 长度 111、去重 name 后 110（命名滞后导致同名重复 1 枚，见 §6）。此前版本记录的样本为 `count=136` / 去重后 135。两组数字是不同账号或不同时间的单账号快照（具体来源待补注日期），与 §3 的「115/115」核验命中数不是同一口径，不应互相比对。
 
 ### 解析坑点
 
@@ -62,6 +62,31 @@ achieveMedals[i]
 2. **`id` 是 hex，不是 achv_**：直接拿去和 FZ `medal_id` 比较会全部不等（这是上一会话踩的坑）。
 3. **`name` 不可作主键**：命名滞后会撞名（§6），按 name 去重会丢章。
 4. **`level` 含义**：玩家当前章等级；`initLevel` 在 `achievementData` 里是该章初始等级，别混。
+
+### 2.1 奖章墙 `display`（不是数组）
+
+```
+achieve.display = {"1": "<hex>", "2": "<hex>", ..., "10": "<hex>"}
+```
+
+- **键是展示位槽位序号（1 起，字符串）**，值是 `achieveMedals[].achievementData.id`（即 hex），**不是**数组下标。
+  渲染顺序必须按键排序，不能沿用 `achieveMedals` 的数组顺序——两者实测完全不一致。
+- **值就是可关联的真 id**：hex = `md5(achv_id)`（与 §3 同一关系），2026-09-29 实测 10/10 全部还原出
+  AKEData 奖章记录。所以做「展示奖章统计」**不需要任何图像识别**，直接按 id 关联即可；
+  `achievementData` 里的 `initIcon` / `reforge2Icon` / `reforge3Icon` / `platedIcon` 只是附带的图片字段。
+- **槽位序号即蜂窝坐标**（同日拿游戏内名片截图逐格核对）：奇数为上排、偶数为下排，同列两格是相邻的一对
+  （上排 1/3/5/7/9，下排 2/4/6/8/10）。**不是**「前 5 个一行、后 5 个一行」。列号 = `(slot-1)//2`，排号 = `(slot-1)%2`。
+- 上限 10 格，对应游戏名片上玩家自选的 10 枚；没配满时槽位可能少于 10。
+- 槽位指向的 hex 实测均能在 `achieveMedals` 里找到（只展示**已获得**的章）；代码仍按「可能找不到」做防御，找不到时跳过该格。
+- 图标按 `level` / `isPlated` 从上面四个图标字段里选，同样要按 `real_level = level + initLevel - 1` 校正档位（§2 坑点 4）。
+  单档章（`max_level == initLevel`）没有 `reforge2/3Icon`，取 `initIcon` 是正确的。
+- **高清图映射（2026-09-30 核实）**：AKEData 普通章为 `{achv_id}_lv{tier:02d}.png`，镀层章为
+  `{achv_id}_lv{max_level:02d}_plating.png`（同一 `medaliconbig` 目录）。镀层不是新的等级，
+  也没有独立的 achv_id；由同一 hex 对应记录的 `canBePlated`、最高档位和玩家 `isPlated` 联合确定。
+  森空岛 `platedIcon` 仅作高清图下载失败时的备用，不应一开始就固定选低分辨率图。
+  规则来源、34/34 原图核验和渲染空态见 `endfield_medal_guide.md` §4.7。
+- 消费方：`plugins/endfield/catalog/views/medals.py` 的 `parse_player_medal_wall`（F2 缺章卡页头奖章墙）、
+  `build_medal_id_index` / `resolve_medal_wall`（hex → AKEData 奖章记录，供展示统计复用）。
 
 ---
 

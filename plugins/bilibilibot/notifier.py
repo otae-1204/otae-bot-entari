@@ -37,15 +37,26 @@ OUTBOX_MAX_AGE: dict[str, int] = {
     "dynamic": FEED_NOTIFICATION_MAX_AGE,
 }
 
-MAX_ATTEMPTS = 8
+# A recipient's records are delivered in order, so a head record that keeps
+# failing holds up every later record of that same recipient. The retry budget
+# is therefore deliberately small: 30 s + 60 s + 120 s = 3.5 minutes of blocking
+# before the record is dropped and the queue moves on. The previous budget
+# (8 attempts, 600 s cap) kept one broken recipient silent for ~45 minutes.
+MAX_ATTEMPTS = 4
 RETRY_BASE_SECONDS = 30
-RETRY_MAX_SECONDS = 600
+RETRY_MAX_SECONDS = 120
 SENDER_UNAVAILABLE_DELAY_SECONDS = 10
 DISPATCH_BATCH_LIMIT = 50
 IDLE_INTERVAL_SECONDS = 5.0
 BACKLOG_RECHECK_SECONDS = 5.0
 RENDER_CACHE_SIZE = 32
 MAX_ERROR_CHARS = 500
+# A backlog owned by a single recipient means that recipient's send path is
+# broken. Pausing the poll would then starve every healthy recipient too, so a
+# concentrated backlog is reported instead of stopping the poll.
+BACKLOG_SINGLE_RECIPIENT_RATIO = 0.5
+# Consecutive dropped records for one recipient before it is reported loudly.
+RECIPIENT_ALERT_DROPS = 3
 
 
 class SenderUnavailable(Exception):
@@ -159,6 +170,9 @@ class Notifier:
         self._wakeup: asyncio.Event | None = None
         self._stopping = False
         self._backlog_waiters: list[asyncio.Event] = []
+        # Consecutive drops per recipient, so an unreachable chat is reported
+        # once instead of once per lost record. Cleared by a successful send.
+        self._dropped_per_recipient: dict[tuple[str, str], int] = {}
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -216,6 +230,16 @@ class Notifier:
         count = await _resolve(self.store.outbox_count())
         if count < threshold:
             return
+        leader = await self._backlog_leader()
+        if leader is not None:
+            subscriber_type, subscriber_id, held = leader
+            if held >= max(2, int(count * BACKLOG_SINGLE_RECIPIENT_RATIO)):
+                logger.warning(
+                    f"[bilibilibot] notification backlog {count} is concentrated on "
+                    f"{subscriber_type}:{subscriber_id} ({held} records); keeping the poll "
+                    "running so healthy recipients are not starved"
+                )
+                return
         logger.info(
             f"[bilibilibot] notification backlog {count} >= {threshold}, pausing the poll"
         )
@@ -250,6 +274,13 @@ class Notifier:
         """Let waiting pollers re-check the outbox after a batch (or on stop)."""
         for waiter in self._backlog_waiters:
             waiter.set()
+
+    async def _backlog_leader(self) -> tuple[str, str, int] | None:
+        """The recipient holding the most pending records, when the store knows."""
+        getter = getattr(self.store, "outbox_backlog_leader", None)
+        if getter is None:
+            return None
+        return await _resolve(getter())
 
     # -- dispatcher --------------------------------------------------------
 
@@ -337,6 +368,9 @@ class Notifier:
         except Exception as exc:
             await self._record_failure(row, recipient, exc)
         else:
+            self._dropped_per_recipient.pop(
+                (row.subscriber_type, row.subscriber_id), None
+            )
             await _resolve(self.store.outbox_done(row.id))
 
     async def _record_failure(self, row: Any, recipient: str, exc: Exception) -> None:
@@ -347,6 +381,7 @@ class Notifier:
                 f"[bilibilibot] dropping notification for {recipient} after {attempts} attempts "
                 f"(event {row.event_key}): {exc}"
             )
+            self._report_repeated_drops(row, recipient, exc)
             return
         delay = min(RETRY_BASE_SECONDS * 2 ** (attempts - 1), RETRY_MAX_SECONDS)
         await _resolve(
@@ -361,6 +396,23 @@ class Notifier:
             f"[bilibilibot] notification for {recipient} failed ({attempts}/{MAX_ATTEMPTS}), "
             f"retry in {delay}s: {exc}"
         )
+
+    def _report_repeated_drops(self, row: Any, recipient: str, exc: Exception) -> None:
+        """Say it once when a chat keeps losing notifications.
+
+        One dropped record is a transient failure; several in a row mean the
+        bot cannot deliver to that chat at all, and the operator has to know
+        instead of silently losing every notification for that group.
+        """
+        key = (row.subscriber_type, row.subscriber_id)
+        count = self._dropped_per_recipient.get(key, 0) + 1
+        self._dropped_per_recipient[key] = count
+        if count == RECIPIENT_ALERT_DROPS:
+            logger.error(
+                f"[bilibilibot] {recipient} has lost {count} notifications in a row; "
+                f"check that the bot is still in that chat and allowed to speak there "
+                f"(last error: {exc})"
+            )
 
     def _render_lock(self, event_key: str) -> asyncio.Lock:
         lock = self._render_locks.get(event_key)

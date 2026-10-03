@@ -24,6 +24,7 @@ from ..account.store import (
     OperatorRosterSnapshot,
     OperatorSnapshotMember,
 )
+from ..cold_start import notice_default_ake_public
 from ..providers.akedata import _get, fetch_akedata_manifest
 from ..gacha.service import ROLE_TASKS, TaskAlreadyRunning
 
@@ -431,6 +432,7 @@ class OwnershipStatsService:
                     f"elapsed_seconds={time.monotonic() - check_started:.3f}"
                 )
                 return False
+            await notice_default_ake_public()
             version, entries = await fetch_operator_catalog(manifest)
             current_signature = {
                 _catalog_entry_signature(item)

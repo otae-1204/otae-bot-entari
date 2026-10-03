@@ -1,0 +1,18 @@
+{
+  "tiers": ["high", "medium", "low"],
+  "default": "medium",
+  "profiles": [
+    {
+      "providers": ["deepseek"],
+      "models": ["deepseek-flash", "deepseek-v4.1-flash-expires-on-0910"],
+      "levels": ["off", "low", "high", "max"],
+      "mapping": {"high": "max", "medium": "low", "low": "off"}
+    },
+    {
+      "providers": ["google", "google-cloud", "google-vertex", "google-gla"],
+      "models": ["gemini-3.8-flash"],
+      "levels": ["low", "medium", "high"],
+      "mapping": {"high": "high", "medium": "medium", "low": "low"}
+    }
+  ]
+}

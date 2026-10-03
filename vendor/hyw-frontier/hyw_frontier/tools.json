@@ -1,0 +1,192 @@
+[
+  {
+    "name": "set_reasoning",
+    "label": "切换思考等级",
+    "description": "切换后续模型轮次的思考等级，每次提问默认 medium（中）；特别简单用 low（低），特别困难、尤其图片与复杂关系交织时用 high（高）。当前轮不变，保持所选等级直到再次切换；尽量与必要的检索同轮调用，每轮只调用一次",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "level": {"type": "string", "enum": ["high", "medium", "low"], "description": "逻辑档位，由调用方映射到实际模型强度，不需要提供推理过程"}
+      },
+      "required": ["level"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "fill_thinking",
+    "label": "填充思考",
+    "description": "填充思考：填写本轮作答准备的简短摘要和行动计划，不展开逐步推理；无相关信息填“无”",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "用户需求": {"type": "string", "minLength": 1, "maxLength": 600, "pattern": "\\S", "description": "用户想知道什么、预期结果；区分明确要求与可能意图"},
+        "关键关系": {"type": "string", "minLength": 1, "maxLength": 600, "pattern": "\\S", "description": "影响答案的复杂关联、依赖、因果、时序或取舍"},
+        "上下文注意点": {"type": "string", "minLength": 1, "maxLength": 600, "pattern": "\\S", "description": "上一轮回复或用户消息中值得核实的事实、歧义、纠正、约束和未完成事项"},
+        "信息主要注意点": {"type": "string", "minLength": 1, "maxLength": 600, "pattern": "\\S", "description": "已收集信息中直接影响当前答案的重点"},
+        "信息潜在注意点": {"type": "string", "minLength": 1, "maxLength": 600, "pattern": "\\S", "description": "可能改变结论、尚待核实的事项，不将猜测当事实"},
+        "图片注意点": {"type": "string", "minLength": 1, "maxLength": 600, "pattern": "\\S", "description": "图片中相关文字、主体、位置关系、异常或与对话不一致之处；看不清注明不确定，无图片填“无图片”"},
+        "接下来任务拆解": {"type": "string", "minLength": 1, "maxLength": 600, "pattern": "\\S", "description": "完成当前请求接下来的简短行动，用分号分隔"},
+        "幽默注意点": {"type": "string", "minLength": 1, "maxLength": 600, "pattern": "\\S", "description": "值得关注的幽默、梗或讽刺，以及回应边界；不适合时填“不使用幽默”"}
+      },
+      "required": ["用户需求", "关键关系", "上下文注意点", "信息主要注意点", "信息潜在注意点", "图片注意点", "接下来任务拆解", "幽默注意点"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "crop_user_image",
+    "label": "裁剪用户图片",
+    "description": "按原图像素坐标裁剪用户图片，返回裁剪图和 crop_id；随后可将 crop_id 作为 reverse_image_search 的 source_id 搜索该裁剪图。再次裁剪仍使用原图编号和坐标",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "source_id": {"type": "string", "minLength": 1, "maxLength": 100, "description": "user_image_original 标记中的原图编号"},
+        "bbox": {
+          "type": "array", "items": {"type": "integer", "minimum": 0}, "minItems": 4, "maxItems": 4,
+          "description": "原图像素坐标 [left, top, right, bottom]，右下边界不包含"
+        }
+      },
+      "required": ["source_id", "bbox"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "web_search",
+    "description": "并行搜索网页，返回标题、链接和摘要",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "searches": {
+          "type": "array", "minItems": 1, "maxItems": 5,
+          "items": {
+            "type": "object",
+            "properties": {
+              "query": {"type": "string", "minLength": 1, "maxLength": 500, "description": "搜索词或短句"},
+              "location": {
+                "type": "string",
+                "enum": ["ar", "au", "at", "be", "br", "ca", "cl", "cn", "dk", "fi", "fr", "de", "gr", "hk", "in", "id", "it", "jp", "my", "mx", "nl", "nz", "no", "ph", "pl", "pt", "ru", "sa", "za", "kr", "es", "se", "ch", "tw", "tr", "gb", "us"],
+                "description": "搜索地区代码"
+              },
+              "after_date": {
+                "search_providers": ["jina", "parallel"],
+                "type": "string", "format": "date", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+                "description": "发布日期下限 YYYY-MM-DD，包含当天；省略不限制"
+              },
+              "timelimit": {
+                "search_providers": ["ddgs"],
+                "type": "string", "enum": ["d", "w", "m", "y"],
+                "description": "近期范围：d一天、w一周、m一个月、y一年；省略不限制"
+              }
+            },
+            "required": ["query"], "additionalProperties": false
+          }
+        }
+      },
+      "required": ["searches"], "additionalProperties": false
+    }
+  },
+  {
+    "name": "search_images",
+    "search_providers": ["jina", "parallel", "ddgs"],
+    "description": "搜索图片，返回图片链接和来源页面",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {"type": "string", "minLength": 1, "maxLength": 500, "pattern": "\\S", "description": "图片搜索词"}
+      },
+      "required": ["query"], "additionalProperties": false
+    }
+  },
+  {
+    "name": "send_process_intro",
+    "description": "向用户发送简短的过程介绍",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string", "minLength": 1, "maxLength": 600, "pattern": "\\S",
+          "description": "过程介绍文本"
+        }
+      },
+      "required": ["text"], "additionalProperties": false
+    }
+  },
+  {
+    "name": "reverse_image_search",
+    "label": "以图搜图",
+    "description": "按需上传指定图片，以同一个公网链接并行通过两个 Jina Reader 查询 Yandex 和 TinEye，聚合返回两个来源的完整正文、各自状态、来源链接及自动下载压缩后的图片。按相同图片 URL 去重并保留全部 engines/sources 关联；视觉候选或同图命中不直接证明出处。按 sources 说明实际调用来源的线索；no_matches 是无匹配，blocked/error/unparsed 是未取得可用结果，不混淆两者，不报告未调用引擎的状态。使用用户原图 source_id、成功裁剪返回的 crop_id（填入 source_id），或公开 HTTPS 图片 url；source_id 与 url 二选一；同图有效期内复用，每天北京时间零点清理，不自动重试。图床通过本机设置配置，不向模型提供上传密钥",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "source_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "最近含图用户消息的原图 source_id，或 crop_user_image 成功返回的 crop_id（搜索裁剪后的图片）；不传图片 base64"
+        },
+        "url": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 2000,
+          "description": "可公开访问的 HTTPS 图片直链；有 source_id 时不要填写"
+        },
+        "page": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "description": "仅控制 TinEye 结果页码，默认 1；只有确认存在下一页时翻页，Yandex 复用任务内原查询缓存"
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "source_id"
+          ]
+        },
+        {
+          "required": [
+            "url"
+          ]
+        }
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "jina_pageshot",
+    "label": "整页截图",
+    "description": "使用 Jina Reader pageshot 获取网页完整滚动页面截图。第一次传 url，返回整页图片、pageshot_id 和附件像素尺寸；需要展示其中局部时，再传 pageshot_id 与 bbox 裁剪，裁剪结果通过 media_images 和相邻 media_attachment 返回内部展示标识 display_url，最终插图时原样复制；source_url 用于引用来源网页。截图和裁剪各占一次工具图片额度，需要展示局部时预留裁剪额度。整页附件仅供审阅，pageshot_id 仅在当前任务有效。仅在明显需要网页视觉布局或整页截图时使用",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string", "minLength": 8, "maxLength": 2000,
+          "description": "要抓取整页截图的公开网页地址；首次抓取时填写"
+        },
+        "pageshot_id": {
+          "type": "string", "minLength": 10, "maxLength": 100,
+          "description": "当前任务此前 jina_pageshot 返回的 pageshot_id；裁剪时填写"
+        },
+        "bbox": {
+          "type": "array", "items": {"type": "integer", "minimum": 0}, "minItems": 4, "maxItems": 4,
+          "description": "pageshot_attachment 附件像素坐标 [left, top, right, bottom]，右下边界不包含"
+        }
+      },
+      "oneOf": [
+        {"required": ["url"], "not": {"anyOf": [{"required": ["pageshot_id"]}, {"required": ["bbox"]}]}},
+        {"required": ["pageshot_id", "bbox"], "not": {"required": ["url"]}}
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "jina_read_url",
+    "description": "读取网页或 PDF，返回正文和来源链接",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "url": {"type": "string", "minLength": 8, "maxLength": 2000, "description": "网页或 PDF 地址"}
+      },
+      "required": ["url"], "additionalProperties": false
+    }
+  }
+]

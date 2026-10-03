@@ -1,36 +1,31 @@
 # Upstream attribution
 
-`assets/system_prompt.txt` and `assets/card.html` originate from
-[kumoSleeping/entari-plugin-hyw](https://github.com/kumoSleeping/entari-plugin-hyw/tree/0ca5b645ba63de5f637be4df2358d55aeeaaa17d),
-commit `0ca5b645ba63de5f637be4df2358d55aeeaaa17d` (plugin version 4.0.11).
-The upstream README and package metadata declare the MIT license.
+The search, tool loop and Markdown card renderer come from
+[kumoSleeping/Hyw-Frontier](https://github.com/kumoSleeping/Hyw-Frontier)
+commit `0a1fede8d7fa701e4ebaaf8a719466ccf89e0416`.
+This plugin does not install `entari_plugin_hyw_frontier`.
 
-The system prompt is extracted from `core/policies.py`; only the dynamic current
-time is replaced at runtime. Local tool and output constraints are appended in
-`agent.py`. The bundled card is copied from
-`core/tools/_public/browser/assets/card-dist/index.html`; local rendering injects
-data, a network-restricting CSP and a style hiding unavailable remote favicons
-without changing the vendored file. Third-party runtime notices are retained in
-`assets/THIRD_PARTY_LICENSES.txt`.
-The Python integration is implemented for this repository's Entari version and
-shared browser/image executors; it does not install the upstream distribution.
+That commit is vendored into `vendor/hyw-frontier/` and installed editable from
+there, because neither `hyw-frontier` nor `md2png` is published to PyPI. The
+vendored copy is not a pristine checkout: the patches below are part of it and
+must be kept when the upstream code is re-synced.
 
-Copyright (c) kumoSleeping and entari-plugin-hyw contributors
+## Local patches
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+| File | Patch | Why |
+| --- | --- | --- |
+| `media_fetch.py` | Accept `198.18.0.0/15` as routable | Clash/mihomo fake-ip uses that range; LAN addresses stay rejected |
+| `rendering.py` | `getattr(os, "O_NOFOLLOW", 0)` | Windows has no `os.O_NOFOLLOW` |
+| `request_log.py` | `getattr(os, "O_NOFOLLOW", 0)` | Same |
+| `tools.py` | Default search provider `parallel` → `ddgs` | `ddgs` needs no key; the bot also passes `ddgs` unless configured |
+| `model_backend.py` | Adds `RETRYABLE_STATUSES`, `http_status()`, `transient_failure()`, `_plan_retry()` and the `HYW_RETRY_*` backoff | Upstream has no retry; `tests/test_hyw.py` imports these symbols, and without them a single 429 fails the whole round |
+| `prompts/system.md` | Identity line, drops the `<final_response>` wrapper | Matches the bot's help text; the final answer is Markdown, not XML |
 
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
+## Excluded from the vendored copy
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
+`hyw_frontier/server.py`, `hyw_frontier/static/`, `hyw_frontier/dev_reload.py`
+(the debug web UI) and `uv.lock` are not installed. Everything else the upstream
+sdist/wheel ships is present.
+
+The previous XML / Playwright plugin was removed on 2026-10-01. It is still
+recoverable from commit `d80759d` for rollback.

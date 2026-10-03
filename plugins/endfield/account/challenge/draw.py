@@ -11,6 +11,7 @@ from typing import Any, Sequence
 
 from loguru import logger
 
+from ...cold_start import REMOTE_ASSET_NAMESPACE, note_remote_assets
 from ...paths import IMAGE_DIR, UI_DIR
 from ...rendering.cards import (
     _prepare_assets,
@@ -19,6 +20,11 @@ from ...rendering.cards import (
     esc_attr,
     optimize_png_container,
 )
+
+
+async def _noted_challenge_assets(urls, *, inline: bool = False):
+    await note_remote_assets(urls, namespace=REMOTE_ASSET_NAMESPACE)
+    return await _prepare_assets(urls, inline=inline)
 from otae_bot.infrastructure.rendering.executor import run_image_render
 from otae_bot.infrastructure.rendering.browser import screenshot_web_element
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
@@ -151,7 +157,7 @@ async def draw_monument_overview(identity: ChallengeIdentity, payload: MonumentP
     if not payload.has_records:
         return await draw_challenge_empty(identity, "影拓丰碑", query="暂无个人挑战记录", variant=variant)
     group = payload.current()
-    assets = await _prepare_assets(_asset_urls_monument(payload, group), inline=False)
+    assets = await _noted_challenge_assets(_asset_urls_monument(payload, group), inline=False)
     return await _render_challenge(
         _monument_overview_html(identity, payload, group, variant, assets.urls),
         assets.resources,
@@ -166,7 +172,7 @@ async def draw_monument_detail(
     *,
     variant: str = DEFAULT_VARIANT,
 ) -> bytes:
-    assets = await _prepare_assets(_asset_urls_monument_detail(group, dungeon), inline=False)
+    assets = await _noted_challenge_assets(_asset_urls_monument_detail(group, dungeon), inline=False)
     return await _render_challenge(
         _monument_detail_html(identity, group, dungeon, variant, assets.urls),
         assets.resources,
@@ -241,7 +247,7 @@ async def draw_war_overview(identity: ChallengeIdentity, payload: WarEchoPayload
     if not payload.has_records:
         return await draw_challenge_empty(identity, "战争回响", query="暂无个人挑战记录", variant=variant)
     season = payload.current()
-    assets = await _prepare_assets(_asset_urls_war(payload, season), inline=False)
+    assets = await _noted_challenge_assets(_asset_urls_war(payload, season), inline=False)
     return await _render_challenge(
         _war_overview_html(identity, payload, season, variant, assets.urls),
         assets.resources,
@@ -258,7 +264,7 @@ async def draw_war_detail(
     *,
     variant: str = DEFAULT_VARIANT,
 ) -> bytes:
-    assets = await _prepare_assets(_asset_urls_war_detail(season, group, dungeon), inline=False)
+    assets = await _noted_challenge_assets(_asset_urls_war_detail(season, group, dungeon), inline=False)
     return await _render_challenge(
         _war_detail_html(identity, season, week, group, dungeon, variant, assets.urls),
         assets.resources,
@@ -420,7 +426,7 @@ async def _prepare_challenge_assets(
     unique_urls = tuple(dict.fromkeys(url for url in urls if url))
     started = perf_counter()
     try:
-        assets = await _prepare_assets(unique_urls, inline=False)
+        assets = await _noted_challenge_assets(unique_urls, inline=False)
     except Exception as exc:
         logger.opt(exception=exc).error(
             "[endfield-challenge] render failed "

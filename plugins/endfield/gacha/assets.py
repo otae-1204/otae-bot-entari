@@ -12,11 +12,13 @@ from typing import Iterable
 from PIL import Image
 from loguru import logger
 
+from otae_bot.infrastructure.http.asset_policy import asset_render_budget
 from otae_bot.infrastructure.http.client import fetch_many_resilient
 
 from ..account.store import GachaRecord
 from ..providers.assets import item_icon_urls, operator_icon_urls, operator_portrait_urls, unique_urls
 from ..catalog.service import EndfieldService
+from .pools import kind_for_record, resolve_pool_kind, series_key as build_series_key
 
 
 GACHA_CACHE_DIR = Path("data") / "endfield" / "image_cache"
@@ -25,8 +27,6 @@ CATALOG_TTL_SECONDS = 24 * 60 * 60
 IMAGE_NAMESPACE = "endfield-gacha-images"
 POOL_ARTICLE_PREFIX = "卡池/"
 KEEPSAKE_ARTICLE_PREFIX = "物品/干员信物/"
-IMAGE_FETCH_TIMEOUT_SECONDS = 20.0
-IMAGE_FETCH_ATTEMPTS = 3
 IMAGE_FETCH_MAX_BYTES = 24 * 1024 * 1024
 
 
@@ -48,6 +48,13 @@ class GachaPoolRule:
     hard_guarantee: int = 0
     pool_name: str = ""
     pool_kind: str = ""
+    type_code: int = -1           # AKE 池表 type；-1 = 未知（FZ-only 或 AKE 不可用）
+    table: str = ""               # "char" | "weapon"（与 pool_kind 同义，保留两者以兼容旧调用）
+    sort_id: int = 0
+    pool_version: int = 0         # AKE gachaPoolVersion
+    client_top_time_id: str = ""  # 武器表；"" 且 sort_id == 0 ⇒ 常驻申领
+    kind_key: str = ""            # prepare_pool_rules 内识别后缓存
+    series_key: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -286,23 +293,34 @@ class EndfieldGachaAssetCache:
         rules = await self._prepare_pool_rules_fz(records)
         for key, row in native.items():
             previous = rules.get(key)
-            rules[key] = GachaPoolRule(key, tuple(row["up_item_ids"]),
-                previous.hard_guarantee if previous else 0, row["pool_name"], row["pool_kind"])
+            table = str(row.get("pool_kind") or "").strip().casefold()
+            rules[key] = GachaPoolRule(
+                key, tuple(row.get("up_item_ids") or ()),
+                previous.hard_guarantee if previous else 0,
+                str(row.get("pool_name") or ""), table,
+                type_code=_safe_int(row.get("type_code"), -1),
+                table=table,
+                sort_id=_safe_int(row.get("sort_id"), 0),
+                pool_version=_safe_int(row.get("pool_version"), 0),
+                client_top_time_id=str(row.get("client_top_time_id") or ""),
+            )
         if native:
             logger.info("[endfield] gacha pool metadata source=AKEData guarantee source=FZ-or-unknown")
-        return rules
+        return {key: classify_pool_rule(rule) for key, rule in rules.items()}
 
     async def _prepare_pool_rules_fz(self, records: Iterable[GachaRecord]) -> dict[str, GachaPoolRule]:
-        current_by_type: dict[str, GachaRecord] = {}
+        # 每种池类型（特许 / 重构 / 限时 / 点绘……）各取最近一条记录去查 FZ「卡池/*」文章拿 hardGuarantee。
+        current_by_kind: dict[str, GachaRecord] = {}
         for item in records:
-            if "standard" in item.pool_type.casefold():
+            kind = kind_for_record(item, None)
+            if kind.key == "standard":
                 continue
-            current = current_by_type.get(item.item_type)
+            current = current_by_kind.get(kind.key)
             if current is None or (item.gacha_ts, item.seq_id) > (current.gacha_ts, current.seq_id):
-                current_by_type[item.item_type] = item
+                current_by_kind[kind.key] = item
         fallback_titles = tuple(
             f"{POOL_ARTICLE_PREFIX}{item.pool_name}"
-            for item in current_by_type.values()
+            for item in current_by_kind.values()
             if item.pool_name
         )
         try:
@@ -452,6 +470,17 @@ class EndfieldGachaAssetCache:
         missing = [item for item in items if item.item_id not in result]
         if not missing:
             return result
+        # 首选与备用两批共用一个素材预算，到点按已取到的出图。
+        with asset_render_budget():
+            return await self._download_images(missing, result, generation, candidates)
+
+    async def _download_images(
+        self,
+        missing: list[GachaItemMetadata],
+        result: dict[str, str],
+        generation: int,
+        candidates: dict[str, tuple[str, ...]] | None,
+    ) -> dict[str, str]:
         pending: dict[str, tuple[GachaItemMetadata, tuple[str, ...]]] = {}
         first_batch: list[str] = []
         for item in missing:
@@ -490,11 +519,10 @@ class EndfieldGachaAssetCache:
         return result
 
     async def _fetch_image_urls(self, urls: Iterable[str]) -> dict[str, object]:
+        # 超时、重试与按主机熔断取素材通道配置（OTAE_HTTP_ASSET_*）。
         fetched = await fetch_many_resilient(
             urls,
             namespace=IMAGE_NAMESPACE,
-            timeout_seconds=IMAGE_FETCH_TIMEOUT_SECONDS,
-            attempts=IMAGE_FETCH_ATTEMPTS,
             max_bytes=IMAGE_FETCH_MAX_BYTES,
             log_prefix="[endfield-gacha]",
         )
@@ -674,15 +702,39 @@ def extract_gacha_pool_rules(payload: object) -> dict[str, GachaPoolRule]:
         pool_kind = str(item.get("poolKind") or "").strip().casefold()
         if not pool_kind:
             normalized_pool_id = pool_id.casefold()
-            pool_kind = "weapon" if normalized_pool_id.startswith(("weapon", "wepon")) else "char"
+            pool_kind = "weapon" if normalized_pool_id.startswith(("weapon", "wepon", "rerun_wpn")) else "char"
+        table = pool_kind or (existing.pool_kind if existing else "")
         result[pool_id] = GachaPoolRule(
             pool_id,
             up_item_ids or (existing.up_item_ids if existing else ()),
             hard_guarantee or (existing.hard_guarantee if existing else 0),
             pool_name or (existing.pool_name if existing else ""),
-            pool_kind or (existing.pool_kind if existing else ""),
+            table,
+            table=table,
         )
     return result
+
+
+def classify_pool_rule(rule: GachaPoolRule) -> GachaPoolRule:
+    """识别池类型并缓存 kind_key / series_key（AKE 表字段优先，其次前缀与名称）。"""
+    table = (rule.table or rule.pool_kind or "").strip().casefold()
+    item_type = "武器" if table == "weapon" else "角色"
+    kind = resolve_pool_kind(
+        pool_id=rule.pool_id, pool_type="", pool_name=rule.pool_name, item_type=item_type, rule=rule,
+    )
+    return replace(
+        rule,
+        table=table,
+        kind_key=kind.key,
+        series_key=build_series_key(kind, rule, rule.pool_id, rule.pool_name),
+    )
+
+
+def _safe_int(value: object, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _walk_dicts(value: object):

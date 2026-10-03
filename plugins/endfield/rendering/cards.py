@@ -6,6 +6,7 @@ import base64
 import html
 import hashlib
 import mimetypes
+import os
 import re
 import struct
 import tempfile
@@ -24,7 +25,10 @@ import numpy as np
 from loguru import logger
 from PIL import Image
 
+from otae_bot.infrastructure.http.asset_policy import asset_render_budget
 from otae_bot.infrastructure.http.client import fetch_many_resilient
+
+from ..cold_start import note_remote_assets
 from otae_bot.infrastructure.rendering.executor import run_image_render
 from otae_bot.infrastructure.rendering.browser import BrowserResource, screenshot_web_element
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
@@ -55,10 +59,12 @@ from ..catalog.models import (
     WeaponCatalogItemView,
     WeaponCatalogView,
     WeaponView,
+    MEDAL_WALL_MAX_SLOTS,
     MedalDiffView,
     MedalItemView,
     MedalMissingView,
     MedalSnapshotView,
+    MedalWallItemView,
 )
 from ..gacha.service import (
     FreePullBatch,
@@ -93,6 +99,7 @@ CARD_WIDTH = OPERATOR_CARD_WIDTH
 CARD_MIN_HEIGHT = 780
 CARD_MAX_HEIGHT = 6144
 GACHA_PAGE_ROW_BUDGETS = (55, 45, 35)
+GACHA_LAYOUT_ENV = "ENDFIELD_GACHA_LAYOUT"   # v3（默认）| v1
 OPERATOR_RAIL_HEIGHT = 880
 OPERATOR_ACCENT_LEFT = 440
 REMOTE_ASSET_NAMESPACE = "endfield-assets"
@@ -613,6 +620,17 @@ async def _draw_daily_card(selector: str, body: str, *, extra_css: str = "") -> 
 
 
 async def draw_gacha_analysis_cards(view: GachaAnalysis, *, uid: str) -> tuple[bytes, ...]:
+    """抽卡分析图入口：默认 v3（1600 宽、重构侧栏三栏 / 无重构两栏、按实测高度分页，见 gacha/draw.py）；
+    ENDFIELD_GACHA_LAYOUT=v1 回到旧版两栏（v3 失败时也会自动回退到它）。"""
+    if os.getenv(GACHA_LAYOUT_ENV, "").strip().casefold() == "v1":
+        return await _draw_gacha_analysis_cards_v1(view, uid=uid)
+    # 延迟导入：gacha.draw 依赖本模块的工具函数与 v1 回退，放在模块顶层会循环导入。
+    from ..gacha.draw import draw_gacha_analysis_cards as draw_gacha_analysis_cards_v3
+
+    return await draw_gacha_analysis_cards_v3(view, uid=uid)
+
+
+async def _draw_gacha_analysis_cards_v1(view: GachaAnalysis, *, uid: str) -> tuple[bytes, ...]:
     try:
         return (await draw_gacha_analysis_card(view, uid=uid),)
     except RuntimeError as exc:
@@ -1166,58 +1184,103 @@ async def _draw_neutral_card(selector: str, body: str, *, extra_css: str = "") -
 
 MEDAL_PAGE_BUDGETS: tuple[int, ...] = (56, 40, 28, 18, 10, 5, 1)
 MEDAL_DOUBLE_COLUMN_MIN = 6  # 单个列表条目 ≥ 此值时启用双列，压缩卡片高度（F1 新增列表 / F2 各缺章分组）
+# 参照游戏截图：列步距约为章面宽的 1.11 倍，行间距约为章面高的 .81 倍。
+# 保留奇上偶下槽位顺序与复杂装饰边角，不能裁切奖章来制造紧凑效果。
+# 原图是方形画布，六边形只占宽约 83%；用居中的方形 img 保持原图比例。
+MEDAL_WALL_COLUMNS = 5
+MEDAL_WALL_ITEM_WIDTH = 80
+MEDAL_WALL_ITEM_HEIGHT = 92
+MEDAL_WALL_STRIDE = 88               # 普通章面横向留约 8px，接近游戏参考图
+MEDAL_WALL_ROW_HEIGHT = 72           # 上下两排深咬合（尖角高 23px），同时保留斜向窄缝
+MEDAL_WALL_ROW_INDENT = MEDAL_WALL_STRIDE // 2
+MEDAL_WALL_ICON_SIZE = 97           # 400px 画布的章面约 330×380，缩至 80×92
+MEDAL_WALL_INSET_PADDING = 9        # 收窄背板边沿，保留局部内嵌轮廓
+# 展示位上限 MEDAL_WALL_MAX_SLOTS 来自 catalog.models，解析与渲染共用；没配满的按空槽位渲染。
+# 页头样式分三层：.medal-header 是 F1/F2 有意共享的骨架；--stats 只属于 F1；
+# --missing / --wall 只属于 F2。单卡专属规则必须挂在修饰类下，避免改一张卡连带另一张。
 MEDAL_CARD_CSS = """
-:is(.medal-stats-card,.medal-missing-card){padding:28px 32px;background:linear-gradient(135deg,#fff,#fafbfd);color:#283440}
-.medal-header{margin:0 0 18px;padding:18px 24px;background:#292929;background-clip:padding-box;color:#fff;border:0;border-bottom:var(--card-header-rule);gap:20px}
-.medal-header small{color:#c7c7c7;font-size:12px;letter-spacing:.24em}
+:is(.medal-stats-card,.medal-missing-card){padding:28px;color:#283440}
+.medal-header{position:relative;margin:0 0 18px;padding:26px 26px 23px;gap:24px;background:linear-gradient(180deg,#333335,#232325 62%,#1c1c1e);background-clip:padding-box;color:#fff;border:0;border-bottom:var(--card-header-rule);border-radius:0;box-shadow:inset 0 1px 0 rgba(255,255,255,.16),inset 0 -1px 0 rgba(0,0,0,.5),0 8px 20px rgba(20,24,30,.24)}
+.medal-heading{flex:1;min-width:0}
+.medal-header small{display:block;color:#c7c7c7;font-size:12px;letter-spacing:.24em}
 .medal-header h1{margin:6px 0 0;font-size:36px;line-height:1.2;letter-spacing:.04em;font-weight:800}
 .medal-header p{margin:6px 0 0;color:#c8c8c8;font-size:15px;overflow-wrap:anywhere}
+.medal-header--stats .medal-head-version{flex:none;align-self:stretch;display:flex;flex-direction:column;justify-content:center;min-width:180px;max-width:360px;padding-left:24px;border-left:1px solid rgba(255,255,255,.14)}
+.medal-header--stats .medal-head-version span{color:#c7c7c7;font-size:12px;letter-spacing:.24em}
+.medal-header--stats .medal-head-version strong{margin-top:6px;font-size:36px;line-height:1.2;font-weight:800;overflow-wrap:anywhere}
+/* 有墙时页头上下/右侧不留白：墙贴顶、贴右、贴黄线，高度由墙决定；标题块在左侧垂直居中。 */
+.medal-header--wall{padding:0 0 0 26px;align-items:stretch}
+.medal-header--wall .medal-heading{align-self:center;padding:14px 0}
+/* 待补齐计数徽标：只在有墙页头的副标题下出现（无墙紧凑页头不挂）；与下方三个分组的总数同源。 */
+.medal-header--missing .medal-gaps{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.medal-header--missing .medal-chip{display:inline-flex;align-items:baseline;gap:6px;padding:5px 12px;border-left:4px solid #c7c7c7;background:rgba(255,255,255,.08);color:#c8c8c8;font-size:14px}
+.medal-header--missing .medal-chip b{color:#fff;font-size:18px;line-height:1;font-weight:750}
+.medal-header--missing .medal-chip--up{border-left-color:#8ba68c}
+.medal-header--missing .medal-chip--plate{border-left-color:#b39a5e}
+.medal-header--missing .medal-chip[data-zero]{border-left-color:#5a5a5c;background:rgba(255,255,255,.04);color:#8e8e8e}
+.medal-header--missing .medal-chip[data-zero] b{color:#9a9a9a;font-weight:600}
+/* 奖章墙：银灰蜂窝背板直接嵌在深色页头里；背板沿十格外轮廓内凹，奖章本体不裁成标准六边形。
+   背板 SVG 的 medal-wall-* id 是文档级的，前提是一页只有一面墙。 */
+.medal-wall{flex:none;display:flex;align-items:center;position:relative;padding:12px 24px 12px 22px;background:none}
+.medal-wall-stage{position:relative}
+.medal-wall-backplate{position:absolute;pointer-events:none;overflow:visible;filter:drop-shadow(0 -1px 0 #101316) drop-shadow(0 1px 0 #ffffff38)}
+.medal-wall-slot{position:absolute}
+.medal-wall-art{display:block;position:relative;width:100%;height:100%;overflow:visible}
+.medal-wall-art img{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);object-fit:contain;max-width:none}
+.medal-wall-recess{display:block;position:relative;width:100%;height:100%;overflow:hidden;clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);background:linear-gradient(145deg,#89949c,#e0e5e8);opacity:.62}
+.medal-wall-recess::before{content:'';position:absolute;inset:2px;clip-path:inherit;background:linear-gradient(145deg,#aab3ba,#c0c8cd 70%);box-shadow:inset 0 3px 10px #7c889340}
+.medal-wall-etching,.medal-wall-outline{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.medal-wall-unavailable{position:absolute;inset:0;display:grid;place-items:center;color:#566570;font-size:12px}
 .medal-main{padding:0;border:0;background:none}
-.medal-stats{padding:14px 22px 0;margin-bottom:18px;border-radius:16px;background:#f2f5f7}
-.medal-row{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));align-items:center}
-.medal-stats .primary{padding:0 20px 0 0}
-.medal-stats .primary span{display:block;color:#616d79;font-size:15px;margin-bottom:2px}
-.medal-stats .primary strong{font-size:40px;line-height:1.1;font-weight:800;letter-spacing:-.04em;font-variant-numeric:tabular-nums}
-.medal-stats .lv-tile{display:flex;align-items:center;justify-content:center;gap:14px;min-height:66px;border-left:1px solid #dfe5e9}
+.medal-stats{margin:0 0 18px;border:1px solid #d0d7dc;background:#f2f5f7}
+.medal-row{display:grid;grid-template-columns:1.25fr repeat(3,minmax(0,1fr));align-items:stretch}
+.medal-missing-card .medal-row{grid-template-columns:repeat(4,minmax(0,1fr))}
+.medal-stats .primary{padding:14px 20px 12px}
+.medal-stats .primary span,.medal-stats-secondary .tile span{display:block;color:#616d79;font-size:15px;margin-bottom:2px}
+.medal-stats .primary strong{display:block;font-size:40px;line-height:1.1;font-weight:800;letter-spacing:-.04em;font-variant-numeric:tabular-nums}
+.medal-stats .primary small{margin-left:6px;color:#8c97a1;font-size:22px;font-weight:600;letter-spacing:0}
+.medal-stats .medal-progress{display:block;height:3px;margin-top:10px;background:linear-gradient(90deg,#3d4852 var(--ratio),#dce2e6 0)}
+.medal-stats .lv-tile{display:flex;align-items:center;justify-content:center;gap:14px;min-height:96px;border-left:1px solid #dfe5e9}
 .medal-stats .lv-tile strong{font-size:32px;line-height:1.1;font-weight:750;font-variant-numeric:tabular-nums}
 .medal-stats .lv-tile .grade-icon{display:block;width:56px;height:66px;object-fit:contain;flex-shrink:0}
-.medal-stats-secondary{display:flex;align-items:center;gap:20px;margin-top:10px;padding:10px 0;border-top:1px solid #dfe5e9}
-.medal-stats-secondary .tile{flex:1;display:flex;align-items:baseline;gap:10px}
-.medal-stats-secondary .tile span{color:#616d79;font-size:15px}
-.medal-stats-secondary .tile strong{font-size:20px;font-weight:750;font-variant-numeric:tabular-nums}
+.medal-stats-secondary{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);border-top:1px solid #dfe5e9}
+.medal-stats-secondary .tile{padding:9px 20px 10px;border-left:1px solid #dfe5e9}
+.medal-stats-secondary .tile:first-child{border-left:0}
+.medal-stats-secondary .tile strong{display:block;font-size:20px;font-weight:750;font-variant-numeric:tabular-nums}
 .medal-section{margin-top:18px}
-.medal-section h2{display:flex;align-items:center;gap:10px;margin:0 0 6px;font-size:22px;font-weight:750;letter-spacing:.03em}
-.medal-section h2::before{content:'';width:5px;height:20px;border-radius:3px;background:#b39a5e}
-.medal-section h2::after{content:'';height:1px;flex:1;margin-left:4px;background:#e2e7eb}
-.medal-section-count{font-size:14px;font-weight:500;letter-spacing:0;color:#65717d}
-.medal-list{display:grid;gap:10px 14px}
+.medal-section h2{display:flex;align-items:center;gap:10px;margin:0 0 10px;padding-bottom:8px;border-bottom:2px solid #3d4852;font-size:22px;font-weight:750;letter-spacing:.03em}
+.medal-section h2::before{content:'';flex:none;width:5px;height:20px;background:#b39a5e}
+.medal-section-count{margin-left:auto;font-size:14px;font-weight:500;letter-spacing:0;color:#65717d}
+.medal-list{display:grid;gap:10px}
 .medal-list--double{grid-template-columns:repeat(2,minmax(0,1fr))}
 .medal-list--double>:only-child{grid-column:1/-1}
-.medal-item,.medal-upgrade{padding:12px 16px;border-radius:14px;background:linear-gradient(110deg,#f3f6f8,#f8fafb)}
-.medal-item{display:grid;grid-template-columns:88px minmax(0,1fr);gap:12px;align-items:start}
-.medal-icon{width:88px;height:88px;display:grid;place-items:center}
-.medal-icon img{width:100%;height:100%;object-fit:contain}
+.medal-item,.medal-upgrade{border:1px solid #d0d7dc;background:linear-gradient(110deg,#f3f6f8,#f8fafb)}
+.medal-item{display:grid;grid-template-columns:96px minmax(0,1fr);gap:14px;align-items:start;padding:12px 16px 12px 12px}
+.medal-icon{width:96px;height:96px;display:grid;place-items:center}
+.medal-icon img{width:88px;height:88px;object-fit:contain}
 .medal-icon .no-icon{color:#75808b;font-size:13px;letter-spacing:.1em}
 .medal-info{min-width:0;overflow-wrap:anywhere}
 .medal-info>strong{display:block;font-size:18px;line-height:1.4;font-weight:750;color:#283440}
 .medal-meta{display:flex;align-items:center;flex-wrap:wrap;gap:7px;margin-top:2px}
 .medal-meta .cat{color:#65717d;font-size:14px}
-.medal-meta .tag{padding:1px 7px;border-radius:10px;font-size:12px;font-weight:600;line-height:1.5}
+.medal-meta .tag{padding:1px 7px;font-size:12px;font-weight:600;line-height:1.5}
 .medal-meta .tag.up{color:#627965;background:#e9eee5}
 .medal-meta .tag.plate{color:#99824d;background:#f2ecd9}
 .medal-desc{margin-top:4px;color:#2e3946;font-size:15px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere}
 .medal-cond{margin-top:3px;color:#61738a;font-size:14px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere}
-.medal-next{margin-top:8px;padding-top:6px;border-top:1px solid #e2e7eb}
-.medal-next-tag{display:inline-block;color:#837451;font-size:13px;font-weight:700;letter-spacing:.06em}
-.medal-upgrade{display:grid;grid-template-columns:minmax(0,1fr) 28px minmax(0,1fr);align-items:start;gap:12px}
-.medal-upgrade .medal-card{display:grid;grid-template-columns:88px minmax(0,1fr);gap:12px;align-items:start;min-width:0}
-.medal-upgrade .medal-icon{width:88px;height:88px;margin-top:18px}
-.medal-stage{display:block;margin-bottom:3px;color:#667480;font-size:13px;line-height:1.4;letter-spacing:.06em}
+.medal-next{margin-top:10px}
+.medal-next-tag,.medal-stage{display:flex;align-items:center;gap:6px;font-size:13px;letter-spacing:.06em}
+.medal-next-tag::before,.medal-stage::before{content:'';flex:none;width:6px;height:8px;background:currentColor;clip-path:polygon(0 0,100% 50%,0 100%)}
+.medal-next-tag{color:#837451;font-weight:700}
+.medal-upgrade{display:grid;grid-template-columns:minmax(0,1fr) 30px minmax(0,1fr);align-items:stretch}
+.medal-upgrade .medal-card{display:grid;grid-template-columns:96px minmax(0,1fr);gap:14px;align-items:start;min-width:0;padding:12px 16px 12px 12px}
+.medal-stage{margin-bottom:3px;color:#667480;line-height:1.4}
 .medal-card--next .medal-stage{color:#837451}
-.medal-upgrade .medal-arrow{align-self:center;display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:#e9edf0;color:#837451;font-size:20px;line-height:1}
-.medal-source{display:flex;justify-content:space-between;gap:20px;margin-top:18px;padding-top:10px;border-top:1px solid #e2e7eb;color:#75808b;font-size:12px;line-height:1.6;overflow-wrap:anywhere}
+.medal-upgrade .medal-arrow{display:grid;place-items:center}
+.medal-upgrade .medal-arrow::before{content:'';width:12px;height:18px;background:#837451;clip-path:polygon(0 0,100% 50%,0 100%)}
+.medal-source{display:flex;justify-content:space-between;gap:20px;margin-top:18px;padding-top:10px;border-top:2px solid #3d4852;color:#75808b;font-size:12px;line-height:1.6;overflow-wrap:anywhere}
 .medal-notice{margin:-6px 0 12px;color:#75808b;font-size:13px;line-height:1.6}
-.medal-main .empty{padding:28px 20px;background:#f3f6f8;border:0;border-radius:14px;color:#65717d;font-size:15px;line-height:1.6}
+.medal-main .empty{padding:28px 20px;background:#f3f6f8;border:1px dashed #c3cbd1;color:#65717d;font-size:15px;line-height:1.6;text-align:center}
 .medal-levelbar{display:flex;gap:24px;margin-bottom:24px}
 .medal-levelbar .lv-cell{flex:1;display:flex;align-items:center;justify-content:center;gap:12px;padding:12px 14px}
 .medal-levelbar .lv-cell strong{font-size:32px;line-height:1;font-weight:800}
@@ -1261,7 +1324,9 @@ async def _draw_medal_stats_page(
     page_count: int,
 ) -> bytes:
     current = view.current
-    icon_map = await _image_data_urls([medal.icon_url for medal in medals if medal.icon_url])
+    medal_icons = [medal.icon_url for medal in medals if medal.icon_url]
+    await note_remote_assets(medal_icons, namespace=REMOTE_ASSET_NAMESPACE)
+    icon_map = await _image_data_urls(medal_icons)
     new_total = len(view.new_medals)
     stats = _medal_stats_block(
         "蚀刻章总数", current.total_count, current.level_counts,
@@ -1274,7 +1339,7 @@ async def _draw_medal_stats_page(
         else '<div class="empty">暂无新增蚀刻章（暂无更早版本可对比或本版本无新增）</div>'
     )
     body = f"""
-    <header class="medal-header"><div><small>ENDFIELD / MEDAL ARCHIVE</small><h1>蚀刻章统计</h1><p>游戏版本 {esc(current.version)}{page_tag}</p></div></header>
+    <header class="medal-header medal-header--stats"><div class="medal-heading"><small>ENDFIELD / MEDAL ARCHIVE</small><h1>蚀刻章统计</h1><p>游戏版本 {esc(current.version)}{page_tag}</p></div><div class="medal-head-version"><span>VERSION</span><strong>{esc(current.version or "--")}</strong></div></header>
     <main class="medal-main">
       {stats}
       <section class="medal-section">
@@ -1311,7 +1376,7 @@ def _medal_item_html(medal: MedalItemView, icon_map: dict[str, str]) -> str:
     next_block = ""
     if medal.next_description or medal.next_condition:
         next_copy = _medal_copy_html(medal.next_description, medal.next_condition)
-        next_block = f'<div class="medal-next"><span class="medal-next-tag">→ 升级后</span>{next_copy}</div>'
+        next_block = f'<div class="medal-next"><span class="medal-next-tag">升级后</span>{next_copy}</div>'
     return (
         f'<div class="medal-item">{icon}'
         f'<div class="medal-info"><strong>{esc(medal.name)}</strong>{meta}{copy}{next_block}</div>'
@@ -1337,10 +1402,11 @@ def _medal_upgrade_html(medal: MedalItemView, icon_map: dict[str, str], *, plati
     current_label, next_label = ("镀层前", "镀层后") if plating else ("当前档位", "升级后")
     current_copy = _medal_copy_html(medal.description, medal.condition)
     next_copy = _medal_copy_html(medal.next_description, medal.next_condition)
+    kind = "plating" if plating else "upgrade"
     return (
-        '<div class="medal-upgrade">'
+        f'<div class="medal-upgrade" data-kind="{kind}">'
         f'<div class="medal-card">{cur_icon}<div class="medal-info"><span class="medal-stage">{current_label}</span><strong>{esc(medal.name)}</strong>{meta}{current_copy}</div></div>'
-        '<div class="medal-arrow" aria-hidden="true">→</div>'
+        '<div class="medal-arrow" aria-hidden="true"></div>'
         f'<div class="medal-card medal-card--next">{next_icon}<div class="medal-info"><span class="medal-stage">{next_label}</span><strong>{esc(medal.name)}</strong>{cat_meta}{next_copy}</div></div>'
         '</div>'
     )
@@ -1352,7 +1418,17 @@ async def draw_medal_missing_card(view: MedalMissingView) -> tuple[bytes, ...]:
     _icon_urls = [m.icon_url for m in all_medals if m.icon_url]
     _icon_urls += [m.next_icon_url for m in view.not_maxed if m.next_icon_url]
     _icon_urls += [m.next_icon_url for m in view.not_plated if m.next_icon_url]
-    icon_map = await _image_data_urls(_icon_urls)
+    _icon_urls += [m.icon_url for m in view.wall if m.icon_url]
+    with asset_render_budget():
+        icon_map = await _image_data_urls(_icon_urls)
+        # 只在高清图缺失时加载同一档位/镀层的备用图，正常路径不增加请求。
+        fallback_urls = [
+            m.fallback_icon_url for m in view.wall
+            if not icon_map.get(m.icon_url) and m.fallback_icon_url
+            and m.fallback_icon_url != m.icon_url
+        ]
+        if fallback_urls:
+            icon_map.update(await _image_data_urls(fallback_urls))
     try:
         return (await _draw_medal_missing_page(view, icon_map),)
     except RuntimeError as exc:
@@ -1385,6 +1461,125 @@ async def draw_medal_missing_card(view: MedalMissingView) -> tuple[bytes, ...]:
     raise last_error
 
 
+def _medal_slot_html(data_url: str, *, empty: bool) -> str:
+    """奖章保留方形原图及伸出的边角，只有空槽背景使用六边形轮廓。"""
+    if data_url:
+        return (
+            '<span class="medal-wall-art">'
+            f'<img src="{esc_attr(data_url)}" alt="" '
+            f'style="width:{MEDAL_WALL_ICON_SIZE}px;height:{MEDAL_WALL_ICON_SIZE}px"></span>'
+        )
+    # 按游戏参考图重绘低对比刻线与字样；这是矢量底纹，不是游戏原始贴图。
+    texture = """<svg class="medal-wall-etching" viewBox="0 0 96 111"
+        xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <g fill="none" stroke="#667580" stroke-width=".65" opacity=".27">
+        <path d="M49 3V50 M49 58V107 M25 20L40 44
+          M57 31L65 12 M60 36L75 19 M62 41L86 25
+          M63 46L90 34 M63 51L92 44 M62 56H92
+          M60 61L90 76 M58 65L82 88 M56 68L65 91"/>
+        <path d="M9 31V58 M13 31V54 M8 61H37 M58 75L63 89"
+          stroke-dasharray=".5 1.4"/>
+        <circle cx="49" cy="54" r=".6"/>
+      </g>
+      <g fill="#697781" opacity=".32" font-family="Arial,sans-serif" font-weight="700">
+        <text x="8" y="70" font-size="8" letter-spacing="-.5">END</text>
+        <text x="8" y="78" font-size="8" letter-spacing="-.6">FIELD</text>
+        <path d="M35 72h6v6h-6z M36 66h1v3h-1z M39 66h1v3h-1z"/>
+      </g>
+    </svg>""" if empty else ""
+    # 已设置但缺图：同一凹槽 + 虚线轮廓 + 文字，和「未设置」区分开。
+    label = '' if empty else (
+        '<svg class="medal-wall-outline" viewBox="0 0 96 111" aria-hidden="true" '
+        'xmlns="http://www.w3.org/2000/svg"><polygon points="48,3 93,29 93,82 48,108 3,82 3,29" '
+        'fill="none" stroke="#566570" stroke-width="1.2" stroke-dasharray="4 3"/></svg>'
+        '<span class="medal-wall-unavailable">图标暂缺</span>'
+    )
+    return f'<span class="medal-wall-recess" aria-hidden="true">{texture}</span>{label}'
+
+
+def _medal_wall_backplate_html(width: int, height: int) -> str:
+    """十个扩大后的六边形合成蜂窝背板，只沿整体外轮廓施加内阴影。"""
+    padding = MEDAL_WALL_INSET_PADDING
+    paths = []
+    for slot in range(MEDAL_WALL_MAX_SLOTS):
+        row, column = slot % 2, slot // 2
+        x = MEDAL_WALL_STRIDE * column + MEDAL_WALL_ROW_INDENT * row
+        y = MEDAL_WALL_ROW_HEIGHT * row
+        w, h = MEDAL_WALL_ITEM_WIDTH + 2 * padding, MEDAL_WALL_ITEM_HEIGHT + 2 * padding
+        points = ((x + w / 2, y), (x + w, y + h / 4), (x + w, y + h * .75),
+                  (x + w / 2, y + h), (x, y + h * .75), (x, y + h / 4))
+        paths.append("M" + " L".join(f"{px:g},{py:g}" for px, py in points) + " Z")
+    w, h = width + 2 * padding, height + 2 * padding
+    return (
+        f'<svg class="medal-wall-backplate" aria-hidden="true" width="{w}" height="{h}" '
+        f'viewBox="0 0 {w} {h}" style="left:-{padding}px;top:-{padding}px" '
+        'xmlns="http://www.w3.org/2000/svg">'
+        '<defs><linearGradient id="medal-wall-metal" x1="0" y1="0" x2=".3" y2="1">'
+        '<stop stop-color="#939da5"/><stop offset=".55" stop-color="#bac2c7"/>'
+        '<stop offset="1" stop-color="#aab4bc"/></linearGradient>'
+        '<filter id="medal-wall-inset" x="-10%" y="-10%" width="120%" height="120%">'
+        '<feOffset in="SourceAlpha" dx="0" dy="4" result="offset"/>'
+        '<feGaussianBlur in="offset" stdDeviation="3" result="blur"/>'
+        '<feComposite in="SourceAlpha" in2="blur" operator="out" result="edge"/>'
+        '<feFlood flood-color="#101820" flood-opacity=".75" result="shade"/>'
+        '<feComposite in="shade" in2="edge" operator="in" result="shadow"/>'
+        '<feComposite in="shadow" in2="SourceGraphic" operator="over"/>'
+        '</filter></defs>'
+        f'<path d="{" ".join(paths)}" fill="url(#medal-wall-metal)" filter="url(#medal-wall-inset)"/>'
+        '</svg>'
+    )
+
+
+def _medal_wall_html(wall: Sequence[MedalWallItemView], icon_map: dict[str, str]) -> str:
+    """奖章墙：按游戏蜂窝排布，区分未设置的槽位和已设置但暂时缺图的奖章。
+
+    槽位序号即蜂窝坐标（2026-09-29 拿游戏内名片截图逐格核对）：奇数为上排、偶数为下排，
+    同列两格是相邻的一对（1/2、3/4 …）。展示位上限 10 个，没配满的位置渲染成空槽。
+    """
+    wall_by_slot = {item.slot: item for item in wall if 1 <= item.slot <= MEDAL_WALL_MAX_SLOTS}
+
+    cells = []
+    for slot in range(1, MEDAL_WALL_MAX_SLOTS + 1):
+        row, column = (slot - 1) % 2, (slot - 1) // 2
+        item = wall_by_slot.get(slot)
+        icon = (icon_map.get(item.icon_url) or icon_map.get(item.fallback_icon_url, "")) if item else ""
+        inner = _medal_slot_html(icon, empty=item is None)
+        title = item.name if item is not None else "未设置奖章"
+        state = "empty" if item is None else ("loaded" if icon else "unavailable")
+        plated = ' data-plated="1"' if item is not None and item.plated else ""
+        cells.append(
+            f'<li class="medal-wall-slot" data-slot="{slot}" data-state="{state}"{plated} '
+            f'style="width:{MEDAL_WALL_ITEM_WIDTH}px;'
+            f'height:{MEDAL_WALL_ITEM_HEIGHT}px;'
+            f'top:{MEDAL_WALL_ROW_HEIGHT * row}px;'
+            f'left:{MEDAL_WALL_STRIDE * column + MEDAL_WALL_ROW_INDENT * row}px"'
+            f' title="{esc_attr(title)}">{inner}</li>'
+        )
+
+    width = MEDAL_WALL_STRIDE * (MEDAL_WALL_COLUMNS - 1) + MEDAL_WALL_ROW_INDENT + MEDAL_WALL_ITEM_WIDTH
+    height = MEDAL_WALL_ROW_HEIGHT + MEDAL_WALL_ITEM_HEIGHT
+    return (
+        '<div class="medal-wall"><div class="medal-wall-stage">'
+        f'{_medal_wall_backplate_html(width, height)}'
+        f'<ul class="medal-wall-grid" style="position:relative;width:{width}px;'
+        f'height:{height}px;'
+        f'margin:0;padding:0;list-style:none">{"".join(cells)}</ul></div></div>'
+    )
+
+
+def _medal_gap_chips_html(view: MedalMissingView) -> str:
+    """页头副标题下的待补齐计数：取截断前的真实总数，与各分组标题一致；为 0 也显示，仅弱化。"""
+    chips = (
+        ("未获得", view.not_obtained_count, ""),
+        ("未升满", view.not_maxed_count, " medal-chip--up"),
+        ("未镀层", view.not_plated_count, " medal-chip--plate"),
+    )
+    return '<div class="medal-gaps">' + "".join(
+        f'<span class="medal-chip{tone}"{"" if value else " data-zero"}>{label}<b>{value}</b></span>'
+        for label, value, tone in chips
+    ) + "</div>"
+
+
 async def _draw_medal_missing_page(
     view: MedalMissingView,
     icon_map: dict[str, str],
@@ -1409,12 +1604,14 @@ async def _draw_medal_missing_page(
         '<div class="medal-notice">缺章清单仅展示部分，完整清单请在游戏内查看。</div>'
         if view.truncated else ""
     )
-    stats = _medal_stats_block(
-        "已拥有", view.owned_count, view.level_counts,
-        [("版本总数", view.total_count), ("未获得", view.not_obtained_count), ("未升满", view.not_maxed_count), ("未镀层", view.not_plated_count)],
-    )
+    stats = _medal_stats_block("已拥有", view.owned_count, view.level_counts, primary_total=view.total_count)
+    # 奖章墙只挂第一页：它是账号名片上的展示态，不随缺章分页变化。
+    wall_html = _medal_wall_html(view.wall, icon_map) if view.wall and page_number == 1 else ""
+    # 待补齐徽标只跟墙一起出现；无墙时保持紧凑页头（small + h1 + p）。
+    gap_chips = _medal_gap_chips_html(view) if wall_html else ""
+    header_class = "medal-header medal-header--missing" + (" medal-header--wall" if wall_html else "")
     body = f"""
-    <header class="medal-header"><div><small>ENDFIELD / MEDAL MISSING</small><h1>蚀刻章缺章</h1><p>{esc(view.nickname)} · {esc(server_name)} · {esc(view.uid)}{page_tag}</p></div></header>
+    <header class="{header_class}"><div class="medal-heading"><small>ENDFIELD / MEDAL MISSING</small><h1>蚀刻章缺章</h1><p>{esc(view.nickname)} · {esc(server_name)} · {esc(view.uid)}{page_tag}</p>{gap_chips}</div>{wall_html}</header>
     <main class="medal-main">
       {stats}
       {notice}
@@ -1477,25 +1674,37 @@ def _medal_stats_block(
     primary_label: str,
     primary_value: int,
     level_counts: dict[int, int],
-    row2: list[tuple[str, int]],
+    row2: list[tuple[str, int]] | None = None,
+    *,
+    primary_total: int | None = None,
 ) -> str:
-    """一体式统计区：总量与三档原图在首行，次行展示补充计数。"""
+    """一体式统计区：总量与三档原图在首行；给出 ``row2`` 时次行展示补充计数。
+
+    给出 ``primary_total`` 时总量显示为「已有 / 总数」并附进度细条。
+    """
+    suffix = progress = ""
+    if primary_total:
+        ratio = min(primary_value / primary_total, 1) * 100
+        suffix = f"<small>/ {primary_total}</small>"
+        progress = f'<i class="medal-progress" style="--ratio:{ratio:.1f}%" aria-hidden="true"></i>'
     primary = (
         f'<div class="tile primary"><span>{esc(primary_label)}</span>'
-        f'<strong>{primary_value}</strong></div>'
+        f'<strong>{primary_value}{suffix}</strong>{progress}</div>'
     )
     lv_cells = "".join(
         f'<div class="lv-tile">{_medal_grade_icon(lv)}<strong>{level_counts.get(lv, level_counts.get(str(lv), 0))}</strong></div>'
         for lv in (3, 2, 1)
     )
-    row2_html = "".join(
-        f'<div class="tile"><span>{esc(label)}</span><strong>{value}</strong></div>'
-        for label, value in row2
-    )
+    row2_html = ""
+    if row2:
+        tiles = "".join(
+            f'<div class="tile"><span>{esc(label)}</span><strong>{value}</strong></div>'
+            for label, value in row2
+        )
+        row2_html = f'<div class="medal-stats-secondary">{tiles}</div>'
     return (
         '<section class="medal-stats">'
-        f'<div class="medal-row">{primary}{lv_cells}</div>'
-        f'<div class="medal-stats-secondary">{row2_html}</div>'
+        f'<div class="medal-row">{primary}{lv_cells}</div>{row2_html}'
         '</section>'
     )
 
@@ -1524,8 +1733,9 @@ def _medal_section_html(
         double = " medal-list--double" if len(medals) >= MEDAL_DOUBLE_COLUMN_MIN else ""
     shown = count if count is not None else len(medals)
     count_label = f"本页 {len(medals)} / 共 {shown} 枚" if shown != len(medals) else f"{shown} 枚"
+    group = ' data-group="plate"' if plating else ""
     return (
-        f'<section class="medal-section"><h2>{esc(title)}<span class="medal-section-count">{count_label}</span></h2>'
+        f'<section class="medal-section"{group}><h2>{esc(title)}<span class="medal-section-count">{count_label}</span></h2>'
         f'<div class="medal-list{double}">{items}</div></section>'
     )
 
@@ -1606,6 +1816,7 @@ async def draw_archive_stats_card(view: ArchiveDiffView) -> tuple[bytes, ...]:
     new_items = _archive_preview_items(view.new_items, ARCHIVE_PREVIEW_LIMIT)
     urls = [item.icon_url for item in new_items if item.icon_url]
     urls.extend(f"{_ARCHIVE_PAGE_ICON_BASE}/{icon}.png" for _, icon, _ in _ARCHIVE_PAGE_LAYOUT)
+    await note_remote_assets(urls, namespace=REMOTE_ASSET_NAMESPACE)
     icon_map = await _image_data_urls(urls)
     if not new_items:
         return (await _draw_archive_stats_page(view, [], 1, 1, icon_map, 0),)
@@ -3353,8 +3564,6 @@ def _centered_png_data_url(data_url: str) -> str:
         return ""
 
 
-ASSET_FETCH_TIMEOUT_SECONDS = 20.0
-ASSET_FETCH_ATTEMPTS = 3
 ASSET_RETRY_BASE_DELAY_SECONDS = 0.25
 ASSET_FETCH_MAX_BYTES = 24 * 1024 * 1024
 
@@ -3365,12 +3574,12 @@ async def _prepare_assets(urls: Iterable[str], *, inline: bool) -> _PreparedAsse
     remote_urls = [url for url in unique if not url.startswith("data:")]
     # 图床（hycdn / assets.fz.wiki）的 404 与超时都是间歇的，交给共享的
     # fetch_many_resilient 退避重试；成功的走缓存命中，避免单次抖动导致渲染「无图」。
+    # 超时、重试次数、按主机熔断与整批预算都取素材通道的配置（OTAE_HTTP_ASSET_*），
+    # 到点没取到的按缺失处理，沿用各卡片原有的占位 / 留空逻辑。
     # 缺图原因由它自己写日志，这里不再重复一遍。
     fetched = await fetch_many_resilient(
         remote_urls,
         namespace=REMOTE_ASSET_NAMESPACE,
-        timeout_seconds=ASSET_FETCH_TIMEOUT_SECONDS,
-        attempts=ASSET_FETCH_ATTEMPTS,
         base_delay_seconds=ASSET_RETRY_BASE_DELAY_SECONDS,
         max_bytes=ASSET_FETCH_MAX_BYTES,
         log_prefix="[endfield]",
@@ -3445,7 +3654,19 @@ async def _resolve_asset_groups(
     *,
     inline: bool,
 ) -> tuple[_PreparedAssets, dict[str, str], dict[str, str]]:
-    """先拉每组首选 URL，失败的再补拉备用源，避免目录页一次打出大量空链。"""
+    """先拉每组首选 URL，失败的再补拉备用源，避免目录页一次打出大量空链。
+
+    首选与备用两批共用一个素材预算，备用源不会把等待时间再翻一倍。
+    """
+    with asset_render_budget():
+        return await _resolve_asset_groups_within_budget(groups, inline=inline)
+
+
+async def _resolve_asset_groups_within_budget(
+    groups: dict[str, Sequence[str]],
+    *,
+    inline: bool,
+) -> tuple[_PreparedAssets, dict[str, str], dict[str, str]]:
     normalized = {key: unique_urls(*candidates) for key, candidates in groups.items()}
     chosen_source: dict[str, str] = {}
     first_batch: list[str] = []
@@ -3456,6 +3677,7 @@ async def _resolve_asset_groups(
             continue
         first_batch.append(candidates[0])
         pending[key] = candidates
+    await note_remote_assets(first_batch, namespace=REMOTE_ASSET_NAMESPACE)
     assets = await _prepare_assets(first_batch, inline=inline)
     retry_urls: list[str] = []
     retry_keys: list[str] = []
@@ -3472,6 +3694,7 @@ async def _resolve_asset_groups(
         else:
             chosen_source[key] = ""
     if retry_urls:
+        await note_remote_assets(retry_urls, namespace=REMOTE_ASSET_NAMESPACE)
         extra = await _prepare_assets(retry_urls, inline=inline)
         assets = _merge_prepared_assets(assets, extra)
         for key in retry_keys:

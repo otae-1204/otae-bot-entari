@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .models import AccountInvestmentView, InvestmentContributionView, InvestmentResourceView
+from ...cold_start import REMOTE_ASSET_NAMESPACE, note_remote_assets
 from ...rendering.cards import (
     PreparedCardHtml,
     _draw_gallery_catalog,
@@ -33,13 +34,19 @@ async def draw_account_investment_cards(view: AccountInvestmentView) -> tuple[by
     )
 
 
+async def _noted_investment_assets(view: AccountInvestmentView, *, inline: bool):
+    urls = _investment_asset_urls(view)
+    await note_remote_assets(urls, namespace=REMOTE_ASSET_NAMESPACE)
+    return await _prepare_assets(urls, inline=inline)
+
+
 async def prepare_account_investment_summary_html(view: AccountInvestmentView) -> PreparedCardHtml:
-    assets = await _prepare_assets(_investment_asset_urls(view), inline=False)
+    assets = await _noted_investment_assets(view, inline=False)
     return PreparedCardHtml(_render_summary_html(view, assets.urls), assets.resources, ACCOUNT_INVESTMENT_CARD_WIDTH)
 
 
 async def prepare_account_investment_detail_html(view: AccountInvestmentView) -> PreparedCardHtml:
-    assets = await _prepare_assets(_investment_asset_urls(view), inline=False)
+    assets = await _noted_investment_assets(view, inline=False)
     return PreparedCardHtml(_render_detail_html(view, assets.urls), assets.resources, ACCOUNT_INVESTMENT_CARD_WIDTH)
 
 
@@ -52,7 +59,7 @@ async def render_account_investment_detail_html(view: AccountInvestmentView) -> 
 
 
 async def _prepare_inline(view: AccountInvestmentView, *, summary: bool) -> PreparedCardHtml:
-    assets = await _prepare_assets(_investment_asset_urls(view), inline=True)
+    assets = await _noted_investment_assets(view, inline=True)
     html = _render_summary_html(view, assets.urls) if summary else _render_detail_html(view, assets.urls)
     return PreparedCardHtml(html, assets.resources, ACCOUNT_INVESTMENT_CARD_WIDTH)
 

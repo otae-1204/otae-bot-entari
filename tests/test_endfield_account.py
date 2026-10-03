@@ -54,6 +54,7 @@ aliases_module = _load(f"{PACKAGE}.catalog.aliases", "plugins/endfield/catalog/a
 sources_module = _load(f"{PACKAGE}.providers.registry", "plugins/endfield/providers/registry.py")
 commands_module = _load(f"{PACKAGE}.catalog.commands", "plugins/endfield/catalog/commands.py")
 draw_module = _load(f"{PACKAGE}.rendering.cards", "plugins/endfield/rendering/cards.py")
+gacha_draw_module = _load(f"{PACKAGE}.gacha.draw", "plugins/endfield/gacha/draw.py")
 account_detail_models_module = _load(
     f"{PACKAGE}.account.detail.models", "plugins/endfield/account/detail/models.py"
 )
@@ -2726,22 +2727,33 @@ class EndfieldGachaServiceTests(unittest.IsolatedAsyncioTestCase):
         self.store.close()
         self.temp.cleanup()
 
-    def test_weapon_up_without_server_guarantee_is_explicitly_unknown(self):
+    def test_weapon_up_without_server_guarantee_falls_back_to_registry_default(self):
+        # v3 口径：FZ 没给 hardGuarantee 时按池类型默认值（武器 80）展示，并以 large_pity_source 标明来源。
         record = store_module.GachaRecord("role", "server", "p", "池", "weapon", "1", 1, "wpn_up", "UP", 6, "武器")
         view = gacha_module.build_gacha_analysis(self.role, [record], [], pool_rules={
             "p": gacha_assets_module.GachaPoolRule("p", ("wpn_up",), 0)
         })
-        self.assertFalse(view.pools[0].large_pity_known)
-        self.assertEqual(view.pools[0].large_pity_limit, 0)
+        self.assertTrue(view.pools[0].large_pity_known)
+        self.assertEqual(view.pools[0].large_pity_limit, 80)
+        self.assertEqual(view.pools[0].large_pity_source, "default")
+        fz_view = gacha_module.build_gacha_analysis(self.role, [record], [], pool_rules={
+            "p": gacha_assets_module.GachaPoolRule("p", ("wpn_up",), 70)
+        })
+        self.assertEqual((fz_view.pools[0].large_pity_limit, fz_view.pools[0].large_pity_source), (70, "fz"))
 
     async def test_full_then_incremental_stops_at_saved_boundary(self):
         fake = _FakeGachaClient()
         service = gacha_module.EndfieldGachaService(self.store, fake, self.cipher)
         first = await service.sync(self.role, full=True)
         second = await service.sync(self.role, full=False)
-        self.assertEqual(first.inserted, 9)
+        # 五条角色流（含重构寻访）各 2 条 + 武器流 1 条
+        self.assertEqual(first.inserted, 11)
         self.assertEqual(second.inserted, 0)
-        self.assertEqual(self.store.count_gacha_records(self.role), 9)
+        self.assertEqual(self.store.count_gacha_records(self.role), 11)
+        self.assertIn(
+            "char:E_CharacterGachaPoolType_Rerun",
+            {state.stream_key for state in self.store.list_sync_states(self.role)},
+        )
 
     async def test_partial_pool_failure_keeps_successful_records(self):
         failed_pool = client_module.CHARACTER_POOL_TYPES[1]
@@ -2910,7 +2922,7 @@ class EndfieldGachaServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertAlmostEqual(weapon_value.up_after, 53.5389, places=4)
         self.assertEqual((weapon_value.actual_up, weapon_value.up_outcomes), (40, 2))
 
-    def test_analysis_hides_standard_from_card_but_keeps_it_in_totals(self):
+    def test_analysis_shows_standard_by_default_and_hides_it_only_by_setting(self):
         records = [
             store_module.GachaRecord("role", "server", "standard", "基础寻访", "E_CharacterGachaPoolType_Standard", "s1", 1, "s", "基础角色", 6, "角色"),
             store_module.GachaRecord("role", "server", "old", "旧限定", "special", "o1", 10, "o1", "旧六星", 6, "角色"),
@@ -2936,10 +2948,24 @@ class EndfieldGachaServiceTests(unittest.IsolatedAsyncioTestCase):
         rules = {
             "current": gacha_assets_module.GachaPoolRule("current", ("free-5",), 120),
         }
-        result = gacha_module.build_gacha_analysis(self.role, records, [], pool_rules=rules)
+        result = gacha_module.build_gacha_analysis(self.role, records, [], pool_rules=rules, show_standard=True)
+        hidden = gacha_module.build_gacha_analysis(self.role, records, [], pool_rules=rules, show_standard=False)
         pools = {item.pool_id: item for item in result.pools}
 
+        def other_section(view):     # 无重构池时两栏：「其他寻访」接在特许寻访栏下方
+            return next(section for column in gacha_draw_module.build_gacha_columns(view)
+                        for section in column.sections if section.spec.divider)
+
         self.assertIn("standard", pools)
+        self.assertIn("standard", {card.pool.pool_id for card in other_section(result).cards})
+        self.assertNotIn("standard", {card.pool.pool_id for card in other_section(hidden).cards})
+        self.assertEqual([card.pool.pool_id for card in other_section(hidden).hidden], ["standard"])
+        self.assertIn("基础寻访已按设置隐藏：1 抽 · 1 个六星", gacha_draw_module.hidden_note(other_section(hidden)))
+        self.assertEqual(
+            (hidden.total, hidden.paid_total, hidden.free_pull_count, hidden.free_ten_count),
+            (result.total, result.paid_total, result.free_pull_count, result.free_ten_count),
+        )
+        # v1 旧版两栏仍按旧规则把基础寻访排除在卡片外（ENDFIELD_GACHA_LAYOUT=v1 回滚时的行为）
         self.assertNotIn(
             "standard",
             {item.pool_id for item in draw_module._recent_gacha_pools(result, "角色")},
@@ -3041,8 +3067,11 @@ class EndfieldGachaServiceTests(unittest.IsolatedAsyncioTestCase):
         ).pools[0]
         events = {item.pool_position: item for item in pool.six_stars}
 
-        self.assertEqual(events[40].pity_labels, ())
+        # AKE 给出 UP 名单后，官方记录里的非 UP 六星也会标"歪"（up_status="off"）。
+        self.assertEqual(events[40].pity_labels, ("歪",))
+        self.assertEqual(events[40].up_status, "off")
         self.assertEqual(events[120].pity_labels, ("小保底", "大保底"))
+        self.assertEqual(events[120].up_status, "up")
 
     def test_joint_pool_does_not_advance_special_pool_pity(self):
         records = [
@@ -3155,7 +3184,8 @@ class EndfieldGachaServiceTests(unittest.IsolatedAsyncioTestCase):
         ).pools[0]
         events = {item.pool_position: item for item in pool.six_stars}
 
-        self.assertEqual(events[40].pity_labels, ("小保底",))
+        # 第 40 抽的六星不在 UP 名单里，v3 起额外标"歪"。
+        self.assertEqual(events[40].pity_labels, ("小保底", "歪"))
         self.assertEqual(
             events[80].pity_labels,
             ("小保底", "大保底"),
@@ -3742,6 +3772,54 @@ class EndfieldGachaServiceTests(unittest.IsolatedAsyncioTestCase):
 
 
 class EndfieldNeutralCardTests(unittest.IsolatedAsyncioTestCase):
+    def test_v1_gacha_renderer_still_draws_v3_pool_kinds(self):
+        """v3 新字段带默认值，旧渲染在重构寻访 / 点绘申领 / 未知池上仍能出 HTML。"""
+        records = [
+            store_module.GachaRecord(
+                "role", "server", "rerun_chr_x", "绚丽异彩", "E_CharacterGachaPoolType_Rerun", str(seq), seq,
+                "chr_up" if seq == 30 else f"r{seq}", "示例UP" if seq == 30 else "结果", 6 if seq == 30 else 4, "角色",
+                pool_version=1,
+            )
+            for seq in range(1, 41)
+        ]
+        records.extend(
+            store_module.GachaRecord(
+                "role", "server", "rerun_chr_x", "绚丽异彩", "E_CharacterGachaPoolType_Rerun", str(seq), 100,
+                f"f{seq}", "结果", 4, "角色", is_free=True, pool_version=1,
+            )
+            for seq in range(41, 51)
+        )
+        records.extend(
+            store_module.GachaRecord(
+                "role", "server", "rerun_wpn_x", "点绘申领", "weapon", str(seq), 200 + (seq - 51) // 10,
+                f"w{seq}", "武器", 4, "武器", pool_version=1,
+            )
+            for seq in range(51, 161)
+        )
+        records.append(
+            store_module.GachaRecord(
+                "role", "server", "collab_1", "联动寻访", "E_CharacterGachaPoolType_Collab", "999", 999,
+                "c1", "联动六星", 6, "角色",
+            )
+        )
+        rules = {
+            "rerun_chr_x": gacha_assets_module.GachaPoolRule("rerun_chr_x", ("chr_up",), 0),
+            "rerun_wpn_x": gacha_assets_module.GachaPoolRule("rerun_wpn_x", ("wpn_up",), 0),
+        }
+        role = store_module.EndfieldRole(1, 1, "qq", "bind", "role", "server", "甲", "一区", True)
+        view = gacha_module.build_gacha_analysis(role, records, [], pool_rules=rules)
+        self.assertEqual(
+            {pool.kind_key for pool in view.pools}, {"rerun", "weapon_rerun", "unknown_char"},
+        )
+        for pool in view.pools:
+            html = draw_module._draw_gacha_pool(pool)
+            self.assertIn(pool.name, html)
+        weapon = next(pool for pool in view.pools if pool.kind_key == "weapon_rerun")
+        self.assertEqual([gift.claim_count for gift in weapon.keepsake_gifts], [10])
+        self.assertIn("第10次申领赠送武库箱", draw_module._draw_gacha_pool(weapon))
+        self.assertEqual(set(view.expectations), {"special", "rerun", "weapon"})
+        self.assertIn("rerun", {chain.family for chain in view.chains})
+
     def test_gacha_pool_header_renders_left_character_banner_without_label(self):
         pool = gacha_module.PoolAnalysis(
             "special", "限定池", "角色", 10, 0,
@@ -3900,7 +3978,9 @@ class EndfieldNeutralCardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sum(len(item.free_batches) for item in pieces), len(free_batches))
         self.assertIn("（续 2）", pieces[1].name)
 
-    async def test_gacha_cards_fall_back_to_multiple_pages_only_after_height_overflow(self):
+    async def test_gacha_v1_cards_fall_back_to_multiple_pages_only_after_height_overflow(self):
+        # v1 只在 ENDFIELD_GACHA_LAYOUT=v1 或 v3 失败回退时使用；v3 的“测量 1 次 + 每页截图 1 次”见
+        # tests/test_endfield_gacha_layout.py。
         events = tuple(
             gacha_module.SixStarEvent(f"六星 {index}", "超长武器池", "武器", index)
             for index in range(90)
@@ -3917,7 +3997,7 @@ class EndfieldNeutralCardTests(unittest.IsolatedAsyncioTestCase):
         ])
 
         with mock.patch.object(draw_module, "draw_gacha_analysis_card", renderer):
-            pages = await draw_module.draw_gacha_analysis_cards(view, uid="****1234")
+            pages = await draw_module._draw_gacha_analysis_cards_v1(view, uid="****1234")
 
         self.assertEqual(pages, (b"page-1", b"page-2"))
         self.assertEqual(renderer.await_count, 3)

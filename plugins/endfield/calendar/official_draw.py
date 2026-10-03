@@ -11,6 +11,7 @@ from otae_bot.infrastructure.rendering.executor import run_image_render
 from otae_bot.infrastructure.rendering.browser import screenshot_web_element
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
 
+from ..cold_start import REMOTE_ASSET_NAMESPACE, note_remote_assets
 from ..rendering.cards import _prepare_assets, optimize_png_container
 from .official import OfficialCalendarDiscoveryError, OfficialVersionCalendar
 
@@ -23,10 +24,9 @@ TIMELINE_OFFSET_X = -4
 
 async def draw_official_version_calendar(calendar: OfficialVersionCalendar) -> bytes:
     started = perf_counter()
-    prepared = await _prepare_assets(
-        (asset.url for asset in calendar.assets),
-        inline=False,
-    )
+    asset_urls = tuple(asset.url for asset in calendar.assets)
+    await note_remote_assets(asset_urls, namespace=REMOTE_ASSET_NAMESPACE)
+    prepared = await _prepare_assets(asset_urls, inline=False)
     for asset in calendar.assets:
         if not prepared.urls.get(asset.url) or len(prepared.contents.get(asset.url, b"")) < 8_000:
             raise OfficialCalendarDiscoveryError(f"官网日历素材不可用：{asset.key}")

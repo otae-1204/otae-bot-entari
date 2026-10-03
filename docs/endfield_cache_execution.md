@@ -160,6 +160,8 @@
 | `OTAE_PUBLIC_IMAGE_CACHE_MIB` | 256 | 磁盘公共图片内容；设 0 可关闭 |
 | `OTAE_PUBLIC_IMAGE_CACHE_PATH` | `data/cache/public-images-v1.sqlite3` | 可丢弃的公共图片缓存位置 |
 
+素材请求的超时、重试、按主机熔断、整卡截止时间与可选代理见 [http_asset_lane.md](http_asset_lane.md)（`OTAE_HTTP_ASSET_*`）。
+
 内存三池总预算 96 MiB，不包括其他业务/PNG 缓存、仍被派生对象引用的源树、在途响应、Python 分配器与浏览器。磁盘 256 MiB 限制的是图片内容，SQLite 索引/WAL 有额外开销。旧抽卡图片目录暂未整体迁移到这个磁盘预算：本轮增加了 TTL、清理标记和派生图源时间检查，但**不能宣称所有历史缓存文件已统一限容**。
 
 磁盘白名单只接受指定公共 HTTPS 图片路径，拒绝带查询参数/认证头和私人 API；保存哈希键、图片和公共验证器，不保存请求 URL、账号标识、Token、Cookie、档案 JSON 或私人 PNG。官方个人数据只用于当前内存查询；程序自身已有加密账号存储机制未改动。

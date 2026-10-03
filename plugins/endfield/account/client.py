@@ -20,6 +20,7 @@ from otae_bot.infrastructure.http.tls import shared_ssl_context
 
 from .store import GachaRecord, RoleCandidate
 from .i18n import localized_text
+from ..gacha.pools import DEFAULT_CHARACTER_POOL_TYPES
 
 
 for _logger_name in ("httpx", "httpcore"):
@@ -47,12 +48,8 @@ ACCOUNT_PROVIDER_CN = "hypergryph"
 ACCOUNT_PROVIDER_SKPORT = "gryphline"
 _ACCOUNT_CREDENTIAL_KIND = "endfield-account-v1"
 _SERVICE_TOKEN_KIND = "endfield-service-token-v1"
-CHARACTER_POOL_TYPES = (
-    "E_CharacterGachaPoolType_Special",
-    "E_CharacterGachaPoolType_Joint",
-    "E_CharacterGachaPoolType_Standard",
-    "E_CharacterGachaPoolType_Beginner",
-)
+# 默认角色池流（含重构寻访）；同步时再与 /char/pool 目录取并集，见 gacha.pools.resolve_character_pool_types。
+CHARACTER_POOL_TYPES = DEFAULT_CHARACTER_POOL_TYPES
 
 # Skland's ``endfield_attendance_*`` values are service-side reward aliases,
 # not keys in AKEData's ItemTable.  These are the stable AKEData item ids that
@@ -801,8 +798,9 @@ class EndfieldOfficialClient:
             params["seq_id"] = seq_id
         payload = await self._json_request("同步角色抽卡", "GET", f"{config.gacha_base}/api/record/char", params=params)
         items = _response_items(payload)
+        page_pool_version = _response_pool_version(payload)
         records = tuple(
-            _character_record(role, item, pool_type, pool_name)
+            _character_record(role, item, pool_type, pool_name, page_pool_version)
             for item in items
             if item.get("seqId") is not None and item.get("charId")
         )
@@ -821,8 +819,9 @@ class EndfieldOfficialClient:
             params["seq_id"] = seq_id
         payload = await self._json_request("同步武器抽卡", "GET", f"{config.gacha_base}/api/record/weapon", params=params)
         items = _response_items(payload)
+        page_pool_version = _response_pool_version(payload)
         records = tuple(
-            _weapon_record(role, item, pool_id, pool_name)
+            _weapon_record(role, item, pool_id, pool_name, page_pool_version)
             for item in items
             if item.get("seqId") is not None and item.get("weaponId")
         )
@@ -1309,7 +1308,21 @@ def _response_has_more(payload: dict[str, Any]) -> bool:
     return False
 
 
-def _character_record(role: Any, item: dict[str, Any], pool_type: str, pool_name: str) -> GachaRecord:
+def _response_pool_version(payload: dict[str, Any]) -> int:
+    """记录接口在 data 顶层给出的 poolVersion（逐条 item 缺失时的兜底）。"""
+    data = payload.get("data") or {}
+    if isinstance(data, dict):
+        return _as_int(data.get("poolVersion") or data.get("pool_version"))
+    return 0
+
+
+def _record_pool_version(item: dict[str, Any], page_pool_version: int) -> int:
+    return _as_int(item.get("poolVersion") or item.get("pool_version")) or int(page_pool_version or 0)
+
+
+def _character_record(
+    role: Any, item: dict[str, Any], pool_type: str, pool_name: str, page_pool_version: int = 0,
+) -> GachaRecord:
     return GachaRecord(
         role_id=role.role_id, server_id=role.server_id,
         pool_id=str(item.get("poolId") or item.get("pool_id") or pool_type),
@@ -1321,10 +1334,13 @@ def _character_record(role: Any, item: dict[str, Any], pool_type: str, pool_name
         item_id=str(item.get("charId") or ""), item_name=localized_text(item.get("charName"), default="未知角色"),
         rarity=_normalize_rarity(item.get("rarity")), item_type="角色",
         is_new=_as_bool(item.get("isNew")), is_free=_as_bool(item.get("isFree")),
+        pool_version=_record_pool_version(item, page_pool_version),
     )
 
 
-def _weapon_record(role: Any, item: dict[str, Any], pool_id: str, pool_name: str) -> GachaRecord:
+def _weapon_record(
+    role: Any, item: dict[str, Any], pool_id: str, pool_name: str, page_pool_version: int = 0,
+) -> GachaRecord:
     return GachaRecord(
         role_id=role.role_id, server_id=role.server_id,
         pool_id=str(item.get("poolId") or item.get("pool_id") or pool_id),
@@ -1337,6 +1353,7 @@ def _weapon_record(role: Any, item: dict[str, Any], pool_id: str, pool_name: str
         rarity=_normalize_rarity(item.get("rarity")), item_type="武器",
         weapon_type=localized_text(item.get("weaponType")), is_new=_as_bool(item.get("isNew")),
         is_free=_as_bool(item.get("isFree")),
+        pool_version=_record_pool_version(item, page_pool_version),
     )
 
 

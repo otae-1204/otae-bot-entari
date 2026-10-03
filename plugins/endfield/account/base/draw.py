@@ -8,6 +8,7 @@ from .models import (
     SettlementView,
     SpaceshipRoomView,
 )
+from ...cold_start import REMOTE_ASSET_NAMESPACE, note_remote_assets
 from ...rendering.cards import (
     PreparedCardHtml,
     _draw_gallery_catalog,
@@ -57,7 +58,9 @@ async def _prepare_account_base_html(
     *,
     inline: bool,
 ) -> PreparedCardHtml:
-    prepared = await _prepare_assets(_asset_urls(view), inline=inline)
+    icon_urls = _asset_urls(view)
+    await note_remote_assets(icon_urls, namespace=REMOTE_ASSET_NAMESPACE)
+    prepared = await _prepare_assets(icon_urls, inline=inline)
     return PreparedCardHtml(
         _render_account_base_html(view, prepared.urls),
         prepared.resources,

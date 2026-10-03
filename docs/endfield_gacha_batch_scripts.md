@@ -30,7 +30,7 @@
 
 ## 一、批量导出寻访历史
 
-对库里每份鹰角通行证凭据，先用 SDK 的 `GET /account/binding/v1/binding_list` 展开该通行证下**全部**终末地 uid（不止手动绑定的角色），再逐个 uid 换 u8 token，把四条角色池 + 武器池的记录全量翻页导出。
+对库里每份鹰角通行证凭据，先用 SDK 的 `GET /account/binding/v1/binding_list` 展开该通行证下**全部**终末地 uid（不止手动绑定的角色），再逐个 uid 换 u8 token，把五条角色池（特许、特殊、基础、启程、重构寻访，另按接口目录动态追加）+ 武器池的记录全量翻页导出。记录里带 `pool_version`（复刻期号，接口未给时为 0）。
 
 ```powershell
 # 导出全部已授权用户
@@ -93,8 +93,8 @@ chcp 65001 > $null; .\.venv\Scripts\python.exe scripts\aggregate_endfield_gacha_
 
 - **六星综合出率** = 六星数 / 付费抽数，附 95% Wilson 置信区间；免费十连不计入付费出率，单列 `free_pulls`。
 - **平均保底** = 相邻两个六星之间的付费抽数；每个池族第一个六星是左删失（本机记录可能不完整），单独计数 `left_censored_first_six`，不进平均。
-- **保底/池族判定**（角色 special 共享、joint / beginner 隔离；武器按单条流）与 `plugins/endfield/gacha/service.py` 对齐，以其为准。
-- **歪率 miss_up**：官方 `gacha_records` 不含 UP 归属，故仅取自**小黑盒导入**，输出中标 `"source": "xhh"`。
+- **保底/池族判定**（特许一条共享链、重构寻访另一条共享链、基础寻访一条、特殊 / 启程按池隔离；武器按单条流）直接复用 `plugins/endfield/gacha/pools.py` 的池类型注册表，与 `plugins/endfield/gacha/service.py` 同一口径。
+- **歪率 miss_up**：官方 `gacha_records` 不含 UP 归属，故仅取自**小黑盒导入**，输出中标 `"source": "xhh"`；统计范围为有 UP 判定的角色池（特许、重构）。
 
 ### 对比基线（官方概率公示，理论值）
 

@@ -627,6 +627,56 @@ class NativeAkeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rows["known"].up_item_ids, ("new-up",))
         self.assertEqual(rows["unknown"].hard_guarantee, 0)
 
+    async def test_real_pool_metadata_reaches_rules_without_fz_fallback(self):
+        # issue #24 第 1 点：get_ake_pool_metadata 曾因未定义的 _pool_table_int 抛 NameError，
+        # prepare_pool_rules 捕获后静默丢掉 AKE 池表，只剩更慢的 FZ 回退。
+        from plugins.endfield.catalog import service as service_module
+        from plugins.endfield.gacha.assets import EndfieldGachaAssetCache
+
+        self.data._tables["GachaCharPoolTable"] = {
+            "pool_rerun": {
+                "name": {"id": "", "text": "重构寻访"},
+                "upCharIds": ["chr_0016_laevat"],
+                "type": "6",
+                "sortId": 12,
+                "gachaPoolVersion": None,
+                "clientTopTimeId": "",
+            }
+        }
+        self.data._tables["GachaWeaponPoolTable"] = {
+            "pool_weapon": {
+                "name": {"id": "", "text": "武库申领"},
+                "upWeaponIds": ["wpn_0001"],
+                "type": "",
+                "sortId": "x",
+                "gachaPoolVersion": 3,
+            }
+        }
+        service = EndfieldService(SimpleNamespace())
+        with patch.object(service_module, "snapshot", AsyncMock(return_value=self.data)):
+            metadata = await service.get_ake_pool_metadata()
+            self.assertEqual(metadata["pool_rerun"]["type_code"], 6)
+            self.assertEqual(metadata["pool_rerun"]["sort_id"], 12)
+            self.assertEqual(metadata["pool_rerun"]["pool_version"], 0)
+            self.assertEqual(metadata["pool_weapon"]["type_code"], -1)
+            self.assertEqual(metadata["pool_weapon"]["sort_id"], 0)
+            self.assertEqual(metadata["pool_weapon"]["pool_version"], 3)
+
+            cache = EndfieldGachaAssetCache(service)
+            with (
+                patch.object(cache, "_prepare_pool_rules_fz", AsyncMock(return_value={})),
+                patch("plugins.endfield.gacha.assets.logger") as log,
+            ):
+                rules = await cache.prepare_pool_rules([])
+        unavailable = [
+            call for call in log.warning.call_args_list
+            if "AKE pool metadata unavailable" in str(call)
+        ]
+        self.assertEqual(unavailable, [])
+        self.assertEqual(rules["pool_rerun"].type_code, 6)
+        self.assertEqual(rules["pool_rerun"].up_item_ids, ("chr_0016_laevat",))
+        self.assertEqual(rules["pool_weapon"].table, "weapon")
+
     def test_client_sprite_folder_is_normalized_for_case_sensitive_cdn(self):
         self.assertIn(
             "/termicon/", static_sprite_url("TermIcon/icon_term_ba_naturalinflict.png")

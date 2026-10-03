@@ -1,22 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-
-from loguru import logger
+from pathlib import Path
 
 from otae_bot.config.settings import SYSTEM_PROXY, _env
 
-VERTEX_ENDPOINT = "https://aiplatform.googleapis.com/v1/projects/{project}/locations/{location}/endpoints/openapi"
-_warned: set[str] = set()
-
 
 def _env_int(name: str, default: int) -> int:
-    """Read an integer setting; missing or malformed values fall back to the default.
-
-    ``_env`` runs values through ``json.loads``, so a legitimate ``0`` arrives as the
-    falsy int ``0``: compare against None rather than testing truthiness, or ``0``
-    would be indistinguishable from "unset".
-    """
     raw = _env(name, None)
     if raw is None:
         return default
@@ -36,41 +26,50 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+def _proxy(name: str, fallback: str = "") -> str:
+    value = str(_env(name, "") or "").strip()
+    if value.lower() == "direct":
+        return ""
+    if value:
+        return value
+    return fallback
+
+
 @dataclass(frozen=True)
 class HywConfig:
     api_key: str = field(default="", repr=False)
     base_url: str = "https://openrouter.ai/api/v1"
-    model: str = "gpt-4o"
+    model: str = "gemini-3.8-flash"
     proxy: str = field(default="", repr=False)
-    search_proxy: str | None = field(default=None, repr=False)
+    search_proxy: str = field(default="", repr=False)
     render: bool = True
-    timeout: float = 120
-    max_turns: int = 10
-    max_tools: int = 8
-    # 凭据模式：api_key=静态密钥（默认，行为与旧版一致）；service_account=Google 服务账号。
+    timeout: float = 300
+    request_timeout: float = 90
+    max_concurrent: int = 2
+    max_tool_images: int = 600
+    max_reader_images: int = 30
+    search_provider: str = "ddgs"
+    search_mode: str = "turbo"
+    reader_engine: str = "browser"
     auth_mode: str = "api_key"
+    provider: str = "openai-compatible"
+    api: str = "chat"
     credentials_file: str = ""
     vertex_location: str = "global"
     vertex_base_url: str = ""
     auth_error: str = ""
-    # 瞬时失败（429/5xx/超时/连接中断）的退避重试；attempts<=1 或 budget<=0 表示关闭。
-    retry_attempts: int = 3
-    retry_base_delay: float = 0.5
-    retry_max_delay: float = 8.0
-    retry_budget: float = 20.0
+    home: str = "data/hyw-frontier"
 
     @property
     def configured(self) -> bool:
-        """当前凭据模式是否可用；不可用时由调用点给出聊天提示。"""
         if self.auth_mode == "service_account":
-            return bool(self.credentials_file)
+            return bool(self.credentials_file) and not self.auth_error
         if self.auth_mode == "api_key":
             return bool(self.api_key)
         return False
 
     @classmethod
-    def from_env(cls) -> HywConfig:
-        # Read the complete credential/endpoint/model tuple from one source.
+    def from_env(cls) -> "HywConfig":
         source = str(_env("HYW_CONFIG_SOURCE", "hyw")).strip().lower()
         prefixes = {"hyw": "HYW", "llm": "LLM", "steam": "STEAM_LLM"}
         if source not in prefixes:
@@ -78,85 +77,57 @@ class HywConfig:
         prefix = prefixes[source]
         default_base = cls.base_url if source == "hyw" else "https://api.deepseek.com"
         default_model = cls.model if source == "hyw" else "deepseek-v4-flash"
-        proxy = str(_env("HYW_PROXY", "") or "").strip()
-        if proxy.lower() == "direct":
-            proxy = ""
-        elif not proxy:
-            proxy = str(SYSTEM_PROXY.get("https") or SYSTEM_PROXY.get("http") or "").strip()
-        search_proxy = str(_env("HYW_SEARCH_PROXY", "") or "").strip()
-        if search_proxy.lower() == "direct":
-            search_proxy = ""
-        elif not search_proxy:
-            search_proxy = proxy
-        explicit_base = str(_env(f"{prefix}_BASE_URL", "") or "").strip()
-        base_url = (explicit_base or default_base).rstrip("/")
+        proxy = _proxy("HYW_PROXY", str(SYSTEM_PROXY.get("https") or SYSTEM_PROXY.get("http") or "").strip())
+        search_proxy = _proxy("HYW_SEARCH_PROXY", proxy)
+        base_url = str(_env(f"{prefix}_BASE_URL", "") or default_base).strip().rstrip("/")
         model = str(_env(f"{prefix}_MODEL", "") or default_model).strip()
         credentials_file = str(_env("HYW_CREDENTIALS_FILE", "") or _env("GOOGLE_APPLICATION_CREDENTIALS", "") or "").strip()
         vertex_location = str(_env("HYW_VERTEX_LOCATION", "") or "").strip() or "global"
         vertex_base_url = str(_env("HYW_VERTEX_BASE_URL", "") or "").strip().rstrip("/")
-        auth_mode, auth_error = ("api_key" if str(_env(f"{prefix}_API_KEY", "") or "").strip() else "none"), ""
+        api_key = str(_env(f"{prefix}_API_KEY", "") or "").strip()
+        auth_mode, auth_error, provider, api = "api_key", "", "openai-compatible", "chat"
+        if "api.deepseek.com" in base_url and not credentials_file:
+            provider, api = "deepseek", "responses"
         if credentials_file:
-            auth_mode, auth_error = cls._apply_service_account(credentials_file, vertex_location, vertex_base_url)
-            if auth_mode == "service_account":
-                # Vertex 的地址形态无法由「根地址 + /chat/completions」拼出，必须整体推导；
-                # 显式设置的中转地址在这里会被忽略，避免把服务账号令牌发往 OpenAI 中转。
-                base_url = cls._vertex_base_url(credentials_file, vertex_location, vertex_base_url, explicit_base)
-                model = model if "/" in model else f"google/{model}"
+            auth_mode, auth_error = "service_account", ""
+            provider, api = "google", "google"
+            if not Path(credentials_file).expanduser().is_file():
+                auth_mode, auth_error = "none", "找不到服务账号 JSON。"
+            model = model.split("/", 1)[-1]
+        elif not api_key:
+            auth_mode = "none"
+        home = str(_env("HYW_HOME", "") or cls.home).strip() or cls.home
+        search_provider = str(_env("HYW_SEARCH_PROVIDER", "") or cls.search_provider).strip().lower()
+        if search_provider not in {"ddgs", "jina", "parallel"}:
+            search_provider = cls.search_provider
+        reader_engine = str(_env("HYW_READER_ENGINE", "") or cls.reader_engine).strip().lower()
+        if reader_engine not in {"default", "browser"}:
+            reader_engine = cls.reader_engine
         return cls(
-            api_key=str(_env(f"{prefix}_API_KEY", "") or "").strip(),
+            api_key=api_key,
             base_url=base_url,
             model=model,
             proxy=proxy,
             search_proxy=search_proxy,
             render=str(_env("HYW_RENDER", True)).lower() not in {"false", "0", "no"},
+            timeout=max(1.0, _env_float("HYW_TIMEOUT", cls.timeout)),
+            request_timeout=max(1.0, _env_float("HYW_REQUEST_TIMEOUT", cls.request_timeout)),
+            max_concurrent=max(1, _env_int("HYW_MAX_CONCURRENT", cls.max_concurrent)),
+            max_tool_images=max(0, _env_int("HYW_MAX_TOOL_IMAGES", cls.max_tool_images)),
+            max_reader_images=max(0, _env_int("HYW_MAX_READER_IMAGES", cls.max_reader_images)),
+            search_provider=search_provider,
+            search_mode=str(_env("HYW_SEARCH_MODE", "") or cls.search_mode).strip() or cls.search_mode,
+            reader_engine=reader_engine,
             auth_mode=auth_mode,
+            provider=provider,
+            api=api,
             credentials_file=credentials_file,
             vertex_location=vertex_location,
             vertex_base_url=vertex_base_url,
             auth_error=auth_error,
-            retry_attempts=max(1, _env_int("HYW_RETRY_ATTEMPTS", cls.retry_attempts)),
-            retry_base_delay=max(0.0, _env_float("HYW_RETRY_BASE_DELAY", cls.retry_base_delay)),
-            retry_max_delay=max(0.0, _env_float("HYW_RETRY_MAX_DELAY", cls.retry_max_delay)),
-            retry_budget=max(0.0, _env_float("HYW_RETRY_BUDGET", cls.retry_budget)),
+            home=home,
         )
-
-    @property
-    def retry(self) -> RetryPolicy:
-        """本次配置对应的退避重试策略。"""
-        from .retry import RetryPolicy
-
-        return RetryPolicy(
-            attempts=self.retry_attempts,
-            base_delay=self.retry_base_delay,
-            max_delay=self.retry_max_delay,
-            budget=self.retry_budget,
-        )
-
-    @staticmethod
-    def _apply_service_account(credentials_file: str, vertex_location: str, vertex_base_url: str) -> tuple[str, str]:
-        """校验凭据文件；不可用时降级为 none 并保留可展示的原因，不抛异常。"""
-        from .google_auth import load_service_account
-
-        try:
-            load_service_account(credentials_file)
-        except HywError as error:
-            return "none", str(error)
-        return "service_account", ""
-
-    @staticmethod
-    def _vertex_base_url(credentials_file: str, vertex_location: str, vertex_base_url: str, explicit_base: str) -> str:
-        from .google_auth import load_service_account
-
-        if vertex_base_url:
-            return vertex_base_url
-        project = load_service_account(credentials_file).project_id
-        derived = VERTEX_ENDPOINT.format(project=project, location=vertex_location)
-        if explicit_base and "aiplatform.googleapis.com" not in explicit_base and "HYW_BASE_URL" not in _warned:
-            # 只记录「已忽略」这一事实，不记录被忽略的值。
-            _warned.add("HYW_BASE_URL")
-            logger.warning("[hyw] service account credentials in use: HYW_BASE_URL is ignored, endpoint derived from the credentials file")
-        return derived
 
 
 class HywError(Exception):
-    """An error whose message is safe to send to the chat."""
+    pass

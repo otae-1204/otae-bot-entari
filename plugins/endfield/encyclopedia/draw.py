@@ -20,6 +20,7 @@ from otae_bot.infrastructure.rendering.browser import BrowserResource, screensho
 from otae_bot.infrastructure.rendering.executor import run_image_render
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
 
+from ..cold_start import REMOTE_ASSET_NAMESPACE, note_remote_assets
 from ..rendering.cards import (
     _prepare_assets,
     _write_temp_html,
@@ -51,23 +52,28 @@ _LINK_RE = re.compile(r"&lt;[@#]([A-Za-z0-9_.-]+)&gt;(.*?)&lt;/&gt;", re.DOTALL)
 _STYLE_RE = re.compile(r"&lt;#([A-Za-z0-9_.-]+)&gt;(.*?)&lt;/&gt;", re.DOTALL)
 
 
+async def _noted_assets(urls):
+    await note_remote_assets(urls, namespace=REMOTE_ASSET_NAMESPACE)
+    return await _prepare_assets(urls, inline=False)
+
+
 async def draw_item_card(view: ItemView) -> bytes:
-    prepared = await _prepare_assets([view.icon_url], inline=False)
+    prepared = await _noted_assets([view.icon_url])
     return await _render(render_item_html(view, prepared.urls), _OVERFLOW_SELECTORS, "item", prepared.resources)
 
 
 async def draw_prop_card(view: PropView) -> bytes:
-    prepared = await _prepare_assets([view.icon_url], inline=False)
+    prepared = await _noted_assets([view.icon_url])
     return await _render(render_prop_html(view, prepared.urls), _OVERFLOW_SELECTORS, "prop", prepared.resources)
 
 
 async def draw_enemy_card(view: EnemyView) -> bytes:
-    prepared = await _prepare_assets([view.icon_url], inline=False)
+    prepared = await _noted_assets([view.icon_url])
     return await _render(render_enemy_html(view, prepared.urls), _OVERFLOW_SELECTORS, "enemy", prepared.resources)
 
 
 async def draw_term_card(view: TermView) -> bytes:
-    prepared = await _prepare_assets([view.icon_url], inline=False)
+    prepared = await _noted_assets([view.icon_url])
     return await _render(render_term_html(view, prepared.urls), _OVERFLOW_SELECTORS, "term", prepared.resources)
 
 

@@ -274,7 +274,7 @@ class AssetFetchResilienceTests(unittest.IsolatedAsyncioTestCase):
 
         with mock.patch.object(http_client, "fetch_bytes", side_effect=flaky):
             results, failures = await http_client.fetch_many_resilient(
-                ["https://assets.invalid/a.png"], namespace="t", base_delay_seconds=0
+                ["https://assets.invalid/a.png"], namespace="t", base_delay_seconds=0, attempts=3
             )
         self.assertEqual(calls["n"], 3)
         self.assertEqual(failures, {})
@@ -321,8 +321,31 @@ class AssetFetchResilienceTests(unittest.IsolatedAsyncioTestCase):
 
         with mock.patch.object(http_client, "fetch_bytes", side_effect=always_timeout):
             with mock.patch.object(http_client.asyncio, "sleep", new=record):
+                # 素材通道默认只重试 1 次（OTAE_HTTP_ASSET_RETRIES=1）
                 await http_client.fetch_many_resilient(["https://assets.invalid/a.png"], namespace="t")
+                self.assertEqual(delays, [0.25])
+                delays.clear()
+                await http_client.fetch_many_resilient(
+                    ["https://assets.invalid/a.png"], namespace="t", attempts=3
+                )
         self.assertEqual(delays, [0.25, 0.5])
+
+    async def test_resilient_fetch_uses_the_asset_lane(self):
+        seen = []
+
+        async def ok(url, **kwargs):
+            seen.append(kwargs)
+            return http_client.HttpResource(b"png", "image/png", 200, url)
+
+        with mock.patch.object(http_client, "fetch_bytes", side_effect=ok):
+            await http_client.fetch_many_resilient(["https://assets.invalid/a.png"], namespace="t")
+        self.assertIs(seen[0]["asset"], True)
+
+    def test_circuit_open_is_given_up_immediately(self):
+        self.assertEqual(
+            http_client.classify_failure(http_client.HostCircuitOpen("cooling down")),
+            (True, "circuit_open"),
+        )
 
 
 if __name__ == "__main__":

@@ -1,0 +1,38 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "md2png"
+version = "0.1.0"
+description = "Inspectable Markdown typography: AST → measured lines → display list → Pillow"
+requires-python = ">=3.11"
+readme = "README.md"
+dependencies = [
+  "Pillow>=11.1,<13",
+  "markdown-it-py>=3.0,<5",
+  "mdit-py-plugins>=0.4,<0.7",
+  "Pygments>=2.19,<3",
+  "fonttools>=4.56,<5",
+  "regex>=2024.11.6",
+  "uniseg>=0.10,<0.11",
+]
+
+[project.optional-dependencies]
+math = [
+    "ziamath==0.13",
+    "ziafont==0.11",
+    "latex2mathml==3.81.1",
+    "aggdraw>=1.3,<2",
+]
+hyw = [
+    "aggdraw>=1.3,<2",
+    "freetype-py>=2.5,<3",
+    "uharfbuzz>=0.50,<1",
+]
+
+[project.scripts]
+md2png = "md2png.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/md2png"]

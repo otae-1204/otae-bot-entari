@@ -89,6 +89,17 @@ class AsyncTTLCache(Generic[K, V]):
         if self._on_event is not None:
             self._on_event(key, event, value)
 
+    def contains(self, key: K) -> bool:
+        """True when a completed, unexpired value is already stored.
+
+        An in-flight fill does not count: callers still waiting on that
+        download have not been served from cache.
+        """
+        now = self._clock()
+        with self._lock:
+            entry = self._entries.get(key)
+            return entry is not None and entry.expires_at > now
+
     async def get_or_create(
         self,
         key: K,

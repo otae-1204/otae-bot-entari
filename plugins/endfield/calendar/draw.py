@@ -13,6 +13,7 @@ from otae_bot.infrastructure.rendering.executor import run_image_render
 from otae_bot.infrastructure.rendering.browser import BrowserResource, screenshot_web_element
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
 
+from ..cold_start import REMOTE_ASSET_NAMESPACE, note_remote_assets
 from ..rendering.cards import _prepare_assets, optimize_png_container
 from .akedata import VersionCalendar, VersionCalendarEntry, VersionCalendarSection
 
@@ -35,10 +36,9 @@ class PreparedVersionCalendarHtml:
 async def prepare_version_calendar_html(
     calendar: VersionCalendar,
 ) -> PreparedVersionCalendarHtml:
-    prepared = await _prepare_assets(
-        (entry.art_url for entry in calendar.entries),
-        inline=False,
-    )
+    art_urls = tuple(entry.art_url for entry in calendar.entries)
+    await note_remote_assets(art_urls, namespace=REMOTE_ASSET_NAMESPACE)
+    prepared = await _prepare_assets(art_urls, inline=False)
     return PreparedVersionCalendarHtml(
         html=render_version_calendar_html(calendar, prepared.urls),
         resources=prepared.resources,
