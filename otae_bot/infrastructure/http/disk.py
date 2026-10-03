@@ -4,7 +4,6 @@ Only hashed request keys and whitelisted public bytes/validators are stored.
 Images and version-addressed AKE tables have separate SQLite files and budgets.
 The image-named storage types remain shared for backwards compatibility. SQLite
 transactions provide atomic replacement; content hashes detect damaged bodies.
-No stale-on-error fallback is provided.
 
 Fetches never wait for the disk: ``put_later``/``refresh_later`` queue rows for
 one background writer thread per database, which applies them in batched
@@ -12,6 +11,7 @@ transactions; queued rows are visible to ``get``/``metadata`` immediately.
 ``put`` stays synchronous for scripts and tests. A ``size`` column with an
 ``(accessed_at, size)`` index turns the quota check into an index-only
 aggregate and eviction into an index walk, so neither reads stored bodies.
+Expired rows are kept; callers may serve them when revalidation fails.
 """
 
 from __future__ import annotations

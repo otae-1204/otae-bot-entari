@@ -25,6 +25,8 @@ from loguru import logger
 
 ENV_PREFIX = "OTAE_HTTP_ASSET_"
 _PROXY_SCHEMES = ("http", "https", "socks5", "socks5h")
+# 内容地址固定（路径带哈希）的图床：磁盘缓存按这里的秒数算新鲜期，不再每 10 分钟校验。
+DEFAULT_HOST_MAX_AGE = (("hycdn.cn", 7 * 86400.0),)
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +42,7 @@ class AssetFetchSettings:
     proxy_hosts: tuple[str, ...] = ()
     trust_env: bool = False
     host_rewrites: tuple[tuple[str, str], ...] = ()
+    host_max_age: tuple[tuple[str, float], ...] = DEFAULT_HOST_MAX_AGE
 
     @property
     def attempts(self) -> int:
@@ -116,6 +119,29 @@ def _proxy(raw: str) -> str:
     return raw
 
 
+def _host_max_age(raw: str, default) -> tuple[tuple[str, float], ...]:
+    """``hycdn.cn=604800,example.com=86400``；按主机后缀匹配，``off`` 表示全部按默认 TTL。"""
+    raw = raw.strip()
+    if not raw:
+        return default
+    if raw.lower() in {"off", "none", "0"}:
+        return ()
+    pairs: dict[str, float] = {}
+    for item in raw.replace(";", ",").split(","):
+        suffix, sep, seconds = item.partition("=")
+        suffix = suffix.strip().lower().lstrip("*.").rstrip(".")
+        try:
+            value = float(seconds) if sep and suffix else None
+        except ValueError:
+            value = None
+        if value is None:
+            logger.warning(f"[http-assets] {ENV_PREFIX}HOST_MAX_AGE entry ignored: {item.strip()[:64]}")
+            continue
+        if value > 0:
+            pairs[suffix] = min(value, 365 * 86400.0)
+    return tuple(pairs.items())
+
+
 def load_asset_settings(environ: Mapping[str, str] | None = None) -> AssetFetchSettings:
     env = os.environ if environ is None else environ
     defaults = AssetFetchSettings()
@@ -131,6 +157,9 @@ def load_asset_settings(environ: Mapping[str, str] | None = None) -> AssetFetchS
         proxy_hosts=_hosts(str(env.get(ENV_PREFIX + "PROXY_HOSTS", "") or "")),
         trust_env=_flag(env, "TRUST_ENV", defaults.trust_env),
         host_rewrites=_rewrites(str(env.get(ENV_PREFIX + "HOST_REWRITE", "") or "")),
+        host_max_age=_host_max_age(
+            str(env.get(ENV_PREFIX + "HOST_MAX_AGE", "") or ""), defaults.host_max_age
+        ),
     )
 
 
@@ -165,6 +194,18 @@ def rewrite_asset_url(url: str, settings: AssetFetchSettings | None = None) -> s
         return url
     netloc = target if parts.port is None else f"{target}:{parts.port}"
     return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+
+
+def host_max_age(host: str, settings: AssetFetchSettings | None = None) -> float | None:
+    """Configured disk freshness for a content-addressed host (longest suffix wins)."""
+    host = (host or "").lower().rstrip(".")
+    best: tuple[str, float] | None = None
+    for suffix, seconds in (settings or asset_settings()).host_max_age:
+        if (host == suffix or host.endswith("." + suffix)) and (
+            best is None or len(suffix) > len(best[0])
+        ):
+            best = (suffix, seconds)
+    return None if best is None else best[1]
 
 
 # ---------------------------------------------------------------- 按主机熔断
