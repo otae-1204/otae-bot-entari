@@ -51,4 +51,19 @@ HYW_HOME=data/hyw-frontier
 
 全局同时最多 2 个问答，整轮 300 秒，单次模型请求 90 秒。工具图最多尝试 600 张。卡片由 md2png 绘制；出图失败时改为文字。
 
+## 失败日志
+
+模型失败（`[hyw] answer failed`）、出图失败（`[hyw] card render failed`）和其它异常（`[hyw] request failed`）
+各记一行 warning，例如：
+
+```text
+[hyw] answer failed: code=http_401 http_status=401 retryable=False chain=[FrontierError: 模型认证失败，请检查 API Key 或服务账号凭据。 <- AuthenticationError: Error code: 401 - Incorrect API key provided: <redacted>]
+```
+
+`code` / `http_status` 取自 Hyw-Frontier 的 `diagnostics`，或异常链上的 `code`、`status_code`、
+`response.status_code`。`chain` 沿 `__cause__` / `__context__` 最多记 6 层的类型与消息：
+Hyw-Frontier 用 `raise ... from None` 隐藏了 SDK 原始异常，但它仍在 `__context__` 里，真正的原因通常在这一层。
+消息先脱敏再写日志：`HYW_API_KEY` 与代理地址原文、`Bearer` / `Basic` 凭据、`Authorization` / `Cookie` /
+`api_key` / `token` 等键值、URL 的查询串与用户信息、`sk-…`、`AIza…`、`ya29.…`、JWT 和私钥块都替换成 `<redacted>`。
+
 本机若把 DNS 改写成 `198.18.0.0/15`，图片下载允许连接这一段，仍拒绝局域网地址。

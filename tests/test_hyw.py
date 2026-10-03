@@ -198,3 +198,143 @@ class RetryTests(unittest.TestCase):
 class ErrorTests(unittest.TestCase):
     def test_hyw_error_is_an_exception(self):
         self.assertIsInstance(HywError("x"), Exception)
+
+
+SECRETS = (
+    "sk-live-SECRETKEY1234567890",
+    "AIzaSyA-SECRET-QUERY-KEY-0000000000",
+    "tok-SECRET-BEARER",
+    "SECRET-COOKIE-VALUE",
+    "cfg-SECRET-API-KEY",
+    "proxy-SECRET-PASS",
+    "ya29.SECRET-OAUTH",
+)
+
+
+class FrontierError(RuntimeError):
+    """Stand-in for hyw_frontier.errors.FrontierError (not installed in the test venv)."""
+
+    def __init__(self, message, *, diagnostics=None):
+        super().__init__(message)
+        self.diagnostics = diagnostics or {}
+
+
+class RenderError(FrontierError):
+    pass
+
+
+class APIStatusError(Exception):
+    def __init__(self, message, status_code):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+def _model_failure() -> FrontierError:
+    """Same shape as hyw_frontier: safe_model_error(...) raised ``from None`` over the SDK error."""
+    try:
+        try:
+            raise APIStatusError(
+                "Error code: 401 - Incorrect API key provided: sk-live-SECRETKEY1234567890. "
+                "POST https://llm.example.test/v1/chat?key=AIzaSyA-SECRET-QUERY-KEY-0000000000&alt=json "
+                "headers={'Authorization': 'Bearer tok-SECRET-BEARER', 'Cookie': 'session=SECRET-COOKIE-VALUE'} "
+                "via http://user:proxy-SECRET-PASS@proxy.test:7897 token ya29.SECRET-OAUTH",
+                401,
+            )
+        except APIStatusError:
+            raise FrontierError(
+                "模型认证失败，请检查 API Key 或服务账号凭据。",
+                diagnostics={"code": "http_401", "http_status": 401, "retryable": False},
+            ) from None
+    except FrontierError as error:
+        return error
+
+
+def _config(**overrides) -> HywConfig:
+    values = dict(api_key="cfg-SECRET-API-KEY", proxy="http://user:proxy-SECRET-PASS@proxy.test:7897")
+    values.update(overrides)
+    return HywConfig(**values)
+
+
+class FailureLogTests(unittest.IsolatedAsyncioTestCase):
+    def assert_redacted(self, text: str):
+        for secret in SECRETS:
+            self.assertNotIn(secret, text)
+
+    def test_summary_has_code_status_and_hidden_cause_without_secrets(self):
+        from plugins.hyw.handlers import failure_summary
+
+        summary = failure_summary(_model_failure(), ("cfg-SECRET-API-KEY",))
+        self.assertIn("code=http_401", summary)
+        self.assertIn("http_status=401", summary)
+        self.assertIn("retryable=False", summary)
+        self.assertIn("FrontierError: 模型认证失败", summary)
+        # `from None` 只隐藏 traceback，__context__ 里的 SDK 异常才是有用的部分
+        self.assertIn("APIStatusError: Error code: 401 - Incorrect API key provided", summary)
+        self.assertIn("https://llm.example.test/v1/chat?<redacted>", summary)
+        self.assert_redacted(summary)
+
+    def test_status_and_code_are_found_on_plain_exceptions_in_the_chain(self):
+        import httpx
+        from plugins.hyw.handlers import failure_summary
+
+        request = httpx.Request("GET", "https://api.example.test/v1/models?api_key=SECRET-QUERY")
+        response = httpx.Response(429, request=request)
+        try:
+            try:
+                response.raise_for_status()
+            except httpx.HTTPStatusError as error:
+                raise RuntimeError("upstream failed") from error
+        except RuntimeError as error:
+            summary = failure_summary(error)
+        self.assertIn("code=- http_status=429", summary)
+        self.assertIn("RuntimeError: upstream failed <- HTTPStatusError:", summary)
+        self.assertNotIn("SECRET-QUERY", summary)
+
+    async def test_frontier_error_in_run_request_is_logged_before_the_user_message(self):
+        import sys
+        import types
+
+        from plugins.hyw import handlers
+
+        package = types.ModuleType("hyw_frontier")
+        package.answer = AsyncMock(side_effect=_model_failure())
+        errors = types.ModuleType("hyw_frontier.errors")
+        errors.FrontierError = FrontierError
+        rendering = types.ModuleType("hyw_frontier.rendering")
+        rendering.RenderError = RenderError
+        modules = {"hyw_frontier": package, "hyw_frontier.errors": errors, "hyw_frontier.rendering": rendering}
+        with patch.dict(sys.modules, modules), patch.object(handlers, "logger") as log:
+            with self.assertRaises(HywError) as raised:
+                await handlers.run_request(AsyncMock(), _config(), ("qq", "b", "g", "c", "u"), "问题", [], [])
+        self.assertIn("模型认证失败", str(raised.exception))
+        template, summary = log.warning.call_args[0]
+        self.assertIn("answer failed", template)
+        self.assertIn("code=http_401 http_status=401", summary)
+        self.assertIn("APIStatusError", summary)
+        self.assert_redacted(summary)
+
+    async def test_unexpected_error_at_the_chat_boundary_logs_the_chain(self):
+        from satori import Text
+
+        from plugins.hyw import handlers
+
+        session = AsyncMock()
+        session.reply = None
+        session.send = AsyncMock(return_value=[])
+
+        async def failing(*args, **kwargs):
+            try:
+                raise ConnectionResetError("reset by peer; Authorization: Bearer tok-SECRET-BEARER")
+            except ConnectionResetError as error:
+                raise RuntimeError("search backend crashed (api_key=cfg-SECRET-API-KEY)") from error
+
+        with patch.object(handlers.HywConfig, "from_env", return_value=_config()), \
+             patch.object(handlers, "run_request", failing), \
+             patch.object(handlers, "logger") as log:
+            await handle_hyw(session, type("R", (), {"all_matched_args": {"content": [Text("问题")]}})())
+        template, summary = log.warning.call_args[0]
+        self.assertIn("request failed", template)
+        self.assertIn("RuntimeError: search backend crashed", summary)
+        self.assertIn("<- ConnectionResetError: reset by peer", summary)
+        self.assert_redacted(summary)
+        session.send.assert_awaited()

@@ -5,6 +5,7 @@ import base64
 import binascii
 import json
 import os
+import re
 from io import BytesIO
 from pathlib import Path
 
@@ -114,6 +115,85 @@ def _element_text(element) -> str:
         lines = _card_lines(card, set())
         return "\n".join(lines[:40])
     return ""
+
+
+_SECRET_NAMES = (
+    r"authorization|proxy-authorization|cookie|set-cookie|x-api-key|x-goog-api-key|api[-_]?key|key"
+    r"|access[-_]?token|refresh[-_]?token|id[-_]?token|token|client[-_]?secret|secret|password"
+    r"|private[-_]?key|signature|sig"
+)
+_REDACTIONS = (
+    (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)", re.S), "<private key>"),
+    (re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+"), "Bearer <redacted>"),
+    (re.compile(r"(?i)\b(basic)\s+[A-Za-z0-9+/=]{8,}"), r"\1 <redacted>"),
+    (re.compile(r"(?i)(https?://)[^\s/@'\"]+@"), r"\1<redacted>@"),
+    (re.compile(r"(https?://[^\s?#'\"<>]+)\?[^\s#'\"<>]*"), r"\1?<redacted>"),
+    (re.compile(rf"(?i)([\"']?\b(?:{_SECRET_NAMES})\b[\"']?\s*[:=]\s*[\"']?)[^\s\"',;&}}]+"), r"\1<redacted>"),
+    (re.compile(r"\b(?:sk|pk|rk)-[A-Za-z0-9_-]{8,}"), "<redacted>"),
+    (re.compile(r"\bAIza[0-9A-Za-z_-]{20,}"), "<redacted>"),
+    (re.compile(r"\bya29\.[0-9A-Za-z._-]+"), "<redacted>"),
+    (re.compile(r"\beyJ[0-9A-Za-z_-]+\.[0-9A-Za-z_-]+\.[0-9A-Za-z_-]+"), "<redacted>"),
+)
+
+
+def _redact(text: str, secrets: tuple[str, ...] = ()) -> str:
+    for secret in secrets:
+        if secret and len(secret) >= 6:
+            text = text.replace(secret, "<redacted>")
+    for pattern, replacement in _REDACTIONS:
+        text = pattern.sub(replacement, text)
+    return text
+
+
+def _message(error: BaseException) -> str:
+    try:
+        return " ".join(str(error).split())
+    except Exception:  # noqa: BLE001 - a broken __str__ must not hide the original failure
+        return "<unprintable>"
+
+
+def _status_value(value) -> int | None:
+    return value if type(value) is int and 100 <= value <= 599 else None
+
+
+def failure_summary(error: BaseException, secrets: tuple[str, ...] = ()) -> str:
+    """One log line: error code, HTTP status and the redacted exception chain.
+
+    ``raise ... from None`` hides the cause from tracebacks but keeps it in
+    ``__context__``; that hidden SDK error is usually the useful part.
+    """
+    chain: list[BaseException] = []
+    current: BaseException | None = error
+    while current is not None and all(current is not seen for seen in chain) and len(chain) < 6:
+        chain.append(current)
+        current = current.__cause__ or current.__context__
+    code = status = retryable = None
+    for item in chain:
+        diagnostics = getattr(item, "diagnostics", None)
+        if isinstance(diagnostics, dict):
+            code = code or diagnostics.get("code")
+            status = status or _status_value(diagnostics.get("http_status"))
+            if retryable is None and isinstance(diagnostics.get("retryable"), bool):
+                retryable = diagnostics["retryable"]
+        value = getattr(item, "code", None)
+        if code is None and isinstance(value, (str, int)) and not isinstance(value, bool):
+            code = value
+        status = status or _status_value(getattr(item, "status_code", None))
+        status = status or _status_value(getattr(getattr(item, "response", None), "status_code", None))
+        status = status or _status_value(value)
+    links = " <- ".join(
+        f"{type(item).__name__}: {_redact(_message(item), secrets)[:300]}".rstrip(": ") for item in chain
+    )
+    parts = [f"code={code if code is not None else '-'}", f"http_status={status or '-'}"]
+    if retryable is not None:
+        parts.append(f"retryable={retryable}")
+    return " ".join(parts) + f" chain=[{links}]"
+
+
+def _config_secrets(config: HywConfig | None) -> tuple[str, ...]:
+    if config is None:
+        return ()
+    return tuple(value for value in (config.api_key, config.proxy, config.search_proxy) if value)
 
 
 def _jpeg(data: bytes) -> str:
@@ -297,10 +377,11 @@ async def run_request(session: Session, config: HywConfig, scope: Scope, text: s
                 images=None if rich else (model_images or None),
                 message_content=message_content,
             )
-        except RenderError:
-            logger.warning("[hyw] card render failed")
+        except RenderError as error:
+            logger.warning("[hyw] card render failed: {}", failure_summary(error, _config_secrets(config)))
             raise HywError("回答已生成，但出图失败。请稍后重试。") from None
         except FrontierError as error:
+            logger.warning("[hyw] answer failed: {}", failure_summary(error, _config_secrets(config)))
             raise HywError(str(error)) from None
     finally:
         if previous_search_proxy is None:
@@ -382,7 +463,7 @@ async def handle_hyw(session: Session, result: Arparma):
     except asyncio.CancelledError:
         raise
     except Exception as error:  # noqa: BLE001 - Chat boundary: always report failure, redact upstream payloads.
-        logger.warning("[hyw] request failed: {}", type(error).__name__)
+        logger.warning("[hyw] request failed: {}", failure_summary(error, _config_secrets(config)))
         await send_text(session, "HYW 处理失败，请稍后重试。")
     finally:
         if task is not None:
