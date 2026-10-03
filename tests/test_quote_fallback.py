@@ -204,8 +204,10 @@ class InstallTests(unittest.TestCase):
 
 
 DISPATCH_SCRIPT = r'''
-import asyncio, sys
+import asyncio, json, sys
 from datetime import datetime, timezone
+
+import httpx
 sys.path.insert(0, sys.argv[1])
 
 from otae_bot.application import create_app
@@ -232,16 +234,15 @@ gather = MessageEvent.__dict__['gather']
 users = sorted(k for k, p in _publishers.items() if p.supplier is gather)
 assert users == ['message-created', 'message-deleted', 'message-updated', 'reaction-added', 'reaction-removed'], users
 
-FORWARD = {'messages': [
+QUOTE_ID = '2|100|3969610'
+FORWARD = {'status': 'ok', 'retcode': 0, 'data': {'messages': [
     {'sender': {'nickname': '甲', 'user_id': '1'}, 'time': 0,
      'content': [{'type': 'text', 'data': {'text': '转发里的第一句'}}]},
     {'sender': {'nickname': '乙', 'user_id': '2'}, 'time': 1,
      'content': [{'type': 'image', 'data': {'url': 'https://example.com/in-forward.png'}}]},
-]}
+]}}
 
 class Protocol:
-    forward = FORWARD
-
     def __init__(self, account):
         self.account = account
         self.internal_calls = []
@@ -251,48 +252,82 @@ class Protocol:
 
     async def internal(self, action, method='POST', **params):
         self.internal_calls.append((action, params))
-        if action == 'get_forward_msg' and self.forward is not None:
-            return self.forward
         raise NotFoundException('not found')
 
     async def send_message(self, channel, message, at_sender=None, reply_to=None, referrer=None):
         return []
 
-def incoming(protocol_forward, n):
-    Protocol.forward = protocol_forward
+# LLBot 8.2.1 的 Satori 透传 /v1/internal/onebot11/<action>
+seen = []
+llbot = {'in_group': True}
+
+def answer(request):
+    seen.append(request)
+    body = json.loads(request.content)
+    if request.url.path == '/v1/internal/onebot11/get_group_msg_history':
+        if not llbot['in_group']:
+            return httpx.Response(500, json={'message': "Cannot read properties of undefined (reading 'start')"})
+        seq = body['message_seq']
+        return httpx.Response(200, json={'status': 'ok', 'retcode': 0, 'data': {'messages': [
+            {'message_id': 1, 'message_seq': seq - 1, 'message': [{'type': 'text', 'data': {'text': '前一条'}}]},
+            {'message_id': 537779999, 'message_seq': seq, 'message': [{'type': 'forward', 'data': {'id': 'resid-1'}}]},
+        ]}})
+    if request.url.path == '/v1/internal/onebot11/get_forward_msg' and body == {'id': 'resid-1'}:
+        return httpx.Response(200, json=FORWARD)
+    return httpx.Response(404)
+
+real_client = httpx.AsyncClient
+
+def client(**kwargs):
+    return real_client(transport=httpx.MockTransport(answer), timeout=kwargs.get('timeout'))
+
+def incoming(n):
     account = Account(Login(user=User('test-bot'), platform='qq'), ApiInfo(port=5500, token='SECRET-TOKEN'), [], Protocol)
     origin = Event('message-created', datetime.now(timezone.utc), Login(user=User('test-bot'), platform='qq'),
                    channel=Channel('100', ChannelType.TEXT), guild=Guild('100'), user=User('otae'),
-                   message=MessageObject.from_elements('incoming-' + str(n), [Quote('fwd-msg-1'), Text('/q 总结一下')]))
+                   message=MessageObject.from_elements('incoming-' + str(n), [Quote(QUOTE_ID), Text('/q 总结一下')]))
     return account, origin
 
 async def main():
     request = AsyncMock()
-    http = AsyncMock(side_effect=RuntimeError('未配置 OneBot HTTP 地址'))
     with patch.object(hyw.HywConfig, 'from_env', return_value=hyw.HywConfig(api_key='test', timeout=5)), \
          patch.dict(hyw.handle_hyw.__globals__, run_request=request), \
-         patch.object(onebot, 'call_onebot_action', http):
-        # 1) 合并转发：Satori message.get 500，事件照常分发，/q 带上转发内容
-        account, origin = incoming(FORWARD, 1)
+         patch.object(onebot.httpx, 'AsyncClient', client), \
+         patch.object(onebot, 'ashared_ssl_context', AsyncMock(return_value=None)):
+        # 1) 合并转发：Satori message.get 500，事件照常分发；按 seq 找到消息，用 resid 展开
+        account, origin = incoming(1)
         await app.handle_event(account, origin)
         request.assert_awaited_once()
         session, _, _, text, images, prior = request.await_args.args
-        assert session.event.quote.id == 'fwd-msg-1', session.event.quote
+        assert session.event.quote.id == QUOTE_ID, session.event.quote
         assert session.reply is None
         assert '总结一下' in text and '[引用消息]' in text, text
-        assert '转发里的第一句' in text and '甲' in text, text
+        assert '转发里的第一句' in text and '甲' in text and '前一条' not in text, text
         assert images == ['https://example.com/in-forward.png'], images
         assert request.await_args.kwargs['rich'] is True
-        assert account.protocol.internal_calls[0] == ('get_forward_msg', {'message_id': 'fwd-msg-1'}), account.protocol.internal_calls
+        assert account.protocol.internal_calls == [], account.protocol.internal_calls
+        assert [str(sent.url) for sent in seen] == [
+            'http://localhost:5500/v1/internal/onebot11/get_group_msg_history',
+            'http://localhost:5500/v1/internal/onebot11/get_forward_msg',
+        ], seen
+        assert json.loads(seen[0].content) == {'group_id': 100, 'message_seq': 3969610, 'count': 10}, seen[0].content
+        for sent in seen:
+            assert sent.headers['authorization'] == 'Bearer SECRET-TOKEN', sent.headers
+            assert sent.headers['satori-user-id'] == 'test-bot', sent.headers
+            assert sent.headers['satori-platform'] == 'qq', sent.headers
+            assert 'x-self-id' not in sent.headers, sent.headers
         print('FORWARD-OK')
 
-        # 2) 转发也读不到：/q 照常执行，只是没有引用上下文
+        # 2) 收到事件的号不在群：history 报错，/q 照常执行，只是没有引用上下文
         request.reset_mock()
-        account, origin = incoming(None, 2)
+        seen.clear()
+        llbot['in_group'] = False
+        account, origin = incoming(2)
         await app.handle_event(account, origin)
         request.assert_awaited_once()
         text = request.await_args.args[3]
         assert text == '总结一下', text
+        assert len(seen) == 1, seen
         print('UNAVAILABLE-OK')
 
 asyncio.get_event_loop().run_until_complete(main())
@@ -321,6 +356,8 @@ class DispatchEndToEndTests(unittest.TestCase):
         # record_message 记下了这条消息：事件确实分发了
         self.assertIn("(otae) -> ", result.stdout)
         self.assertIn("quoted message fetch failed", output)
+        self.assertIn("quoted message unavailable", output)
+        self.assertIn("可能不在群 100", output)
         self.assertNotIn("SECRET-TOKEN", output)
 
 

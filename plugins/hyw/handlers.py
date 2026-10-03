@@ -21,7 +21,7 @@ from otae_bot.infrastructure.http.tls import shared_ssl_context
 
 from .config import HywConfig, HywError
 from .history import HistoryStore, Scope, SourceBook
-from .messages import expand_quote, expand_special
+from .messages import QuoteUnavailable, expand_quote, expand_special
 
 HELP = """HYW / 何意味
 /q 问题：搜索问答，也可附带图片（最多 4 张）。
@@ -415,7 +415,7 @@ def _unfetched_quote(session: Session):
     """The event's quote when Entari could not turn it into ``session.reply``.
 
     The Entari adapter keeps ``event.quote`` when ``message.get`` fails (LLBot answers
-    500 "消息为空" for merged forwards), so the quoted id is still available here.
+    500 "消息为空" for merged forwards), so the quoted Satori id is still available here.
     """
     from satori import Quote
 
@@ -429,13 +429,17 @@ async def _quoted_without_reply(session: Session, quote) -> tuple[str, list[str]
     if quote.children:
         return await _compose(session, MessageChain(quote.children))
     failures: list[str] = []
-    text, images, rich = await expand_quote(session, str(quote.id), failures)
-    if not text and not images:
+    try:
+        text, images, rich = await expand_quote(session, str(quote.id), failures)
+    except Exception as error:  # noqa: BLE001 - an unreadable quote must not stop the answer
+        reason = error.reason if isinstance(error, QuoteUnavailable) else f"读取出错：{failure_summary(error)}"
         logger.warning(
-            "[hyw] quoted message unavailable, answering without it: channel={} quote={} failures={}",
-            getattr(getattr(session.event, "channel", None), "id", None), quote.id, failures,
+            "[hyw] quoted message unavailable, answering without it: channel={} quote={} reason={} failures={}",
+            getattr(getattr(session.event, "channel", None), "id", None), quote.id,
+            _redact(reason), [_redact(item) for item in failures],
         )
-    elif failures:
+        return "", [], False
+    if failures:
         logger.debug("[hyw] quoted message read after fallbacks: quote={} failures={}", quote.id, failures)
     return text, images, rich
 
