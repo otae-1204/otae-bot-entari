@@ -1,7 +1,9 @@
 """Expand QQ share cards, XML cards and merged forwards into text and image URLs.
 
 Only the triggering message and its quote are walked. Forward ids are fetched
-for that message; the channel history is not scanned.
+for that message; the channel history is not scanned. A Satori
+``<message forward>`` with child messages is read in place; one that only
+carries an id, and a OneBot ``forward`` segment, go through ``get_forward_msg``.
 """
 
 from __future__ import annotations
@@ -190,27 +192,61 @@ def _segment(element):
     elif tag in {"img", "image"}:
         tag = "image"
         attrs = {"url": getattr(element, "src", None) or attrs.get("url") or attrs.get("src") or ""}
+    elif tag in {"message", "author"}:
+        # Elements built in code keep these as fields; only parsed ones fill attrs.
+        attrs = {**attrs, **{key: getattr(element, key) for key in ("id", "forward", "name")
+                             if getattr(element, key, None) is not None}}
     children = list(getattr(element, "children", None) or [])
     return tag, attrs, children
 
 
-async def _load_forward(session, forward_id: str):
+def _flag(value) -> bool:
+    return value is True or (isinstance(value, str) and value.lower() == "true")
+
+
+def _note(failures: list[str] | None, step: str, error: BaseException):
+    if failures is not None:
+        detail = " ".join(str(error).split())[:120]
+        failures.append(f"{step}: {type(error).__name__}" + (f": {detail}" if detail else ""))
+
+
+async def _load(session, action: str, failures: list[str] | None = None, **params):
+    """Satori internal API first, then the account's OneBot HTTP endpoint."""
     async def call(method):
         return await asyncio.wait_for(method, 20)
 
     if session is not None and hasattr(session, "internal"):
         try:
-            return await call(session.internal("get_forward_msg", message_id=forward_id))
-        except Exception:
-            pass
+            result = await call(session.internal(action, **params))
+            if isinstance(result, dict) and result.get("status") == "failed":
+                raise RuntimeError(result.get("wording") or result.get("message") or "OneBot action failed")
+            return result
+        except Exception as error:
+            _note(failures, f"internal {action}", error)
     account = getattr(session, "account", None)
     if account is None:
         return None
     try:
         from otae_bot.adapters.onebot import call_onebot_action
-        return await call(call_onebot_action(account, "get_forward_msg", message_id=forward_id))
-    except Exception:
+        return await call(call_onebot_action(account, action, **params))
+    except Exception as error:
+        _note(failures, f"onebot {action}", error)
         return None
+
+
+async def _load_forward(session, forward_id: str, failures: list[str] | None = None):
+    return await _load(session, "get_forward_msg", failures, message_id=forward_id)
+
+
+def _payload_segments(payload):
+    """Segments of a OneBot ``get_msg`` answer, unwrapped from ``data`` if needed."""
+    if not isinstance(payload, dict):
+        return None
+    data = payload.get("data", payload)
+    message = data.get("message") if isinstance(data, dict) else None
+    if isinstance(message, str):
+        return [{"type": "text", "data": {"text": message}}] if message else None
+    return message if isinstance(message, list) and message else None
 
 
 def _payload_messages(payload):
@@ -225,9 +261,10 @@ def _payload_messages(payload):
 
 
 class _Parser:
-    def __init__(self, session):
+    def __init__(self, session, failures: list[str] | None = None):
         self.session = session
         self.output = Expanded()
+        self.failures = failures
 
     async def feed(self, elements, depth: int = 0, *, nested: bool = False):
         if isinstance(elements, str):
@@ -257,6 +294,11 @@ class _Parser:
                 _xml_card(str(data.get("data", "")), self.output)
             elif tag == "forward":
                 await self._forward(str(data.get("id", "")), depth)
+            elif tag == "message" and _flag(data.get("forward")):
+                if children:
+                    await self._inline_forward(children, depth)
+                else:
+                    await self._forward(str(data.get("id") or ""), depth)
             elif tag == "node" and depth < _MAX_DEPTH:
                 name = str(data.get("name") or "未知")[:200]
                 self.output.add_text(f"\n【转发节点】发送者：{name}\n")
@@ -264,7 +306,30 @@ class _Parser:
             elif children and depth < _MAX_DEPTH and tag not in {"at", "author", "quote", "reply"}:
                 await self.feed(children, depth + 1, nested=nested)
 
-    async def _forward(self, forward_id: str, depth: int):
+    async def _inline_forward(self, nodes, depth: int):
+        """Satori ``<message forward>``: each child ``<message>`` is one record, ``<author>`` its sender."""
+        self.output.rich = True
+        if depth >= _MAX_DEPTH:
+            self.output.add_text("[聊天记录嵌套过深，未展开]\n")
+            return
+        self.output.add_text("\n【聊天记录 开始；按原始顺序】\n")
+        for index, node in enumerate(nodes, 1):
+            if self.output._truncated:
+                return
+            if self.output._messages >= _MAX_MESSAGES:
+                self.output._stop("展开消息数量达到 2000 条上限")
+                return
+            self.output._messages += 1
+            tag, _, children = _segment(node)
+            content = children if tag == "message" else [node]
+            author = next((attrs for kind, attrs, _ in map(_segment, content) if kind == "author"), {})
+            name = str(author.get("name") or "未知发送者")[:200]
+            uid = str(author.get("id") or "未知")[:100]
+            self.output.add_text(f"\n【消息 {index}】\n发送者：{name}（{uid}）\n")
+            await self.feed(content, depth + 1, nested=True)
+        self.output.add_text("\n【聊天记录 结束】\n")
+
+    async def _forward(self, forward_id: str, depth: int, payload=None):
         self.output.rich = True
         if depth >= _MAX_DEPTH or not forward_id or forward_id in self.output._active or len(forward_id) > 256:
             self.output.add_text("[聊天记录嵌套过深、循环引用或缺少标识，未展开]\n")
@@ -272,9 +337,12 @@ class _Parser:
         self.output.add_text("\n【聊天记录 开始；按原始顺序】\n")
         self.output._active.add(forward_id)
         try:
-            payload = await _load_forward(self.session, forward_id)
+            if payload is None:
+                payload = await _load_forward(self.session, forward_id, self.failures)
             messages = _payload_messages(payload)
             if not isinstance(messages, list):
+                if self.failures is not None:
+                    self.failures.append(f"get_forward_msg {forward_id[:40]}: no message list")
                 self.output.add_text("[聊天记录读取失败或格式无效，未展开]\n")
                 return
             for index, message in enumerate(messages, 1):
@@ -306,4 +374,24 @@ async def expand_special(session, elements) -> tuple[str, list[str], bool]:
     """Return extra text, image URLs, and whether a card or forward was expanded."""
     parser = _Parser(session)
     await parser.feed(elements)
+    return "".join(parser.output.lines).strip(), parser.output.images, parser.output.rich
+
+
+async def expand_quote(session, message_id: str, failures: list[str] | None = None) -> tuple[str, list[str], bool]:
+    """Read a quoted message by id without Satori ``message.get``.
+
+    LLBot's Satori ``message.get`` answers a merged forward with 500 "消息为空", but its
+    OneBot ``get_forward_msg`` takes that same message id. Other quotes fall back to
+    OneBot ``get_msg``. Every failed step is appended to ``failures``; when nothing could
+    be read the result is empty.
+    """
+    parser = _Parser(session, failures)
+    payload = await _load_forward(session, message_id, failures)
+    if _payload_messages(payload) is not None:
+        await parser._forward(message_id, 0, payload)
+    else:
+        segments = _payload_segments(await _load(session, "get_msg", failures, message_id=message_id))
+        if segments is None:
+            return "", [], False
+        await parser.feed(segments, nested=True)
     return "".join(parser.output.lines).strip(), parser.output.images, parser.output.rich
