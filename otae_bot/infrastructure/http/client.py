@@ -21,13 +21,16 @@ from loguru import logger
 
 from otae_bot.infrastructure.cache import AsyncTTLCache, CacheStats
 from .asset_policy import (
+    DIRECT_FAILURES,
     AssetFetchSettings,
     HostCircuitOpen,
     asset_breaker,
+    asset_direct_routes,
     asset_settings,
     batch_deadline,
     configure_asset_settings,
     host_max_age,
+    proxied_host,
     rewrite_asset_url,
 )
 from .json_values import freeze_json, freeze_json_object, json_memory_size, mutable_json
@@ -109,6 +112,9 @@ _request_semaphore: asyncio.Semaphore | None = None
 # API 请求仍按原有的 Semaphore(DEFAULT_CONCURRENCY) 排队，互不阻塞。
 _asset_client: httpx.AsyncClient | None = None
 _asset_client_lifetime = None
+# PROXY_MODE=fallback 时 _asset_client 只直连，直连连不上才用这个走代理的客户端。
+_asset_proxy_client: httpx.AsyncClient | None = None
+_asset_proxy_client_lifetime = None
 _asset_semaphore_loop: asyncio.AbstractEventLoop | None = None
 _asset_semaphore: asyncio.Semaphore | None = None
 
@@ -208,36 +214,63 @@ def _build_asset_client(settings: AssetFetchSettings) -> httpx.AsyncClient:
             f"[http-assets] asset proxy unusable ({type(exc).__name__}); connecting directly"
         )
         return httpx.AsyncClient(**options)
-    proxy = urlsplit(settings.proxy)
     logger.info(
-        f"[http-assets] asset proxy enabled via {proxy.scheme}://{proxy.hostname}:{proxy.port or ''} "
-        f"hosts={','.join(settings.proxy_hosts) or '*'}"
+        f"[http-assets] asset proxy enabled via {_proxy_label(settings.proxy)} "
+        f"hosts={','.join(settings.proxy_hosts) or '*'} mode={settings.proxy_mode}"
     )
     return client
 
 
-def _get_asset_client() -> httpx.AsyncClient:
-    global _asset_client
+def _proxy_label(proxy: str) -> str:
+    # 代理地址可能带口令：只记 scheme、主机和端口。
+    parts = urlsplit(proxy)
+    return f"{parts.scheme}://{parts.hostname}:{parts.port or ''}"
+
+
+def _direct_first(settings: AssetFetchSettings) -> bool:
+    return bool(settings.proxy) and settings.proxy_mode == "fallback"
+
+
+def _get_asset_client(*, proxy: bool = False) -> httpx.AsyncClient:
+    global _asset_client, _asset_proxy_client
     with _client_lock:
+        settings = asset_settings()
+        if proxy:
+            if _asset_proxy_client is None or _asset_proxy_client.is_closed:
+                _asset_proxy_client = _build_asset_client(settings)
+            return _asset_proxy_client
         if _asset_client is None or _asset_client.is_closed:
-            _asset_client = _build_asset_client(asset_settings())
+            if _direct_first(settings):
+                _asset_client = _build_asset_client(replace(settings, proxy=""))
+                logger.info(
+                    f"[http-assets] asset proxy mode=fallback: direct first, "
+                    f"{_proxy_label(settings.proxy)} after a connect failure "
+                    f"hosts={','.join(settings.proxy_hosts) or '*'}"
+                )
+            else:
+                _asset_client = _build_asset_client(settings)
         return _asset_client
 
 
-async def _get_owned_client(*, asset: bool = False):
-    global _client_lifetime, _asset_client_lifetime
-    if asset:
+async def _owned(client: httpx.AsyncClient, lifetime):
+    if lifetime is None or lifetime[0] is not client:
+        generator = _own_client(client)
+        await anext(generator)
+        lifetime = (client, generator)
+    return lifetime
+
+
+async def _get_owned_client(*, asset: bool = False, proxy: bool = False):
+    global _client_lifetime, _asset_client_lifetime, _asset_proxy_client_lifetime
+    if asset and proxy:
+        client = _get_asset_client(proxy=True)
+        _asset_proxy_client_lifetime = await _owned(client, _asset_proxy_client_lifetime)
+    elif asset:
         client = _get_asset_client()
-        if _asset_client_lifetime is None or _asset_client_lifetime[0] is not client:
-            lifetime = _own_client(client)
-            await anext(lifetime)
-            _asset_client_lifetime = (client, lifetime)
-        return client
-    client = _get_client()
-    if _client_lifetime is None or _client_lifetime[0] is not client:
-        lifetime = _own_client(client)
-        await anext(lifetime)
-        _client_lifetime = (client, lifetime)
+        _asset_client_lifetime = await _owned(client, _asset_client_lifetime)
+    else:
+        client = _get_client()
+        _client_lifetime = await _owned(client, _client_lifetime)
     return client
 
 
@@ -306,15 +339,15 @@ async def _request_resource(
         _install_request_log_filter()
         log_token = _suppress_request_log.set(True)
         try:
-            client = await _get_owned_client(asset=asset)
-            response = await client.get(
-                url,
-                params=params,
-                headers=headers,
-                timeout=timeout,
-            )
+            request = dict(params=params, headers=headers, timeout=timeout)
+            if asset:
+                response = await _asset_get(url, host, request)
+            else:
+                client = await _get_owned_client()
+                response = await client.get(url, **request)
         except BaseException as exc:
             if asset:
+                # 只记最终结果：直连失败但代理成功不算连接失败，不会打开熔断。
                 breaker.record(host, exc)
             raise
         finally:
@@ -352,6 +385,34 @@ async def _request_resource(
                 )
             ),
         )
+
+
+async def _asset_get(url: str, host: str, request: dict) -> httpx.Response:
+    """PROXY_MODE=fallback：先直连，只有连接失败 / 连接超时才对这次请求改走代理。"""
+    settings = asset_settings()
+    client = await _get_owned_client(asset=True)
+    if not (_direct_first(settings) and proxied_host(host, settings)):
+        return await client.get(url, **request)
+    routes = asset_direct_routes()
+    if routes.try_direct(host):
+        try:
+            response = await client.get(url, **request)
+        except DIRECT_FAILURES as exc:
+            routes.record(host, False)
+            logger.debug(
+                f"[http-assets] direct {type(exc).__name__} host={host}; retrying via proxy"
+            )
+        except httpx.HTTPError:
+            routes.record(host, True)  # connected: a read timeout is not a route problem
+            raise
+        except BaseException:
+            routes.record(host, None)
+            raise
+        else:
+            routes.record(host, True)
+            return response
+    proxy_client = await _get_owned_client(asset=True, proxy=True)
+    return await proxy_client.get(url, **request)
 
 
 def _disk_lifetime(url: str, ttl_seconds: float) -> tuple[float, bool]:
@@ -1020,12 +1081,13 @@ async def get_http_cache_diagnostics() -> dict[str, Any]:
 async def close_http_client() -> None:
     global _client, _client_lifetime, _request_semaphore, _semaphore_loop
     global _asset_client, _asset_client_lifetime, _asset_semaphore, _asset_semaphore_loop
+    global _asset_proxy_client, _asset_proxy_client_lifetime
     await asyncio.gather(*(pool.close() for pool in _cache_pools))
     with _client_lock:
-        clients = (_client, _asset_client)
-        lifetimes = (_client_lifetime, _asset_client_lifetime)
-        _client = _asset_client = None
-        _client_lifetime = _asset_client_lifetime = None
+        clients = (_client, _asset_client, _asset_proxy_client)
+        lifetimes = (_client_lifetime, _asset_client_lifetime, _asset_proxy_client_lifetime)
+        _client = _asset_client = _asset_proxy_client = None
+        _client_lifetime = _asset_client_lifetime = _asset_proxy_client_lifetime = None
     for lifetime in lifetimes:
         if lifetime is not None:
             await lifetime[1].aclose()
@@ -1036,7 +1098,7 @@ async def close_http_client() -> None:
     _semaphore_loop = None
     _asset_semaphore = None
     _asset_semaphore_loop = None
-    # 熔断状态与素材配置随客户端一起重置；下次使用时重新读取环境变量。
+    # 熔断、直连记录与素材配置随客户端一起重置；下次使用时重新读取环境变量。
     configure_asset_settings(None)
     await clear_http_cache(include_disk=False)
     # close() 先把排队的磁盘写入落盘（有上限），再断开连接。

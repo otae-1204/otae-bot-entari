@@ -4,7 +4,8 @@
 并发槽位，签到、绑定等 API 请求不受影响。这里只放策略与状态，不发网络请求。
 
 配置全部来自环境变量（.env 由 otae_bot.config.settings 载入 os.environ），首次使用时
-读取；默认值保持原有安全行为：不走代理、trust_env=False、不改写主机。
+读取；默认值保持原有安全行为：不走代理、trust_env=False、不改写主机。配置了代理时
+默认「先直连、连不上再走代理」（PROXY_MODE=fallback）。
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ from loguru import logger
 
 ENV_PREFIX = "OTAE_HTTP_ASSET_"
 _PROXY_SCHEMES = ("http", "https", "socks5", "socks5h")
+PROXY_MODES = ("always", "fallback")
 # 内容地址固定（路径带哈希）的图床：磁盘缓存按这里的秒数算新鲜期，不再每 10 分钟校验。
 DEFAULT_HOST_MAX_AGE = (("hycdn.cn", 7 * 86400.0),)
 
@@ -40,6 +42,10 @@ class AssetFetchSettings:
     render_budget: float = 25.0
     proxy: str = ""
     proxy_hosts: tuple[str, ...] = ()
+    # always：代理主机一律走代理；fallback：先直连，连接失败 / 连接超时才改走代理。
+    proxy_mode: str = "fallback"
+    # fallback 模式下某主机直连失败后，这么多秒内直接走代理，过后放一个直连探测。
+    direct_cooldown: float = 300.0
     trust_env: bool = False
     host_rewrites: tuple[tuple[str, str], ...] = ()
     host_max_age: tuple[tuple[str, float], ...] = DEFAULT_HOST_MAX_AGE
@@ -119,6 +125,18 @@ def _proxy(raw: str) -> str:
     return raw
 
 
+def _proxy_mode(raw: str, default: str) -> str:
+    raw = raw.strip().lower()
+    if not raw:
+        return default
+    if raw not in PROXY_MODES:
+        logger.warning(
+            f"[http-assets] {ENV_PREFIX}PROXY_MODE must be one of {'/'.join(PROXY_MODES)}; using {default}"
+        )
+        return default
+    return raw
+
+
 def _host_max_age(raw: str, default) -> tuple[tuple[str, float], ...]:
     """``hycdn.cn=604800,example.com=86400``；按主机后缀匹配，``off`` 表示全部按默认 TTL。"""
     raw = raw.strip()
@@ -155,6 +173,8 @@ def load_asset_settings(environ: Mapping[str, str] | None = None) -> AssetFetchS
         render_budget=_number(env, "RENDER_BUDGET", defaults.render_budget, float, 0.0),
         proxy=_proxy(str(env.get(ENV_PREFIX + "PROXY", "") or "")),
         proxy_hosts=_hosts(str(env.get(ENV_PREFIX + "PROXY_HOSTS", "") or "")),
+        proxy_mode=_proxy_mode(str(env.get(ENV_PREFIX + "PROXY_MODE", "") or ""), defaults.proxy_mode),
+        direct_cooldown=_number(env, "DIRECT_COOLDOWN", defaults.direct_cooldown, float, 1.0, 86400.0),
         trust_env=_flag(env, "TRUST_ENV", defaults.trust_env),
         host_rewrites=_rewrites(str(env.get(ENV_PREFIX + "HOST_REWRITE", "") or "")),
         host_max_age=_host_max_age(
@@ -177,10 +197,11 @@ def asset_settings() -> AssetFetchSettings:
 
 def configure_asset_settings(settings: AssetFetchSettings | None) -> None:
     """Replace the cached settings (None re-reads the environment on next use)."""
-    global _settings, _breaker
+    global _settings, _breaker, _direct_routes
     with _settings_lock:
         _settings = settings
         _breaker = None
+        _direct_routes = None
 
 
 def rewrite_asset_url(url: str, settings: AssetFetchSettings | None = None) -> str:
@@ -206,6 +227,26 @@ def host_max_age(host: str, settings: AssetFetchSettings | None = None) -> float
         ):
             best = (suffix, seconds)
     return None if best is None else best[1]
+
+
+def proxied_host(host: str, settings: AssetFetchSettings | None = None) -> bool:
+    """Whether the asset proxy applies to ``host``; same patterns as httpx mounts."""
+    settings = settings or asset_settings()
+    if not settings.proxy:
+        return False
+    if not settings.proxy_hosts:
+        return True
+    host = (host or "").lower()
+    for pattern in settings.proxy_hosts:
+        if pattern.startswith("*."):
+            if host.endswith(pattern[1:]):
+                return True
+        elif pattern.startswith("*"):
+            if host == pattern[1:] or host.endswith("." + pattern[1:]):
+                return True
+        elif host == pattern:
+            return True
+    return False
 
 
 # ---------------------------------------------------------------- 按主机熔断
@@ -345,6 +386,70 @@ def reset_asset_breaker() -> None:
     global _breaker
     with _settings_lock:
         _breaker = None
+
+
+# ---------------------------------------------------------------- 先直连、失败再走代理
+
+# 只有这两类说明「直连连不上」；读超时、HTTP 状态说明已经连上了，不改走代理。
+DIRECT_FAILURES = (httpx.ConnectError, httpx.ConnectTimeout)
+
+
+class DirectRoutes:
+    """fallback 模式下按主机记住「直连不通」。
+
+    直连失败后冷却期内该主机直接走代理；冷却期过后只放一个请求去探测直连，
+    其余请求继续走代理，探测成功才恢复直连。日志只在切换时各记一次。
+    """
+
+    def __init__(self, *, cooldown_seconds: float, clock: Callable[[], float] = time.monotonic):
+        self.cooldown_seconds = float(cooldown_seconds)
+        self._clock = clock
+        self._failed_at: dict[str, float] = {}
+        self._probing: set[str] = set()
+        self._lock = RLock()
+
+    def try_direct(self, host: str) -> bool:
+        """Call right before sending; False means go straight to the proxy."""
+        with self._lock:
+            failed_at = self._failed_at.get(host)
+            if failed_at is None:
+                return True
+            if host in self._probing or self._clock() - failed_at < self.cooldown_seconds:
+                return False
+            self._probing.add(host)
+            return True
+
+    def record(self, host: str, reachable: bool | None) -> None:
+        """``reachable=None``: cancelled or local error, says nothing about the route."""
+        with self._lock:
+            self._probing.discard(host)
+            if reachable is None:
+                return
+            if reachable:
+                if self._failed_at.pop(host, None) is not None:
+                    logger.info(f"[http-assets] direct connection works again host={host}")
+                return
+            if host not in self._failed_at:
+                logger.warning(
+                    f"[http-assets] direct connection failed host={host}; "
+                    f"using the asset proxy for {self.cooldown_seconds:.0f}s"
+                )
+            self._failed_at[host] = self._clock()
+
+    def snapshot(self) -> dict[str, bool]:
+        with self._lock:
+            return {host: host in self._probing for host in self._failed_at}
+
+
+_direct_routes: DirectRoutes | None = None
+
+
+def asset_direct_routes() -> DirectRoutes:
+    global _direct_routes
+    with _settings_lock:
+        if _direct_routes is None:
+            _direct_routes = DirectRoutes(cooldown_seconds=asset_settings().direct_cooldown)
+        return _direct_routes
 
 
 # ---------------------------------------------------------------- 整卡截止时间
