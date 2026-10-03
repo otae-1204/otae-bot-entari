@@ -8,6 +8,7 @@ from arclet.entari.event.plugin import PluginLoadedSuccess
 from otae_bot.adapters.command_input import install_quoted_command_mentions
 from otae_bot.adapters.exception_hooks import install_exception_hooks
 from otae_bot.adapters.feature_gate import install_group_feature_gates, on_plugin_loaded
+from otae_bot.adapters.quote_fallback import install_quote_fetch_fallback
 from otae_bot.config.settings import SATORI_CLIENTS
 from otae_bot.infrastructure.http.tls import prewarm_shared_ssl_context
 from otae_bot.infrastructure.loop_watchdog import (
@@ -38,6 +39,7 @@ def build_networks(clients: list[dict] | None = None) -> list[WS]:
 def create_app() -> Entari:
     app = Entari(*build_networks())
     install_exception_hooks()
+    install_quote_fetch_fallback()
     install_quoted_command_mentions()
     listen(Startup)(start_loop_watchdog)
     listen(Cleanup)(close_loop_watchdog)
