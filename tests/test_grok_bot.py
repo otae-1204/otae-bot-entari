@@ -393,14 +393,18 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                     await gateway.Gateway(CONFIG, client).request(command, {"prompt": "private content"})
                 client.request.assert_awaited_once()
 
-    async def test_transcript_read_timeout_is_separate_from_state_rpc_timeout(self):
+    async def test_transcript_and_create_read_timeouts_are_separate_from_other_rpcs(self):
         host = Host()
+        host.override["createAgent"] = lambda _: {"agent": {"id": AGENT, "isGroup": False}}
         async with httpx.AsyncClient(transport=httpx.MockTransport(host.response), timeout=httpx.Timeout(20, connect=10)) as client:
             api = gateway.Gateway(CONFIG, client)
             await api.request("getAgentTranscriptTail")
+            await api.request("createAgent", {"name": "多惠"})
             await api.request("listAgents")
-        self.assertEqual(host.calls[0][2].extensions["timeout"], {"connect": 10, "read": 60, "write": 20, "pool": 20})
-        self.assertEqual(host.calls[1][2].extensions["timeout"]["read"], 20)
+            await api.request("sendPrompt", {"prompt": "问题", "clientNonce": "nonce"})
+        long_read = {"connect": 10, "read": 60, "write": 20, "pool": 20}
+        self.assertEqual([call[2].extensions["timeout"] for call in host.calls[:2]], [long_read, long_read])
+        self.assertEqual([call[2].extensions["timeout"]["read"] for call in host.calls[2:]], [20, 20])
 
     async def test_disconnected_older_transcript_page_recovers_without_resubmitting_prompt(self):
         host = Host()

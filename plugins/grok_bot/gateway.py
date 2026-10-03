@@ -48,6 +48,8 @@ READ_ONLY_COMMANDS = frozenset({
 # Exponential backoff, 31 s in total: rides out a 20-30 s tailnet/DERP outage.
 READ_RETRY_DELAYS = (1.0, 2.0, 4.0, 8.0, 16.0)
 TRANSCRIPT_READ_TIMEOUT = 60
+# Long tool transcripts and Bot creation can take longer than ordinary state RPCs.
+READ_TIMEOUTS = {"getAgentTranscriptTail": TRANSCRIPT_READ_TIMEOUT, "createAgent": 60}
 # Before asking whether a prompt lost in transit was recorded.
 PROMPT_SETTLE = 2.0
 
@@ -199,9 +201,8 @@ class Gateway:
         try:
             args = ("GET" if health else "POST", self.config.base_url + ("/health" if health else "/api/" + command))
             kwargs = {"headers": headers, "follow_redirects": False, **({} if health else {"json": body or {}})}
-            if command == "getAgentTranscriptTail":
-                # Long tool transcripts can take longer than ordinary state RPCs.
-                kwargs["timeout"] = httpx.Timeout(20, connect=10, read=TRANSCRIPT_READ_TIMEOUT)
+            if command in READ_TIMEOUTS:
+                kwargs["timeout"] = httpx.Timeout(20, connect=10, read=READ_TIMEOUTS[command])
             if response_limit is None:
                 response = await self.client.request(*args, **kwargs)
             else:
