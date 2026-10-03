@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import tempfile
 import unittest
@@ -11,11 +12,12 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 from arclet.entari import MessageChain
+from loguru import logger
 from satori import ChannelType, Image, MessageObject, Text
 
 from otae_bot.group_features import GroupFeatureStore
 from plugins.grok_bot import gateway, handlers
-from plugins.grok_bot.config import GrokConfig, GrokError
+from plugins.grok_bot.config import GatewayError, GrokConfig, GrokError
 from plugins.grok_bot.conversations import ConversationScope
 from plugins.grok_bot.media import Reply
 
@@ -293,7 +295,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
             await gateway.ask(replace(CONFIG, timeout=.01), "问题")
         self.assertFalse(any(name in {"sendPrompt", "interruptAgentRun", "deleteAgent"} for name, _, _ in host.calls))
 
-    async def test_transient_read_failures_recover_with_redacted_diagnostics(self):
+    async def test_transient_read_failures_recover_and_log_the_redacted_original_exception(self):
         for failure in (httpx.ConnectError, httpx.ReadTimeout, httpx.WriteTimeout, httpx.ReadError, httpx.RemoteProtocolError):
             client = SimpleNamespace(request=AsyncMock(side_effect=[
                 failure("private-token upstream-body"), httpx.Response(200, json={"entries": []}),
@@ -303,9 +305,44 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                 result = await gateway.Gateway(CONFIG, client).request("getAgentTranscriptTail", {"id": AGENT})
             self.assertEqual(result, {"entries": []})
             self.assertEqual(client.request.await_count, 2)
-            self.assertIn(failure.__name__, str(warning.call_args))
+            self.assertIn(f"httpx.{failure.__name__}: <redacted> upstream-body", str(warning.call_args))
             self.assertNotIn(CONFIG.token, str(warning.call_args))
-            self.assertNotIn("upstream-body", str(warning.call_args))
+
+    async def test_original_exception_is_kept_as_cause_and_logged_without_the_token(self):
+        def drop(request):
+            raise httpx.RemoteProtocolError("Server disconnected without sending a response.", request=request)
+
+        error = None
+        async with httpx.AsyncClient(transport=httpx.MockTransport(drop)) as client:
+            with patch.object(gateway.logger, "warning") as warning:
+                try:
+                    await gateway.Gateway(CONFIG, client).request("sendPrompt", {"prompt": "private content"})
+                except GatewayError as caught:  # Not assertRaises: it clears frame locals.
+                    error = caught
+        self.assertIsInstance(error, GatewayError)
+        self.assertEqual(str(error), "Grok Bot 网关通信失败（sendPrompt / RemoteProtocolError），请检查两端 Tailscale、"
+                                     "网关及云端后台服务；已提交的任务可能仍在云端运行。")
+        self.assertIsInstance(error.__cause__, httpx.RemoteProtocolError)
+        self.assertEqual(str(error.__cause__), "Server disconnected without sending a response.")
+        logged = warning.call_args.args[0].format(*warning.call_args.args[1:])
+        self.assertIn("cause=httpx.RemoteProtocolError: Server disconnected", logged)
+        self.assertIn("Traceback", logged)
+        self.assertIn("_request_once", logged)  # Call chain: frames and source lines, no values.
+        self.assertNotIn(CONFIG.token, logged)
+        self.assertNotIn("private content", logged)
+        # entari renders frame variables (loguru diagnose=True); the request line holds the
+        # Authorization header, so the cause keeps its type and message but not its frames.
+        self.assertIsNone(error.__cause__.__traceback__)
+        sink = io.StringIO()
+        sink_id = logger.add(sink, diagnose=True, backtrace=True, format="{message}")
+        try:
+            logger.opt(exception=error).error("probe")
+        finally:
+            logger.remove(sink_id)
+        self.assertIn("httpx.RemoteProtocolError: Server disconnected", sink.getvalue())
+        # Long values are truncated, so check for the header itself, not just the token.
+        self.assertNotIn("Authorization", sink.getvalue())
+        self.assertNotIn(CONFIG.token, sink.getvalue())
 
     async def test_read_retries_are_bounded_and_do_not_retry_local_protocol_errors(self):
         for failure, attempts in ((httpx.RemoteProtocolError, 3), (httpx.ReadTimeout, 3), (httpx.LocalProtocolError, 1)):

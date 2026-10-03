@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import traceback
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from time import monotonic
@@ -46,6 +47,20 @@ READ_ONLY_COMMANDS = frozenset({
 })
 READ_RETRY_DELAYS = (0.5, 1.0)
 TRANSCRIPT_READ_TIMEOUT = 60
+
+
+def cause_chain(error: BaseException) -> list[BaseException]:
+    links, link = [], error.__cause__
+    while link is not None and all(link is not seen for seen in links):
+        links.append(link)
+        link = link.__cause__ or (None if link.__suppress_context__ else link.__context__)
+    return links
+
+
+def describe(error: BaseException) -> str:
+    kind = type(error)
+    name = kind.__qualname__ if kind.__module__ == "builtins" else f"{kind.__module__}.{kind.__qualname__}"
+    return f"{name}: {error}" if str(error) else name
 
 
 @dataclass
@@ -145,14 +160,27 @@ class Gateway:
                 return await self._request_once(command, body, response_limit=response_limit)
             except GatewayError as error:
                 retry = error.retryable and attempt + 1 < attempts
-                # All GatewayError text is generated locally; do not log upstream
-                # exception strings, response bodies, headers, prompts or URLs.
-                logger.warning("[grok_bot] gateway command={} attempt={}/{} elapsed={:.2f}s retry={} error={}",
-                               command, attempt + 1, attempts, monotonic() - started, retry, error)
+                links = cause_chain(error)
+                # GatewayError text is generated locally. The original exception is
+                # logged as type, message and stack, without frame variables, response
+                # bodies, headers, prompts or the token.
+                logger.warning(
+                    "[grok_bot] gateway command={} attempt={}/{} elapsed={:.2f}s retry={} error={} cause={}{}",
+                    command, attempt + 1, attempts, monotonic() - started, retry, error,
+                    self._redact(" <- ".join(map(describe, links)) or "-"),
+                    "" if retry or not links else "\n" + self._redact("".join(traceback.format_exception(links[0]))),
+                )
+                # Keep __cause__ but drop its frames: entari's loguru renders frame
+                # variables (diagnose=True), and the request line holds the token.
+                for link in links:
+                    link.__traceback__ = None
                 if not retry:
                     raise
                 # Cancellation / the caller's total task timeout also bounds retries.
                 await asyncio.sleep(READ_RETRY_DELAYS[attempt])
+
+    def _redact(self, text: str) -> str:
+        return text.replace(self.config.token, "<redacted>") if self.config.token else text
 
     async def _request_once(self, command: str, body: dict | None = None, *, response_limit: int | None = None):
         health = command == "health"
@@ -179,17 +207,17 @@ class Gateway:
             raise GatewayError(
                 f"连接 Grok Bot 网关失败（{command} / {type(error).__name__}），请求尚未提交，请检查 Tailscale 和云端服务。",
                 not_submitted=True, retryable=True,
-            ) from None
+            ) from error
         except httpx.TimeoutException as error:
             raise GatewayError(
                 f"Grok Bot 网关请求超时（{command} / {type(error).__name__}），已提交的任务可能仍在云端运行。",
                 retryable=True,
-            ) from None
+            ) from error
         except httpx.HTTPError as error:
             raise GatewayError(
                 f"Grok Bot 网关通信失败（{command} / {type(error).__name__}），请检查两端 Tailscale、网关及云端后台服务；已提交的任务可能仍在云端运行。",
                 retryable=isinstance(error, (httpx.NetworkError, httpx.RemoteProtocolError)),
-            ) from None
+            ) from error
         if response.status_code in {401, 403}:
             raise GatewayError("Grok Bot 网关认证失败，请管理员检查 GROKBOT_GATEWAY_TOKEN。", not_submitted=True)
         if response.status_code in {400, 422}:
@@ -206,8 +234,8 @@ class Gateway:
                                retryable=response.status_code in {408, 500, 502, 503, 504})
         try:
             data = response.json()
-        except ValueError:
-            raise GatewayError(PROTOCOL_ERROR) from None
+        except ValueError as error:
+            raise GatewayError(PROTOCOL_ERROR) from error
         if isinstance(data, dict) and data.get("error"):
             raise GatewayError(f"Grok Bot 网关未能完成 {command}，请在应用中查看详情。")
         return data
