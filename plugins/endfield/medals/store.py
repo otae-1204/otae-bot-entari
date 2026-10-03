@@ -3,8 +3,8 @@
 ``current`` 槽存当前版本全量快照（命令读取的性能缓存，避免每次 `奖章` 都实时抓取）；
 ``baseline`` 槽存版本对比基线（akedata 上一游戏版本 achv_id 集合，源和源对比）。
 
-底层用 ``utils.json_store.JsonStore``（文件 JSON，每次 set 全量重写）。写盘放线程池、
-模块级 ``asyncio.Lock`` 串行化，避免并发刷新互相覆盖。
+底层使用 JsonStore 读取，写入通过临时文件原子替换。线程池写盘成功后才发布内存视图，
+实例级 ``asyncio.Lock`` 串行化，避免并发刷新互相覆盖。
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ from typing import Any
 from otae_bot.infrastructure.storage.json_store import JsonStore
 
 from ..catalog.models import MedalBaselineView, MedalItemView, MedalSnapshotView
+from ..catalog.snapshot_store import persist_snapshot
 
 _DEFAULT_PATH = str(Path("data") / "endfield" / "medal_snapshot.json")
 
@@ -25,7 +26,7 @@ _MEDAL_ITEM_FIELDS = frozenset(MedalItemView.__dataclass_fields__)
 
 
 class MedalSnapshotStore:
-    """奖章全量快照：current/previous 两槽，手动刷新时滚动。"""
+    """奖章全量快照：current/baseline 两槽，自动或手动刷新时成对替换。"""
 
     def __init__(self, file_path: str = _DEFAULT_PATH) -> None:
         self._store = JsonStore(file_path)
@@ -34,45 +35,25 @@ class MedalSnapshotStore:
     async def replace_current(self, snapshot: MedalSnapshotView) -> None:
         """新快照写入 current。版本对比不再用滚动 previous，改用 baseline（akedata 历史版本）。"""
         current_dict = _snapshot_to_dict(snapshot)
-        async with self._lock:
-            await asyncio.to_thread(self._persist_current, current_dict)
+        await persist_snapshot(self._store, self._lock, current=current_dict)
 
     async def replace_current_and_baseline(
         self,
         snapshot: MedalSnapshotView,
         baseline: MedalBaselineView | None,
     ) -> None:
-        """Persist a current snapshot and its matching baseline in one locked save."""
-        current_dict = _snapshot_to_dict(snapshot)
-        baseline_dict = _baseline_to_dict(baseline) if baseline else None
-        async with self._lock:
-            await asyncio.to_thread(self._persist_current_and_baseline, current_dict, baseline_dict)
-
-    def _persist_current(self, current_dict: dict[str, Any]) -> None:
-        # 直接改底层 _data 再一次 _save，避免 set() 两次全量写盘
-        self._store._data["current"] = current_dict
-        self._store._data.pop("previous", None)  # 清理旧的滚动基线残留
-        self._store._save()
-
-    def _persist_current_and_baseline(
-        self,
-        current_dict: dict[str, Any],
-        baseline_dict: dict[str, Any] | None,
-    ) -> None:
-        self._store._data["current"] = current_dict
-        self._store._data["baseline"] = baseline_dict
-        self._store._data.pop("previous", None)
-        self._store._save()
+        """Persist the snapshot and its matching baseline in one atomic replacement."""
+        await persist_snapshot(
+            self._store, self._lock,
+            current=_snapshot_to_dict(snapshot),
+            baseline=_baseline_to_dict(baseline) if baseline else None,
+        )
 
     async def replace_baseline(self, baseline: MedalBaselineView | None) -> None:
-        """写入版本对比基线（akedata 上一游戏版本的 achv_id 集合）；None 清空。串行 + 写盘放线程池。"""
-        baseline_dict = _baseline_to_dict(baseline) if baseline else None
-        async with self._lock:
-            await asyncio.to_thread(self._persist_baseline, baseline_dict)
-
-    def _persist_baseline(self, baseline_dict: dict[str, Any] | None) -> None:
-        self._store._data["baseline"] = baseline_dict
-        self._store._save()
+        await persist_snapshot(
+            self._store, self._lock,
+            baseline=_baseline_to_dict(baseline) if baseline else None,
+        )
 
     def load_current_view(self) -> MedalSnapshotView | None:
         data = self._store.get("current")
@@ -89,6 +70,7 @@ def _snapshot_to_dict(snapshot: MedalSnapshotView) -> dict[str, Any]:
         "version": snapshot.version,
         "fetched_at": snapshot.fetched_at,
         "source": snapshot.source,
+        "source_revision": snapshot.source_revision,
         "total_count": snapshot.total_count,
         "level_counts": {str(k): v for k, v in snapshot.level_counts.items()},
         "platable_count": snapshot.platable_count,
@@ -120,6 +102,7 @@ def _dict_to_snapshot(data: dict[str, Any]) -> MedalSnapshotView:
     return MedalSnapshotView(
         medals=medals,
         version=str(data.get("version") or ""),
+        source_revision=str(data.get("source_revision") or ""),
         fetched_at=int(data.get("fetched_at") or 0),
         source=str(data.get("source") or "fz"),
         total_count=int(data.get("total_count") or len(medals)),
