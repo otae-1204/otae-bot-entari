@@ -266,6 +266,7 @@ class ColdStartNoticeTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(gets, [])
 
+        self.images.flush()  # the fetch queued its row for the background writer
         connection = self.images._connect()
         connection.execute(
             "UPDATE public_images_v1 SET validated_at=?, max_age=?, etag=?, modified=?",

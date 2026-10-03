@@ -33,6 +33,7 @@ from .json_values import freeze_json, freeze_json_object, json_memory_size, muta
 from .tls import shared_ssl_context
 from .disk import (
     DiskImage,
+    DiskImageMeta,
     public_image_request,
     public_images,
     public_table_request,
@@ -545,21 +546,33 @@ async def _fetch_resource(
             if private:
                 resource = replace(resource, expires_at=time.time())
             elif resource.content_type.startswith("image/") or table_eligible:
-                value = DiskImage(
-                    resource.content,
-                    resource.content_type,
-                    resource.etag,
-                    resource.modified,
-                    time.time(),
-                    max_age,
-                )
-                try:
-                    await asyncio.to_thread(
-                        disk.put, disk_key, namespace, value, generation
+                validated_at = time.time()
+                # Queued for the background writer: the caller never waits for SQLite.
+                if resource.status_code == 304 and cached is not None:
+                    # Same bytes: refresh validators and freshness, keep the stored body.
+                    disk.refresh_later(
+                        disk_key,
+                        namespace,
+                        DiskImageMeta(
+                            validated_at, max_age, resource.etag, resource.modified
+                        ),
+                        generation,
                     )
-                except (OSError, sqlite3.Error):
-                    _cache_event(key, "disk_errors", 1)
-                resource = replace(resource, expires_at=value.validated_at + max_age)
+                else:
+                    disk.put_later(
+                        disk_key,
+                        namespace,
+                        DiskImage(
+                            resource.content,
+                            resource.content_type,
+                            resource.etag,
+                            resource.modified,
+                            validated_at,
+                            max_age,
+                        ),
+                        generation,
+                    )
+                resource = replace(resource, expires_at=validated_at + max_age)
             if resource.status_code == 304:
                 _cache_event(key, "not_modified", 1)
                 resource = replace(resource, status_code=200)
@@ -916,5 +929,6 @@ async def close_http_client() -> None:
     # 熔断状态与素材配置随客户端一起重置；下次使用时重新读取环境变量。
     configure_asset_settings(None)
     await clear_http_cache(include_disk=False)
+    # close() 先把排队的磁盘写入落盘（有上限），再断开连接。
     await asyncio.to_thread(public_images.close)
     await asyncio.to_thread(public_tables.close)
