@@ -9,6 +9,10 @@ one ``<author>`` state per forward, whereas ``send_*_forward_msg`` takes a
 per-node name/uin.  Callers can try the account's internal action first and fall
 back to the configured OneBot HTTP endpoint without importing the
 request-handler plugin (which would register that plugin as a side effect).
+
+Reads that only work for one account (message history, per-account message ids) go
+through ``call_account_action``: that account's OneBot HTTP server, then LLBot's Satori
+passthrough ``/v1/internal/onebot11/{action}`` on the same connection.
 """
 
 from __future__ import annotations
@@ -67,6 +71,17 @@ def _own_client(bot: Any) -> dict | None:
     return None
 
 
+def _client_onebot(client: dict | None) -> tuple[str, str] | None:
+    """(``onebot_url``, token) of one ``SATORI_CLIENTS`` entry, if it names its own server."""
+    own = str((client or {}).get("onebot_url") or "").rstrip("/")
+    if not client or not own:
+        return None
+    token = client.get("onebot_token")
+    if token is None:
+        token = _env("ONEBOT_ACCESS_TOKEN", "") or client.get("token")
+    return own, str(token or "")
+
+
 def _endpoints(bot: Any) -> list[tuple[str, str]]:
     """(base URL, token) pairs to try.
 
@@ -74,15 +89,137 @@ def _endpoints(bot: Any) -> list[tuple[str, str]]:
     answer for the wrong account, so a client may name its own ``onebot_url`` (and
     ``onebot_token``); that account then uses only its own endpoint.
     """
-    client = _own_client(bot)
-    own = str((client or {}).get("onebot_url") or "").rstrip("/")
-    if client and own:
-        token = client.get("onebot_token")
-        if token is None:
-            token = _env("ONEBOT_ACCESS_TOKEN", "") or client.get("token")
-        return [(own, str(token or ""))]
+    own = _client_onebot(_own_client(bot))
+    if own:
+        return [own]
     token = _access_token()
     return [(url, token) for url in _base_urls()]
+
+
+class OneBotUnavailable(RuntimeError):
+    """No channel of the account could run the action.
+
+    ``answered`` is True when OneBot itself rejected it (``status`` failed, a non-zero
+    ``retcode`` or HTTP 5xx), False when no channel was configured or reachable.
+    """
+
+    def __init__(self, message: str, *, answered: bool = False):
+        super().__init__(message)
+        self.answered = answered
+
+
+class _Rejected(RuntimeError):
+    pass
+
+
+def _account_onebot(bot: Any) -> tuple[str, str] | None:
+    """This account's OneBot HTTP server: its own ``onebot_url``, or ``ONEBOT_HTTP_URL``
+    when only one Satori connection is configured (so it cannot belong to another account)."""
+    own = _client_onebot(_own_client(bot))
+    if own:
+        return own
+    configured = str(_env("ONEBOT_HTTP_URL", "") or _env("LLONEBOT_HTTP_URL", "") or "").rstrip("/")
+    clients = _env("SATORI_CLIENTS", [])
+    if configured and (not isinstance(clients, list) or len(clients) <= 1):
+        return configured, _access_token()
+    return None
+
+
+def _satori_passthrough(bot: Any) -> tuple[str, dict[str, str]] | None:
+    """LLBot's Satori route to its OneBot 11 actions, as this account.
+
+    ``POST {api_base}/internal/onebot11/{action}`` on the connection the account came in
+    on, with that connection's Satori token; ``Satori-User-ID`` / ``Satori-Platform`` pick
+    the account. LLBot answered 403 when probed with ``X-Self-ID``, so it is not sent.
+    """
+    config = getattr(bot, "config", None)
+    self_id = str(getattr(bot, "self_id", "") or "")
+    base = str(getattr(config, "api_base", "") or "")
+    host, port = getattr(config, "host", None), getattr(config, "port", None)
+    if not base and host and port:
+        path = str(getattr(config, "path", "") or "").strip("/")
+        base = f"http://{host}:{port}" + (f"/{path}" if path else "") + "/v1"
+    if not base or not self_id:
+        return None
+    headers = {
+        "Content-Type": "application/json",
+        "Satori-User-ID": self_id,
+        "Satori-Platform": str(getattr(bot, "platform", "") or ""),
+    }
+    token = getattr(config, "token", None) or (_own_client(bot) or {}).get("token")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return f"{base.rstrip('/')}/internal/onebot11", headers
+
+
+def _answer(response: httpx.Response) -> Any:
+    """OneBot payload of a response; failures OneBot reported itself raise ``_Rejected``."""
+    if response.status_code >= 500:
+        detail = response.text
+        try:
+            body = response.json()
+            if isinstance(body, dict):
+                detail = str(body.get("message") or body.get("wording") or body.get("msg") or detail)
+        except ValueError:
+            pass
+        raise _Rejected(f"HTTP {response.status_code}: {' '.join(detail.split())[:200]}")
+    if response.status_code >= 400:
+        raise RuntimeError(f"HTTP {response.status_code}")
+    try:
+        data = response.json()
+    except ValueError:
+        raise RuntimeError("响应不是 JSON") from None
+    if isinstance(data, dict) and (data.get("status") == "failed" or data.get("retcode") not in (None, 0)):
+        message = data.get("wording") or data.get("message") or data.get("msg") or "OneBot action failed"
+        raise _Rejected(f"retcode={data.get('retcode')}: {' '.join(str(message).split())[:200]}")
+    return data
+
+
+async def call_account_action(bot: Any, action: str, *, timeout: float = 8, **params: Any) -> Any:
+    """Call a OneBot 11 action as the account ``bot`` and no other.
+
+    Tries the account's own OneBot HTTP server, then LLBot's Satori passthrough on the
+    account's connection. Unlike ``call_onebot_action`` it never tries another account's
+    endpoint: ``get_group_msg_history`` fails for an account that is not in the group, and
+    OneBot message ids are generated per account.
+    """
+    channels: list[tuple[str, list[str], dict[str, str]]] = []
+    if own := _account_onebot(bot):
+        base, token = own
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        channels.append(("onebot", [f"{base}/{action}", f"{base}/api/{action}"], headers))
+    if passthrough := _satori_passthrough(bot):
+        base, headers = passthrough
+        channels.append(("satori", [f"{base}/{action}"], headers))
+    if not channels:
+        raise OneBotUnavailable("没有可用通道：账号没配 onebot_url，Satori 连接也没有地址")
+    tokens = [headers["Authorization"].removeprefix("Bearer ") for _, _, headers in channels if "Authorization" in headers]
+    errors: list[str] = []
+    answered = False
+    async with httpx.AsyncClient(
+        timeout=timeout, trust_env=False, verify=await ashared_ssl_context(trust_env=False),
+    ) as client:
+        for name, urls, headers in channels:
+            for url in urls:
+                try:
+                    response = await client.post(url, json=params, headers=headers)
+                    if response.status_code == 404 and url != urls[-1]:
+                        errors.append(f"{name} {url}: HTTP 404")
+                        continue
+                    return _answer(response)
+                except _Rejected as exc:
+                    answered = True
+                    errors.append(f"{name} {url}: {exc}")
+                except Exception as exc:  # noqa: BLE001 - try the next channel
+                    errors.append(f"{name} {url}: {type(exc).__name__}" + (f": {exc}" if isinstance(exc, RuntimeError) else ""))
+                break
+    message = "; ".join(errors)
+    for token in tokens:
+        if token:
+            message = message.replace(token, "<redacted>")
+    raise OneBotUnavailable(message, answered=answered)
 
 
 async def call_onebot_action(bot: Any, action: str, *, http_timeout: float = 10, **params: Any) -> Any:
