@@ -21,11 +21,13 @@ from otae_bot.infrastructure.http import asset_policy
 from otae_bot.infrastructure.http import client as http_client
 from otae_bot.infrastructure.http.asset_policy import (
     AssetFetchSettings,
+    DirectRoutes,
     HostCircuitBreaker,
     HostCircuitOpen,
     asset_render_budget,
     configure_asset_settings,
     load_asset_settings,
+    proxied_host,
     rewrite_asset_url,
 )
 
@@ -238,6 +240,190 @@ class AssetSettingsTests(unittest.TestCase):
             self.assertIsInstance(transport._pool, httpcore.AsyncHTTPProxy)
         finally:
             asyncio.run(client.aclose())
+
+
+class ProxyModeSettingsTests(unittest.TestCase):
+    def test_fallback_is_the_default_and_modes_parse(self):
+        defaults = load_asset_settings({})
+        self.assertEqual((defaults.proxy_mode, defaults.direct_cooldown), ("fallback", 300.0))
+        self.assertFalse(proxied_host("bbs.hycdn.cn", defaults))  # 没配代理：行为不变
+        always = load_asset_settings(
+            {"OTAE_HTTP_ASSET_PROXY_MODE": "ALWAYS", "OTAE_HTTP_ASSET_DIRECT_COOLDOWN": "60"}
+        )
+        self.assertEqual((always.proxy_mode, always.direct_cooldown), ("always", 60.0))
+        with mock.patch.object(asset_policy, "logger") as log:
+            bad = load_asset_settings({"OTAE_HTTP_ASSET_PROXY_MODE": "sometimes"})
+        self.assertEqual(bad.proxy_mode, "fallback")
+        log.warning.assert_called_once()
+
+    def test_proxied_host_matches_httpx_mount_patterns(self):
+        settings = AssetFetchSettings(
+            proxy="http://127.0.0.1:7897", proxy_hosts=("bbs.hycdn.cn", "*.sub.test", "*apex.test")
+        )
+        for host in ("bbs.hycdn.cn", "a.sub.test", "apex.test", "www.apex.test"):
+            self.assertTrue(proxied_host(host, settings), host)
+        for host in ("web.hycdn.cn", "sub.test", "notapex.test"):
+            self.assertFalse(proxied_host(host, settings), host)
+        self.assertTrue(proxied_host("any.test", AssetFetchSettings(proxy="http://127.0.0.1:7897")))
+
+    def test_fallback_mode_builds_a_direct_client_and_a_separate_proxy_client(self):
+        async def run():
+            proxy = "http://127.0.0.1:7897"
+            url = httpx.URL("https://bbs.hycdn.cn/a.png")
+            try:
+                configure_asset_settings(AssetFetchSettings(proxy=proxy, proxy_hosts=("bbs.hycdn.cn",)))
+                direct = http_client._get_asset_client()
+                self.assertNotIsInstance(direct._transport_for_url(url)._pool, httpcore.AsyncHTTPProxy)
+                routed = http_client._get_asset_client(proxy=True)
+                self.assertIsInstance(routed._transport_for_url(url)._pool, httpcore.AsyncHTTPProxy)
+                await http_client.close_http_client()
+                configure_asset_settings(
+                    AssetFetchSettings(proxy=proxy, proxy_hosts=("bbs.hycdn.cn",), proxy_mode="always")
+                )
+                always = http_client._get_asset_client()
+                self.assertIsInstance(always._transport_for_url(url)._pool, httpcore.AsyncHTTPProxy)
+            finally:
+                await http_client.close_http_client()
+
+        asyncio.run(run())
+
+
+class DirectRoutesTests(unittest.TestCase):
+    def test_failure_routes_to_proxy_until_one_probe_succeeds(self):
+        clock = FakeClock()
+        routes = DirectRoutes(cooldown_seconds=300, clock=clock)
+        with mock.patch.object(asset_policy, "logger") as log:
+            self.assertTrue(routes.try_direct("bbs.hycdn.cn"))
+            routes.record("bbs.hycdn.cn", False)
+            routes.record("bbs.hycdn.cn", False)  # 并发的另一个失败不重复告警
+            self.assertFalse(routes.try_direct("bbs.hycdn.cn"))
+            self.assertTrue(routes.try_direct("web.hycdn.cn"))
+            clock.now += 300
+            self.assertTrue(routes.try_direct("bbs.hycdn.cn"))  # 一个探测
+            self.assertFalse(routes.try_direct("bbs.hycdn.cn"))  # 其余继续走代理
+            routes.record("bbs.hycdn.cn", None)  # 探测被取消：释放名额，结论不变
+            self.assertTrue(routes.try_direct("bbs.hycdn.cn"))
+            routes.record("bbs.hycdn.cn", True)
+            self.assertTrue(routes.try_direct("bbs.hycdn.cn"))
+            self.assertEqual(routes.snapshot(), {})
+        self.assertEqual(log.warning.call_count, 1)
+        self.assertEqual(log.info.call_count, 1)
+
+
+class ProxyFallbackTests(unittest.IsolatedAsyncioTestCase):
+    """PROXY_MODE=fallback：先直连，连接失败才走代理；熔断只看最终结果。"""
+
+    proxy_settings = dict(proxy="http://127.0.0.1:7897", proxy_hosts=("bbs.hycdn.cn",))
+
+    async def asyncSetUp(self):
+        await http_client.close_http_client()
+        self.direct_calls: list[str] = []
+        self.proxy_calls: list[str] = []
+
+    async def asyncTearDown(self):
+        await http_client.close_http_client()
+
+    def _install(self, *, direct, proxy, **settings):
+        configure_asset_settings(AssetFetchSettings(**{**self.proxy_settings, **settings}))
+
+        async def direct_handler(request):
+            self.direct_calls.append(request.url.path)
+            return await direct(request)
+
+        async def proxy_handler(request):
+            self.proxy_calls.append(request.url.path)
+            return await proxy(request)
+
+        http_client._asset_client = httpx.AsyncClient(transport=httpx.MockTransport(direct_handler))
+        http_client._asset_proxy_client = httpx.AsyncClient(transport=httpx.MockTransport(proxy_handler))
+
+    async def _get(self, url: str):
+        return await http_client.fetch_bytes(url, namespace="t-assets", asset=True)
+
+    async def test_direct_first_then_proxy_after_a_connect_failure(self):
+        reachable = True
+
+        async def direct(request):
+            if not reachable:
+                raise httpx.ConnectTimeout("timed out", request=request)
+            return httpx.Response(200, content=b"direct")
+
+        async def proxy(request):
+            return httpx.Response(200, content=b"proxy")
+
+        self._install(direct=direct, proxy=proxy)
+        self.assertEqual((await self._get("https://bbs.hycdn.cn/image/a.png")).content, b"direct")
+        self.assertEqual(self.proxy_calls, [])
+        reachable = False
+        self.assertEqual((await self._get("https://bbs.hycdn.cn/image/b.png")).content, b"proxy")
+        self.assertEqual(self.direct_calls, ["/image/a.png", "/image/b.png"])
+        # 记住了直连不通：冷却期内不再先试直连
+        self.assertEqual((await self._get("https://bbs.hycdn.cn/image/c.png")).content, b"proxy")
+        self.assertEqual(self.direct_calls, ["/image/a.png", "/image/b.png"])
+        self.assertEqual(self.proxy_calls, ["/image/b.png", "/image/c.png"])
+        self.assertEqual(asset_policy.asset_breaker().snapshot(), {})
+
+    async def test_direct_failures_rescued_by_the_proxy_never_open_the_breaker(self):
+        async def direct(request):
+            raise httpx.ConnectError("refused", request=request)
+
+        async def proxy(request):
+            return httpx.Response(200, content=b"proxy")
+
+        # cooldown 0：每个请求都先试直连，连续失败远超熔断阈值
+        self._install(direct=direct, proxy=proxy, breaker_threshold=2, direct_cooldown=0.0)
+        results, failures = await http_client.fetch_many_resilient(
+            [f"https://bbs.hycdn.cn/image/{index}.png" for index in range(6)],
+            namespace="t-assets",
+            base_delay_seconds=0,
+        )
+        self.assertEqual(failures, {})
+        self.assertTrue(all(resource.content == b"proxy" for resource in results.values()))
+        self.assertGreaterEqual(len(self.direct_calls), 6)
+        self.assertFalse(asset_policy.asset_breaker().blocked("bbs.hycdn.cn"))
+        self.assertEqual(asset_policy.asset_breaker().snapshot(), {})
+
+    async def test_direct_and_proxy_both_failing_still_opens_the_breaker(self):
+        async def direct(request):
+            raise httpx.ConnectError("refused", request=request)
+
+        async def proxy(request):
+            raise httpx.ProxyError("proxy down", request=request)
+
+        self._install(direct=direct, proxy=proxy, breaker_threshold=2)
+        for name in ("a", "b"):
+            with self.assertRaises(httpx.ProxyError):
+                await self._get(f"https://bbs.hycdn.cn/image/{name}.png")
+        self.assertTrue(asset_policy.asset_breaker().blocked("bbs.hycdn.cn"))
+
+    async def test_read_timeout_and_unlisted_hosts_do_not_switch_to_the_proxy(self):
+        async def direct(request):
+            if request.url.host == "web.hycdn.cn":
+                raise httpx.ConnectError("refused", request=request)
+            raise httpx.ReadTimeout("slow", request=request)
+
+        async def proxy(request):
+            return httpx.Response(200, content=b"proxy")
+
+        self._install(direct=direct, proxy=proxy)
+        with self.assertRaises(httpx.ReadTimeout):
+            await self._get("https://bbs.hycdn.cn/image/slow.png")
+        with self.assertRaises(httpx.ConnectError):
+            await self._get("https://web.hycdn.cn/a.png")
+        self.assertEqual(self.proxy_calls, [])
+        self.assertEqual(asset_policy.asset_direct_routes().snapshot(), {})
+
+    async def test_always_mode_never_tries_direct(self):
+        async def direct(request):
+            return httpx.Response(200, content=b"via-asset-client")
+
+        async def proxy(request):
+            raise AssertionError("always mode routes through the asset client's proxy mounts")
+
+        self._install(direct=direct, proxy=proxy, proxy_mode="always")
+        self.assertEqual((await self._get("https://bbs.hycdn.cn/image/a.png")).content, b"via-asset-client")
+        self.assertEqual(self.proxy_calls, [])
+        self.assertEqual(asset_policy.asset_direct_routes().snapshot(), {})
 
 
 class AssetLaneTests(unittest.IsolatedAsyncioTestCase):
