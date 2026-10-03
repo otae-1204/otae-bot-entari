@@ -6,7 +6,7 @@ from arclet.entari import WS, Cleanup, Entari, Startup, listen, load_plugin
 from arclet.entari.event.plugin import PluginLoadedSuccess
 
 from otae_bot.adapters.command_input import install_quoted_command_mentions
-from otae_bot.adapters.exception_hooks import install_exception_hooks
+from otae_bot.adapters.exception_hooks import install_exception_hooks, reassert_exception_hooks
 from otae_bot.adapters.feature_gate import install_group_feature_gates, on_plugin_loaded
 from otae_bot.adapters.quote_fallback import install_quote_fetch_fallback
 from otae_bot.config.settings import SATORI_CLIENTS
@@ -41,6 +41,7 @@ def create_app() -> Entari:
     install_exception_hooks()
     install_quote_fetch_fallback()
     install_quoted_command_mentions()
+    listen(Startup)(reassert_exception_hooks)
     listen(Startup)(start_loop_watchdog)
     listen(Cleanup)(close_loop_watchdog)
     listen(Cleanup)(close_shared_resources)
@@ -57,6 +58,8 @@ def main() -> int:
         print("[ERROR] Another bot-entari instance is already running.")
         print("[ERROR] Run scripts\\stop.bat first if you need to restart it.")
         return 2
+    # Entari's logger is already imported here; cover startup before create_app too.
+    install_exception_hooks()
     prewarm_shared_ssl_context()
     try:
         create_app().run()

@@ -1,14 +1,17 @@
-"""修正 Entari 的 loguru_exc_callback 在 Python 3.13 上的签名不兼容。
+"""修正 Entari 的 loguru_exc_callback 与标准库调用约定不兼容。
 
-Entari 导入时把 ``traceback.print_exception`` 与 ``sys.excepthook`` 都换成了
-``loguru_exc_callback(cls, val, tb, *_, **__)``，三个位置参数都是必填。Python 3.10 起
-``print_exception`` 允许只传异常对象，3.13 的 ``traceback.print_exc()`` 正是这样调用：
-``print_exception(sys.exception(), limit=..., file=..., chain=...)``。于是 satori 在事件
-回调出错时调用 ``print_exc()``（例如引用消息为空的那类事件），会再抛
+``arclet/entari/logger.py``（0.17.4 第 186–219 行）在模块导入时把 ``traceback.print_exception``
+与 ``sys.excepthook`` 都换成了 ``loguru_exc_callback(cls, val, tb, *_, **__)``，三个位置参数都是
+必填。Python 3.10 起 ``print_exception`` 允许只传异常对象，3.12 与 3.13 的
+``traceback.print_exc()`` 都这样调用：``print_exception(sys.exception(), limit=..., file=..., chain=...)``；
+3.13 解释器自己显示异常（默认 ``sys.__excepthook__``、线程默认 excepthook）时还会经
+``traceback._print_exception_bltin`` 调 ``print_exception(exc, limit=..., file=..., colorize=...)``。
+于是 satori 在事件回调出错时调用 ``print_exc()``（例如引用消息为空的那类事件），会再抛
 ``TypeError: missing 2 required positional arguments``，原始异常反而没有记下来。
 
 这里装一个与标准库同签名的替身：新旧两种调用方式都接受，没有异常可报时什么也不做，
-最后仍交给 Entari 的回调，日志格式保持不变。
+最后仍交给 Entari 的回调，日志格式保持不变。Entari 的 logger 一旦（再次）导入就会把两个钩子
+改回去，所以安装前先确保它已导入，启动完成后再核对一次。
 """
 
 from __future__ import annotations
@@ -73,7 +76,31 @@ def excepthook(exc_type: Any, value: Any, tb: Any) -> None:
         _entari_callback()(*info)
 
 
+def hooks_installed() -> bool:
+    return traceback.print_exception is print_exception and sys.excepthook is excepthook
+
+
 def install_exception_hooks() -> None:
-    """Call after ``arclet.entari`` is imported, which installs its own hooks on import."""
+    """Replace Entari's hooks; idempotent and independent of import order."""
+    try:
+        # 导入 Entari 的 logger 就会覆盖两个钩子，必须让它先发生。
+        import arclet.entari.logger  # noqa: F401
+    except ImportError:
+        pass
     traceback.print_exception = print_exception
     sys.excepthook = excepthook
+
+
+def _describe(hook: Any) -> str:
+    return f"{getattr(hook, '__module__', '?')}.{getattr(hook, '__qualname__', type(hook).__name__)}"
+
+
+async def reassert_exception_hooks() -> None:
+    """Startup check: put the hooks back if something loaded later replaced them."""
+    if hooks_installed():
+        return
+    logger.warning(
+        "[core] exception hooks were replaced after install (print_exception={}, excepthook={}); reinstalling",
+        _describe(traceback.print_exception), _describe(sys.excepthook),
+    )
+    install_exception_hooks()
