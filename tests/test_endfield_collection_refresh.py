@@ -11,7 +11,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from plugins.endfield import handlers
+from plugins.endfield import cold_start, handlers
 from plugins.endfield.archives.store import ArchiveSnapshotStore
 from plugins.endfield.catalog.commands import parse_command
 from plugins.endfield.catalog.models import (
@@ -466,6 +466,39 @@ class PinnedProviderTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len([p for p in paths if "I18nTextTable_CN" in p]), 2)
         self.assertEqual(medals[-1], pinned["latest"])
         self.assertEqual(archives[-1], pinned["latest"])
+
+    async def test_refresh_token_keeps_i18n_warm_for_cold_start_checks(self):
+        """A ``?v=`` refresh read must still count as a warm I18n read."""
+        pinned = manifest()
+        akedata.clear_i18n_process_warm()
+        self.addCleanup(akedata.clear_i18n_process_warm)
+        with patch.object(akedata, "fetch_json", AsyncMock(return_value={"ok": {}})) as fetch:
+            await akedata.fetch_akedata_medal_tables(manifest=pinned, cache_token="refresh-1")
+        requested = [
+            call.args[0] for call in fetch.await_args_list if "I18nTextTable_CN" in call.args[0]
+        ]
+        self.assertEqual(len(requested), 1)
+        # Cache identity drops the token, so it still matches the manifest path.
+        self.assertEqual(
+            akedata.i18n_loaded_path(),
+            "/public/1.5.3/10506507-7/TableCfg/I18nTextTable_CN.json",
+        )
+        self.assertTrue(akedata.i18n_process_warm())
+        self.assertTrue(akedata.i18n_loaded_request_path().endswith("?v=refresh-1"))
+        with (
+            patch.object(cold_start, "fetch_akedata_manifest", AsyncMock(return_value=pinned)),
+            patch.object(
+                cold_start, "cached_public_resource", AsyncMock(return_value=True)
+            ) as cached,
+        ):
+            self.assertFalse(await cold_start.ake_public_tables_cold())
+        # The probe must use the path the refresh really wrote, not the token-less one.
+        self.assertEqual(cached.await_args.args[0], requested[0])
+        with (
+            patch.object(cold_start, "fetch_akedata_manifest", AsyncMock(return_value=pinned)),
+            patch.object(cold_start, "cached_public_resource", AsyncMock(return_value=False)),
+        ):
+            self.assertTrue(await cold_start.ake_public_tables_cold())
 
     async def test_baselines_use_same_manifest_and_reject_missing_historical_path(self):
         service = EndfieldService.__new__(EndfieldService)

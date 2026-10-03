@@ -48,14 +48,22 @@ _I18N_SUFFIX = "/I18nTextTable_CN.json"
 # Path of the I18n table successfully loaded into memory in this process.
 # None until that read returns; cleared when /ef dev drops the akedata cache.
 _i18n_loaded_path: str | None = None
+# Exact path of that read; keeps the on-demand refresh token (``?v=``) so the
+# cold-start check probes the same cache key the refresh wrote.
+_i18n_loaded_request: str | None = None
 
 
 def normalize_table_path(path: str) -> str:
-    return "/" + str(path or "").lstrip("/")
+    """Cache identity of a table: drop the on-demand refresh token (``?v=``)."""
+    return "/" + str(path or "").split("?", 1)[0].lstrip("/")
 
 
 def i18n_loaded_path() -> str | None:
     return _i18n_loaded_path
+
+
+def i18n_loaded_request_path() -> str | None:
+    return _i18n_loaded_request
 
 
 def i18n_process_warm() -> bool:
@@ -63,15 +71,17 @@ def i18n_process_warm() -> bool:
 
 
 def clear_i18n_process_warm() -> None:
-    global _i18n_loaded_path
+    global _i18n_loaded_path, _i18n_loaded_request
     _i18n_loaded_path = None
+    _i18n_loaded_request = None
 
 
 def remember_i18n_loaded(path: str) -> None:
-    global _i18n_loaded_path
+    global _i18n_loaded_path, _i18n_loaded_request
     normalized = normalize_table_path(path)
     if normalized.endswith(_I18N_SUFFIX):
         _i18n_loaded_path = normalized
+        _i18n_loaded_request = "/" + str(path or "").lstrip("/")
 
 
 def i18n_path_from_manifest(manifest: dict[str, Any]) -> str | None:

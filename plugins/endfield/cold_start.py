@@ -22,6 +22,7 @@ from .providers.akedata import (
     AKEDATA_HEADERS,
     fetch_akedata_manifest,
     i18n_loaded_path,
+    i18n_loaded_request_path,
     i18n_path_from_manifest,
     i18n_process_warm,
 )
@@ -85,8 +86,10 @@ async def ake_public_tables_cold() -> bool:
     current = i18n_path_from_manifest(manifest)
     if not current or current != i18n_loaded_path():
         return True
+    # On-demand refresh reads tables through a per-refresh ``?v=`` token, so probe
+    # the path that was actually requested instead of the token-less manifest path.
     return not await cached_public_resource(
-        f"{AKEDATA_DATA_BASE}{current}",
+        f"{AKEDATA_DATA_BASE}{i18n_loaded_request_path() or current}",
         namespace="akedata",
         response_kind="json",
         headers=AKEDATA_HEADERS,
