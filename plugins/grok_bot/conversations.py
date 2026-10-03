@@ -12,6 +12,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from threading import RLock
+from time import time
 from uuid import UUID, uuid4
 
 from satori import ChannelType
@@ -65,13 +66,22 @@ class SessionStore:
 
     The application run lock excludes other bot processes using this data dir.
     RequestQueue gives each scope one receiver, which resolves its binding once;
-    a repair cannot run concurrently with that scope's receiver.
+    a repair cannot run concurrently with that scope's receiver. Reads reload a
+    file replaced on disk, so an offline repair takes effect without a restart.
     """
 
     def __init__(self, path: Path = Path("data/grok_bot/sessions.json")):
         self.path = path
         self._data: dict | None = None
+        self._stamp: tuple | None = None
         self._lock = RLock()
+
+    def _stat(self) -> tuple | None:
+        try:
+            info = self.path.stat()
+        except OSError:
+            return None
+        return info.st_mtime_ns, info.st_size, info.st_ino
 
     def _save(self, data: dict) -> None:
         temp_path = None
@@ -88,33 +98,40 @@ class SessionStore:
         finally:
             if temp_path is not None:
                 temp_path.unlink(missing_ok=True)
-        self._data = data
+        self._data, self._stamp = data, self._stat()
 
     def _load(self) -> dict:
-        if self._data is None:
-            try:
-                data = json.loads(self.path.read_text(encoding="utf-8"))
-                if not isinstance(data, dict) or data.get("version") != 1:
-                    raise ValueError
-                UUID(data["installation"])
-                if not isinstance(data["bindings"], dict):
-                    raise TypeError
-                ids = set()
-                for entry in data["bindings"].values():
-                    UUID(entry["nonce"])
-                    agent_id = entry["agent_id"]
-                    if agent_id is not None:
-                        UUID(agent_id)
-                        if agent_id in ids:
-                            raise ValueError
-                        ids.add(agent_id)
-            except FileNotFoundError:
-                data = {"version": 1, "installation": str(uuid4()), "bindings": {}}
-                self._save(data)
-            except (OSError, ValueError, TypeError, KeyError, AttributeError):
-                raise GrokError("Grok Bot 会话绑定无法读取或已损坏，请管理员检查 data/grok_bot/sessions.json；未使用共享会话。") from None
-            self._data = data
-        return self._data
+        stamp = self._stat()
+        # A file deleted while running keeps the cached installation id rather than
+        # silently starting new Bots for every conversation.
+        if self._data is not None and stamp in (None, self._stamp):
+            return self._data
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+            if not isinstance(data, dict) or data.get("version") != 1:
+                raise ValueError
+            UUID(data["installation"])
+            if not isinstance(data["bindings"], dict):
+                raise TypeError
+            ids = set()
+            for entry in data["bindings"].values():
+                UUID(entry["nonce"])
+                agent_id = entry["agent_id"]
+                if agent_id is not None:
+                    UUID(agent_id)
+                    if agent_id in ids:
+                        raise ValueError
+                    ids.add(agent_id)
+        except FileNotFoundError:
+            if self._data is not None:
+                return self._data
+            data = {"version": 1, "installation": str(uuid4()), "bindings": {}}
+            self._save(data)
+            return data
+        except (OSError, ValueError, TypeError, KeyError, AttributeError):
+            raise GrokError("Grok Bot 会话绑定无法读取或已损坏，请管理员检查 data/grok_bot/sessions.json；未使用共享会话。") from None
+        self._data, self._stamp = data, stamp
+        return data
 
     def snapshot(self) -> dict:
         with self._lock:
@@ -125,7 +142,11 @@ class SessionStore:
             data = copy.deepcopy(self._load())
             if agent_id and any(k != key and entry["agent_id"] == agent_id for k, entry in data["bindings"].items()):
                 raise GrokError("Grok Bot 会话绑定冲突，问题尚未发送，请管理员检查会话映射。")
-            data["bindings"][key] = {"agent_id": agent_id, "nonce": nonce}
+            entry = {"agent_id": agent_id, "nonce": nonce}
+            if agent_id is None:
+                # Wall clock, so the settle window survives a restart.
+                entry["pending_since"] = round(time(), 3)
+            data["bindings"][key] = entry
             self._save(data)
 
     def clear_pending(self, key: str, nonce: str) -> bool:

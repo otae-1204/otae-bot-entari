@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import tempfile
 import unittest
 from dataclasses import replace
@@ -235,6 +236,30 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(SCOPE.key, self.store.snapshot()["bindings"])
         self.store.put(SCOPE.key, str(uuid4()), nonce)
         self.assertFalse(self.store.clear_pending(SCOPE.key, nonce))
+
+    def test_store_reloads_a_file_replaced_offline_and_keeps_its_cache_if_the_file_vanishes(self):
+        self.store.put(SCOPE.key, None, str(uuid4()))
+        self.store.put("other", str(uuid4()), str(uuid4()))
+        installation = self.store.snapshot()["installation"]
+        # scripts/repair_grok_binding.py replaces the file while the bot keeps running.
+        payload = json.loads(self.path.read_text(encoding="utf-8"))
+        del payload["bindings"][SCOPE.key]
+        replacement = self.path.with_name("sessions.json.new")
+        replacement.write_text(json.dumps(payload), encoding="utf-8")
+        os.replace(replacement, self.path)
+        self.assertNotIn(SCOPE.key, self.store.snapshot()["bindings"])
+        self.store.put("third", None, str(uuid4()))
+        self.assertEqual(set(SessionStore(self.path).snapshot()["bindings"]), {"other", "third"})
+        # Deleting the file must not mint a new installation, and new Bots, mid-run.
+        self.path.unlink()
+        self.assertEqual(self.store.snapshot()["installation"], installation)
+        self.store.put("fourth", None, str(uuid4()))
+        self.assertEqual(SessionStore(self.path).snapshot()["installation"], installation)
+        # A corrupt replacement is refused, never overwritten with the cache.
+        self.path.write_text("{", encoding="utf-8")
+        with self.assertRaises(GrokError):
+            self.store.put("fifth", None, str(uuid4()))
+        self.assertEqual(self.path.read_text(encoding="utf-8"), "{")
 
     async def test_bad_or_ambiguous_remote_binding_never_uses_shared_or_different_chat(self):
         await self.resolve()
