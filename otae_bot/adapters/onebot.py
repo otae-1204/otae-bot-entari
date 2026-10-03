@@ -52,6 +52,39 @@ def _access_token() -> str:
     return ""
 
 
+def _own_client(bot: Any) -> dict | None:
+    """The ``SATORI_CLIENTS`` entry of the connection this account came in on."""
+    config = getattr(bot, "config", None)
+    host, port = getattr(config, "host", None), getattr(config, "port", None)
+    clients = _env("SATORI_CLIENTS", [])
+    if not host or port is None or not isinstance(clients, list):
+        return None
+    for item in clients:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("host") or item.get("hostname")) == str(host) and str(item.get("port")) == str(port):
+            return item
+    return None
+
+
+def _endpoints(bot: Any) -> list[tuple[str, str]]:
+    """(base URL, token) pairs to try.
+
+    With several LLBot instances (one per QQ account) a single ``ONEBOT_HTTP_URL`` would
+    answer for the wrong account, so a client may name its own ``onebot_url`` (and
+    ``onebot_token``); that account then uses only its own endpoint.
+    """
+    client = _own_client(bot)
+    own = str((client or {}).get("onebot_url") or "").rstrip("/")
+    if client and own:
+        token = client.get("onebot_token")
+        if token is None:
+            token = _env("ONEBOT_ACCESS_TOKEN", "") or client.get("token")
+        return [(own, str(token or ""))]
+    token = _access_token()
+    return [(url, token) for url in _base_urls()]
+
+
 async def call_onebot_action(bot: Any, action: str, *, http_timeout: float = 10, **params: Any) -> Any:
     """Call an action through Satori internal API, then configured HTTP.
 
@@ -68,18 +101,17 @@ async def call_onebot_action(bot: Any, action: str, *, http_timeout: float = 10,
         except Exception as exc:  # pragma: no cover - adapter-specific
             internal_error = exc
 
-    urls = _base_urls()
-    if not urls:
+    endpoints = _endpoints(bot)
+    if not endpoints:
         raise RuntimeError("未配置 OneBot HTTP 地址") from internal_error
-    headers = {"Content-Type": "application/json"}
-    token = _access_token()
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
     errors: list[str] = []
     async with httpx.AsyncClient(
         timeout=http_timeout, trust_env=False, verify=await ashared_ssl_context(trust_env=False),
     ) as client:
-        for base in urls:
+        for base, token in endpoints:
+            headers = {"Content-Type": "application/json"}
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
             for suffix in (f"/{action}", f"/api/{action}"):
                 try:
                     response = await client.post(f"{base}{suffix}", json=params, headers=headers)
