@@ -48,6 +48,14 @@ READ_ONLY_COMMANDS = frozenset({
 # Exponential backoff, 31 s in total: rides out a 20-30 s tailnet/DERP outage.
 READ_RETRY_DELAYS = (1.0, 2.0, 4.0, 8.0, 16.0)
 TRANSCRIPT_READ_TIMEOUT = 60
+# Before asking whether a prompt lost in transit was recorded.
+PROMPT_SETTLE = 2.0
+
+
+def lost_in_transit(error: BaseException) -> bool:
+    """A timeout or broken connection: the host may or may not have the request."""
+    return (isinstance(error, GatewayError) and error.retryable
+            and isinstance(error.__cause__, httpx.TransportError))
 
 
 def cause_chain(error: BaseException) -> list[BaseException]:
@@ -384,11 +392,47 @@ class Gateway:
         if attachments:
             body["attachmentPaths"] = [item.source for item in attachments]
             body["attachmentNames"] = [item.name for item in attachments]
-        accepted = await self.request("sendPrompt", body)
-        if not isinstance(accepted, dict) or accepted.get("accepted") is not True:
+        if not await self.send_prompt(body):
             raise GrokError("Grok Bot 未确认接受本次问题，请在应用中检查状态；本次未重复提交。")
 
+    async def send_prompt(self, body: dict) -> bool:
+        """Resend a lost prompt, with the same clientNonce, only if the host never recorded it."""
+        nonce, resent = body["clientNonce"], False
+        while True:
+            try:
+                accepted = await self.request("sendPrompt", body)
+                return isinstance(accepted, dict) and accepted.get("accepted") is True
+            except GatewayError as error:
+                if not lost_in_transit(error) or (resent and error.not_submitted):
+                    raise
+                cause = type(error.__cause__).__name__
+                # TCP may still deliver a timed-out request once the link returns, so
+                # "not-found" proves nothing then. A refused or closed connection cannot.
+                resendable = not resent and (error.not_submitted or not isinstance(error.__cause__, httpx.TimeoutException))
+                if not error.not_submitted:
+                    await asyncio.sleep(PROMPT_SETTLE)
+                try:
+                    # Read-only, so retried with backoff; a failed lookup never resends.
+                    outcome = await self.acceptance_outcome(nonce)
+                except GrokError as lookup:
+                    logger.warning("[grok_bot] sendPrompt nonce={} lost ({}); acceptance lookup failed ({}), not resending",
+                                   nonce, cause, type(lookup).__name__)
+                    raise error
+                resend = resendable and outcome == "not-found"
+                logger.warning("[grok_bot] sendPrompt nonce={} lost ({}); acceptance={} resend={}", nonce, cause, outcome, resend)
+                if outcome not in {"not-found", "unknown-durability"}:
+                    return True  # Recorded; the receiver follows its acceptance status.
+                if not resend:
+                    raise
+                resent = True
+
     async def acceptance(self, nonce: str) -> str:
+        status = await self.acceptance_outcome(nonce)
+        # Absence may only mean the record is not written yet; never a rejection.
+        return "pending" if status == "not-found" else status
+
+    async def acceptance_outcome(self, nonce: str) -> str:
+        """The recorded status, or "not-found" / "unknown-durability"."""
         payload = await self.request("promptAcceptanceStatus", {"accountSlot": "host", "clientNonce": nonce})
         if not isinstance(payload, dict):
             raise GrokError(PROTOCOL_ERROR)
@@ -400,9 +444,7 @@ class Gateway:
             if record.get("status") not in {"pending", "accepted", "rejected"}:
                 raise GrokError(PROTOCOL_ERROR)
             return record["status"]
-        if outcome == "not-found":
-            return "pending"
-        if outcome == "unknown-durability":
+        if outcome in {"not-found", "unknown-durability"}:
             return outcome
         raise GrokError(PROTOCOL_ERROR)
 
@@ -421,8 +463,7 @@ class Gateway:
         if attachments:
             body["attachmentPaths"] = [item.source for item in attachments]
             body["attachmentNames"] = [item.name for item in attachments]
-        accepted = await self.request("sendPrompt", body)
-        if not isinstance(accepted, dict) or accepted.get("accepted") is not True:
+        if not await self.send_prompt(body):
             raise GrokError("Grok Bot 未接受本次问题，请在应用中检查状态。")
         previous_reply = None
         while True:

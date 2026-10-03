@@ -425,6 +425,96 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(pages[1], pages[2])
         self.assertEqual(pages[1]["beforeSeq"], 20)
 
+    async def lost_send(self, failures, outcomes):
+        """Submit once: sendPrompt raises `failures` in turn, status lookups answer `outcomes`."""
+        host, sends, lookups, slept = Host(), [], [], []
+
+        def send(body):
+            sends.append(body)
+            if failures:
+                failure = failures.pop(0)
+                if isinstance(failure, httpx.Response):
+                    return failure
+                raise failure("private-token")
+            return {"accepted": True}
+
+        def lookup(body):
+            lookups.append(body)
+            outcome = outcomes.pop(0) if len(outcomes) > 1 else outcomes[0]
+            if isinstance(outcome, httpx.Response) or outcome in {"not-found", "unknown-durability"}:
+                return outcome if isinstance(outcome, httpx.Response) else {"outcome": outcome}
+            return {"outcome": "found", "record": {"agentId": AGENT, "clientNonce": body["clientNonce"], "status": outcome}}
+
+        async def sleep(seconds):
+            slept.append(seconds)
+
+        host.override.update(sendPrompt=send, promptAcceptanceStatus=lookup)
+        error = None
+        async with host.client() as client:
+            with patch.object(gateway.asyncio, "sleep", sleep):
+                try:
+                    await gateway.Gateway(CONFIG, client).submit("问题", "nonce-1")
+                except GrokError as caught:
+                    error = caught
+        return sends, lookups, slept, error
+
+    async def test_lost_send_is_resent_only_after_the_host_reports_its_nonce_not_found(self):
+        # Connection closed, but the host recorded the nonce: never send it twice.
+        for status in ("pending", "accepted", "rejected"):
+            sends, lookups, slept, error = await self.lost_send([httpx.RemoteProtocolError], [status])
+            self.assertIsNone(error)
+            self.assertEqual(len(sends), 1)
+            self.assertEqual(lookups, [{"accountSlot": "host", "clientNonce": "nonce-1"}])
+            self.assertEqual(slept, [gateway.PROMPT_SETTLE])
+        # Connection closed and no record: resend once, same body and clientNonce.
+        sends, _, _, error = await self.lost_send([httpx.RemoteProtocolError], ["not-found"])
+        self.assertIsNone(error)
+        self.assertEqual(len(sends), 2)
+        self.assertEqual(sends[0], sends[1])
+        # Connection refused: nothing was sent, so no settle wait before the lookup.
+        sends, lookups, slept, error = await self.lost_send([httpx.ConnectError], ["not-found"])
+        self.assertIsNone(error)
+        self.assertEqual((len(sends), len(lookups), slept), (2, 1, []))
+        # The resend is lost as well: report it, never a third copy.
+        sends, lookups, _, error = await self.lost_send([httpx.RemoteProtocolError, httpx.ReadError], ["not-found"])
+        self.assertIn("sendPrompt / ReadError", str(error))
+        self.assertEqual((len(sends), len(lookups)), (2, 2))
+
+    async def test_lost_send_is_not_resent_when_absence_is_unproven(self):
+        # The status lookup fails even after its backoff: report, never resend blindly.
+        sends, lookups, slept, error = await self.lost_send([httpx.RemoteProtocolError], [httpx.Response(503)])
+        self.assertIn("sendPrompt / RemoteProtocolError", str(error))
+        self.assertFalse(error.not_submitted)
+        self.assertEqual((len(sends), len(lookups)), (1, 1 + len(gateway.READ_RETRY_DELAYS)))
+        self.assertEqual(slept, [gateway.PROMPT_SETTLE, *gateway.READ_RETRY_DELAYS])
+        # TCP may still deliver a timed-out request after the link returns.
+        sends, _, _, error = await self.lost_send([httpx.ReadTimeout], ["not-found"])
+        self.assertIn("sendPrompt / ReadTimeout", str(error))
+        self.assertEqual(len(sends), 1)
+        sends, _, _, error = await self.lost_send([httpx.ReadTimeout], ["accepted"])
+        self.assertIsNone(error)
+        self.assertEqual(len(sends), 1)
+        sends, _, _, error = await self.lost_send([httpx.RemoteProtocolError], ["unknown-durability"])
+        self.assertIsInstance(error, GatewayError)
+        self.assertEqual(len(sends), 1)
+        # An explicit rejection was not lost in transit: no lookup at all.
+        sends, lookups, _, error = await self.lost_send([httpx.Response(400)], ["not-found"])
+        self.assertTrue(error.not_submitted)
+        self.assertEqual((len(sends), lookups), (1, []))
+
+    async def test_ask_continues_after_a_lost_but_recorded_send(self):
+        host = Host()
+
+        def send(body):
+            host.prompt, host.nonce = body["prompt"], body["clientNonce"]
+            raise httpx.RemoteProtocolError("private-token")
+
+        host.override["sendPrompt"] = send
+        async with host.client() as client:
+            with patch.object(gateway, "PROMPT_SETTLE", 0):
+                self.assertEqual((await gateway.Gateway(CONFIG, client).ask("问题")).text, host.answer)
+        self.assertEqual(sum(name == "sendPrompt" for name, _, _ in host.calls), 1)
+
     async def test_total_task_timeout_cancels_read_backoff_without_new_prompt(self):
         host = Host()
 
