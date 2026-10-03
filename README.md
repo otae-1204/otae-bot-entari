@@ -85,6 +85,11 @@ Satori server exposes several logins through one endpoint, that endpoint only
 needs one list entry. `entari.yml` is not the network source for this custom
 `bot.py` entrypoint.
 
+Some actions only exist in OneBot 11 (reading a quoted merged forward, native
+forward sending). An entry may add `"onebot_url"` (and `"onebot_token"`) for that
+instance's OneBot HTTP server; the account then uses only its own endpoint.
+Entries without it fall back to `ONEBOT_HTTP_URL`. See `docs/hyw_plugin.md`.
+
 ## Deploy To Windows Server
 
 Default production directory:

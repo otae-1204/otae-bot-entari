@@ -163,6 +163,45 @@ class ExpansionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("甲", text)
         self.assertEqual(images, ["https://example.com/in.png"])
 
+    async def test_satori_forward_with_children_is_read_in_place(self):
+        from satori import Author, Image, Text
+        from satori.element import Message, transform
+        from satori.parser import parse
+
+        from plugins.hyw.messages import expand_special
+
+        built = Message(forward=True, content=[
+            Message(content=[Author("1", "甲"), Text("第一句"), Image(src="https://example.com/a.png")]),
+            Message(content=[Author("2", "乙"), Text("第二句")]),
+        ])
+        parsed = transform(parse(
+            '<message forward="true"><message><author id="1" name="甲"/>第一句<img src="https://example.com/a.png"/>'
+            '</message><message><author id="2" name="乙"/>第二句</message></message>'
+        ))[0]
+        session = AsyncMock()
+        for element in (built, parsed):
+            text, images, rich = await expand_special(session, [element])
+            self.assertTrue(rich)
+            self.assertIn("【聊天记录 开始", text)
+            self.assertLess(text.index("甲（1）"), text.index("第一句"))
+            self.assertLess(text.index("第一句"), text.index("乙（2）"))
+            self.assertIn("第二句", text)
+            self.assertEqual(images, ["https://example.com/a.png"])
+        session.internal.assert_not_awaited()
+
+    async def test_satori_forward_without_children_is_fetched_by_id(self):
+        from satori.element import Message
+
+        from plugins.hyw.messages import expand_special
+
+        session = AsyncMock()
+        session.internal.return_value = {"messages": [{"sender": {"nickname": "丙"}, "content": [
+            {"type": "text", "data": {"text": "按 id 取回"}}]}]}
+        text, _, rich = await expand_special(session, [Message("res-1", forward=True)])
+        session.internal.assert_awaited_once_with("get_forward_msg", message_id="res-1")
+        self.assertTrue(rich)
+        self.assertIn("按 id 取回", text)
+
     def test_xml_entity_declaration_is_not_parsed(self):
         import asyncio
         from plugins.hyw.messages import expand_special
@@ -176,6 +215,184 @@ class ExpansionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(rich)
         self.assertIn("实体声明", text)
         self.assertEqual(images, [])
+
+
+def _args(*content):
+    return type("R", (), {"all_matched_args": {"content": list(content)}})()
+
+
+class UnfetchedQuoteTests(unittest.IsolatedAsyncioTestCase):
+    """Entari 取不到引用（LLBot message.get 500 消息为空）时 reply 为空，但 event.quote 还在。"""
+
+    FORWARD = {"status": "ok", "retcode": 0, "data": {"messages": [
+        {"sender": {"nickname": "甲", "user_id": "1"}, "time": 0, "content": [
+            {"type": "text", "data": {"text": "转发正文"}},
+            {"type": "image", "data": {"url": "https://example.com/f.png"}},
+        ]},
+    ]}}
+
+    def setUp(self):
+        self.http = AsyncMock(side_effect=RuntimeError("未配置 OneBot HTTP 地址"))
+        patcher = patch("otae_bot.adapters.onebot.call_onebot_action", self.http)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _session(self, internal=None, quote_id="fwd-1"):
+        from types import SimpleNamespace
+
+        from satori import Quote
+
+        session = AsyncMock()
+        session.reply = None
+        session.send = AsyncMock(return_value=[])
+        session.internal = internal or AsyncMock(side_effect=RuntimeError("internal route missing"))
+        session.account = SimpleNamespace(platform="qq", self_id="bot")
+        session.event = SimpleNamespace(
+            quote=Quote(quote_id), channel=SimpleNamespace(id="100"),
+            guild=SimpleNamespace(id="100"), user=SimpleNamespace(id="otae"),
+        )
+        return session
+
+    async def test_forward_is_read_by_the_quoted_message_id(self):
+        from plugins.hyw.messages import expand_quote
+
+        session = self._session(AsyncMock(return_value=self.FORWARD))
+        failures = []
+        text, images, rich = await expand_quote(session, "fwd-1", failures)
+        session.internal.assert_awaited_once_with("get_forward_msg", message_id="fwd-1")
+        self.assertIn("【消息 1】\n发送者：甲（1）", text)
+        self.assertIn("转发正文", text)
+        self.assertEqual(images, ["https://example.com/f.png"])
+        self.assertTrue(rich)
+        self.assertEqual(failures, [])
+
+    async def test_onebot_http_is_used_when_the_satori_internal_route_fails(self):
+        from plugins.hyw.messages import expand_quote
+
+        session = self._session()
+        self.http.side_effect = None
+        self.http.return_value = self.FORWARD
+        failures = []
+        text, _, _ = await expand_quote(session, "fwd-1", failures)
+        self.http.assert_awaited_once_with(session.account, "get_forward_msg", message_id="fwd-1")
+        self.assertIn("转发正文", text)
+        self.assertEqual(failures, ["internal get_forward_msg: RuntimeError: internal route missing"])
+
+    async def test_a_failed_onebot_status_from_the_internal_route_also_falls_back(self):
+        from plugins.hyw.messages import expand_quote
+
+        session = self._session(AsyncMock(return_value={"status": "failed", "retcode": 1200, "wording": "msg not found"}))
+        self.http.side_effect = None
+        self.http.return_value = self.FORWARD
+        failures = []
+        text, _, _ = await expand_quote(session, "fwd-1", failures)
+        self.assertIn("转发正文", text)
+        self.assertEqual(failures, ["internal get_forward_msg: RuntimeError: msg not found"])
+
+    async def test_other_quotes_fall_back_to_get_msg(self):
+        from plugins.hyw.messages import expand_quote
+
+        async def internal(action, **params):
+            if action == "get_msg":
+                return {"data": {"message_id": params["message_id"], "message": [
+                    {"type": "text", "data": {"text": "原消息"}},
+                    {"type": "image", "data": {"url": "https://example.com/m.png"}},
+                    {"type": "forward", "data": {"id": "inner"}},
+                ]}}
+            if params == {"message_id": "inner"}:
+                return self.FORWARD
+            raise RuntimeError("消息为空")
+
+        session = self._session(AsyncMock(side_effect=internal))
+        text, images, rich = await expand_quote(session, "plain-1", [])
+        self.assertIn("原消息", text)
+        self.assertIn("转发正文", text)
+        self.assertEqual(images, ["https://example.com/m.png", "https://example.com/f.png"])
+        self.assertTrue(rich)
+
+    async def test_nothing_readable_is_empty_with_every_step_recorded(self):
+        from plugins.hyw.messages import expand_quote
+
+        failures = []
+        self.assertEqual(await expand_quote(self._session(), "fwd-1", failures), ("", [], False))
+        self.assertEqual([item.split(":")[0] for item in failures], [
+            "internal get_forward_msg", "onebot get_forward_msg", "internal get_msg", "onebot get_msg",
+        ])
+
+    async def test_q_gets_the_forward_as_context_without_entari_reply(self):
+        from satori import Text
+
+        from plugins.hyw import handlers
+
+        session = self._session(AsyncMock(return_value=self.FORWARD))
+        request = AsyncMock()
+        with patch.object(handlers.HywConfig, "from_env", return_value=_config()), \
+             patch.object(handlers, "run_request", request):
+            await handle_hyw(session, _args(Text("总结一下")))
+        request.assert_awaited_once()
+        _, _, scope, text, images, prior = request.await_args.args
+        self.assertEqual(scope, ("qq", "bot", "100", "100", "otae"))
+        self.assertTrue(text.startswith("总结一下\n\n[引用消息]\n"), text)
+        self.assertIn("转发正文", text)
+        self.assertEqual(images, ["https://example.com/f.png"])
+        self.assertEqual(prior, [])
+        self.assertIs(request.await_args.kwargs["rich"], True)
+
+    async def test_q_still_runs_when_the_forward_cannot_be_read(self):
+        from satori import Text
+
+        from plugins.hyw import handlers
+
+        session = self._session()
+        request = AsyncMock()
+        with patch.object(handlers.HywConfig, "from_env", return_value=_config()), \
+             patch.object(handlers, "run_request", request), patch.object(handlers, "logger") as log:
+            await handle_hyw(session, _args(Text("总结一下")))
+        request.assert_awaited_once()
+        self.assertEqual(request.await_args.args[3:], ("总结一下", [], []))
+        self.assertIs(request.await_args.kwargs["rich"], False)
+        template, channel, quote_id, failures = log.warning.call_args.args
+        self.assertIn("quoted message unavailable", template)
+        self.assertEqual((channel, quote_id, len(failures)), ("100", "fwd-1", 4))
+
+    async def test_bare_q_on_an_unreadable_quote_asks_for_a_question(self):
+        from plugins.hyw import handlers
+
+        session = self._session()
+        request = AsyncMock()
+        with patch.object(handlers.HywConfig, "from_env", return_value=_config()), \
+             patch.object(handlers, "run_request", request), patch.object(handlers, "logger"):
+            await handle_hyw(session, _args())
+        request.assert_not_awaited()
+        self.assertIn("没能读取引用的消息", str(session.send.await_args.args[0]))
+
+    async def test_follow_up_on_an_own_answer_uses_the_quote_id(self):
+        from satori import Text
+
+        from plugins.hyw import handlers
+
+        session = self._session(quote_id="answer-1")
+        scope = handlers.scope_for(session)
+        history = [{"role": "user", "content": "旧问题"}, {"role": "assistant", "content": "旧回答"}]
+        handlers.history_store.put(scope, "answer-1", history)
+        self.addCleanup(handlers.history_store.clear, scope)
+        request = AsyncMock()
+        with patch.object(handlers.HywConfig, "from_env", return_value=_config()), \
+             patch.object(handlers, "run_request", request):
+            await handle_hyw(session, _args(Text("继续")))
+        self.assertEqual(request.await_args.args[3], "继续")
+        self.assertEqual(request.await_args.args[5], history)
+        session.internal.assert_not_awaited()
+
+    async def test_link_uses_the_quote_id(self):
+        from plugins.hyw import handlers
+
+        session = self._session(quote_id="answer-2")
+        scope = handlers.scope_for(session)
+        handlers.sources.put(handlers.channel_for(scope), scope[4], "answer-2", [{"title": "来源", "url": "https://example.com/s"}])
+        self.addCleanup(handlers.sources.clear_sender, handlers.channel_for(scope), scope[4])
+        await handlers.handle_link(session, _args())
+        self.assertIn("https://example.com/s", str(session.send.await_args.args[0]))
 
 
 class RetryTests(unittest.TestCase):
