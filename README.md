@@ -88,7 +88,10 @@ needs one list entry. `entari.yml` is not the network source for this custom
 Some actions only exist in OneBot 11 (reading a quoted merged forward, native
 forward sending). An entry may add `"onebot_url"` (and `"onebot_token"`) for that
 instance's OneBot HTTP server; the account then uses only its own endpoint.
-Entries without it fall back to `ONEBOT_HTTP_URL`. See `docs/hyw_plugin.md`.
+Entries without it fall back to `ONEBOT_HTTP_URL`. Reading a quoted message needs
+neither when LLOneBot exposes its Satori passthrough `/v1/internal/onebot11/*`
+(LLBot 8.2.1 does): the read goes through the receiving account's own connection.
+See `docs/hyw_plugin.md`.
 
 ## Deploy To Windows Server
 
