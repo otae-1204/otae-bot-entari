@@ -45,7 +45,8 @@ READ_ONLY_COMMANDS = frozenset({
     "health", "listAgents", "getAsyncTasks", "getSubagents", "promptAcceptanceStatus",
     "getAgentTranscriptTail", "readAttachmentChunk",
 })
-READ_RETRY_DELAYS = (0.5, 1.0)
+# Exponential backoff, 31 s in total: rides out a 20-30 s tailnet/DERP outage.
+READ_RETRY_DELAYS = (1.0, 2.0, 4.0, 8.0, 16.0)
 TRANSCRIPT_READ_TIMEOUT = 60
 
 

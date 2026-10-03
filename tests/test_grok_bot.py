@@ -344,6 +344,32 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("Authorization", sink.getvalue())
         self.assertNotIn(CONFIG.token, sink.getvalue())
 
+    async def test_read_backoff_rides_out_a_25_second_outage_within_about_half_a_minute(self):
+        clock, slept = [0.0], []
+
+        async def sleep(seconds):
+            slept.append(seconds)
+            clock[0] += seconds
+
+        def respond(request):
+            if clock[0] < 25:
+                raise httpx.ConnectError("tailnet down", request=request)
+            return httpx.Response(200, json=[])
+
+        self.assertTrue(30 <= sum(gateway.READ_RETRY_DELAYS) <= 40)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            with patch.object(gateway.asyncio, "sleep", sleep):
+                self.assertEqual(await gateway.Gateway(CONFIG, client).request("getAsyncTasks", {"id": AGENT}), [])
+                self.assertEqual(slept, list(gateway.READ_RETRY_DELAYS))
+                clock[0], slept[:] = -100.0, []
+                with self.assertRaisesRegex(GrokError, "ConnectError"):
+                    await gateway.Gateway(CONFIG, client).request("listAgents")
+                self.assertEqual(slept, list(gateway.READ_RETRY_DELAYS))  # Bounded: six attempts.
+                slept.clear()
+                with self.assertRaises(GrokError):
+                    await gateway.Gateway(CONFIG, client).request("createAgent", {})
+                self.assertEqual(slept, [])  # Mutations never retry here.
+
     async def test_read_retries_are_bounded_and_do_not_retry_local_protocol_errors(self):
         for failure, attempts in ((httpx.RemoteProtocolError, 3), (httpx.ReadTimeout, 3), (httpx.LocalProtocolError, 1)):
             client = SimpleNamespace(request=AsyncMock(side_effect=failure("private-token")))
@@ -406,9 +432,9 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
             raise httpx.ReadError("private-token")
 
         host.override["getAgentTranscriptTail"] = broken_tail
-        with patch.object(gateway, "make_client", side_effect=host.client), patch.object(gateway, "READ_RETRY_DELAYS", (1, 1)), \
-             self.assertRaisesRegex(GrokError, "仍在云端运行"):
-            await gateway.ask(replace(CONFIG, timeout=.05), "问题")
+        # The default 31 s backoff must not outlive GROKBOT_TIMEOUT.
+        with patch.object(gateway, "make_client", side_effect=host.client), self.assertRaisesRegex(GrokError, "仍在云端运行"):
+            await asyncio.wait_for(gateway.ask(replace(CONFIG, timeout=.05), "问题"), 2)
         self.assertEqual(sum(name == "getAgentTranscriptTail" for name, _, _ in host.calls), 1)
         self.assertEqual(sum(name == "sendPrompt" for name, _, _ in host.calls), 1)
         self.assertFalse(any(name == "interruptAgentRun" for name, _, _ in host.calls))
