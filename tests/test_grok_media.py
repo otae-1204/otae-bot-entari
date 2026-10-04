@@ -35,6 +35,12 @@ def data_url(data: bytes) -> str:
     return "data:image/png;base64," + base64.b64encode(data).decode()
 
 
+def encode(image: PILImage.Image, format: str, **options) -> bytes:
+    buffer = BytesIO()
+    image.save(buffer, format=format, **options)
+    return buffer.getvalue()
+
+
 def session():
     return SimpleNamespace(account=SimpleNamespace(protocol=SimpleNamespace(upload_create=AsyncMock(return_value=["internal:uploaded"]))),
                            send=AsyncMock(return_value=[SimpleNamespace(id="receipt")]))
@@ -95,6 +101,77 @@ class ImageTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("base64", repr(image))
         with self.assertRaisesRegex(GrokError, "3 张"):
             await media.input_images((data_url(png()),) * 4)
+
+    async def test_large_photos_are_resized_and_compressed_off_the_event_loop(self):
+        threaded = []
+        to_thread = asyncio.to_thread
+
+        async def record(function, *args):
+            threaded.append(function)
+            return await to_thread(function, *args)
+
+        photo = PILImage.linear_gradient("L").resize((3200, 2400)).convert("RGB")
+        with patch.object(media.asyncio, "to_thread", record):
+            (image,) = await media.input_images((data_url(encode(photo, "PNG")),))
+        self.assertEqual(threaded, [media.compress_image])
+        self.assertEqual((image.name, image.mime), ("qq-image-1.jpg", "image/jpeg"))
+        self.assertLessEqual(len(image.data), media.UPLOAD_IMAGE_BYTES)
+        with PILImage.open(BytesIO(image.data)) as decoded:
+            self.assertEqual((decoded.format, decoded.size), ("JPEG", (1600, 1200)))
+
+    def test_over_budget_photos_lose_quality_then_size_until_they_fit(self):
+        photo = encode(PILImage.effect_noise((1200, 900), 100).convert("RGB"), "JPEG", quality=95)
+        at_85 = len(encode(PILImage.open(BytesIO(photo)), "JPEG", quality=85, optimize=True))
+        with patch.object(media, "UPLOAD_IMAGE_BYTES", at_85 - 1):
+            data, kind = media.compress_image(photo)
+        self.assertEqual(kind, "JPEG")
+        self.assertLess(len(data), at_85)
+        with patch.object(media, "UPLOAD_IMAGE_BYTES", 20_000):
+            data, _ = media.compress_image(photo)
+        self.assertLessEqual(len(data), 20_000)
+        with PILImage.open(BytesIO(data)) as decoded:
+            self.assertLess(decoded.width, 1200)
+            self.assertEqual(decoded.width * 3, decoded.height * 4)
+
+    def test_transparent_images_stay_transparent_png(self):
+        image = PILImage.new("RGBA", (2000, 1000), (255, 0, 0, 255))
+        image.paste((0, 0, 0, 0), (0, 0, 1000, 1000))
+        data, kind = media.compress_image(encode(image, "PNG"))
+        self.assertEqual(kind, "PNG")
+        with PILImage.open(BytesIO(data)) as decoded:
+            self.assertEqual(decoded.size, (1600, 800))
+            self.assertEqual(decoded.convert("RGBA").getpixel((10, 10))[3], 0)
+            self.assertEqual(decoded.convert("RGBA").getpixel((1500, 10)), (255, 0, 0, 255))
+        # Noisy transparency falls back to a palette, which keeps the alpha channel.
+        noisy = PILImage.merge("RGBA", [PILImage.effect_noise((1600, 1600), 100)] * 3 + [PILImage.linear_gradient("L").resize((1600, 1600))])
+        with patch.object(media, "UPLOAD_IMAGE_BYTES", len(encode(noisy, "PNG")) - 1):
+            data, kind = media.compress_image(encode(noisy, "PNG"))
+        self.assertEqual(kind, "PNG")
+        with PILImage.open(BytesIO(data)) as decoded:
+            self.assertLess(decoded.convert("RGBA").getchannel("A").getextrema()[0], 32)
+        # An opaque alpha channel is not transparency.
+        _, kind = media.compress_image(encode(PILImage.new("RGBA", (10, 10), (0, 0, 255, 255)), "PNG"))
+        self.assertEqual(kind, "JPEG")
+
+    async def test_small_animations_are_sent_unchanged_and_large_ones_as_their_first_frame(self):
+        frames = [PILImage.new("RGB", (64, 64), color) for color in ("red", "green", "blue")]
+        stream = BytesIO()
+        frames[0].save(stream, format="GIF", save_all=True, append_images=frames[1:], duration=100, loop=0)
+        gif = stream.getvalue()
+        (image,) = await media.input_images((data_url(gif),))
+        self.assertEqual((image.name, image.mime, image.data), ("qq-image-1.gif", "image/gif", gif))
+        with patch.object(media, "UPLOAD_IMAGE_BYTES", len(gif) - 1):
+            data, kind = media.compress_image(gif)
+        self.assertIn(kind, {"JPEG", "PNG"})
+        with PILImage.open(BytesIO(data)) as decoded:
+            self.assertEqual(getattr(decoded, "n_frames", 1), 1)
+
+    def test_camera_orientation_is_applied(self):
+        exif = PILImage.Exif()
+        exif[0x0112] = 6  # Rotate 90° clockwise to display.
+        data, _ = media.compress_image(encode(PILImage.new("RGB", (40, 20), "white"), "JPEG", exif=exif))
+        with PILImage.open(BytesIO(data)) as decoded:
+            self.assertEqual(decoded.size, (20, 40))
 
     async def test_corrupt_inline_images_and_oversized_input_are_rejected(self):
         for source in ("data:image/png;base64,!!", "data:image/png,hello", data_url(b"not an image")):
