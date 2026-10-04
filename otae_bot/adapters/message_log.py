@@ -20,7 +20,8 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 
 PHONE = re.compile(r"(?<![0-9])(1[3-9][0-9])[0-9]{4}([0-9]{4})(?![0-9])")
-CODE = re.compile(r"(?<![0-9A-Za-z])[0-9]{4,8}(?![0-9A-Za-z])")
+# Not the visible tail of an already masked phone number, so redacting twice changes nothing.
+CODE = re.compile(r"(?<![0-9A-Za-z*])[0-9]{4,8}(?![0-9A-Za-z])")
 TOKEN = re.compile(r"[A-Za-z0-9+/=_.%-]{16,}")
 # The nickname may contain parentheses; the user id is the group right before " -> ".
 LINE = re.compile(r"(?P<head>.*?\((?P<user>[^()]*)\) -> )(?P<content>.*)", re.S)
@@ -49,7 +50,6 @@ def is_sensitive(user_id: str) -> bool:
 def redact(text: str, *, sensitive: bool = False) -> str:
     if sensitive:
         text = TOKEN.sub("<已隐藏>", text)
-        # Before phone numbers, so a masked number's last four digits stay readable.
         text = CODE.sub("******", text)
     return PHONE.sub(r"\1****\2", text)
 

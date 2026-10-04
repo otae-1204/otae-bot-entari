@@ -29,6 +29,10 @@ class RedactTests(unittest.TestCase):
         self.assertEqual(redact('{"code":0,"data":{"content":"' + token + '"}}', sensitive=True),
                          '{"code":0,"data":{"content":"<已隐藏>"}}')
         self.assertEqual(redact("13812345678", sensitive=True), "138****5678")
+        # Applying the mask twice (a second patch) changes nothing.
+        for text in ("13812345678", "123456", "联系 13812345678 验证码 654321", token):
+            once = redact(text, sensitive=True)
+            self.assertEqual(redact(once, sensitive=True), once)
         # Menu choices and role UIDs stay readable for diagnosis.
         for text in ("1", "2", "取消", "1、2", "1095714689", "1, 1095714689"):
             self.assertEqual(redact(text, sensitive=True), text)
@@ -50,11 +54,12 @@ class RedactTests(unittest.TestCase):
 
 class EntariMessageLogTests(unittest.TestCase):
     def setUp(self):
-        original = log.loggers["[message]"]
+        # create_app() in other tests may already have patched it.
+        original, installed = log.loggers["[message]"], message_log._installed
 
         def restore():
             log.loggers["[message]"] = original
-            message_log._installed = None
+            message_log._installed = installed
 
         self.addCleanup(restore)
         self.lines = []
