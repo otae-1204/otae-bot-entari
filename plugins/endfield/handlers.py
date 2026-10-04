@@ -6,6 +6,7 @@ import json
 import os
 import re
 import tempfile
+import unicodedata
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, replace
 from datetime import datetime
@@ -1387,15 +1388,48 @@ async def _one_page(page) -> tuple[bytes, ...]:
     return (await page,)
 
 
+BINDING_SELECT_ATTEMPTS = 3
+_BINDING_STOPPED = {
+    "cancel": "已取消绑定。",
+    "timeout": "等待回复超时，绑定已取消；需要时请重新发送 /ef 绑定。",
+    "invalid": f"连续 {BINDING_SELECT_ATTEMPTS} 次未选中有效角色，绑定已取消；需要时请重新发送 /ef 绑定。",
+}
+
+
+class _BindingStopped(Exception):
+    """The user cancelled, a prompt timed out, or role selection stayed invalid."""
+
+    def __init__(self, stage: str, reason: str):
+        super().__init__(stage, reason)
+        self.stage, self.reason = stage, reason
+
+
+async def _prompt_binding(message: str, *, timeout: int, stage: str) -> str:
+    answer = await prompt(message, timeout=timeout)
+    if answer is None:
+        raise _BindingStopped(stage, "timeout")
+    text = answer.extract_plain_text() if hasattr(answer, "extract_plain_text") else str(answer or "")
+    text = text.strip()
+    if not text or text.casefold() in {"取消", "cancel", "q", "quit"}:
+        raise _BindingStopped(stage, "cancel")
+    return text
+
+
 async def _handle_binding(matcher, qq_user_id: str, cipher: CredentialCipher) -> None:
-    region = await _prompt_text(
+    try:
+        return await _run_binding(matcher, qq_user_id, cipher)
+    except _BindingStopped as stopped:
+        return await matcher.finish(_BINDING_STOPPED[stopped.reason])
+
+
+async def _run_binding(matcher, qq_user_id: str, cipher: CredentialCipher) -> None:
+    region = await _prompt_binding(
         "请选择服务器：\n1. 国服（森空岛，支持 Token/短信；二维码绑定暂不支持）\n"
         "2. 亚服（SKPORT，当前仅支持 Token）\n"
         "回复 1 或 2；回复“取消”退出。",
         timeout=90,
+        stage="region",
     )
-    if region is None:
-        return await matcher.finish("绑定已取消或等待超时。")
     normalized_region = region.casefold()
     if normalized_region in {"1", "国服", "cn", "china"}:
         provider = ACCOUNT_PROVIDER_CN
@@ -1417,11 +1451,9 @@ async def _handle_binding(matcher, qq_user_id: str, cipher: CredentialCipher) ->
             "不要发送上面的范例 Token。\n"
             "不要在群聊或其他平台公开该内容。"
         )
-        raw_account_token = await _prompt_text(
-            "请发送 content 双引号内的 Token；回复“取消”退出。", timeout=150
+        raw_account_token = await _prompt_binding(
+            "请发送 content 双引号内的 Token；回复“取消”退出。", timeout=150, stage="token"
         )
-        if raw_account_token is None:
-            return await matcher.finish("绑定已取消或等待超时。")
         account_token = encode_account_credential(raw_account_token, provider)
     else:
         account_token = await _bind_cn_account_token(matcher)
@@ -1436,8 +1468,6 @@ async def _handle_binding(matcher, qq_user_id: str, cipher: CredentialCipher) ->
     elif not roles:
         return await matcher.finish("该鹰角账号下未找到终末地角色。")
     selected = await _select_binding_roles(roles)
-    if selected is None:
-        return await matcher.finish("绑定已取消或等待超时。")
     previous_roles = account_store.list_roles(qq_user_id)
     previous_keys = {(role.role_id, role.server_id) for role in previous_roles}
     bound_roles = account_store.bind_roles(qq_user_id, account_token, selected, cipher)
@@ -1471,38 +1501,27 @@ async def _handle_binding(matcher, qq_user_id: str, cipher: CredentialCipher) ->
 
 
 async def _bind_cn_account_token(matcher) -> str | None:
-    method = await _prompt_text(
+    method = await _prompt_binding(
         "请选择绑定方式：\n1. Token 绑定\n2. 手机号验证码绑定\n"
         "二维码绑定暂不支持。\n"
         "可重复绑定其他鹰角账号，已有账号不会被覆盖。\n回复 1 或 2；回复“取消”退出。",
         timeout=90,
+        stage="method",
     )
-    if method is None:
-        await matcher.finish("绑定已取消或等待超时。")
-        return None
     normalized = method.casefold()
     if normalized in {"1", "token", "t"}:
         await matcher.send(
             "请在浏览器登录森空岛后打开：\nhttps://web-api.skland.com/account/info/hg\n"
             "复制响应中 data.content 的完整内容并发送。不要在群聊或其他平台公开该内容。"
         )
-        account_token = await _prompt_text("请发送 data.content；回复“取消”退出。", timeout=150)
-        if account_token is None:
-            await matcher.finish("绑定已取消或等待超时。")
-            return None
+        account_token = await _prompt_binding("请发送 data.content；回复“取消”退出。", timeout=150, stage="token")
     elif normalized in {"2", "短信", "手机", "sms"}:
-        phone = await _prompt_text("请输入用于鹰角账号登录的手机号；回复“取消”退出。", timeout=90)
-        if phone is None:
-            await matcher.finish("绑定已取消或等待超时。")
-            return None
+        phone = await _prompt_binding("请输入用于鹰角账号登录的手机号；回复“取消”退出。", timeout=90, stage="phone")
         if not re.fullmatch(r"1\d{10}", phone):
             await matcher.finish("手机号格式不正确，绑定已取消。")
             return None
         await official_client.send_phone_code(phone)
-        code = await _prompt_text("验证码已发送，请输入短信验证码；回复“取消”退出。", timeout=120)
-        if code is None:
-            await matcher.finish("绑定已取消或等待超时。")
-            return None
+        code = await _prompt_binding("验证码已发送，请输入短信验证码；回复“取消”退出。", timeout=120, stage="code")
         if not re.fullmatch(r"\d{4,8}", code):
             await matcher.finish("验证码格式不正确，绑定已取消。")
             return None
@@ -1562,26 +1581,46 @@ async def _bind_cn_account_token(matcher) -> str | None:
 #     return png.tobytes()
 
 
-async def _select_binding_roles(roles: list[RoleCandidate]) -> list[RoleCandidate] | None:
+def parse_binding_selection(answer: str, roles: list[RoleCandidate]) -> list[RoleCandidate] | None:
+    """Listed numbers and/or UIDs, in any mix; None unless every item names a listed role."""
+    text = unicodedata.normalize("NFKC", answer).strip()
+    if text.casefold() in {"全部", "all"}:
+        return list(roles)
+    items = [item.strip(".。号#") for item in re.split(r"[\s,，、;；/|]+|(?i:uid)[:：]?", text)]
+    items = [item for item in items if item]
+    if not items:
+        return None
+    picked: set[int] = set()
+    for item in items:
+        if not item.isdecimal():
+            return None
+        if len(item) <= 3 and 1 <= int(item) <= len(roles):
+            picked.add(int(item) - 1)
+            continue
+        matches = {index for index, role in enumerate(roles) if role.role_id == item}
+        if not matches:
+            return None
+        picked |= matches
+    return [role for index, role in enumerate(roles) if index in picked]
+
+
+async def _select_binding_roles(roles: list[RoleCandidate]) -> list[RoleCandidate]:
     if len(roles) == 1:
         return roles
-    lines = ["检测到多个终末地角色，请回复编号、逗号分隔的多个编号，或“全部”："]
-    lines.extend(
+    listing = "\n".join(
         f"{index}. {role.nickname} · {server_label(role.server_name or role.server_id)} · UID {role.role_id}"
         for index, role in enumerate(roles, 1)
     )
-    answer = await _prompt_text("\n".join(lines), timeout=120)
-    if answer is None:
-        return None
-    if answer.casefold() in {"全部", "all"}:
-        return roles
-    try:
-        indexes = {int(item.strip()) - 1 for item in re.split(r"[,，\s]+", answer) if item.strip()}
-    except ValueError:
-        return None
-    if not indexes or any(index < 0 or index >= len(roles) for index in indexes):
-        return None
-    return [role for index, role in enumerate(roles) if index in indexes]
+    message = (
+        "检测到多个终末地角色，请回复序号或 UID，可一次回复多个（用空格、逗号或顿号分隔），"
+        "也可回复“全部”；回复“取消”退出：\n" + listing
+    )
+    for _ in range(BINDING_SELECT_ATTEMPTS):
+        selected = parse_binding_selection(await _prompt_binding(message, timeout=120, stage="select"), roles)
+        if selected:
+            return selected
+        message = "编号无效，请回复列表前面的序号（或列表中的 UID）：\n" + listing
+    raise _BindingStopped("select", "invalid")
 
 
 async def _handle_accounts(
