@@ -38,6 +38,7 @@ from otae_bot.adapters.entari import (
     send_forward,
     timer,
 )
+from otae_bot.adapters.message_log import sensitive_input
 from otae_bot.adapters.onebot import send_forward_images
 from otae_bot.infrastructure.rendering.help_runtime import cached_help_image
 from otae_bot.infrastructure.http.asset_policy import asset_render_budget
@@ -905,7 +906,9 @@ async def _handle_personal_command(matcher, event: Event, command: ParsedEndfiel
     try:
         if command.action == "bind":
             cipher = CredentialCipher.from_env()
-            return await _handle_binding(matcher, qq_user_id, cipher)
+            # The [message] log hides codes and tokens this user sends until the dialog ends.
+            with sensitive_input(qq_user_id):
+                return await _handle_binding(matcher, qq_user_id, cipher)
         if command.action == "challenge":
             cipher = CredentialCipher.from_env()
             return await _handle_challenge(matcher, event, qq_user_id, command, cipher, bot=bot)
@@ -949,7 +952,8 @@ async def _handle_personal_command(matcher, event: Event, command: ParsedEndfiel
                 matcher, qq_user_id, command, cipher, group=is_group(event), event=event, bot=bot,
             )
         if command.action == "gacha_import":
-            return await _handle_xhh_import(matcher, qq_user_id, command)
+            with sensitive_input(qq_user_id):
+                return await _handle_xhh_import(matcher, qq_user_id, command)
         if command.action == "gacha_history":
             return await _handle_gacha_history(matcher, qq_user_id, command, group=is_group(event))
     except TaskAlreadyRunning:

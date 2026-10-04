@@ -7,6 +7,7 @@ from unittest import mock
 from loguru import logger
 
 import plugins.endfield.handlers as endfield
+from otae_bot.adapters import message_log
 from plugins.endfield.account.client import ACCOUNT_PROVIDER_CN
 from plugins.endfield.account.store import RoleCandidate
 from plugins.endfield.catalog import commands as commands_module
@@ -68,7 +69,7 @@ class BindingFlowTests(unittest.IsolatedAsyncioTestCase):
         answers = list(answers)
 
         async def prompt(message, timeout):
-            self.prompts.append(message)
+            self.prompts.append((message, message_log.is_sensitive(USER)))
             answer = answers.pop(0)
             return None if answer is None else reply(answer)
 
@@ -79,6 +80,7 @@ class BindingFlowTests(unittest.IsolatedAsyncioTestCase):
              mock.patch.object(endfield.CredentialCipher, "from_env", return_value=mock.Mock()):
             await endfield._handle_personal_command(self.matcher, event, command)
         self.assertEqual(answers, [])
+        self.assertFalse(message_log.is_sensitive(USER))
         return self.matcher.finish.await_args.args[0]
 
     def binding_logs(self):
@@ -92,6 +94,8 @@ class BindingFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.store.bind_roles.call_args.args[2], ROLES[:1])
         self.client.send_phone_code.assert_awaited_once_with(PHONE)
         self.client.token_by_phone_code.assert_awaited_once_with(PHONE, CODE)
+        # Every reply, including the phone number and code, was typed in a masked dialog.
+        self.assertTrue(all(sensitive for _, sensitive in self.prompts))
         steps = [line.split(" step=", 1)[1].split(" ", 1)[0] for line in self.binding_logs()]
         self.assertEqual(steps, ["start", "region", "method", "send_code", "code_sent", "verify", "verified",
                                  "roles", "select", "done"])
@@ -104,7 +108,7 @@ class BindingFlowTests(unittest.IsolatedAsyncioTestCase):
         finished = await self.run_binding("1", "2", PHONE, CODE, "9", "UID 1770431888、3")
         self.assertIn("新增 2 个账号", finished)
         self.assertEqual(self.store.bind_roles.call_args.args[2], ROLES[1:])
-        retry = self.prompts[-1]
+        retry = self.prompts[-1][0]
         self.assertTrue(retry.startswith("编号无效，请回复列表前面的序号"))
         self.assertIn("1. 甲", retry)
         self.assertIn(f"[endfield-bind] user={USER} step=select_invalid attempt=1 limit=3", self.logs)
@@ -113,7 +117,7 @@ class BindingFlowTests(unittest.IsolatedAsyncioTestCase):
         finished = await self.run_binding("1", "2", PHONE, CODE, "9", "甲", "1095714680")
         self.assertEqual(finished, "连续 3 次未选中有效角色，绑定已取消；需要时请重新发送 /ef 绑定。")
         self.store.bind_roles.assert_not_called()
-        self.assertEqual(sum(message.startswith("编号无效") for message in self.prompts), 2)
+        self.assertEqual(sum(message.startswith("编号无效") for message, _ in self.prompts), 2)
         self.assertIn(f"[endfield-bind] user={USER} step=invalid at=select", self.logs)
 
     async def test_cancel_and_timeout_are_told_apart(self):
@@ -146,6 +150,20 @@ class BindingFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(finished, str(error))
         self.assertIn(f"[endfield-bind] user={USER} step=failed operation=send_phone_code code=1", self.logs)
         self.assertFalse(any(PHONE in line for line in self.logs))
+
+    async def test_xhh_import_asks_for_a_phone_and_code_in_a_masked_dialog_too(self):
+        seen = []
+
+        async def xhh_import(*_):
+            seen.append(message_log.is_sensitive(USER))
+
+        with mock.patch.object(endfield, "_handle_xhh_import", xhh_import), \
+             mock.patch.object(endfield, "is_group", return_value=False), \
+             mock.patch.object(endfield, "event_user_id", return_value=USER):
+            await endfield._handle_personal_command(self.matcher, SimpleNamespace(),
+                                                    commands_module.ParsedEndfieldCommand("gacha_import"))
+        self.assertEqual(seen, [True])
+        self.assertFalse(message_log.is_sensitive(USER))
 
     async def test_a_single_role_needs_no_selection(self):
         self.client.discover_roles.return_value = ROLES[:1]
