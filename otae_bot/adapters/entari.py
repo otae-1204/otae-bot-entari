@@ -507,6 +507,8 @@ def on_ready(func: Callable[..., Any]):
         if event.status not in {LoginStatus.ONLINE, LoginStatus.CONNECT, LoginStatus.RECONNECT}:
             return None
         runtime.set_account(event.account, event.status)
+        # Several plugins register on_ready; the registry lists each login's groups once.
+        runtime.schedule_guild_refresh(event.account)
         result = func(event.account) if _takes_one_arg(func) else func()
         if inspect.isawaitable(result):
             return await result
@@ -518,10 +520,21 @@ def on_ready(func: Callable[..., Any]):
 
 
 def get_bot() -> Account:
+    """The default account: the most recent login that is still online."""
     account = runtime.get_account()
     if account is None:
         raise RuntimeError("No Entari account is ready")
     return account
+
+
+def get_bots() -> list[Account]:
+    """Every online account, the default one first."""
+    return runtime.get_bots()
+
+
+def get_bot_for_guild(guild_id: str) -> Account | None:
+    """An online account known to be in the group (the default one if it is), else None."""
+    return runtime.get_bot_for_guild(guild_id)
 
 
 def account_adapter_name(account: Any) -> str:
