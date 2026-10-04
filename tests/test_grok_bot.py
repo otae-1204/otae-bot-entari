@@ -524,7 +524,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
 
         links = Links(respond)
         api = gateway.Gateway(CONFIG, links.pooled, connect=links.connect)
-        with patch.object(gateway.asyncio, "sleep", AsyncMock()):
+        with patch.object(gateway.asyncio, "sleep", AsyncMock()), patch.object(gateway.logger, "log") as log:
             self.assertEqual(await api.request("listAgents"), [])  # Read-only: retried at once.
             await api.request("getAsyncTasks", {"id": AGENT})
             with self.assertRaises(GatewayError):
@@ -536,7 +536,39 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
             ("promptAcceptanceStatus", "new-2"), ("getAsyncTasks", "pooled"),
         ])
         self.assertTrue(all(client.is_closed for client in links.opened))
+        # A poll that recovered is worth INFO; a routine one is not.
+        levels = [(call.args[0], call.args[2]) for call in log.call_args_list]
+        self.assertEqual(levels, [("INFO", "listAgents"), ("DEBUG", "getAsyncTasks"), ("DEBUG", "promptAcceptanceStatus"),
+                                  ("DEBUG", "getAsyncTasks")])
+        self.assertIn("connection=new", log.call_args_list[0].args[1].format(*log.call_args_list[0].args[2:]))
         await links.pooled.aclose()
+
+    async def test_successful_calls_are_logged_with_size_and_request_id_but_not_the_token(self):
+        sent_ids = []
+
+        def respond(request):
+            sent_ids.append(request.headers["x-sand-request-id"])
+            if request.url.path.endswith("uploadAttachment"):
+                return httpx.Response(200, json={"path": "/attachments/a.jpg"}, headers={"x-sand-request-id": "host-req-1"})
+            return httpx.Response(200, json=[])
+
+        body = {"agentId": AGENT, "filename": "a.jpg", "bytesBase64": "QUJD"}
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            with patch.object(gateway.logger, "log") as log:
+                api = gateway.Gateway(CONFIG, client)
+                await api.request("uploadAttachment", body, response_limit=65536)
+                await api.request("listAgents")
+        upload, roster = (call.args[1].format(*call.args[2:]) for call in log.call_args_list)
+        self.assertEqual([call.args[0] for call in log.call_args_list], ["INFO", "DEBUG"])
+        sent = len(json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode())
+        received = len(json.dumps({"path": "/attachments/a.jpg"}, separators=(",", ":")).encode())
+        self.assertIn("command=uploadAttachment attempt=1/4 elapsed=", upload)
+        self.assertIn(f"sent={sent}B received={received}B request_id=host-req-1 connection=pooled ok", upload)
+        # Without an echoed id, the id sent to the host.
+        self.assertIn(f"request_id={sent_ids[1]} ", roster)
+        for message in (upload, roster):
+            self.assertNotIn(CONFIG.token, message)
+            self.assertNotIn("QUJD", message)
 
     async def test_disconnected_older_transcript_page_recovers_without_resubmitting_prompt(self):
         host = Host()

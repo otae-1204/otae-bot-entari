@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import json
 import traceback
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
@@ -190,18 +191,22 @@ class Gateway:
         delays = (READ_RETRY_DELAYS if read_only
                   else UNANSWERED_RETRY_DELAYS if command in UNANSWERED_RETRY_COMMANDS else ())
         attempts = 1 + len(delays)
+        payload = b"" if command == "health" else json.dumps(
+            body or {}, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode()
         broken = False
         for attempt in range(attempts):
-            started = monotonic()
+            started, request_id = monotonic(), str(uuid4())
             # Another request may already have cleared self.reconnect; this retry still avoids the pool.
             fresh = (broken or self.reconnect) and self.connect is not None
             try:
                 if fresh:
                     async with self.connect() as client:
-                        data = await self._request_once(command, body, client, response_limit=response_limit)
+                        data, received, answered_id = await self._request_once(
+                            command, payload, request_id, client, response_limit=response_limit)
                     self.reconnect = False
-                    return data
-                return await self._request_once(command, body, self.client, response_limit=response_limit)
+                else:
+                    data, received, answered_id = await self._request_once(
+                        command, payload, request_id, self.client, response_limit=response_limit)
             except GatewayError as error:
                 broken = isinstance(error.__cause__, httpx.TransportError)
                 if broken:
@@ -212,8 +217,10 @@ class Gateway:
                 # logged as type, message and stack, without frame variables, response
                 # bodies, headers, prompts or the token.
                 logger.warning(
-                    "[grok_bot] gateway command={} attempt={}/{} elapsed={:.2f}s connection={} retry={} error={} cause={}{}",
-                    command, attempt + 1, attempts, monotonic() - started, "new" if fresh else "pooled", retry, error,
+                    "[grok_bot] gateway command={} attempt={}/{} elapsed={:.2f}s sent={}B request_id={} connection={} "
+                    "retry={} error={} cause={}{}",
+                    command, attempt + 1, attempts, monotonic() - started, len(payload), request_id,
+                    "new" if fresh else "pooled", retry, error,
                     self._redact(" <- ".join(map(describe, links)) or "-"),
                     "" if retry or not links else "\n" + self._redact("".join(traceback.format_exception(links[0]))),
                 )
@@ -225,30 +232,46 @@ class Gateway:
                     raise
                 # Cancellation / the caller's total task timeout also bounds retries.
                 await asyncio.sleep(delays[attempt])
+                continue
+            # Status polls run every second; keep them out of the INFO log unless
+            # they recovered from a failure. The id is the one the host answered
+            # with, else the one sent.
+            logger.log(
+                "DEBUG" if read_only and not attempt else "INFO",
+                "[grok_bot] gateway command={} attempt={}/{} elapsed={:.2f}s sent={}B received={}B request_id={} connection={} ok",
+                command, attempt + 1, attempts, monotonic() - started, len(payload), received,
+                answered_id or request_id, "new" if fresh else "pooled",
+            )
+            return data
 
     def _redact(self, text: str) -> str:
         return text.replace(self.config.token, "<redacted>") if self.config.token else text
 
-    async def _request_once(self, command: str, body: dict | None, client: httpx.AsyncClient, *,
-                            response_limit: int | None = None):
+    async def _request_once(self, command: str, payload: bytes, request_id: str, client: httpx.AsyncClient, *,
+                            response_limit: int | None = None) -> tuple[object, int, str]:
+        """The decoded JSON, the received byte count and the response's x-sand-request-id."""
         health = command == "health"
-        headers = {"x-sand-request-id": str(uuid4()), "x-sand-slim-avatars": "1"}
+        headers = {"x-sand-request-id": request_id, "x-sand-slim-avatars": "1"}
         if not health:
             headers["Authorization"] = "Bearer " + self.config.token
+            # Sent as encoded bytes, so the log can state the exact request size.
+            headers["Content-Type"] = "application/json"
         # Only a streamed response shows whether headers arrived before a failure.
         responded = None if response_limit is None else False
         try:
             args = ("GET" if health else "POST", self.config.base_url + ("/health" if health else "/api/" + command))
-            kwargs = {"headers": headers, "follow_redirects": False, **({} if health else {"json": body or {}})}
+            kwargs = {"headers": headers, "follow_redirects": False, **({} if health else {"content": payload})}
             if command == "uploadAttachment":
                 kwargs["timeout"] = UPLOAD_TIMEOUT
             elif command in READ_TIMEOUTS:
                 kwargs["timeout"] = httpx.Timeout(20, connect=10, read=READ_TIMEOUTS[command])
             if response_limit is None:
                 response = await client.request(*args, **kwargs)
+                answered_id = response.headers.get("x-sand-request-id", "")
             else:
                 async with client.stream(*args, **kwargs) as streamed:
                     responded = True
+                    answered_id = streamed.headers.get("x-sand-request-id", "")
                     content = bytearray()
                     async for chunk in streamed.aiter_bytes(chunk_size=65536):
                         if len(content) + len(chunk) > response_limit:
@@ -290,7 +313,7 @@ class Gateway:
             raise GatewayError(PROTOCOL_ERROR) from error
         if isinstance(data, dict) and data.get("error"):
             raise GatewayError(f"Grok Bot 网关未能完成 {command}，请在应用中查看详情。")
-        return data
+        return data, len(response.content), answered_id
 
     async def upload_images(self, images: tuple[Attachment, ...]) -> tuple[Attachment, ...]:
         """Desktop 0.30.0: uploadAttachment({agentId?, filename, bytesBase64})."""
