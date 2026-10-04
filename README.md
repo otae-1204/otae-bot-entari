@@ -85,6 +85,21 @@ Satori server exposes several logins through one endpoint, that endpoint only
 needs one list entry. `entari.yml` is not the network source for this custom
 `bot.py` entrypoint.
 
+Every online account is kept by its self id (`otae_bot/adapters/runtime.py`).
+`get_bot()` returns the default one (the latest login still online); `get_bots()`
+lists all of them and `get_bot_for_guild(group_id)` returns one that is in the
+group, based on each account's Satori `guild.list`. Bilibili pushes use that to
+send each group's notification from an account in the group, switching account
+at once on "not in group" errors (see `docs/bilibili_refactor_plan.md` §5.7).
+
+Some actions only exist in OneBot 11 (reading a quoted merged forward, native
+forward sending). An entry may add `"onebot_url"` (and `"onebot_token"`) for that
+instance's OneBot HTTP server; the account then uses only its own endpoint.
+Entries without it fall back to `ONEBOT_HTTP_URL`. Reading a quoted message needs
+neither when LLOneBot exposes its Satori passthrough `/v1/internal/onebot11/*`
+(LLBot 8.2.1 does): the read goes through the receiving account's own connection.
+See `docs/hyw_plugin.md`.
+
 ## Deploy To Windows Server
 
 Default production directory:

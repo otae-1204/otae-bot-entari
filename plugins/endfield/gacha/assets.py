@@ -12,6 +12,7 @@ from typing import Iterable
 from PIL import Image
 from loguru import logger
 
+from otae_bot.infrastructure.http.asset_policy import asset_render_budget
 from otae_bot.infrastructure.http.client import fetch_many_resilient
 
 from ..account.store import GachaRecord
@@ -26,8 +27,6 @@ CATALOG_TTL_SECONDS = 24 * 60 * 60
 IMAGE_NAMESPACE = "endfield-gacha-images"
 POOL_ARTICLE_PREFIX = "卡池/"
 KEEPSAKE_ARTICLE_PREFIX = "物品/干员信物/"
-IMAGE_FETCH_TIMEOUT_SECONDS = 20.0
-IMAGE_FETCH_ATTEMPTS = 3
 IMAGE_FETCH_MAX_BYTES = 24 * 1024 * 1024
 
 
@@ -471,6 +470,17 @@ class EndfieldGachaAssetCache:
         missing = [item for item in items if item.item_id not in result]
         if not missing:
             return result
+        # 首选与备用两批共用一个素材预算，到点按已取到的出图。
+        with asset_render_budget():
+            return await self._download_images(missing, result, generation, candidates)
+
+    async def _download_images(
+        self,
+        missing: list[GachaItemMetadata],
+        result: dict[str, str],
+        generation: int,
+        candidates: dict[str, tuple[str, ...]] | None,
+    ) -> dict[str, str]:
         pending: dict[str, tuple[GachaItemMetadata, tuple[str, ...]]] = {}
         first_batch: list[str] = []
         for item in missing:
@@ -509,11 +519,10 @@ class EndfieldGachaAssetCache:
         return result
 
     async def _fetch_image_urls(self, urls: Iterable[str]) -> dict[str, object]:
+        # 超时、重试与按主机熔断取素材通道配置（OTAE_HTTP_ASSET_*）。
         fetched = await fetch_many_resilient(
             urls,
             namespace=IMAGE_NAMESPACE,
-            timeout_seconds=IMAGE_FETCH_TIMEOUT_SECONDS,
-            attempts=IMAGE_FETCH_ATTEMPTS,
             max_bytes=IMAGE_FETCH_MAX_BYTES,
             log_prefix="[endfield-gacha]",
         )

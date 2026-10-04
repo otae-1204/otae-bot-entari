@@ -2952,8 +2952,9 @@ class EndfieldGachaServiceTests(unittest.IsolatedAsyncioTestCase):
         hidden = gacha_module.build_gacha_analysis(self.role, records, [], pool_rules=rules, show_standard=False)
         pools = {item.pool_id: item for item in result.pools}
 
-        def other_section(view):
-            return gacha_draw_module.build_gacha_columns(view)[1].sections[1]
+        def other_section(view):     # 无重构池时两栏：「其他寻访」接在特许寻访栏下方
+            return next(section for column in gacha_draw_module.build_gacha_columns(view)
+                        for section in column.sections if section.spec.divider)
 
         self.assertIn("standard", pools)
         self.assertIn("standard", {card.pool.pool_id for card in other_section(result).cards})

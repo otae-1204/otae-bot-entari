@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import tempfile
 import unittest
@@ -11,11 +12,12 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 from arclet.entari import MessageChain
+from loguru import logger
 from satori import ChannelType, Image, MessageObject, Text
 
 from otae_bot.group_features import GroupFeatureStore
 from plugins.grok_bot import gateway, handlers
-from plugins.grok_bot.config import GrokConfig, GrokError
+from plugins.grok_bot.config import GatewayError, GrokConfig, GrokError
 from plugins.grok_bot.conversations import ConversationScope
 from plugins.grok_bot.media import Reply
 
@@ -75,6 +77,32 @@ class Host:
 
     def client(self):
         return httpx.AsyncClient(transport=httpx.MockTransport(self.response), trust_env=False)
+
+
+def _raise(error):
+    raise error
+
+
+class Links:
+    """A pooled client and one-off clients over one handler, recording which served each request."""
+
+    def __init__(self, handler):
+        self.handler, self.after_first = handler, None
+        self.served, self.bodies, self.opened = [], [], []
+        self.pooled = self.client("pooled")
+
+    def client(self, label):
+        def respond(request):
+            self.served.append((request.url.path.rsplit("/", 1)[-1], label))
+            self.bodies.append(json.loads(request.content))
+            if self.after_first is not None and len(self.served) > 1:
+                return self.after_first(request)
+            return self.handler(request)
+        return httpx.AsyncClient(transport=httpx.MockTransport(respond))
+
+    def connect(self):
+        self.opened.append(self.client(f"new-{len(self.opened) + 1}"))
+        return self.opened[-1]
 
 
 class ConfigTests(unittest.TestCase):
@@ -293,7 +321,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
             await gateway.ask(replace(CONFIG, timeout=.01), "问题")
         self.assertFalse(any(name in {"sendPrompt", "interruptAgentRun", "deleteAgent"} for name, _, _ in host.calls))
 
-    async def test_transient_read_failures_recover_with_redacted_diagnostics(self):
+    async def test_transient_read_failures_recover_and_log_the_redacted_original_exception(self):
         for failure in (httpx.ConnectError, httpx.ReadTimeout, httpx.WriteTimeout, httpx.ReadError, httpx.RemoteProtocolError):
             client = SimpleNamespace(request=AsyncMock(side_effect=[
                 failure("private-token upstream-body"), httpx.Response(200, json={"entries": []}),
@@ -303,9 +331,70 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                 result = await gateway.Gateway(CONFIG, client).request("getAgentTranscriptTail", {"id": AGENT})
             self.assertEqual(result, {"entries": []})
             self.assertEqual(client.request.await_count, 2)
-            self.assertIn(failure.__name__, str(warning.call_args))
+            self.assertIn(f"httpx.{failure.__name__}: <redacted> upstream-body", str(warning.call_args))
             self.assertNotIn(CONFIG.token, str(warning.call_args))
-            self.assertNotIn("upstream-body", str(warning.call_args))
+
+    async def test_original_exception_is_kept_as_cause_and_logged_without_the_token(self):
+        def drop(request):
+            raise httpx.RemoteProtocolError("Server disconnected without sending a response.", request=request)
+
+        error = None
+        async with httpx.AsyncClient(transport=httpx.MockTransport(drop)) as client:
+            with patch.object(gateway.logger, "warning") as warning:
+                try:
+                    await gateway.Gateway(CONFIG, client).request("sendPrompt", {"prompt": "private content"})
+                except GatewayError as caught:  # Not assertRaises: it clears frame locals.
+                    error = caught
+        self.assertIsInstance(error, GatewayError)
+        self.assertEqual(str(error), "Grok Bot 网关通信失败（sendPrompt / RemoteProtocolError），请检查两端 Tailscale、"
+                                     "网关及云端后台服务；已提交的任务可能仍在云端运行。")
+        self.assertIsInstance(error.__cause__, httpx.RemoteProtocolError)
+        self.assertEqual(str(error.__cause__), "Server disconnected without sending a response.")
+        logged = warning.call_args.args[0].format(*warning.call_args.args[1:])
+        self.assertIn("cause=httpx.RemoteProtocolError: Server disconnected", logged)
+        self.assertIn("Traceback", logged)
+        self.assertIn("_request_once", logged)  # Call chain: frames and source lines, no values.
+        self.assertNotIn(CONFIG.token, logged)
+        self.assertNotIn("private content", logged)
+        # entari renders frame variables (loguru diagnose=True); the request line holds the
+        # Authorization header, so the cause keeps its type and message but not its frames.
+        self.assertIsNone(error.__cause__.__traceback__)
+        sink = io.StringIO()
+        sink_id = logger.add(sink, diagnose=True, backtrace=True, format="{message}")
+        try:
+            logger.opt(exception=error).error("probe")
+        finally:
+            logger.remove(sink_id)
+        self.assertIn("httpx.RemoteProtocolError: Server disconnected", sink.getvalue())
+        # Long values are truncated, so check for the header itself, not just the token.
+        self.assertNotIn("Authorization", sink.getvalue())
+        self.assertNotIn(CONFIG.token, sink.getvalue())
+
+    async def test_read_backoff_rides_out_a_25_second_outage_within_about_half_a_minute(self):
+        clock, slept = [0.0], []
+
+        async def sleep(seconds):
+            slept.append(seconds)
+            clock[0] += seconds
+
+        def respond(request):
+            if clock[0] < 25:
+                raise httpx.ConnectError("tailnet down", request=request)
+            return httpx.Response(200, json=[])
+
+        self.assertTrue(30 <= sum(gateway.READ_RETRY_DELAYS) <= 40)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            with patch.object(gateway.asyncio, "sleep", sleep):
+                self.assertEqual(await gateway.Gateway(CONFIG, client).request("getAsyncTasks", {"id": AGENT}), [])
+                self.assertEqual(slept, list(gateway.READ_RETRY_DELAYS))
+                clock[0], slept[:] = -100.0, []
+                with self.assertRaisesRegex(GrokError, "ConnectError"):
+                    await gateway.Gateway(CONFIG, client).request("listAgents")
+                self.assertEqual(slept, list(gateway.READ_RETRY_DELAYS))  # Bounded: six attempts.
+                slept.clear()
+                with self.assertRaises(GrokError):
+                    await gateway.Gateway(CONFIG, client).request("createAgent", {})
+                self.assertEqual(slept, [])  # Mutations never retry here.
 
     async def test_read_retries_are_bounded_and_do_not_retry_local_protocol_errors(self):
         for failure, attempts in ((httpx.RemoteProtocolError, 3), (httpx.ReadTimeout, 3), (httpx.LocalProtocolError, 1)):
@@ -330,14 +419,156 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                     await gateway.Gateway(CONFIG, client).request(command, {"prompt": "private content"})
                 client.request.assert_awaited_once()
 
-    async def test_transcript_read_timeout_is_separate_from_state_rpc_timeout(self):
+    async def test_transcript_and_create_read_timeouts_are_separate_from_other_rpcs(self):
         host = Host()
+        host.override["createAgent"] = lambda _: {"agent": {"id": AGENT, "isGroup": False}}
         async with httpx.AsyncClient(transport=httpx.MockTransport(host.response), timeout=httpx.Timeout(20, connect=10)) as client:
             api = gateway.Gateway(CONFIG, client)
             await api.request("getAgentTranscriptTail")
+            await api.request("createAgent", {"name": "多惠"})
             await api.request("listAgents")
-        self.assertEqual(host.calls[0][2].extensions["timeout"], {"connect": 10, "read": 60, "write": 20, "pool": 20})
-        self.assertEqual(host.calls[1][2].extensions["timeout"]["read"], 20)
+            await api.request("sendPrompt", {"prompt": "问题", "clientNonce": "nonce"})
+        long_read = {"connect": 10, "read": 60, "write": 20, "pool": 20}
+        self.assertEqual([call[2].extensions["timeout"] for call in host.calls[:2]], [long_read, long_read])
+        self.assertEqual([call[2].extensions["timeout"]["read"] for call in host.calls[2:]], [20, 20])
+
+    async def test_upload_has_longer_write_and_read_timeouts_and_pooled_connections_expire_early(self):
+        host = Host()
+        host.override["uploadAttachment"] = lambda _: {"path": "/attachments/a.jpg"}
+        async with httpx.AsyncClient(transport=httpx.MockTransport(host.response), timeout=httpx.Timeout(20, connect=10)) as client:
+            api = gateway.Gateway(CONFIG, client)
+            await api.request("uploadAttachment", {"agentId": AGENT, "filename": "a.jpg", "bytesBase64": "QUJD"}, response_limit=65536)
+            await api.request("sendPrompt", {"prompt": "问题", "clientNonce": "nonce"})
+        self.assertEqual(host.calls[0][2].extensions["timeout"], {"connect": 10, "read": 30, "write": 60, "pool": 20})
+        self.assertEqual(host.calls[1][2].extensions["timeout"], {"connect": 10, "read": 20, "write": 20, "pool": 20})
+        with patch("plugins.grok_bot.gateway.httpx.AsyncClient") as client:
+            gateway.make_client()
+        limits = client.call_args.kwargs["limits"]
+        self.assertEqual((limits.keepalive_expiry, limits.max_connections, limits.max_keepalive_connections), (2.0, 100, 20))
+
+    async def test_upload_is_retried_on_a_new_connection_only_when_the_host_never_answered(self):
+        class BrokenBody(httpx.AsyncByteStream):
+            async def __aiter__(self):
+                yield b'{"path":'
+                raise httpx.RemoteProtocolError("peer closed connection without sending complete message body")
+
+        body = {"agentId": AGENT, "filename": "0123-qq-image-1.jpg", "bytesBase64": "QUJD"}
+        cases = [
+            (httpx.RemoteProtocolError("Server disconnected without sending a response."), True),
+            (httpx.ReadError("connection reset"), True),
+            (httpx.WriteError("broken pipe"), True),
+            (httpx.ConnectError("refused"), True),
+            (httpx.ConnectTimeout("connect"), True),
+            (httpx.PoolTimeout("pool"), True),
+            # The host answered or may still be storing it: never sent twice.
+            (lambda: httpx.Response(200, stream=BrokenBody()), False),
+            (httpx.ReadTimeout("read"), False),
+            (lambda: httpx.Response(503), False),
+            (lambda: httpx.Response(429), False),
+        ]
+        for failure, retried in cases:
+            links = Links(lambda request, failure=failure: failure() if callable(failure) else _raise(failure))
+            links.after_first = lambda _: httpx.Response(200, json={"path": "/attachments/" + body["filename"]})
+            slept = []
+
+            async def sleep(seconds):
+                slept.append(seconds)
+
+            with self.subTest(failure=failure), patch.object(gateway.asyncio, "sleep", sleep):
+                api = gateway.Gateway(CONFIG, links.pooled, connect=links.connect)
+                try:
+                    result = await api.request("uploadAttachment", body, response_limit=65536)
+                except GatewayError:
+                    result = None
+                if retried:
+                    self.assertEqual(result, {"path": "/attachments/" + body["filename"]})
+                    self.assertEqual(links.served, [("uploadAttachment", "pooled"), ("uploadAttachment", "new-1")])
+                    self.assertEqual(links.bodies[0], links.bodies[1])  # Same file name and bytes.
+                    self.assertEqual(slept, [gateway.UNANSWERED_RETRY_DELAYS[0]])
+                    self.assertTrue(all(client.is_closed for client in links.opened))
+                else:
+                    self.assertIsNone(result)
+                    self.assertEqual(links.served, [("uploadAttachment", "pooled")])
+                    self.assertEqual(slept, [])
+            await links.pooled.aclose()
+
+    async def test_upload_retries_are_bounded(self):
+        links = Links(lambda _: _raise(httpx.RemoteProtocolError("Server disconnected without sending a response.")))
+        slept = []
+
+        async def sleep(seconds):
+            slept.append(seconds)
+
+        self.assertTrue(2 <= len(gateway.UNANSWERED_RETRY_DELAYS) <= 3)
+        self.assertTrue(all(1 <= delay <= 2 for delay in gateway.UNANSWERED_RETRY_DELAYS))
+        self.assertTrue(gateway.UNANSWERED_RETRY_COMMANDS.isdisjoint(gateway.READ_ONLY_COMMANDS))
+        with patch.object(gateway.asyncio, "sleep", sleep), self.assertRaisesRegex(GatewayError, "uploadAttachment / RemoteProtocolError"):
+            await gateway.Gateway(CONFIG, links.pooled, connect=links.connect).request(
+                "uploadAttachment", {"filename": "a.jpg", "bytesBase64": "QUJD"}, response_limit=65536)
+        self.assertEqual(slept, list(gateway.UNANSWERED_RETRY_DELAYS))
+        self.assertEqual([label for _, label in links.served], ["pooled", "new-1", "new-2", "new-3"])
+        self.assertTrue(all(client.is_closed for client in links.opened))
+        await links.pooled.aclose()
+
+    async def test_any_command_after_a_broken_connection_uses_a_new_connection(self):
+        broken = {"listAgents", "sendPrompt"}
+
+        def respond(request):
+            command = request.url.path.rsplit("/", 1)[-1]
+            if command in broken:
+                broken.discard(command)
+                raise httpx.RemoteProtocolError("Server disconnected without sending a response.")
+            if command == "promptAcceptanceStatus":
+                return httpx.Response(200, json={"outcome": "not-found"})
+            return httpx.Response(200, json=[])
+
+        links = Links(respond)
+        api = gateway.Gateway(CONFIG, links.pooled, connect=links.connect)
+        with patch.object(gateway.asyncio, "sleep", AsyncMock()), patch.object(gateway.logger, "log") as log:
+            self.assertEqual(await api.request("listAgents"), [])  # Read-only: retried at once.
+            await api.request("getAsyncTasks", {"id": AGENT})
+            with self.assertRaises(GatewayError):
+                await api.request("sendPrompt", {"prompt": "问题", "clientNonce": "nonce"})
+            await api.request("promptAcceptanceStatus", {"accountSlot": "host", "clientNonce": "nonce"})
+            await api.request("getAsyncTasks", {"id": AGENT})
+        self.assertEqual(links.served, [
+            ("listAgents", "pooled"), ("listAgents", "new-1"), ("getAsyncTasks", "pooled"), ("sendPrompt", "pooled"),
+            ("promptAcceptanceStatus", "new-2"), ("getAsyncTasks", "pooled"),
+        ])
+        self.assertTrue(all(client.is_closed for client in links.opened))
+        # A poll that recovered is worth INFO; a routine one is not.
+        levels = [(call.args[0], call.args[2]) for call in log.call_args_list]
+        self.assertEqual(levels, [("INFO", "listAgents"), ("DEBUG", "getAsyncTasks"), ("DEBUG", "promptAcceptanceStatus"),
+                                  ("DEBUG", "getAsyncTasks")])
+        self.assertIn("connection=new", log.call_args_list[0].args[1].format(*log.call_args_list[0].args[2:]))
+        await links.pooled.aclose()
+
+    async def test_successful_calls_are_logged_with_size_and_request_id_but_not_the_token(self):
+        sent_ids = []
+
+        def respond(request):
+            sent_ids.append(request.headers["x-sand-request-id"])
+            if request.url.path.endswith("uploadAttachment"):
+                return httpx.Response(200, json={"path": "/attachments/a.jpg"}, headers={"x-sand-request-id": "host-req-1"})
+            return httpx.Response(200, json=[])
+
+        body = {"agentId": AGENT, "filename": "a.jpg", "bytesBase64": "QUJD"}
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            with patch.object(gateway.logger, "log") as log:
+                api = gateway.Gateway(CONFIG, client)
+                await api.request("uploadAttachment", body, response_limit=65536)
+                await api.request("listAgents")
+        upload, roster = (call.args[1].format(*call.args[2:]) for call in log.call_args_list)
+        self.assertEqual([call.args[0] for call in log.call_args_list], ["INFO", "DEBUG"])
+        sent = len(json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode())
+        received = len(json.dumps({"path": "/attachments/a.jpg"}, separators=(",", ":")).encode())
+        self.assertIn("command=uploadAttachment attempt=1/4 elapsed=", upload)
+        self.assertIn(f"sent={sent}B received={received}B request_id=host-req-1 connection=pooled ok", upload)
+        # Without an echoed id, the id sent to the host.
+        self.assertIn(f"request_id={sent_ids[1]} ", roster)
+        for message in (upload, roster):
+            self.assertNotIn(CONFIG.token, message)
+            self.assertNotIn("QUJD", message)
 
     async def test_disconnected_older_transcript_page_recovers_without_resubmitting_prompt(self):
         host = Host()
@@ -362,6 +593,96 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(pages[1], pages[2])
         self.assertEqual(pages[1]["beforeSeq"], 20)
 
+    async def lost_send(self, failures, outcomes):
+        """Submit once: sendPrompt raises `failures` in turn, status lookups answer `outcomes`."""
+        host, sends, lookups, slept = Host(), [], [], []
+
+        def send(body):
+            sends.append(body)
+            if failures:
+                failure = failures.pop(0)
+                if isinstance(failure, httpx.Response):
+                    return failure
+                raise failure("private-token")
+            return {"accepted": True}
+
+        def lookup(body):
+            lookups.append(body)
+            outcome = outcomes.pop(0) if len(outcomes) > 1 else outcomes[0]
+            if isinstance(outcome, httpx.Response) or outcome in {"not-found", "unknown-durability"}:
+                return outcome if isinstance(outcome, httpx.Response) else {"outcome": outcome}
+            return {"outcome": "found", "record": {"agentId": AGENT, "clientNonce": body["clientNonce"], "status": outcome}}
+
+        async def sleep(seconds):
+            slept.append(seconds)
+
+        host.override.update(sendPrompt=send, promptAcceptanceStatus=lookup)
+        error = None
+        async with host.client() as client:
+            with patch.object(gateway.asyncio, "sleep", sleep):
+                try:
+                    await gateway.Gateway(CONFIG, client).submit("问题", "nonce-1")
+                except GrokError as caught:
+                    error = caught
+        return sends, lookups, slept, error
+
+    async def test_lost_send_is_resent_only_after_the_host_reports_its_nonce_not_found(self):
+        # Connection closed, but the host recorded the nonce: never send it twice.
+        for status in ("pending", "accepted", "rejected"):
+            sends, lookups, slept, error = await self.lost_send([httpx.RemoteProtocolError], [status])
+            self.assertIsNone(error)
+            self.assertEqual(len(sends), 1)
+            self.assertEqual(lookups, [{"accountSlot": "host", "clientNonce": "nonce-1"}])
+            self.assertEqual(slept, [gateway.PROMPT_SETTLE])
+        # Connection closed and no record: resend once, same body and clientNonce.
+        sends, _, _, error = await self.lost_send([httpx.RemoteProtocolError], ["not-found"])
+        self.assertIsNone(error)
+        self.assertEqual(len(sends), 2)
+        self.assertEqual(sends[0], sends[1])
+        # Connection refused: nothing was sent, so no settle wait before the lookup.
+        sends, lookups, slept, error = await self.lost_send([httpx.ConnectError], ["not-found"])
+        self.assertIsNone(error)
+        self.assertEqual((len(sends), len(lookups), slept), (2, 1, []))
+        # The resend is lost as well: report it, never a third copy.
+        sends, lookups, _, error = await self.lost_send([httpx.RemoteProtocolError, httpx.ReadError], ["not-found"])
+        self.assertIn("sendPrompt / ReadError", str(error))
+        self.assertEqual((len(sends), len(lookups)), (2, 2))
+
+    async def test_lost_send_is_not_resent_when_absence_is_unproven(self):
+        # The status lookup fails even after its backoff: report, never resend blindly.
+        sends, lookups, slept, error = await self.lost_send([httpx.RemoteProtocolError], [httpx.Response(503)])
+        self.assertIn("sendPrompt / RemoteProtocolError", str(error))
+        self.assertFalse(error.not_submitted)
+        self.assertEqual((len(sends), len(lookups)), (1, 1 + len(gateway.READ_RETRY_DELAYS)))
+        self.assertEqual(slept, [gateway.PROMPT_SETTLE, *gateway.READ_RETRY_DELAYS])
+        # TCP may still deliver a timed-out request after the link returns.
+        sends, _, _, error = await self.lost_send([httpx.ReadTimeout], ["not-found"])
+        self.assertIn("sendPrompt / ReadTimeout", str(error))
+        self.assertEqual(len(sends), 1)
+        sends, _, _, error = await self.lost_send([httpx.ReadTimeout], ["accepted"])
+        self.assertIsNone(error)
+        self.assertEqual(len(sends), 1)
+        sends, _, _, error = await self.lost_send([httpx.RemoteProtocolError], ["unknown-durability"])
+        self.assertIsInstance(error, GatewayError)
+        self.assertEqual(len(sends), 1)
+        # An explicit rejection was not lost in transit: no lookup at all.
+        sends, lookups, _, error = await self.lost_send([httpx.Response(400)], ["not-found"])
+        self.assertTrue(error.not_submitted)
+        self.assertEqual((len(sends), lookups), (1, []))
+
+    async def test_ask_continues_after_a_lost_but_recorded_send(self):
+        host = Host()
+
+        def send(body):
+            host.prompt, host.nonce = body["prompt"], body["clientNonce"]
+            raise httpx.RemoteProtocolError("private-token")
+
+        host.override["sendPrompt"] = send
+        async with host.client() as client:
+            with patch.object(gateway, "PROMPT_SETTLE", 0):
+                self.assertEqual((await gateway.Gateway(CONFIG, client).ask("问题")).text, host.answer)
+        self.assertEqual(sum(name == "sendPrompt" for name, _, _ in host.calls), 1)
+
     async def test_total_task_timeout_cancels_read_backoff_without_new_prompt(self):
         host = Host()
 
@@ -369,9 +690,9 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
             raise httpx.ReadError("private-token")
 
         host.override["getAgentTranscriptTail"] = broken_tail
-        with patch.object(gateway, "make_client", side_effect=host.client), patch.object(gateway, "READ_RETRY_DELAYS", (1, 1)), \
-             self.assertRaisesRegex(GrokError, "仍在云端运行"):
-            await gateway.ask(replace(CONFIG, timeout=.05), "问题")
+        # The default 31 s backoff must not outlive GROKBOT_TIMEOUT.
+        with patch.object(gateway, "make_client", side_effect=host.client), self.assertRaisesRegex(GrokError, "仍在云端运行"):
+            await asyncio.wait_for(gateway.ask(replace(CONFIG, timeout=.05), "问题"), 2)
         self.assertEqual(sum(name == "getAgentTranscriptTail" for name, _, _ in host.calls), 1)
         self.assertEqual(sum(name == "sendPrompt" for name, _, _ in host.calls), 1)
         self.assertFalse(any(name == "interruptAgentRun" for name, _, _ in host.calls))

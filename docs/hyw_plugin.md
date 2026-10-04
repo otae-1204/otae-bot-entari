@@ -51,4 +51,108 @@ HYW_HOME=data/hyw-frontier
 
 全局同时最多 2 个问答，整轮 300 秒，单次模型请求 90 秒。工具图最多尝试 600 张。卡片由 md2png 绘制；出图失败时改为文字。
 
+## 引用的消息取不到时（合并转发）
+
+Entari 0.17.4 组装消息事件时，引用不带内联内容就调 Satori `message.get` 取原消息
+（`arclet/entari/event/base.py:329`）。LLBot 取合并转发会回 `500 ServerException: 消息为空`，
+异常在分发前抛出，整条消息被丢掉：`/q` 没反应，日志里连这条消息都没有。
+
+现在分两层兜住：
+
+1. **事件照常分发。** `otae_bot/adapters/quote_fallback.py` 在 `create_app()` 里包装
+   `MessageEvent.gather`，并把 letoderea 已经存下旧 gather 的 publisher 一起改指过来。
+   `message_get` 抛任何异常时记一条 warning，然后按"没有引用"重跑原 gather：没有 `session.reply`，
+   `is_reply_me` 为 False，`event.quote`（含 id）原样留给插件。日志只有频道、引用 id、异常类型和消息，
+   连接 token 会被替换成 `<redacted>`：
+
+   ```text
+   [entari] quoted message fetch failed, dispatching without reply: channel=123456 quote=7412... error=ServerException: 消息为空
+   ```
+
+   Entari 升级后 gather 的签名或其中的 `message_get` / `Reply` 等引用对不上时，不打补丁，
+   启动时记 `quote fetch fallback not installed: ...`；装上时记 `quote fetch fallback installed on 5 event publishers`。
+
+2. **HYW 自己读引用。** `session.reply` 为空而 `event.quote` 还在时，`/q` 不再走 `message.get`。
+   LLBot 8.2.1 的实测情况决定了读法：
+   - 引用 id 是 Satori 消息 id `chatType|peerUid|msgSeq`（如 `2|875241970|3969610`，2 是群、peerUid 是群号，
+     1 是私聊）；OneBot 的 `message_id` 是含随机数的哈希、每个号各不相同，算不出来，只能查。
+   - LLBot 的 Satori 解码不处理合并转发，引用里拿不到转发的 resid；`get_forward_msg` 只认 resid，
+     传 `message_id` 或 Satori id 都回 `unexpected end of file`；`get_msg` 传 Satori id 回 `no such column: NaN`。
+
+   所以：
+   1. 解析引用 id，格式不符就跳过；
+   2. 用**收到这条事件的号**调 `get_group_msg_history {group_id: peerUid, message_seq: seq, count: 10}`
+      （私聊调 `get_friend_msg_history {user_id, message_seq, count}`，对方 QQ 号取自 `private:` 频道或发送者），
+      在返回里按 `message_seq == seq` 找到这条消息（返回的 `data` 可以是列表，也可以是 `{messages: [...]}`）；
+   3. 消息里有 `forward` 段就用它的 `data.id`（resid）调 `get_forward_msg {id: resid}`，按原顺序展开每条的发送者、
+      文字和图片，与转发卡片同样交给 Hyw-Frontier 的 `message_content`；没有 `forward` 段就直接用这条消息的文字、图片。
+   4. 引用的是自己的 HYW 回答时仍按引用 id 续聊，`/link` 也按引用 id 取来源，不发请求。
+
+   这些调用只走收到事件的那个号（`otae_bot/adapters/onebot.py` 的 `call_account_action`），不会换到别的号：
+   号不在群里时 history 会报 `Cannot read properties of undefined (reading 'start')`。依次尝试：
+   1. 该账号的 OneBot HTTP：`SATORI_CLIENTS` 条目里的 `onebot_url` / `onebot_token`；只配了一个 Satori 连接时，
+      `ONEBOT_HTTP_URL` / `ONEBOT_ACCESS_TOKEN` 也算这个号的；
+   2. LLBot 的 Satori 透传 `POST {该连接}/v1/internal/onebot11/{action}`，JSON body 即参数，请求头
+      `Authorization: Bearer <该连接的 Satori token>`、`Satori-User-ID: <收到事件的号>`、`Satori-Platform: <平台>`；
+      不带 `X-Self-ID`（实测带它回 403）。其它 `internal/*` 路径都是 404，不再尝试。
+
+   读不到时 `/q` 照常回答问题，只是不带引用内容，并记一条 warning，`reason` 写明原因，`failures` 是各通道的报错
+   （token 不会出现在日志里）：
+
+   ```text
+   [hyw] quoted message unavailable, answering without it: channel=875241970 quote=2|875241970|3969610 reason=get_group_msg_history 报错，收到事件的号可能不在群 875241970 failures=["get_group_msg_history: OneBotUnavailable: satori http://127.0.0.1:5500/v1/internal/onebot11/get_group_msg_history: HTTP 500: Cannot read properties of undefined (reading 'start')"]
+   ```
+
+   | `reason` | 含义 |
+   | --- | --- |
+   | `引用 id 不是 chatType\|peerUid\|msgSeq 格式` / `引用 id 的会话无法识别：chatType=…` | 解析失败，没有发请求 |
+   | `通道不可用，get_group_msg_history 没有送达` | 没配 `onebot_url`、透传也连不上或鉴权失败（401/403/404） |
+   | `get_group_msg_history 报错，收到事件的号可能不在群 …` | OneBot 回了失败（`status=failed`、`retcode≠0` 或 HTTP 5xx） |
+   | `get_group_msg_history 返回 N 条，没有 message_seq=…` | history 里没有这条（消息太旧或已撤回） |
+   | `合并转发展开失败（get_forward_msg <resid>）` | 找到了消息，但转发内容取不到 |
+   | `引用的消息里没有可读的文字、图片或转发` | 只有表情等无法交给模型的内容 |
+
+   只发了 `/q` 没写问题时提示"没能读取引用的消息，请在 /q 后直接写出问题。"。
+
+   消息里直接带的 Satori `<message forward>`（子元素是各条 `<message>`、`<author>` 是发送者）在本地展开，
+   只有 id 没有子元素时同样用 `get_forward_msg {id}` 取。
+
+### em 部署配置
+
+**透传路由可用时（LLBot 8.2.1，5500 与 5550 均实测可用）不用改配置。** 现有的
+`SATORI_CLIENTS=[{"host":"127.0.0.1","port":5500,"token":"…"},{"host":"127.0.0.1","port":5550,"token":"…"}]`
+已经足够：每个号的请求经自己那条 Satori 连接透传给同一个 LLBot 实例的 OneBot。
+
+需要配 `onebot_url` 的情况：
+
+- LLBot 换成没有 `/v1/internal/onebot11/*` 透传的版本，或透传被关闭（日志里 reason 是"通道不可用"，
+  failures 里透传那一项是 `HTTP 404`）；
+- 想让这些读取绕开 Satori 端口。
+
+这时在两个 LLBot 实例里各自开启 OneBot 11 HTTP 服务（端口互不相同，例如 3000、3001），在 `SATORI_CLIENTS`
+里给每个连接写上自己的地址，然后重启机器人：
+
+```dotenv
+SATORI_CLIENTS=[{"host":"127.0.0.1","port":5500,"token":"SATORI_TOKEN_1","onebot_url":"http://127.0.0.1:3000","onebot_token":"ONEBOT_TOKEN_1"},{"host":"127.0.0.1","port":5550,"token":"SATORI_TOKEN_2","onebot_url":"http://127.0.0.1:3001","onebot_token":"ONEBOT_TOKEN_2"}]
+```
+
+写了 `onebot_url` 的账号先走自己的地址，失败再走自己连接的透传，不会把请求发到另一个 QQ 号的 LLBot。
+没写 `onebot_token` 时依次用 `ONEBOT_ACCESS_TOKEN`、该连接的 Satori `token`。有两个连接时单独的
+`ONEBOT_HTTP_URL` 分不清属于哪个号，读引用时不会用它。
+
+## 失败日志
+
+模型失败（`[hyw] answer failed`）、出图失败（`[hyw] card render failed`）和其它异常（`[hyw] request failed`）
+各记一行 warning，例如：
+
+```text
+[hyw] answer failed: code=http_401 http_status=401 retryable=False chain=[FrontierError: 模型认证失败，请检查 API Key 或服务账号凭据。 <- AuthenticationError: Error code: 401 - Incorrect API key provided: <redacted>]
+```
+
+`code` / `http_status` 取自 Hyw-Frontier 的 `diagnostics`，或异常链上的 `code`、`status_code`、
+`response.status_code`。`chain` 沿 `__cause__` / `__context__` 最多记 6 层的类型与消息：
+Hyw-Frontier 用 `raise ... from None` 隐藏了 SDK 原始异常，但它仍在 `__context__` 里，真正的原因通常在这一层。
+消息先脱敏再写日志：`HYW_API_KEY` 与代理地址原文、`Bearer` / `Basic` 凭据、`Authorization` / `Cookie` /
+`api_key` / `token` 等键值、URL 的查询串与用户信息、`sk-…`、`AIza…`、`ya29.…`、JWT 和私钥块都替换成 `<redacted>`。
+
 本机若把 DNS 改写成 `198.18.0.0/15`，图片下载允许连接这一段，仍拒绝局域网地址。

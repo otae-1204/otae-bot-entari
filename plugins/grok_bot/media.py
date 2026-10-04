@@ -18,12 +18,18 @@ from satori import ChannelType, File, Image
 from satori.model import Upload
 
 from otae_bot.infrastructure.http.tls import ashared_ssl_context
-from otae_bot.infrastructure.rendering.executor import run_image_render
 
 from .config import GrokError
 
 MAX_INPUT_IMAGES = 3
 MAX_IMAGE_BYTES = 5_000_000
+# Upload copies: longest edge, JPEG qualities tried in turn, encoded size.
+UPLOAD_EDGE = 1600
+UPLOAD_QUALITIES = (85, 75, 65)
+UPLOAD_IMAGE_BYTES = 2_000_000
+ANIMATED_FORMATS = frozenset({"GIF", "PNG", "WEBP"})
+UPLOAD_FORMATS = {"JPEG": ("jpg", "image/jpeg"), "PNG": ("png", "image/png"),
+                  "GIF": ("gif", "image/gif"), "WEBP": ("webp", "image/webp")}
 MAX_FILE_BYTES = 20_000_000
 MAX_REPLY_BYTES = 50_000_000
 MAX_REPLY_FILES = 10
@@ -149,23 +155,49 @@ async def download_url(url: str, *, limit: int, account=None) -> tuple[bytes, st
     raise GrokError("附件链接重定向层级过多，已中止请求。")
 
 
-def normalize_image(data: bytes) -> bytes:
+def encoded(image: PILImage.Image, **options) -> bytes:
+    stream = BytesIO()
+    image.save(stream, **options)
+    return stream.getvalue()
+
+
+def has_alpha(image: PILImage.Image) -> bool:
+    if image.mode not in {"RGBA", "LA", "PA", "RGBa", "La"} and "transparency" not in image.info:
+        return False
+    return image.convert("RGBA").getchannel("A").getextrema()[0] < 255
+
+
+def encodings(image: PILImage.Image, alpha: bool):
+    """Smaller and smaller encodings at this size; transparency stays PNG."""
+    if alpha:
+        yield encoded(image, format="PNG")
+        # A 256-colour palette keeps the alpha channel.
+        yield encoded(image.quantize(256, method=PILImage.Quantize.FASTOCTREE), format="PNG")
+    else:
+        for quality in UPLOAD_QUALITIES:
+            yield encoded(image, format="JPEG", quality=quality, optimize=True)
+
+
+def compress_image(data: bytes) -> tuple[bytes, str]:
+    """An upload copy within UPLOAD_EDGE and UPLOAD_IMAGE_BYTES, and its format."""
     try:
         with PILImage.open(BytesIO(data)) as original:
             if original.width * original.height > 20_000_000:
                 raise GrokError("图片分辨率超出限制，请调整尺寸或压缩后再试。")
+            # Re-encoding keeps only the first frame, so an animation within the limit goes as sent.
+            if original.format in ANIMATED_FORMATS and getattr(original, "n_frames", 1) > 1 and len(data) <= UPLOAD_IMAGE_BYTES:
+                return data, original.format
             original.seek(0)
-            normalized = ImageOps.exif_transpose(original)
-            normalized.thumbnail((2048, 2048))
-            rgba = normalized.convert("RGBA")
-            rgb = PILImage.new("RGB", rgba.size, "white")
-            rgb.paste(rgba, mask=rgba.getchannel("A"))
-            stream = BytesIO()
-            rgb.save(stream, format="JPEG", quality=90)
-            result = stream.getvalue()
-            if len(result) > MAX_IMAGE_BYTES:
-                raise GrokError("图片处理后体积依然超出限制，请压缩文件后重新上传。")
-            return result
+            image = ImageOps.exif_transpose(original)
+            image.thumbnail((UPLOAD_EDGE, UPLOAD_EDGE))
+            alpha = has_alpha(image)
+            image = image.convert("RGBA" if alpha else "RGB")
+            for _ in range(8):
+                for result in encodings(image, alpha):
+                    if len(result) <= UPLOAD_IMAGE_BYTES:
+                        return result, "PNG" if alpha else "JPEG"
+                image = image.resize((max(1, image.width * 3 // 4), max(1, image.height * 3 // 4)), PILImage.Resampling.LANCZOS)
+            raise GrokError("图片处理后体积依然超出限制，请压缩文件后重新上传。")
     except (UnidentifiedImageError, OSError, ValueError, PILImage.DecompressionBombError):
         raise GrokError("图像格式无法识别，请使用合规的 PNG、JPEG、WebP 或 GIF 文件。") from None
 
@@ -179,8 +211,9 @@ async def input_images(sources: tuple[str, ...], account=None) -> tuple[Attachme
             data, _ = decode_data_url(source, MAX_IMAGE_BYTES)
         else:
             data, _ = await download_url(source, limit=MAX_IMAGE_BYTES, account=account)
-        normalized = await run_image_render(normalize_image, data)
-        result.append(Attachment(f"qq-image-{index}.jpg", mime="image/jpeg", image=True, data=normalized))
+        compressed, kind = await asyncio.to_thread(compress_image, data)
+        extension, mime = UPLOAD_FORMATS[kind]
+        result.append(Attachment(f"qq-image-{index}.{extension}", mime=mime, image=True, data=compressed))
     return tuple(result)
 
 

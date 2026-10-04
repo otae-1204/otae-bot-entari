@@ -423,10 +423,10 @@ async def _prepare_assets(urls: Iterable[Any], *, inline: bool) -> _PreparedAsse
     )
     # 图床的 404 与超时都是间歇的：走共享的退避重试。这里以前是单次 fetch_many，
     # 一次抖动就静默丢图；缺图原因由 fetch_many_resilient 自己写日志。
+    # 超时、重试、按主机熔断与整卡预算取素材通道配置，到点未取到的按缺失留空。
     fetched = await fetch_many_resilient(
         unique_urls,
         namespace=REMOTE_ASSET_NAMESPACE,
-        timeout_seconds=12.0,
         max_bytes=24 * 1024 * 1024,
         log_prefix="[endfield]",
     )

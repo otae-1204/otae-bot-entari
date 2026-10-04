@@ -5,6 +5,7 @@ import base64
 import binascii
 import json
 import os
+import re
 from io import BytesIO
 from pathlib import Path
 
@@ -20,7 +21,7 @@ from otae_bot.infrastructure.http.tls import shared_ssl_context
 
 from .config import HywConfig, HywError
 from .history import HistoryStore, Scope, SourceBook
-from .messages import expand_special
+from .messages import QuoteUnavailable, expand_quote, expand_special
 
 HELP = """HYW 搜索问答服务
 /q <问题> —— 联网搜索并作答，支持附加至多 4 张图片
@@ -113,6 +114,85 @@ def _element_text(element) -> str:
         lines = _card_lines(card, set())
         return "\n".join(lines[:40])
     return ""
+
+
+_SECRET_NAMES = (
+    r"authorization|proxy-authorization|cookie|set-cookie|x-api-key|x-goog-api-key|api[-_]?key|key"
+    r"|access[-_]?token|refresh[-_]?token|id[-_]?token|token|client[-_]?secret|secret|password"
+    r"|private[-_]?key|signature|sig"
+)
+_REDACTIONS = (
+    (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)", re.S), "<private key>"),
+    (re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+"), "Bearer <redacted>"),
+    (re.compile(r"(?i)\b(basic)\s+[A-Za-z0-9+/=]{8,}"), r"\1 <redacted>"),
+    (re.compile(r"(?i)(https?://)[^\s/@'\"]+@"), r"\1<redacted>@"),
+    (re.compile(r"(https?://[^\s?#'\"<>]+)\?[^\s#'\"<>]*"), r"\1?<redacted>"),
+    (re.compile(rf"(?i)([\"']?\b(?:{_SECRET_NAMES})\b[\"']?\s*[:=]\s*[\"']?)[^\s\"',;&}}]+"), r"\1<redacted>"),
+    (re.compile(r"\b(?:sk|pk|rk)-[A-Za-z0-9_-]{8,}"), "<redacted>"),
+    (re.compile(r"\bAIza[0-9A-Za-z_-]{20,}"), "<redacted>"),
+    (re.compile(r"\bya29\.[0-9A-Za-z._-]+"), "<redacted>"),
+    (re.compile(r"\beyJ[0-9A-Za-z_-]+\.[0-9A-Za-z_-]+\.[0-9A-Za-z_-]+"), "<redacted>"),
+)
+
+
+def _redact(text: str, secrets: tuple[str, ...] = ()) -> str:
+    for secret in secrets:
+        if secret and len(secret) >= 6:
+            text = text.replace(secret, "<redacted>")
+    for pattern, replacement in _REDACTIONS:
+        text = pattern.sub(replacement, text)
+    return text
+
+
+def _message(error: BaseException) -> str:
+    try:
+        return " ".join(str(error).split())
+    except Exception:  # noqa: BLE001 - a broken __str__ must not hide the original failure
+        return "<unprintable>"
+
+
+def _status_value(value) -> int | None:
+    return value if type(value) is int and 100 <= value <= 599 else None
+
+
+def failure_summary(error: BaseException, secrets: tuple[str, ...] = ()) -> str:
+    """One log line: error code, HTTP status and the redacted exception chain.
+
+    ``raise ... from None`` hides the cause from tracebacks but keeps it in
+    ``__context__``; that hidden SDK error is usually the useful part.
+    """
+    chain: list[BaseException] = []
+    current: BaseException | None = error
+    while current is not None and all(current is not seen for seen in chain) and len(chain) < 6:
+        chain.append(current)
+        current = current.__cause__ or current.__context__
+    code = status = retryable = None
+    for item in chain:
+        diagnostics = getattr(item, "diagnostics", None)
+        if isinstance(diagnostics, dict):
+            code = code or diagnostics.get("code")
+            status = status or _status_value(diagnostics.get("http_status"))
+            if retryable is None and isinstance(diagnostics.get("retryable"), bool):
+                retryable = diagnostics["retryable"]
+        value = getattr(item, "code", None)
+        if code is None and isinstance(value, (str, int)) and not isinstance(value, bool):
+            code = value
+        status = status or _status_value(getattr(item, "status_code", None))
+        status = status or _status_value(getattr(getattr(item, "response", None), "status_code", None))
+        status = status or _status_value(value)
+    links = " <- ".join(
+        f"{type(item).__name__}: {_redact(_message(item), secrets)[:300]}".rstrip(": ") for item in chain
+    )
+    parts = [f"code={code if code is not None else '-'}", f"http_status={status or '-'}"]
+    if retryable is not None:
+        parts.append(f"retryable={retryable}")
+    return " ".join(parts) + f" chain=[{links}]"
+
+
+def _config_secrets(config: HywConfig | None) -> tuple[str, ...]:
+    if config is None:
+        return ()
+    return tuple(value for value in (config.api_key, config.proxy, config.search_proxy) if value)
 
 
 def _jpeg(data: bytes) -> str:
@@ -296,10 +376,11 @@ async def run_request(session: Session, config: HywConfig, scope: Scope, text: s
                 images=None if rich else (model_images or None),
                 message_content=message_content,
             )
-        except RenderError:
-            logger.warning("[hyw] card render failed")
+        except RenderError as error:
+            logger.warning("[hyw] card render failed: {}", failure_summary(error, _config_secrets(config)))
             raise HywError("文本回答已生成完毕，但生成渲染卡片时失败，请稍后重试。") from None
         except FrontierError as error:
+            logger.warning("[hyw] answer failed: {}", failure_summary(error, _config_secrets(config)))
             raise HywError(str(error)) from None
     finally:
         if previous_search_proxy is None:
@@ -329,10 +410,44 @@ async def _compose(session: Session, elements) -> tuple[str, list[str], bool]:
     return text, [*images, *[url for url in extra_images if url not in images]], rich or bool(extra_text or extra_images)
 
 
+def _unfetched_quote(session: Session):
+    """The event's quote when Entari could not turn it into ``session.reply``.
+
+    The Entari adapter keeps ``event.quote`` when ``message.get`` fails (LLBot answers
+    500 "消息为空" for merged forwards), so the quoted Satori id is still available here.
+    """
+    from satori import Quote
+
+    if session.reply:
+        return None
+    quote = getattr(getattr(session, "event", None), "quote", None)
+    return quote if isinstance(quote, Quote) and quote.id else None
+
+
+async def _quoted_without_reply(session: Session, quote) -> tuple[str, list[str], bool]:
+    if quote.children:
+        return await _compose(session, MessageChain(quote.children))
+    failures: list[str] = []
+    try:
+        text, images, rich = await expand_quote(session, str(quote.id), failures)
+    except Exception as error:  # noqa: BLE001 - an unreadable quote must not stop the answer
+        reason = error.reason if isinstance(error, QuoteUnavailable) else f"读取出错：{failure_summary(error)}"
+        logger.warning(
+            "[hyw] quoted message unavailable, answering without it: channel={} quote={} reason={} failures={}",
+            getattr(getattr(session.event, "channel", None), "id", None), quote.id,
+            _redact(reason), [_redact(item) for item in failures],
+        )
+        return "", [], False
+    if failures:
+        logger.debug("[hyw] quoted message read after fallbacks: quote={} failures={}", quote.id, failures)
+    return text, images, rich
+
+
 async def handle_hyw(session: Session, result: Arparma):
     text, images, rich = await _compose(session, result.all_matched_args.get("content", []) or [])
     scope = scope_for(session)
-    if text.lower() in {"帮助", "help", "--help"} or (not text and not images and not session.reply):
+    quote = _unfetched_quote(session)
+    if text.lower() in {"帮助", "help", "--help"} or (not text and not images and not session.reply and not quote):
         await send_text(session, HELP)
         return
     if text.lower() in {"清空", "重置", "clear", "reset"} and not images:
@@ -368,6 +483,17 @@ async def handle_hyw(session: Session, result: Arparma):
             text = f"{text}\n\n[引用消息]\n{quoted_text}".strip()
             images = [*images, *[url for url in quoted_images if url not in images]]
             rich = rich or quoted_rich
+    elif quote:
+        prior = history_store.get(scope, str(quote.id))
+        if not prior:
+            quoted_text, quoted_images, quoted_rich = await _quoted_without_reply(session, quote)
+            if quoted_text or quoted_images:
+                text = f"{text}\n\n[引用消息]\n{quoted_text}".strip()
+                images = [*images, *[url for url in quoted_images if url not in images]]
+                rich = rich or quoted_rich
+            elif not text and not images:
+                await send_text(session, "没能读取引用的消息，请在 /q 后直接写出问题。")
+                return
     _active[scope] = _active.get(scope, 0) + 1
     task = asyncio.current_task()
     if task is not None:
@@ -381,7 +507,7 @@ async def handle_hyw(session: Session, result: Arparma):
     except asyncio.CancelledError:
         raise
     except Exception as error:  # noqa: BLE001 - Chat boundary: always report failure, redact upstream payloads.
-        logger.warning("[hyw] request failed: {}", type(error).__name__)
+        logger.warning("[hyw] request failed: {}", failure_summary(error, _config_secrets(config)))
         await send_text(session, "HYW 处理异常，请稍后重新发送。")
     finally:
         if task is not None:
@@ -410,10 +536,14 @@ async def handle_stop(session: Session, result: Arparma):
 
 
 async def handle_link(session: Session, result: Arparma):
-    if not session.reply or not session.reply.origin:
+    if session.reply and session.reply.origin:
+        quoted_id = str(session.reply.origin.id)
+    elif quote := _unfetched_quote(session):
+        quoted_id = str(quote.id)
+    else:
         await send_text(session, "请先引用或回复一条 HYW 生成的回答消息，再发送 /link。")
         return
-    listed = sources.get(channel_for(scope_for(session)), str(session.reply.origin.id))
+    listed = sources.get(channel_for(scope_for(session)), quoted_id)
     if not listed:
         await send_text(session, "该条消息暂无可查询的参考来源记录，请确认引用的确为 HYW 的回答。")
         return

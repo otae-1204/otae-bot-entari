@@ -20,10 +20,24 @@ import httpx
 from loguru import logger
 
 from otae_bot.infrastructure.cache import AsyncTTLCache, CacheStats
+from .asset_policy import (
+    DIRECT_FAILURES,
+    AssetFetchSettings,
+    HostCircuitOpen,
+    asset_breaker,
+    asset_direct_routes,
+    asset_settings,
+    batch_deadline,
+    configure_asset_settings,
+    host_max_age,
+    proxied_host,
+    rewrite_asset_url,
+)
 from .json_values import freeze_json, freeze_json_object, json_memory_size, mutable_json
 from .tls import shared_ssl_context
 from .disk import (
     DiskImage,
+    DiskImageMeta,
     public_image_request,
     public_images,
     public_table_request,
@@ -34,6 +48,8 @@ from .disk import (
 DEFAULT_CACHE_TTL_SECONDS = 600.0
 DEFAULT_CONCURRENCY = 8
 DEFAULT_MAX_RESOURCE_BYTES = 10 * 1024 * 1024
+# 重新校验失败、改用旧磁盘副本时，内存里只留这么久，之后再试一次网络。
+STALE_RETRY_SECONDS = 60.0
 
 
 def _cache_budget(name: str, default_mib: int) -> int:
@@ -81,6 +97,8 @@ class HttpResource:
     cache_control: str = ""
     private_response: bool = False
     expires_at: float | None = None
+    # 过期的磁盘副本：重新校验失败或整批截止时间已到时用来代替空白。
+    stale: bool = False
 
 
 _client: httpx.AsyncClient | None = None
@@ -90,6 +108,15 @@ _stats_lock = RLock()
 _namespace_metrics: dict[str, dict[str, float]] = {}
 _semaphore_loop: asyncio.AbstractEventLoop | None = None
 _request_semaphore: asyncio.Semaphore | None = None
+# 素材（图片/图标/头像）走独立的客户端与信号量：图床不可达时只占素材自己的槽位，
+# API 请求仍按原有的 Semaphore(DEFAULT_CONCURRENCY) 排队，互不阻塞。
+_asset_client: httpx.AsyncClient | None = None
+_asset_client_lifetime = None
+# PROXY_MODE=fallback 时 _asset_client 只直连，直连连不上才用这个走代理的客户端。
+_asset_proxy_client: httpx.AsyncClient | None = None
+_asset_proxy_client_lifetime = None
+_asset_semaphore_loop: asyncio.AbstractEventLoop | None = None
+_asset_semaphore: asyncio.Semaphore | None = None
 
 
 def _cache_event(key: RequestKey, event: str, value: float) -> None:
@@ -156,13 +183,94 @@ async def _own_client(client):
         await client.aclose()
 
 
-async def _get_owned_client():
-    global _client_lifetime
-    client = _get_client()
-    if _client_lifetime is None or _client_lifetime[0] is not client:
-        lifetime = _own_client(client)
-        await anext(lifetime)
-        _client_lifetime = (client, lifetime)
+def _build_asset_client(settings: AssetFetchSettings) -> httpx.AsyncClient:
+    limits = httpx.Limits(
+        max_connections=settings.concurrency,
+        max_keepalive_connections=settings.concurrency,
+    )
+    verify = shared_ssl_context(trust_env=settings.trust_env)
+    options = dict(
+        follow_redirects=True,
+        trust_env=settings.trust_env,
+        verify=verify,
+        limits=limits,
+    )
+    if not settings.proxy:
+        return httpx.AsyncClient(**options)
+    try:
+        if settings.proxy_hosts:
+            # httpx 的 mounts 按主机路由：只有列出的素材主机走代理，其余直连。
+            mounts = {
+                f"all://{host}": httpx.AsyncHTTPTransport(
+                    proxy=settings.proxy, verify=verify, limits=limits
+                )
+                for host in settings.proxy_hosts
+            }
+            client = httpx.AsyncClient(mounts=mounts, **options)
+        else:
+            client = httpx.AsyncClient(proxy=settings.proxy, **options)
+    except (ImportError, ValueError) as exc:
+        logger.warning(
+            f"[http-assets] asset proxy unusable ({type(exc).__name__}); connecting directly"
+        )
+        return httpx.AsyncClient(**options)
+    logger.info(
+        f"[http-assets] asset proxy enabled via {_proxy_label(settings.proxy)} "
+        f"hosts={','.join(settings.proxy_hosts) or '*'} mode={settings.proxy_mode}"
+    )
+    return client
+
+
+def _proxy_label(proxy: str) -> str:
+    # 代理地址可能带口令：只记 scheme、主机和端口。
+    parts = urlsplit(proxy)
+    return f"{parts.scheme}://{parts.hostname}:{parts.port or ''}"
+
+
+def _direct_first(settings: AssetFetchSettings) -> bool:
+    return bool(settings.proxy) and settings.proxy_mode == "fallback"
+
+
+def _get_asset_client(*, proxy: bool = False) -> httpx.AsyncClient:
+    global _asset_client, _asset_proxy_client
+    with _client_lock:
+        settings = asset_settings()
+        if proxy:
+            if _asset_proxy_client is None or _asset_proxy_client.is_closed:
+                _asset_proxy_client = _build_asset_client(settings)
+            return _asset_proxy_client
+        if _asset_client is None or _asset_client.is_closed:
+            if _direct_first(settings):
+                _asset_client = _build_asset_client(replace(settings, proxy=""))
+                logger.info(
+                    f"[http-assets] asset proxy mode=fallback: direct first, "
+                    f"{_proxy_label(settings.proxy)} after a connect failure "
+                    f"hosts={','.join(settings.proxy_hosts) or '*'}"
+                )
+            else:
+                _asset_client = _build_asset_client(settings)
+        return _asset_client
+
+
+async def _owned(client: httpx.AsyncClient, lifetime):
+    if lifetime is None or lifetime[0] is not client:
+        generator = _own_client(client)
+        await anext(generator)
+        lifetime = (client, generator)
+    return lifetime
+
+
+async def _get_owned_client(*, asset: bool = False, proxy: bool = False):
+    global _client_lifetime, _asset_client_lifetime, _asset_proxy_client_lifetime
+    if asset and proxy:
+        client = _get_asset_client(proxy=True)
+        _asset_proxy_client_lifetime = await _owned(client, _asset_proxy_client_lifetime)
+    elif asset:
+        client = _get_asset_client()
+        _asset_client_lifetime = await _owned(client, _asset_client_lifetime)
+    else:
+        client = _get_client()
+        _client_lifetime = await _owned(client, _client_lifetime)
     return client
 
 
@@ -173,6 +281,15 @@ def _get_semaphore() -> asyncio.Semaphore:
         _semaphore_loop = loop
         _request_semaphore = asyncio.Semaphore(DEFAULT_CONCURRENCY)
     return _request_semaphore
+
+
+def _get_asset_semaphore() -> asyncio.Semaphore:
+    global _asset_semaphore_loop, _asset_semaphore
+    loop = asyncio.get_running_loop()
+    if _asset_semaphore is None or _asset_semaphore_loop is not loop:
+        _asset_semaphore_loop = loop
+        _asset_semaphore = asyncio.Semaphore(asset_settings().concurrency)
+    return _asset_semaphore
 
 
 def _normalized_params(
@@ -202,20 +319,41 @@ async def _request_resource(
     timeout_seconds: float,
     max_bytes: int,
     cached_image: DiskImage | None = None,
+    asset: bool = False,
 ) -> HttpResource:
-    async with _get_semaphore():
+    timeout: float | httpx.Timeout = timeout_seconds
+    if asset:
+        breaker = asset_breaker()
+        host = (urlsplit(url).hostname or "").lower()
+        # 熔断中的主机连信号量都不排，直接判缺失。
+        if breaker.blocked(host):
+            raise HostCircuitOpen(f"asset host cooling down: {host}")
+        timeout = httpx.Timeout(
+            timeout_seconds,
+            connect=min(asset_settings().connect_timeout, timeout_seconds),
+        )
+    async with _get_asset_semaphore() if asset else _get_semaphore():
+        # 排队期间熔断可能已经打开；半开时这里只放行一个探测请求。
+        if asset and not breaker.acquire(host):
+            raise HostCircuitOpen(f"asset host cooling down: {host}")
         _install_request_log_filter()
         log_token = _suppress_request_log.set(True)
         try:
-            client = await _get_owned_client()
-            response = await client.get(
-                url,
-                params=params,
-                headers=headers,
-                timeout=timeout_seconds,
-            )
+            request = dict(params=params, headers=headers, timeout=timeout)
+            if asset:
+                response = await _asset_get(url, host, request)
+            else:
+                client = await _get_owned_client()
+                response = await client.get(url, **request)
+        except BaseException as exc:
+            if asset:
+                # 只记最终结果：直连失败但代理成功不算连接失败，不会打开熔断。
+                breaker.record(host, exc)
+            raise
         finally:
             _suppress_request_log.reset(log_token)
+        if asset:
+            breaker.record(host, None)
         if response.status_code == 304 and cached_image is not None:
             content = cached_image.content
         else:
@@ -249,15 +387,58 @@ async def _request_resource(
         )
 
 
+async def _asset_get(url: str, host: str, request: dict) -> httpx.Response:
+    """PROXY_MODE=fallback：先直连，只有连接失败 / 连接超时才对这次请求改走代理。"""
+    settings = asset_settings()
+    client = await _get_owned_client(asset=True)
+    if not (_direct_first(settings) and proxied_host(host, settings)):
+        return await client.get(url, **request)
+    routes = asset_direct_routes()
+    if routes.try_direct(host):
+        try:
+            response = await client.get(url, **request)
+        except DIRECT_FAILURES as exc:
+            routes.record(host, False)
+            logger.debug(
+                f"[http-assets] direct {type(exc).__name__} host={host}; retrying via proxy"
+            )
+        except httpx.HTTPError:
+            routes.record(host, True)  # connected: a read timeout is not a route problem
+            raise
+        except BaseException:
+            routes.record(host, None)
+            raise
+        else:
+            routes.record(host, True)
+            return response
+    proxy_client = await _get_owned_client(asset=True, proxy=True)
+    return await proxy_client.get(url, **request)
+
+
+def _disk_lifetime(url: str, ttl_seconds: float) -> tuple[float, bool]:
+    """Disk freshness window, and whether a content-addressed host pins it."""
+    if ttl_seconds <= 0:
+        return ttl_seconds, False
+    pinned = host_max_age(urlsplit(url).hostname or "")
+    return (ttl_seconds, False) if pinned is None else (pinned, True)
+
+
+def _fresh_for(max_age: float, disk_ttl: float, pinned: bool) -> float:
+    # A pinned host follows the configured window even for rows stored with the
+    # old 600s; a stored 0 still means the server sent no-cache.
+    if pinned:
+        return disk_ttl if max_age > 0 else 0.0
+    return min(float(disk_ttl), float(max_age))
+
+
 def _disk_metadata_reusable(
-    meta, *, ttl_seconds: float, now: float | None = None
+    meta, *, ttl_seconds: float, now: float | None = None, pinned: bool = False
 ) -> bool:
     """True for an unexpired row or one that can be revalidated with 304."""
     if meta is None or ttl_seconds <= 0:
         return False
     current = time.time() if now is None else now
-    fresh_for = min(float(ttl_seconds), float(meta.max_age))
-    if current < meta.validated_at + fresh_for:
+    if current < meta.validated_at + _fresh_for(meta.max_age, ttl_seconds, pinned):
         return True
     return bool(meta.etag or meta.modified)
 
@@ -317,8 +498,11 @@ async def cached_public_resource(
     params: Mapping[str, Any] | Sequence[tuple[str, Any]] | None = None,
     headers: Mapping[str, str] | None = None,
     ttl_seconds: float = DEFAULT_CACHE_TTL_SECONDS,
+    asset: bool = False,
 ) -> bool:
     """True when memory or disk metadata can serve this request without a body read."""
+    if asset:
+        url = rewrite_asset_url(url)
     key, eligible, disk_key, ttl_seconds = await _cache_coordinates(
         url,
         namespace=namespace,
@@ -339,7 +523,8 @@ async def cached_public_resource(
         meta = await asyncio.to_thread(disk.metadata, disk_key)
     except (OSError, sqlite3.Error):
         return False
-    return _disk_metadata_reusable(meta, ttl_seconds=ttl_seconds)
+    disk_ttl, pinned = _disk_lifetime(url, ttl_seconds)
+    return _disk_metadata_reusable(meta, ttl_seconds=disk_ttl, pinned=pinned)
 
 
 async def _fetch_resource(
@@ -353,6 +538,7 @@ async def _fetch_resource(
     ttl_seconds: float,
     max_bytes: int,
     validator: Callable[[HttpResource], object] | None = None,
+    asset: bool = False,
 ) -> HttpResource:
     key, eligible, disk_key, ttl_seconds = await _cache_coordinates(
         url,
@@ -383,6 +569,8 @@ async def _fetch_resource(
         _cache_event(key, "decodes", 1)
         return resource
 
+    disk_ttl, pinned = _disk_lifetime(url, ttl_seconds)
+
     async def request() -> HttpResource:
         cached = None
         if eligible:
@@ -391,7 +579,7 @@ async def _fetch_resource(
             except (OSError, sqlite3.Error):
                 _cache_event(key, "disk_errors", 1)
         if cached is not None:
-            deadline = cached.validated_at + min(ttl_seconds, cached.max_age)
+            deadline = cached.validated_at + _fresh_for(cached.max_age, disk_ttl, pinned)
             if time.time() < deadline:
                 _cache_event(key, "disk_hits", 1)
                 return validate(
@@ -409,14 +597,35 @@ async def _fetch_resource(
                 request_headers["If-None-Match"] = cached.etag
             elif cached.modified:
                 request_headers["If-Modified-Since"] = cached.modified
-        resource = await _request_resource(
-            url,
-            params=params,
-            headers=request_headers,
-            timeout_seconds=timeout_seconds,
-            max_bytes=max_bytes,
-            cached_image=cached,
-        )
+        try:
+            resource = await _request_resource(
+                url,
+                params=params,
+                headers=request_headers,
+                timeout_seconds=timeout_seconds,
+                max_bytes=max_bytes,
+                cached_image=cached,
+                asset=asset,
+            )
+        except (httpx.HTTPError, ValueError, OSError) as exc:
+            if cached is None:
+                raise
+            # stale-if-error: an expired copy beats a blank; retried after a minute.
+            _cache_event(key, "stale_served", 1)
+            logger.debug(
+                f"[http] revalidation failed ({classify_failure(exc)[1]}); "
+                f"serving the stale disk copy namespace={namespace}"
+            )
+            return validate(
+                HttpResource(
+                    cached.content,
+                    cached.content_type,
+                    200,
+                    url,
+                    expires_at=time.time() + STALE_RETRY_SECONDS,
+                    stale=True,
+                )
+            )
         resource = validate(resource)  # Never persist malformed JSON.
         if eligible:
             private = resource.private_response or any(
@@ -436,26 +645,40 @@ async def _fetch_resource(
                 and cached is not None
             ):
                 max_age = min(ttl_seconds, cached.max_age)
+            if pinned:
+                max_age = disk_ttl  # content-addressed: the path changes with the bytes
             if "no-cache" in resource.cache_control.lower():
                 max_age = 0
             if private:
                 resource = replace(resource, expires_at=time.time())
             elif resource.content_type.startswith("image/") or table_eligible:
-                value = DiskImage(
-                    resource.content,
-                    resource.content_type,
-                    resource.etag,
-                    resource.modified,
-                    time.time(),
-                    max_age,
-                )
-                try:
-                    await asyncio.to_thread(
-                        disk.put, disk_key, namespace, value, generation
+                validated_at = time.time()
+                # Queued for the background writer: the caller never waits for SQLite.
+                if resource.status_code == 304 and cached is not None:
+                    # Same bytes: refresh validators and freshness, keep the stored body.
+                    disk.refresh_later(
+                        disk_key,
+                        namespace,
+                        DiskImageMeta(
+                            validated_at, max_age, resource.etag, resource.modified
+                        ),
+                        generation,
                     )
-                except (OSError, sqlite3.Error):
-                    _cache_event(key, "disk_errors", 1)
-                resource = replace(resource, expires_at=value.validated_at + max_age)
+                else:
+                    disk.put_later(
+                        disk_key,
+                        namespace,
+                        DiskImage(
+                            resource.content,
+                            resource.content_type,
+                            resource.etag,
+                            resource.modified,
+                            validated_at,
+                            max_age,
+                        ),
+                        generation,
+                    )
+                resource = replace(resource, expires_at=validated_at + max_age)
             if resource.status_code == 304:
                 _cache_event(key, "not_modified", 1)
                 resource = replace(resource, status_code=200)
@@ -483,10 +706,18 @@ async def fetch_bytes(
     namespace: str,
     params: Mapping[str, Any] | Sequence[tuple[str, Any]] | None = None,
     headers: Mapping[str, str] | None = None,
-    timeout_seconds: float = 10.0,
+    timeout_seconds: float | None = None,
     ttl_seconds: float = DEFAULT_CACHE_TTL_SECONDS,
     max_bytes: int = DEFAULT_MAX_RESOURCE_BYTES,
+    asset: bool = False,
 ) -> HttpResource:
+    """``asset=True`` 走素材通道：独立并发、短连接超时、按主机熔断、可选代理与主机改写。"""
+    if asset:
+        url = rewrite_asset_url(url)
+        if timeout_seconds is None:
+            timeout_seconds = asset_settings().read_timeout
+    elif timeout_seconds is None:
+        timeout_seconds = 10.0
     return await _fetch_resource(
         url,
         namespace=namespace,
@@ -496,6 +727,7 @@ async def fetch_bytes(
         timeout_seconds=timeout_seconds,
         ttl_seconds=ttl_seconds,
         max_bytes=max_bytes,
+        asset=asset,
     )
 
 
@@ -504,9 +736,10 @@ async def fetch_many(
     *,
     namespace: str,
     headers: Mapping[str, str] | None = None,
-    timeout_seconds: float = 10.0,
+    timeout_seconds: float | None = None,
     ttl_seconds: float = DEFAULT_CACHE_TTL_SECONDS,
     max_bytes: int = DEFAULT_MAX_RESOURCE_BYTES,
+    asset: bool = False,
 ) -> dict[str, HttpResource | None]:
     unique_urls = tuple(dict.fromkeys(str(url) for url in urls if url))
     results = await asyncio.gather(
@@ -518,6 +751,7 @@ async def fetch_many(
                 timeout_seconds=timeout_seconds,
                 ttl_seconds=ttl_seconds,
                 max_bytes=max_bytes,
+                asset=asset,
             )
             for url in unique_urls
         ),
@@ -534,8 +768,10 @@ def classify_failure(exc: BaseException) -> tuple[bool, str]:
 
     图床（bbs.hycdn.cn）实测：同一批头像 URL 一组 15 次全 404、另一组 12 个全 200
     ——404 是**间歇**的（边缘节点对象不一致），不能当永久失败，否则会把原有容错削掉。
-    只有确定性的失败才放弃：体积超过上限，重取也不会变小。
+    只有确定性的失败才放弃：体积超过上限，重取也不会变小；主机熔断中，冷却期内重试也不会发请求。
     """
+    if isinstance(exc, HostCircuitOpen):
+        return True, "circuit_open"
     if isinstance(exc, httpx.HTTPStatusError):
         return False, f"http {exc.response.status_code}"
     if isinstance(exc, httpx.TimeoutException):
@@ -548,35 +784,75 @@ def classify_failure(exc: BaseException) -> tuple[bool, str]:
     return False, type(exc).__name__.lower()
 
 
+# 截止时间已过时，仍给内存 / 磁盘缓存命中留的一点时间；网络请求赶不上就判缺失。
+DEADLINE_GRACE_SECONDS = 0.5
+_DEADLINE = object()
+
+
+async def _gather_until(coros: Iterable[Any], deadline: float | None) -> list[Any]:
+    """Like gather(return_exceptions=True), but unfinished items become ``_DEADLINE``."""
+    tasks = [asyncio.ensure_future(coro) for coro in coros]
+    try:
+        if tasks:
+            timeout = None
+            if deadline is not None:
+                timeout = max(DEADLINE_GRACE_SECONDS, deadline - time.monotonic())
+            _done, late = await asyncio.wait(tasks, timeout=timeout)
+            for task in late:
+                task.cancel()
+            if late:
+                await asyncio.gather(*late, return_exceptions=True)
+    finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+    return [
+        _DEADLINE if task.cancelled() else (task.exception() or task.result())
+        for task in tasks
+    ]
+
+
 async def fetch_many_resilient(
     urls: Iterable[str],
     *,
     namespace: str,
     headers: Mapping[str, str] | None = None,
-    timeout_seconds: float = 10.0,
+    timeout_seconds: float | None = None,
     ttl_seconds: float = DEFAULT_CACHE_TTL_SECONDS,
     max_bytes: int = DEFAULT_MAX_RESOURCE_BYTES,
-    attempts: int = 3,
+    attempts: int | None = None,
     base_delay_seconds: float = 0.25,
     log_prefix: str = "[assets]",
+    budget_seconds: float | None = None,
 ) -> tuple[dict[str, HttpResource | None], dict[str, str]]:
-    """并发取多个资源，对间歇性失败退避重试，并返回失败原因。
+    """并发取多个素材，对间歇性失败退避重试，并返回失败原因。
 
-    与 fetch_many 的区别只有两点，都是为图床的抖动服务：
-    1. 失败会重试（默认 3 轮，0.25s / 0.5s 退避）——hycdn 的 404 与超时都是间歇的；
-    2. 放弃的原因会写进日志，调用方不再只看到「少了几张图」。
+    与 fetch_many 的区别，都是为图床的抖动与不可达服务：
+    1. 走素材通道（独立并发、短连接超时、按主机熔断），不占 API 请求的并发；
+    2. 失败会重试（默认重试 1 次，0.25s 退避）——hycdn 的 404 与超时都是间歇的；
+    3. 整批有总预算（默认取 OTAE_HTTP_ASSET_RENDER_BUDGET，或外层 asset_render_budget
+       设定的整卡截止时间），到点不再等待，未取到的按缺失返回；
+    4. 放弃的原因会写进日志，调用方不再只看到「少了几张图」。
+    5. 重新校验失败或到点没取到时，有旧磁盘副本就用旧图（stale=True），不算失败。
     第一项覆盖**每一个**请求过的 url（失败为 None），第二项只保留最终失败原因，
     调用方既不会悄悄少图，也能决定是否把失败详情带入诊断信息。
     """
+    if attempts is None:
+        attempts = asset_settings().attempts
+    deadline = batch_deadline(budget_seconds)
     unique_urls = tuple(dict.fromkeys(str(url) for url in urls if url))
     resolved: dict[str, HttpResource] = {}
     failures: dict[str, str] = {}
     pending = list(unique_urls)
+    expired = False
     for attempt in range(max(1, attempts)):
         if not pending:
             break
-        results = await asyncio.gather(
-            *(
+        if attempt and deadline is not None and time.monotonic() >= deadline:
+            expired = True
+            break
+        results = await _gather_until(
+            (
                 fetch_bytes(
                     url,
                     namespace=namespace,
@@ -584,13 +860,18 @@ async def fetch_many_resilient(
                     timeout_seconds=timeout_seconds,
                     ttl_seconds=ttl_seconds,
                     max_bytes=max_bytes,
+                    asset=True,
                 )
                 for url in pending
             ),
-            return_exceptions=True,
+            deadline,
         )
         retry: list[str] = []
         for url, outcome in zip(pending, results):
+            if outcome is _DEADLINE:
+                failures[url] = "deadline"
+                expired = True
+                continue
             if isinstance(outcome, BaseException):
                 give_up, reason = classify_failure(outcome)
                 failures[url] = reason
@@ -601,18 +882,85 @@ async def fetch_many_resilient(
             failures.pop(url, None)
         pending = retry
         if pending and attempt + 1 < attempts:
-            await asyncio.sleep(base_delay_seconds * (2**attempt))
+            delay = base_delay_seconds * (2**attempt)
+            if deadline is not None:
+                delay = min(delay, max(0.0, deadline - time.monotonic()))
+            await asyncio.sleep(delay)
     if failures:
+        # 截止时间已到或重新校验失败：有旧磁盘副本的先用旧图，不画空白。
+        # 没跑完的请求仍在后台继续，拿到新图后更新缓存，下次渲染就是新的。
+        try:
+            recovered = await _stale_copies(
+                list(failures),
+                namespace=namespace,
+                headers=headers,
+                ttl_seconds=ttl_seconds,
+                max_bytes=max_bytes,
+            )
+        except (OSError, sqlite3.Error, httpx.HTTPError) as exc:
+            logger.debug(f"{log_prefix} stale lookup failed: {type(exc).__name__}")
+            recovered = {}
+        for url, resource in recovered.items():
+            resolved[url] = resource
+            failures.pop(url, None)
+    stale = sum(1 for resource in resolved.values() if getattr(resource, "stale", False))
+    if failures or stale:
         summary = ", ".join(
             f"{url.rsplit('/', 1)[-1][:12]}={failures[url]}"
             for url in list(failures)[:6]
         )
-        logger.warning(
-            f"{log_prefix} fetch incomplete "
+        log = logger.warning if failures else logger.info
+        log(
+            f"{log_prefix} fetch {'incomplete' if failures else 'used stale copies'} "
             f"namespace={namespace} requested={len(unique_urls)} resolved={len(resolved)} "
-            f"failed={len(failures)} detail={summary}"
+            f"failed={len(failures)} stale={stale}{' deadline=hit' if expired else ''}"
+            f"{f' detail={summary}' if summary else ''}"
         )
     return {url: resolved.get(url) for url in unique_urls}, failures
+
+
+async def _stale_copies(
+    urls: Sequence[str],
+    *,
+    namespace: str,
+    headers: Mapping[str, str] | None,
+    ttl_seconds: float,
+    max_bytes: int,
+) -> dict[str, HttpResource]:
+    """Disk copies of any age for asset URLs a batch could not fetch in time."""
+    lookups = []
+    for url in urls:
+        target = rewrite_asset_url(url)
+        _key, eligible, disk_key, _ttl = await _cache_coordinates(
+            target,
+            namespace=namespace,
+            response_kind="bytes",
+            params=None,
+            headers=headers,
+            ttl_seconds=ttl_seconds,
+        )
+        if eligible:
+            lookups.append((url, target, disk_key))
+    if not lookups:
+        return {}
+    disk = public_images
+
+    def read() -> dict[str, HttpResource]:
+        found = {}
+        for url, target, disk_key in lookups:
+            image = disk.get(disk_key, max_bytes)
+            if image is not None:
+                found[url] = HttpResource(
+                    image.content,
+                    image.content_type,
+                    200,
+                    target,
+                    expires_at=time.time(),
+                    stale=True,
+                )
+        return found
+
+    return await asyncio.to_thread(read)
 
 
 async def fetch_json(
@@ -732,18 +1080,27 @@ async def get_http_cache_diagnostics() -> dict[str, Any]:
 
 async def close_http_client() -> None:
     global _client, _client_lifetime, _request_semaphore, _semaphore_loop
+    global _asset_client, _asset_client_lifetime, _asset_semaphore, _asset_semaphore_loop
+    global _asset_proxy_client, _asset_proxy_client_lifetime
     await asyncio.gather(*(pool.close() for pool in _cache_pools))
     with _client_lock:
-        client = _client
-        _client = None
-        lifetime = _client_lifetime
-        _client_lifetime = None
-    if lifetime is not None:
-        await lifetime[1].aclose()
-    if client is not None:
-        await client.aclose()
+        clients = (_client, _asset_client, _asset_proxy_client)
+        lifetimes = (_client_lifetime, _asset_client_lifetime, _asset_proxy_client_lifetime)
+        _client = _asset_client = _asset_proxy_client = None
+        _client_lifetime = _asset_client_lifetime = _asset_proxy_client_lifetime = None
+    for lifetime in lifetimes:
+        if lifetime is not None:
+            await lifetime[1].aclose()
+    for client in clients:
+        if client is not None:
+            await client.aclose()
     _request_semaphore = None
     _semaphore_loop = None
+    _asset_semaphore = None
+    _asset_semaphore_loop = None
+    # 熔断、直连记录与素材配置随客户端一起重置；下次使用时重新读取环境变量。
+    configure_asset_settings(None)
     await clear_http_cache(include_disk=False)
+    # close() 先把排队的磁盘写入落盘（有上限），再断开连接。
     await asyncio.to_thread(public_images.close)
     await asyncio.to_thread(public_tables.close)

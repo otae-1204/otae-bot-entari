@@ -1,7 +1,8 @@
-"""抽卡分析图 v3 前端：分栏与排序、保底格、记录行、按实测高度分页、渲染入口与回退。"""
+"""抽卡分析图 v3 前端：宽度、重构侧栏与两栏折叠、排序、保底格、记录行、按实测高度分页、渲染入口与回退。"""
 
 from __future__ import annotations
 
+import base64
 import importlib
 import importlib.util
 import os
@@ -51,6 +52,8 @@ NextReward = models.NextReward
 GachaRecord = store_module.GachaRecord
 TS = 1_790_000_000
 DAY = 86_400
+# 三个池格的标题（不含卡池总数格）：kicker 用 <small>，标题是 .metric-title 里唯一的 <span>
+SUMMARY_TITLE = r'<div class="metric-head"><div class="metric-title"><small>[^<]*</small><span>([^<]+)</span>'
 
 
 def _role(nickname: str = "示例玩家"):
@@ -89,6 +92,14 @@ def _layout(view, **kwargs):
     return columns, rows
 
 
+def _column(columns, key: str):
+    return next(column for column in columns if column.spec.key == key)
+
+
+def _other_section(columns):
+    return next(section for column in columns for section in column.sections if section.spec.divider)
+
+
 def _fake_measure(columns, rows, *, row=50.0, head=110.0, head_cont=60.0, base=20.0,
                   overhead_first=520.0, overhead_cont=260.0):
     pools = {
@@ -104,21 +115,23 @@ def _raw_measure(view, *, row=50.0):
     columns, rows = _layout(view)
     full = {key: {"total": 20 + 110 + row * len(items) + 6 * max(len(items) - 1, 0), "head": 110.0,
                   "rows": [row] * len(items)} for key, items in rows.items()}
+    count = len(columns)
     return {
-        "first": {"card": 3000.0, "cols": [2480.0, 2300.0, 2200.0], "heads": [70.0, 70.0, 70.0]},
-        "cont": {"card": 500.0, "cols": [240.0, 240.0, 240.0], "heads": [72.0, 72.0, 72.0]},
+        "first": {"card": 3000.0, "cols": [2480.0, 2300.0, 2200.0][:count], "heads": [70.0] * count},
+        "cont": {"card": 500.0, "cols": [240.0] * count, "heads": [72.0] * count},
         "blocks": {"divider": 60.0, "divider_cont": 60.0, "note": 40.0, "empty": 50.0, "hint": 30.0, "done": 50.0},
         "full": full, "cont_heads": {key: 60.0 for key in rows}, "row_gap": 6.0,
     }
 
 
-def _heavy_view(*, pools_per_column: int = 14, sixes: int = 9):
+def _heavy_view(*, pools_per_column: int = 14, sixes: int = 9, rerun: bool = True):
     pools = [_pool("special_cur#0", "特许当期", "special", current=True, sixes=sixes, latest=TS + 99 * DAY,
                    small_pity_limit=80, small_pity_progress=10)]
     pools += [_pool(f"special_{index}#0", f"特许历史{index}", "special", sixes=sixes, latest=TS + index * DAY)
               for index in range(pools_per_column)]
-    pools += [_pool(f"rerun_{index}#1", f"重构{index}", "rerun", sixes=sixes // 2, latest=TS + index * DAY,
-                    series_key=f"rerun:{index}") for index in range(pools_per_column // 2)]
+    if rerun:
+        pools += [_pool(f"rerun_{index}#1", f"重构{index}", "rerun", sixes=sixes // 2, latest=TS + index * DAY,
+                        series_key=f"rerun:{index}") for index in range(pools_per_column // 2)]
     pools += [_pool("joint_a#0", "特殊寻访甲", "joint", sixes=3, latest=TS),
               _pool("standard#0", "基础寻访", "standard", sixes=sixes * 3, latest=TS + DAY)]
     pools += [_pool(f"weponbox_{index}#0", f"武库{index}", "weapon_limited", item_type="武器", sixes=sixes,
@@ -127,30 +140,96 @@ def _heavy_view(*, pools_per_column: int = 14, sixes: int = 9):
 
 
 class GachaColumnLayoutTests(unittest.TestCase):
-    def test_kinds_map_to_three_columns_and_other_section(self):
-        view = _view([
-            _pool("special_a#0", "特许甲", "special"),
-            _pool("rerun_a#1", "重构甲", "rerun", series_key="rerun:a"),
-            _pool("joint_a#0", "特殊甲", "joint"),
-            _pool("standard#0", "基础寻访", "standard"),
-            _pool("beginner#0", "启程寻访", "beginner"),
-            _pool("collab#0", "联动寻访", "unknown_char"),
-            _pool("weponbox_a#0", "限时甲", "weapon_limited", item_type="武器"),
-            _pool("rerun_wpn_a#1", "点绘申领", "weapon_rerun", item_type="武器", series_key="weapon_rerun:a"),
-            _pool("weaponbox_constant_a#0", "常驻申领", "weapon_constant", item_type="武器"),
-            _pool("odd#0", "奇怪申领", "unknown_weapon", item_type="武器"),
-        ])
-        columns = draw.build_gacha_columns(view)
-        keys = [[[card.pool.pool_id for card in section.cards] for section in column.sections] for column in columns]
+    ALL_KINDS = [
+        _pool("special_a#0", "特许甲", "special"),
+        _pool("rerun_a#1", "重构甲", "rerun", series_key="rerun:a"),
+        _pool("joint_a#0", "特殊甲", "joint"),
+        _pool("standard#0", "基础寻访", "standard"),
+        _pool("beginner#0", "启程寻访", "beginner"),
+        _pool("collab#0", "联动寻访", "unknown_char"),
+        _pool("weponbox_a#0", "限时甲", "weapon_limited", item_type="武器"),
+        _pool("rerun_wpn_a#1", "点绘申领", "weapon_rerun", item_type="武器", series_key="weapon_rerun:a"),
+        _pool("weaponbox_constant_a#0", "常驻申领", "weapon_constant", item_type="武器"),
+        _pool("odd#0", "奇怪申领", "unknown_weapon", item_type="武器"),
+    ]
+
+    def _keys(self, columns):
+        return [[[card.pool.pool_id for card in section.cards] for section in column.sections] for column in columns]
+
+    def test_rerun_side_right_puts_rerun_and_other_in_the_last_column(self):
+        columns = draw.build_gacha_columns(_view(self.ALL_KINDS), rerun_side="right")
+        self.assertEqual([column.spec.key for column in columns], ["special", "weapon", "rerun"])
+        self.assertEqual([column.spec.title for column in columns], ["特许寻访", "武器申领", "重构寻访"])
+        keys = self._keys(columns)
         self.assertEqual(keys[0], [["special_a"]])
-        self.assertEqual(keys[1][0], ["rerun_a"])
-        self.assertEqual(set(keys[1][1]), {"joint_a", "standard", "beginner", "collab"})
+        self.assertEqual(set(keys[1][0]), {"weponbox_a", "rerun_wpn_a", "weaponbox_constant_a", "odd"})
+        self.assertEqual(keys[2][0], ["rerun_a"])
+        self.assertEqual(set(keys[2][1]), {"joint_a", "standard", "beginner", "collab"})
+        self.assertEqual(columns[2].sections[1].spec.divider, "其他寻访")
+        self.assertEqual([column.index for column in columns], [0, 1, 2])
+
+    def test_rerun_side_left_puts_rerun_and_other_in_the_first_column(self):
+        columns = draw.build_gacha_columns(_view(self.ALL_KINDS), rerun_side="left")
+        self.assertEqual([column.spec.key for column in columns], ["rerun", "special", "weapon"])
+        keys = self._keys(columns)
+        self.assertEqual(keys[0][0], ["rerun_a"])
+        self.assertEqual(set(keys[0][1]), {"joint_a", "standard", "beginner", "collab"})
+        self.assertEqual(keys[1], [["special_a"]])
         self.assertEqual(set(keys[2][0]), {"weponbox_a", "rerun_wpn_a", "weaponbox_constant_a", "odd"})
-        self.assertEqual(columns[1].sections[1].spec.divider, "其他寻访")
+
+    def test_rerun_side_comes_from_env_and_defaults_to_right(self):
+        view = _view(self.ALL_KINDS)
+        cases = {"": "special", "right": "special", " LEFT ": "rerun", "middle": "special"}
+        for raw, first in cases.items():
+            with self.subTest(raw=raw), mock.patch.dict(os.environ, {draw.GACHA_RERUN_SIDE_ENV: raw}):
+                self.assertEqual(draw.build_gacha_columns(view)[0].spec.key, first)
+        self.assertEqual(draw.GACHA_RERUN_SIDE_DEFAULT, "right")
+        with self.assertRaises(ValueError):
+            draw.build_gacha_columns(view, rerun_side="middle")
+
+    def test_side_column_is_narrower_than_the_main_columns(self):
+        for side in draw.GACHA_RERUN_SIDES:
+            columns = draw.build_gacha_columns(_view(self.ALL_KINDS), rerun_side=side)
+            shares = {column.spec.key: column.spec.share for column in columns}
+            self.assertEqual(shares["special"], shares["weapon"])
+            self.assertLess(shares["rerun"], shares["special"])
+            style = draw._grid_style(columns)
+            self.assertEqual(style.count("minmax(0,"), 3)
+            self.assertIn(f"minmax(0,{draw.SIDE_COLUMN_SHARE:g}fr)", style)
+
+    def test_no_rerun_collapses_to_two_columns_on_both_sides(self):
+        pools = [pool for pool in self.ALL_KINDS if pool.kind_key != "rerun"]
+        for side in draw.GACHA_RERUN_SIDES:
+            with self.subTest(side=side):
+                columns = draw.build_gacha_columns(_view(pools), rerun_side=side)
+                self.assertEqual([column.spec.key for column in columns], ["special", "weapon"])
+                keys = self._keys(columns)
+                # 「其他寻访」接在特许寻访下方，两栏宽度相同、没有空的重构栏
+                self.assertEqual(keys[0][0], ["special_a"])
+                self.assertEqual(set(keys[0][1]), {"joint_a", "standard", "beginner", "collab"})
+                self.assertEqual(columns[0].sections[1].spec.divider, "其他寻访")
+                self.assertEqual(set(keys[1][0]), {"weponbox_a", "rerun_wpn_a", "weaponbox_constant_a", "odd"})
+                self.assertEqual(draw._grid_style(columns), "grid-template-columns:minmax(0,1fr) minmax(0,1fr)")
+                self.assertFalse(any(section.spec.empty == "暂无重构寻访记录"
+                                     for column in columns for section in column.sections))
+
+    def test_weapon_rerun_alone_does_not_make_a_rerun_column(self):
+        view = _view([_pool("rerun_wpn_a#1", "点绘申领", "weapon_rerun", item_type="武器",
+                            series_key="weapon_rerun:a")])
+        self.assertEqual([column.spec.key for column in draw.build_gacha_columns(view)], ["special", "weapon"])
 
     def test_every_registry_kind_has_a_column(self):
-        mapped = {kind for column in draw.GACHA_COLUMNS for section in column.sections for kind in section.kinds}
-        self.assertEqual(mapped, set(sys.modules[f"{PACKAGE}.gacha.pools"].KINDS_BY_KEY))
+        registry = set(sys.modules[f"{PACKAGE}.gacha.pools"].KINDS_BY_KEY)
+        for name, columns in draw.GACHA_LAYOUTS.items():
+            mapped = {kind for column in columns for section in column.sections for kind in section.kinds}
+            self.assertEqual(mapped, registry - ({"rerun"} if name == "two" else set()), name)
+
+    def test_kind_label_is_hidden_only_for_special_pools(self):
+        columns = draw.build_gacha_columns(_view([pool for pool in self.ALL_KINDS if pool.kind_key != "rerun"]))
+        special, other = columns[0].sections
+        self.assertFalse(special.spec.show_kind)
+        self.assertTrue(other.spec.show_kind)
+        self.assertTrue(all(section.spec.show_kind for section in columns[1].sections))
 
     def test_current_first_then_series_adjacent_newest_period_first(self):
         view = _view([
@@ -161,7 +240,7 @@ class GachaColumnLayoutTests(unittest.TestCase):
                   series_index=2, series_run_count=2),
             _pool("rerun_long#1", "名字很长的重构", "rerun", latest=TS + 30 * DAY, series_key="rerun:long"),
         ])
-        cards = draw.build_gacha_columns(view)[1].sections[0].cards
+        cards = _column(draw.build_gacha_columns(view), "rerun").sections[0].cards
         self.assertEqual([card.key for card in cards], ["rerun_x#2", "rerun_x#1", "rerun_old#1", "rerun_long#1"])
         self.assertEqual([card.featured for card in cards], [True, False, False, False])
 
@@ -181,7 +260,7 @@ class GachaColumnLayoutTests(unittest.TestCase):
         layouts = []
         for pool_id, version in (("rerun_chr_x", 2), ("rerun_chr_x_b", 1)):
             view = gacha_module.build_gacha_analysis(_role(), records(pool_id, version), [], pool_rules=rules)
-            cards = draw.build_gacha_columns(view)[1].sections[0].cards
+            cards = _column(draw.build_gacha_columns(view), "rerun").sections[0].cards
             layouts.append([(card.pool.series_index, card.featured, card.pool.series_inherited_to) for card in cards])
             pieces = [draw.render_pool_piece(card, draw.render_pool_rows(card), 0, 1, cont=False, open_end=False,
                                              show_kind=True) for card in cards]
@@ -198,21 +277,27 @@ class GachaColumnLayoutTests(unittest.TestCase):
             _pool("joint_a#0", "特殊甲", "joint"),
         ], show_standard_pools=False)
         columns, rows = _layout(view)
-        other = columns[1].sections[1]
+        other = _other_section(columns)
         self.assertEqual([card.pool.pool_id for card in other.cards], ["joint_a"])
         self.assertEqual([card.pool.pool_id for card in other.hidden], ["standard"])
-        units = draw.column_units(columns[1], {key: len(items) for key, items in rows.items()})
+        # 没有重构池 → 两栏，「其他寻访」在特许寻访栏：暂无特许 → 分组标题 → 卡片 → 隐藏说明
+        units = draw.column_units(_column(columns, "special"), {key: len(items) for key, items in rows.items()})
         self.assertEqual([unit.kind for unit in units], ["empty", "divider", "card", "note"])
         self.assertIn("基础寻访已按设置隐藏：210 抽 · 2 个六星，仍计入总数与角色寻访", units[-1].text)
         self.assertEqual(view.total, 310)
-        shown = draw.build_gacha_columns(view, show_standard=True)[1].sections[1]
+        shown = _other_section(draw.build_gacha_columns(view, show_standard=True))
         self.assertEqual({card.pool.pool_id for card in shown.cards}, {"joint_a", "standard"})
 
     def test_only_hidden_standard_keeps_the_other_section(self):
         view = _view([_pool("standard#0", "基础寻访", "standard", sixes=1)], show_standard_pools=False)
         columns, rows = _layout(view)
-        units = draw.column_units(columns[1], {key: len(items) for key, items in rows.items()})
+        units = draw.column_units(_column(columns, "special"), {key: len(items) for key, items in rows.items()})
         self.assertEqual([unit.kind for unit in units], ["empty", "divider", "note"])
+        rerun_view = _view([_pool("standard#0", "基础寻访", "standard", sixes=1),
+                            _pool("rerun_a#1", "重构甲", "rerun", series_key="rerun:a")], show_standard_pools=False)
+        columns, rows = _layout(rerun_view)
+        units = draw.column_units(_column(columns, "rerun"), {key: len(items) for key, items in rows.items()})
+        self.assertEqual([unit.kind for unit in units], ["card", "divider", "note"])
 
     def test_missing_kind_key_falls_back_to_registry_detection(self):
         view = _view([
@@ -223,8 +308,8 @@ class GachaColumnLayoutTests(unittest.TestCase):
         columns = draw.build_gacha_columns(view)
         self.assertEqual([card.pool.pool_id for card in columns[0].sections[0].cards], ["special_old"])
         self.assertTrue(columns[0].sections[0].cards[0].featured)
-        self.assertEqual([card.pool.pool_id for card in columns[1].sections[1].cards], ["pool"])
-        self.assertEqual([card.pool.pool_id for card in columns[2].sections[0].cards], ["weapon"])
+        self.assertEqual([card.pool.pool_id for card in columns[0].sections[1].cards], ["pool"])
+        self.assertEqual([card.pool.pool_id for card in columns[1].sections[0].cards], ["weapon"])
 
     def test_duplicate_card_keys_are_made_unique(self):
         view = _view([PoolAnalysis("same", "甲", "角色", 1, 0), PoolAnalysis("same", "乙", "武器", 1, 0)])
@@ -351,6 +436,78 @@ class GachaRowTests(unittest.TestCase):
         self.assertNotIn(" · <", meta)       # 「·」贴着前一段，不会出现在行首
 
 
+class GachaTypographyTests(unittest.TestCase):
+    def test_css_only_uses_weights_the_bundled_font_has(self):
+        weights = set(re.findall(r"font-weight:\s*(\d+)", draw.GACHA_CSS))
+        self.assertTrue(weights)
+        self.assertLessEqual(weights, {"400", "500", "700"})
+        self.assertIsNone(re.search(r"font-weight:\s*(800|850|900|950)", draw.GACHA_CSS))
+        self.assertIn("font-synthesis:none", draw.GACHA_CSS)
+
+    def test_harmonyos_font_face_is_embedded_and_first_in_the_stack(self):
+        family = draw.GACHA_FONT_FAMILY
+        self.assertIn(f"font-family:'{family}','Microsoft YaHei','PingFang SC','Noto Sans SC',Arial,sans-serif",
+                      draw.GACHA_CSS)
+        faces = draw.gacha_font_face_css()
+        self.assertEqual(re.findall(rf'@font-face\{{font-family:"{family}";font-weight:(\d+)', faces),
+                         ["400", "500", "700"])
+        for _weight, name in draw.GACHA_FONT_FILES:
+            path = draw.GACHA_FONT_DIR / name
+            self.assertTrue(name.startswith("HarmonyOS_Sans_SC_") and path.is_file(), path)
+            head = base64.b64encode(path.read_bytes()[:48]).decode("ascii")
+            self.assertIn(f"url(data:font/ttf;base64,{head}", faces)
+        document = draw._document("<div></div>")
+        self.assertLess(document.index("@font-face"), document.index(draw.GACHA_CSS))
+
+    def test_missing_font_files_fall_back_to_the_system_stack(self):
+        draw.gacha_font_face_css.cache_clear()
+        try:
+            with mock.patch.object(draw, "GACHA_FONT_DIR", Path("/nonexistent/fonts")):
+                self.assertEqual(draw.gacha_font_face_css(), "")
+                self.assertIn("'Microsoft YaHei'", draw._document("<div></div>"))
+        finally:
+            draw.gacha_font_face_css.cache_clear()
+
+    def test_summary_small_text_is_at_least_12px(self):
+        sizes = [
+            float(size)
+            for selectors, body in re.findall(r"([^{}]+)\{([^{}]*)\}", draw.GACHA_CSS)
+            if re.search(r"\.(total|metric|expectation)", selectors)
+            for size in re.findall(r"font-size:([\d.]+)px", body)
+        ]
+        self.assertTrue(sizes)
+        self.assertGreaterEqual(min(sizes), 12)
+
+    def test_summary_titles_are_dark_bold_and_share_one_heading_block(self):
+        rules = {selectors.strip(): body for selectors, body in re.findall(r"([^{}]+)\{([^{}]*)\}", draw.GACHA_CSS)}
+
+        def size(selector: str) -> float:
+            return float(re.search(r"font-size:([\d.]+)px", rules[selector]).group(1))
+
+        title = rules[".metric-title span"]
+        self.assertIn("font-weight:700", title)
+        self.assertIn("color:#181818", title)
+        self.assertGreaterEqual(size(".metric-title span"), 18)
+        # 层级：标题明显大于下方副标题与期望行标签，kicker 最小
+        self.assertGreater(size(".metric-title span"), size(".total>small,.metric>small") + 4)
+        self.assertGreater(size(".metric-title span"), size(".expectation-label strong"))
+        self.assertLess(size(".metric-title small"), size(".metric-title span"))
+        # 总数与标题底边对齐，而不是标题贴在大数字底下当说明文字
+        self.assertIn("align-items:flex-end", rules[".total-head,.metric-head"])
+        self.assertIn("line-height:1", rules[".metric-head strong"])
+
+        view = _view([
+            _pool("special_a#0", "特许", "special", current=True),
+            _pool("rerun_a#1", "重构", "rerun", series_key="rerun:a"),
+            _pool("weponbox_a#0", "限时", "weapon_limited", item_type="武器"),
+        ])
+        columns, _ = _layout(view)
+        summary = draw._summary_html(view, columns)
+        self.assertEqual(re.findall(r'<div class="metric-title"><small>[^<]+</small><span>([^<]+)</span>', summary),
+                         ["卡池总数", "特许寻访", "武器申领", "重构寻访"])
+        self.assertIn('<div class="total-head"><div class="metric-title">', summary)
+
+
 class GachaPaginationTests(unittest.TestCase):
     def _paginate(self, view, **measure_kwargs):
         columns, rows = _layout(view)
@@ -358,6 +515,43 @@ class GachaPaginationTests(unittest.TestCase):
         units = [draw.column_units(column, {key: len(items) for key, items in rows.items()}) for column in columns]
         pages, info = draw.paginate_gacha(columns, units, measure)
         return columns, rows, measure, pages, info
+
+    def _check_pages(self, rows, measure, pages, cap):
+        """每页（开销 + 最高一栏）≤ cap − 余量；每条记录行恰好出现一次。"""
+        seen = []
+        for page_index, page in enumerate(pages):
+            heights = [draw.column_height(units, measure.heads[(index, page_index > 0)], measure)
+                       for index, units in enumerate(page)]
+            overhead = measure.overhead_cont if page_index else measure.overhead_first
+            self.assertLessEqual(overhead + max(heights), cap - draw.GACHA_PAGE_SAFETY + 0.01)
+            seen.extend((unit.card.key, row) for units in page for unit in units if unit.kind == "card"
+                        for row in range(unit.start, unit.end))
+        self.assertEqual(sorted(seen), sorted((key, row) for key, items in rows.items() for row in range(len(items))))
+        self.assertEqual(len(seen), len(set(seen)))
+
+    def test_page_height_cap_comes_from_the_module_constant(self):
+        columns, rows = _layout(_heavy_view())
+        measure = _fake_measure(columns, rows)
+        units = [draw.column_units(column, {key: len(items) for key, items in rows.items()}) for column in columns]
+        default_pages, _ = draw.paginate_gacha(columns, units, measure)
+        self._check_pages(rows, measure, default_pages, draw.GACHA_PAGE_MAX_HEIGHT)
+        low_pages, info = draw.paginate_gacha(columns, units, measure, max_height=3000)
+        self.assertGreater(len(low_pages), len(default_pages))
+        self.assertEqual(info["budget_first"], round(3000 - measure.overhead_first - draw.GACHA_PAGE_SAFETY, 1))
+        self._check_pages(rows, measure, low_pages, 3000)
+        with mock.patch.object(draw, "GACHA_PAGE_MAX_HEIGHT", 3000):
+            patched_pages, _ = draw.paginate_gacha(columns, units, measure)
+        self.assertEqual(len(patched_pages), len(low_pages))
+
+    def test_two_column_layout_paginates_with_other_section_under_special(self):
+        columns, rows, measure, pages, info = self._paginate(_heavy_view(rerun=False))
+        self.assertEqual([column.spec.key for column in columns], ["special", "weapon"])
+        self.assertGreater(len(pages), 1)
+        self.assertTrue(all(len(page) == 2 for page in pages))
+        self._check_pages(rows, measure, pages, draw.GACHA_PAGE_MAX_HEIGHT)
+        dividers = [unit for page in pages for unit in page[0] if unit.kind == "divider"]
+        self.assertEqual([unit.section.spec.divider for unit in dividers if not unit.cont], ["其他寻访"])
+        self.assertFalse(any(unit.kind == "divider" for page in pages for unit in page[1]))
 
     def test_single_page_when_it_fits(self):
         view = _view([_pool("special_a#0", "特许", "special", current=True, sixes=3)])
@@ -435,10 +629,11 @@ class GachaPaginationTests(unittest.TestCase):
                         self.assertIn(kinds[position + 1], ("card", "note"))
                 if page_index and units[0].kind in ("card", "note") and units[0].section.spec.divider:
                     self.fail("续页从「其他寻访」中间开始时必须先补「其他寻访（续）」")
-        split_standard = any(unit.cont for page in pages[1:] for unit in page[1]
+        side = _column(columns, "rerun").index
+        split_standard = any(unit.cont for page in pages[1:] for unit in page[side]
                              if unit.kind == "card" and unit.card.kind.key == "standard")
         self.assertTrue(split_standard)
-        self.assertTrue(any(page[1][0].kind == "divider" and page[1][0].cont for page in pages[1:]))
+        self.assertTrue(any(page[side][0].kind == "divider" and page[side][0].cont for page in pages[1:]))
 
     def test_small_cards_move_whole_and_pagination_is_deterministic(self):
         view = _heavy_view(sixes=2)
@@ -509,6 +704,49 @@ class GachaRenderTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("重构寻访", summary)
         self.assertIn("含常驻 30", summary)
         self.assertNotIn("待确认", summary)
+        # 总览格顺序跟随栏序（默认重构在右）
+        self.assertEqual(re.findall(SUMMARY_TITLE, summary), ["特许寻访", "武器申领", "重构寻访"])
+
+    async def test_pages_use_the_gacha_width_and_both_rerun_sides(self):
+        view = _heavy_view()
+        self.assertEqual(draw.GACHA_CARD_WIDTH, 1600)
+        self.assertNotIn("1280px", draw.GACHA_CSS)
+        self.assertIn("width:var(--gacha-width)", draw.GACHA_CSS)
+        expected = {"right": ["special", "weapon", "rerun"], "left": ["rerun", "special", "weapon"]}
+        for side, order in expected.items():
+            with self.subTest(side=side), mock.patch.dict(os.environ, {draw.GACHA_RERUN_SIDE_ENV: side}):
+                pages, documents, evaluate, _ = await self._render(view)
+                self.assertGreater(len(pages), 1)
+                self.assertEqual(evaluate.await_args.kwargs["viewport"][0], draw.GACHA_CARD_WIDTH)
+                for document in documents:
+                    self.assertIn(f"--gacha-width:{draw.GACHA_CARD_WIDTH}px", document)
+                    self.assertIn('data-cols="3"', document)
+                    self.assertEqual(re.findall(r'data-key="(\w+)"', document), order)
+                titles = re.findall(SUMMARY_TITLE, documents[0])
+                self.assertEqual(titles, [{"special": "特许寻访", "weapon": "武器申领", "rerun": "重构寻访"}[key]
+                                          for key in order])
+
+    async def test_no_rerun_pages_have_two_columns_on_both_sides(self):
+        view = _view([
+            _pool("special_a#0", "特许", "special", current=True, sixes=2),
+            _pool("standard#0", "基础寻访", "standard", sixes=3),
+            _pool("weponbox_a#0", "限时", "weapon_limited", item_type="武器", sixes=1),
+        ])
+        for side in draw.GACHA_RERUN_SIDES:
+            with self.subTest(side=side), mock.patch.dict(os.environ, {draw.GACHA_RERUN_SIDE_ENV: side}):
+                pages, documents, _, _ = await self._render(view)
+                self.assertEqual(len(pages), 1)
+                document = documents[0]
+                self.assertEqual(re.findall(r'data-key="(\w+)"', document), ["special", "weapon"])
+                self.assertIn('data-cols="2"', document)
+                self.assertNotIn("暂无重构寻访记录", document)
+                summary = document.split('class="summary"', 1)[1].split("</section>", 1)[0]
+                self.assertIn("repeat(2,minmax(0,1fr))", summary)
+                self.assertEqual(summary.count('class="metric"'), 2)
+                self.assertNotIn("重构寻访", summary)
+                special = document.split('data-key="special"', 1)[1].split('data-key="weapon"', 1)[0]
+                self.assertIn("<h3>其他寻访</h3>", special)
+                self.assertIn('data-pool="standard#0"', special)
 
     async def test_height_overflow_repacks_once_with_larger_safety(self):
         view = _heavy_view()
@@ -540,7 +778,8 @@ class GachaRenderTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(pages, (b"v1",))
         self.assertEqual(legacy.await_count, 2)
 
-    async def test_entry_switch_and_height_constants(self):
+    async def test_entry_switch_and_size_constants(self):
+        self.assertEqual(draw.GACHA_CARD_WIDTH, 1600)
         self.assertEqual(draw.GACHA_PAGE_MAX_HEIGHT, 4096)
         self.assertEqual(cards_module.CARD_MAX_HEIGHT, 6144)
         view = _view([_pool("special_a#0", "特许", "special")])
@@ -553,7 +792,7 @@ class GachaRenderTests(unittest.IsolatedAsyncioTestCase):
             with mock.patch.dict(os.environ, {"ENDFIELD_GACHA_LAYOUT": ""}):
                 self.assertEqual(await cards_module.draw_gacha_analysis_cards(view, uid="u"), (b"v3",))
 
-    async def test_real_browser_page_is_1280_wide_and_within_limit(self):
+    async def test_real_browser_page_is_card_width_wide_and_within_limit(self):
         view = _view([
             _pool("special_a#0", "特许寻访·示例名称很长很长的卡池用于换行测试", "special", current=True, sixes=4,
                   small_pity_limit=80, small_pity_progress=12),

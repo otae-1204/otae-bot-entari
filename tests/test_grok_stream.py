@@ -15,7 +15,7 @@ import httpx
 from satori import ChannelType, File, Image, Text
 
 from otae_bot.group_features import GroupFeatureStore
-from plugins.grok_bot import conversations, handlers, stream
+from plugins.grok_bot import conversations, gateway, handlers, stream
 from plugins.grok_bot.config import GrokConfig, GrokError
 from plugins.grok_bot.conversations import ConversationScope, SessionStore
 from plugins.grok_bot.media import Attachment, Reply
@@ -203,12 +203,32 @@ class StreamTests(unittest.IsolatedAsyncioTestCase):
             raise httpx.RemoteProtocolError("secret-token")
 
         self.host.hooks["sendPrompt"] = lost
-        with self.assertRaisesRegex(GrokError, "RemoteProtocolError"):
-            await self.submit("followup", "B")
+        with patch.object(gateway, "PROMPT_SETTLE", 0):
+            self.assertEqual(await self.submit("followup", "B"), Reply())  # Recorded under its nonce.
         self.host.publish(aid, "追加后的结果")
         await until(lambda: bool(self.received))
         self.assertEqual(self.received[0], ("A", Reply("追加后的结果"), False))
         self.assertEqual(len(self.host.prompts()), 2)
+
+    async def test_followup_never_recorded_is_resent_once_under_the_same_nonce(self):
+        await self.submit()
+        aid = self.host.prompts()[0]["agentId"]
+
+        async def dropped(body):
+            del self.host.hooks["sendPrompt"]
+            raise httpx.RemoteProtocolError("secret-token")
+
+        async def lookup(body):
+            if body["clientNonce"] not in self.host.nonces:
+                return httpx.Response(200, json={"outcome": "not-found"})
+
+        self.host.hooks.update(sendPrompt=dropped, promptAcceptanceStatus=lookup)
+        with patch.object(gateway, "PROMPT_SETTLE", 0):
+            self.assertEqual(await self.submit("followup", "B"), Reply())
+        followups = self.host.prompts()[1:]
+        self.assertEqual(len(followups), 2)
+        self.assertEqual(followups[0], followups[1])
+        self.assertEqual(sum("followup" in row.get("content", "") for row in self.host.entries[aid]), 1)
 
     async def test_followup_image_is_uploaded_to_same_bot_without_waiting_for_idle(self):
         await self.submit()
@@ -221,6 +241,30 @@ class StreamTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(prompt["agentId"], aid)
         self.assertEqual(prompt["attachmentNames"], ["input.jpg"])
         self.assertTrue(prompt["attachmentPaths"][0].startswith("/input/"))
+
+    async def test_followup_upload_dropped_once_is_resent_and_a_failed_one_is_not_prompted(self):
+        drops = []
+
+        async def drop(body):
+            if len(drops) < limit:
+                drops.append(body["filename"])
+                raise httpx.RemoteProtocolError("Server disconnected without sending a response.")
+
+        self.host.hooks["uploadAttachment"] = drop
+        await self.submit()
+        with patch.object(gateway, "UNANSWERED_RETRY_DELAYS", (0, 0, 0)), \
+             patch.object(stream, "input_images", AsyncMock(return_value=(Attachment("image.jpg", data=b"jpg"),))):
+            limit = 1
+            self.assertEqual(await self.submit("picture", "B", images=("source",)), Reply())
+            uploads = [body for command, body in self.host.calls if command == "uploadAttachment"]
+            self.assertEqual(len(uploads), 2)
+            self.assertEqual(uploads[0], uploads[1])
+            self.assertEqual(self.host.prompts()[-1]["attachmentPaths"], ["/input/" + drops[0]])
+            limit = len(drops) + 1 + len(gateway.UNANSWERED_RETRY_DELAYS)
+            with self.assertRaisesRegex(GrokError, "^图片上传失败，问题尚未发送，请重发。$"):
+                await self.submit("again", "B", images=("source",))
+        self.assertEqual(len(drops), limit)
+        self.assertEqual(len(self.host.prompts()), 2)
 
     async def test_capacity_wait_does_not_block_followups_to_running_group_and_cancelled_input_is_not_sent(self):
         config = replace(CONFIG, max_concurrent=1)

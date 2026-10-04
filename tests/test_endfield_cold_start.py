@@ -49,7 +49,8 @@ class DiskMetadataTests(unittest.TestCase):
     def test_metadata_reads_freshness_fields_only(self):
         body = b"x" * 4096
         self._store(validated_at=10, max_age=20, etag='"abc"', body=body)
-        connection = self.disk._connect()
+        with self.disk._read_lock:
+            connection = self.disk._read_connection()  # reads have their own connection
         statements: list[str] = []
         connection.set_trace_callback(statements.append)
         try:
@@ -265,6 +266,7 @@ class ColdStartNoticeTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(gets, [])
 
+        self.images.flush()  # the fetch queued its row for the background writer
         connection = self.images._connect()
         connection.execute(
             "UPDATE public_images_v1 SET validated_at=?, max_age=?, etag=?, modified=?",

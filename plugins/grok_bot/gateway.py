@@ -9,6 +9,8 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import json
+import traceback
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from time import monotonic
@@ -44,8 +46,50 @@ READ_ONLY_COMMANDS = frozenset({
     "health", "listAgents", "getAsyncTasks", "getSubagents", "promptAcceptanceStatus",
     "getAgentTranscriptTail", "readAttachmentChunk",
 })
-READ_RETRY_DELAYS = (0.5, 1.0)
+# Exponential backoff, 31 s in total: rides out a 20-30 s tailnet/DERP outage.
+READ_RETRY_DELAYS = (1.0, 2.0, 4.0, 8.0, 16.0)
+# Writes repeated only when the host never answered. Each upload has its own file
+# name, so a request the host did receive just stores the same file again.
+UNANSWERED_RETRY_COMMANDS = frozenset({"uploadAttachment"})
+UNANSWERED_RETRY_DELAYS = (1.0, 1.5, 2.0)
 TRANSCRIPT_READ_TIMEOUT = 60
+# Long tool transcripts and Bot creation can take longer than ordinary state RPCs.
+READ_TIMEOUTS = {"getAgentTranscriptTail": TRANSCRIPT_READ_TIMEOUT, "createAgent": 60}
+# A base64 image body takes longer to send than an ordinary RPC.
+UPLOAD_TIMEOUT = httpx.Timeout(20, connect=10, write=60, read=30)
+# The gateway drops idle keep-alive connections sooner than httpx's 5 s default.
+KEEPALIVE_EXPIRY = 2.0
+# Before asking whether a prompt lost in transit was recorded.
+PROMPT_SETTLE = 2.0
+UPLOAD_FAILED = "图片上传失败，问题尚未发送，请重发。"
+
+
+def lost_in_transit(error: BaseException) -> bool:
+    """A timeout or broken connection: the host may or may not have the request."""
+    return (isinstance(error, GatewayError) and error.retryable
+            and isinstance(error.__cause__, httpx.TransportError))
+
+
+def unanswered(error: GatewayError) -> bool:
+    """Refused, or closed before any response header arrived."""
+    cause = error.__cause__
+    if isinstance(cause, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)):
+        return True
+    return isinstance(cause, (httpx.RemoteProtocolError, httpx.ReadError, httpx.WriteError)) and error.responded is False
+
+
+def cause_chain(error: BaseException) -> list[BaseException]:
+    links, link = [], error.__cause__
+    while link is not None and all(link is not seen for seen in links):
+        links.append(link)
+        link = link.__cause__ or (None if link.__suppress_context__ else link.__context__)
+    return links
+
+
+def describe(error: BaseException) -> str:
+    kind = type(error)
+    name = kind.__qualname__ if kind.__module__ == "builtins" else f"{kind.__module__}.{kind.__qualname__}"
+    return f"{name}: {error}" if str(error) else name
 
 
 @dataclass
@@ -134,41 +178,100 @@ def reply_from(entries: list[dict], marker: str, *, include_assistant: bool = Tr
 
 
 class Gateway:
-    def __init__(self, config: GrokConfig, client: httpx.AsyncClient):
+    def __init__(self, config: GrokConfig, client: httpx.AsyncClient, *,
+                 connect: Callable[[], httpx.AsyncClient] | None = None):
         self.config, self.client = config, client
+        # Opens a one-off client, so a request after a broken connection never
+        # picks another pooled keep-alive connection the host may have dropped.
+        self.connect = connect
+        self.reconnect = False
 
     async def request(self, command: str, body: dict | None = None, *, response_limit: int | None = None):
-        attempts = 1 + len(READ_RETRY_DELAYS) if command in READ_ONLY_COMMANDS else 1
+        read_only = command in READ_ONLY_COMMANDS
+        delays = (READ_RETRY_DELAYS if read_only
+                  else UNANSWERED_RETRY_DELAYS if command in UNANSWERED_RETRY_COMMANDS else ())
+        attempts = 1 + len(delays)
+        payload = b"" if command == "health" else json.dumps(
+            body or {}, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode()
+        broken = False
         for attempt in range(attempts):
-            started = monotonic()
+            started, request_id = monotonic(), str(uuid4())
+            # Another request may already have cleared self.reconnect; this retry still avoids the pool.
+            fresh = (broken or self.reconnect) and self.connect is not None
             try:
-                return await self._request_once(command, body, response_limit=response_limit)
+                if fresh:
+                    async with self.connect() as client:
+                        data, received, answered_id = await self._request_once(
+                            command, payload, request_id, client, response_limit=response_limit)
+                    self.reconnect = False
+                else:
+                    data, received, answered_id = await self._request_once(
+                        command, payload, request_id, self.client, response_limit=response_limit)
             except GatewayError as error:
-                retry = error.retryable and attempt + 1 < attempts
-                # All GatewayError text is generated locally; do not log upstream
-                # exception strings, response bodies, headers, prompts or URLs.
-                logger.warning("[grok_bot] gateway command={} attempt={}/{} elapsed={:.2f}s retry={} error={}",
-                               command, attempt + 1, attempts, monotonic() - started, retry, error)
+                broken = isinstance(error.__cause__, httpx.TransportError)
+                if broken:
+                    self.reconnect = True
+                retry = attempt + 1 < attempts and (error.retryable if read_only else unanswered(error))
+                links = cause_chain(error)
+                # GatewayError text is generated locally. The original exception is
+                # logged as type, message and stack, without frame variables, response
+                # bodies, headers, prompts or the token.
+                logger.warning(
+                    "[grok_bot] gateway command={} attempt={}/{} elapsed={:.2f}s sent={}B request_id={} connection={} "
+                    "retry={} error={} cause={}{}",
+                    command, attempt + 1, attempts, monotonic() - started, len(payload), request_id,
+                    "new" if fresh else "pooled", retry, error,
+                    self._redact(" <- ".join(map(describe, links)) or "-"),
+                    "" if retry or not links else "\n" + self._redact("".join(traceback.format_exception(links[0]))),
+                )
+                # Keep __cause__ but drop its frames: entari's loguru renders frame
+                # variables (diagnose=True), and the request line holds the token.
+                for link in links:
+                    link.__traceback__ = None
                 if not retry:
                     raise
                 # Cancellation / the caller's total task timeout also bounds retries.
-                await asyncio.sleep(READ_RETRY_DELAYS[attempt])
+                await asyncio.sleep(delays[attempt])
+                continue
+            # Status polls run every second; keep them out of the INFO log unless
+            # they recovered from a failure. The id is the one the host answered
+            # with, else the one sent.
+            logger.log(
+                "DEBUG" if read_only and not attempt else "INFO",
+                "[grok_bot] gateway command={} attempt={}/{} elapsed={:.2f}s sent={}B received={}B request_id={} connection={} ok",
+                command, attempt + 1, attempts, monotonic() - started, len(payload), received,
+                answered_id or request_id, "new" if fresh else "pooled",
+            )
+            return data
 
-    async def _request_once(self, command: str, body: dict | None = None, *, response_limit: int | None = None):
+    def _redact(self, text: str) -> str:
+        return text.replace(self.config.token, "<redacted>") if self.config.token else text
+
+    async def _request_once(self, command: str, payload: bytes, request_id: str, client: httpx.AsyncClient, *,
+                            response_limit: int | None = None) -> tuple[object, int, str]:
+        """The decoded JSON, the received byte count and the response's x-sand-request-id."""
         health = command == "health"
-        headers = {"x-sand-request-id": str(uuid4()), "x-sand-slim-avatars": "1"}
+        headers = {"x-sand-request-id": request_id, "x-sand-slim-avatars": "1"}
         if not health:
             headers["Authorization"] = "Bearer " + self.config.token
+            # Sent as encoded bytes, so the log can state the exact request size.
+            headers["Content-Type"] = "application/json"
+        # Only a streamed response shows whether headers arrived before a failure.
+        responded = None if response_limit is None else False
         try:
             args = ("GET" if health else "POST", self.config.base_url + ("/health" if health else "/api/" + command))
-            kwargs = {"headers": headers, "follow_redirects": False, **({} if health else {"json": body or {}})}
-            if command == "getAgentTranscriptTail":
-                # Long tool transcripts can take longer than ordinary state RPCs.
-                kwargs["timeout"] = httpx.Timeout(20, connect=10, read=TRANSCRIPT_READ_TIMEOUT)
+            kwargs = {"headers": headers, "follow_redirects": False, **({} if health else {"content": payload})}
+            if command == "uploadAttachment":
+                kwargs["timeout"] = UPLOAD_TIMEOUT
+            elif command in READ_TIMEOUTS:
+                kwargs["timeout"] = httpx.Timeout(20, connect=10, read=READ_TIMEOUTS[command])
             if response_limit is None:
-                response = await self.client.request(*args, **kwargs)
+                response = await client.request(*args, **kwargs)
+                answered_id = response.headers.get("x-sand-request-id", "")
             else:
-                async with self.client.stream(*args, **kwargs) as streamed:
+                async with client.stream(*args, **kwargs) as streamed:
+                    responded = True
+                    answered_id = streamed.headers.get("x-sand-request-id", "")
                     content = bytearray()
                     async for chunk in streamed.aiter_bytes(chunk_size=65536):
                         if len(content) + len(chunk) > response_limit:
@@ -178,18 +281,18 @@ class Gateway:
         except (httpx.ConnectTimeout, httpx.ConnectError, httpx.PoolTimeout) as error:
             raise GatewayError(
                 f"网关连接建立失败（{command} / {type(error).__name__}），提问尚未提交，请检查 Tailscale 网络及云端服务状态。",
-                not_submitted=True, retryable=True,
-            ) from None
+                not_submitted=True, retryable=True, responded=False,
+            ) from error
         except httpx.TimeoutException as error:
             raise GatewayError(
                 f"网关接口请求超时（{command} / {type(error).__name__}），已提交的任务可能仍在云端处理。",
-                retryable=True,
-            ) from None
+                retryable=True, responded=responded,
+            ) from error
         except httpx.HTTPError as error:
             raise GatewayError(
                 f"网关数据传输异常（{command} / {type(error).__name__}），请排查 Tailscale 连通性、网关与后台服务；已提交任务可能仍在云端处理。",
-                retryable=isinstance(error, (httpx.NetworkError, httpx.RemoteProtocolError)),
-            ) from None
+                retryable=isinstance(error, (httpx.NetworkError, httpx.RemoteProtocolError)), responded=responded,
+            ) from error
         if response.status_code in {401, 403}:
             raise GatewayError("网关鉴权未通过，请管理员检查 GROKBOT_GATEWAY_TOKEN 配置。", not_submitted=True)
         if response.status_code in {400, 422}:
@@ -206,11 +309,11 @@ class Gateway:
                                retryable=response.status_code in {408, 500, 502, 503, 504})
         try:
             data = response.json()
-        except ValueError:
-            raise GatewayError(PROTOCOL_ERROR) from None
+        except ValueError as error:
+            raise GatewayError(PROTOCOL_ERROR) from error
         if isinstance(data, dict) and data.get("error"):
             raise GatewayError(f"网关未能正常执行指令 {command}，详细原因请在客户端查看。")
-        return data
+        return data, len(response.content), answered_id
 
     async def upload_images(self, images: tuple[Attachment, ...]) -> tuple[Attachment, ...]:
         """Desktop 0.30.0: uploadAttachment({agentId?, filename, bytesBase64})."""
@@ -218,10 +321,15 @@ class Gateway:
         for item in images:
             if not item.data or len(item.data) > MAX_IMAGE_BYTES:
                 raise GrokError("图片数据损坏或单张体积超限，提问尚未发出。")
-            result = await self.request("uploadAttachment", {
-                "agentId": self.config.agent_id, "filename": f"{uuid4().hex}-{item.name}",
-                "bytesBase64": base64.b64encode(item.data).decode("ascii"),
-            }, response_limit=65536)
+            try:
+                # Streamed, so a connection closed before any response is told apart.
+                result = await self.request("uploadAttachment", {
+                    "agentId": self.config.agent_id, "filename": f"{uuid4().hex}-{item.name}",
+                    "bytesBase64": base64.b64encode(item.data).decode("ascii"),
+                }, response_limit=65536)
+            except GatewayError:
+                # Logged by request(). No prompt references this image yet.
+                raise GrokError(UPLOAD_FAILED) from None
             if not isinstance(result, dict) or not isinstance(result.get("path"), str):
                 raise GrokError("图片上传未获取到有效资源标识，提问尚未发出，请检查网关服务版本。")
             uploaded.append(replace(item, source=remote_path(result["path"]), data=None))
@@ -355,11 +463,47 @@ class Gateway:
         if attachments:
             body["attachmentPaths"] = [item.source for item in attachments]
             body["attachmentNames"] = [item.name for item in attachments]
-        accepted = await self.request("sendPrompt", body)
-        if not isinstance(accepted, dict) or accepted.get("accepted") is not True:
+        if not await self.send_prompt(body):
             raise GrokError("云端未确认接收本次提问，请在 Grok Bot 客户端核对状态；本次未重复提交。")
 
+    async def send_prompt(self, body: dict) -> bool:
+        """Resend a lost prompt, with the same clientNonce, only if the host never recorded it."""
+        nonce, resent = body["clientNonce"], False
+        while True:
+            try:
+                accepted = await self.request("sendPrompt", body)
+                return isinstance(accepted, dict) and accepted.get("accepted") is True
+            except GatewayError as error:
+                if not lost_in_transit(error) or (resent and error.not_submitted):
+                    raise
+                cause = type(error.__cause__).__name__
+                # TCP may still deliver a timed-out request once the link returns, so
+                # "not-found" proves nothing then. A refused or closed connection cannot.
+                resendable = not resent and (error.not_submitted or not isinstance(error.__cause__, httpx.TimeoutException))
+                if not error.not_submitted:
+                    await asyncio.sleep(PROMPT_SETTLE)
+                try:
+                    # Read-only, so retried with backoff; a failed lookup never resends.
+                    outcome = await self.acceptance_outcome(nonce)
+                except GrokError as lookup:
+                    logger.warning("[grok_bot] sendPrompt nonce={} lost ({}); acceptance lookup failed ({}), not resending",
+                                   nonce, cause, type(lookup).__name__)
+                    raise error
+                resend = resendable and outcome == "not-found"
+                logger.warning("[grok_bot] sendPrompt nonce={} lost ({}); acceptance={} resend={}", nonce, cause, outcome, resend)
+                if outcome not in {"not-found", "unknown-durability"}:
+                    return True  # Recorded; the receiver follows its acceptance status.
+                if not resend:
+                    raise
+                resent = True
+
     async def acceptance(self, nonce: str) -> str:
+        status = await self.acceptance_outcome(nonce)
+        # Absence may only mean the record is not written yet; never a rejection.
+        return "pending" if status == "not-found" else status
+
+    async def acceptance_outcome(self, nonce: str) -> str:
+        """The recorded status, or "not-found" / "unknown-durability"."""
         payload = await self.request("promptAcceptanceStatus", {"accountSlot": "host", "clientNonce": nonce})
         if not isinstance(payload, dict):
             raise GrokError(PROTOCOL_ERROR)
@@ -371,9 +515,7 @@ class Gateway:
             if record.get("status") not in {"pending", "accepted", "rejected"}:
                 raise GrokError(PROTOCOL_ERROR)
             return record["status"]
-        if outcome == "not-found":
-            return "pending"
-        if outcome == "unknown-durability":
+        if outcome in {"not-found", "unknown-durability"}:
             return outcome
         raise GrokError(PROTOCOL_ERROR)
 
@@ -392,8 +534,7 @@ class Gateway:
         if attachments:
             body["attachmentPaths"] = [item.source for item in attachments]
             body["attachmentNames"] = [item.name for item in attachments]
-        accepted = await self.request("sendPrompt", body)
-        if not isinstance(accepted, dict) or accepted.get("accepted") is not True:
+        if not await self.send_prompt(body):
             raise GrokError("云端未能接收本次提问，请在 Grok Bot 客户端核实当前状态。")
         previous_reply = None
         while True:
@@ -438,20 +579,22 @@ class Gateway:
 
 def make_client() -> httpx.AsyncClient:
     # Tailnet requests must bypass global model/search/system proxies.
-    return httpx.AsyncClient(trust_env=False, timeout=httpx.Timeout(20, connect=10), follow_redirects=False, verify=shared_ssl_context(trust_env=False))
+    return httpx.AsyncClient(trust_env=False, timeout=httpx.Timeout(20, connect=10), follow_redirects=False,
+                             limits=httpx.Limits(max_connections=100, max_keepalive_connections=20, keepalive_expiry=KEEPALIVE_EXPIRY),
+                             verify=shared_ssl_context(trust_env=False))
 
 
 async def ask(config: GrokConfig, prompt: str) -> Reply:
     async with make_client() as client:
         try:
-            return await asyncio.wait_for(Gateway(config, client).ask(prompt), timeout=config.timeout)
+            return await asyncio.wait_for(Gateway(config, client, connect=make_client).ask(prompt), timeout=config.timeout)
         except asyncio.TimeoutError:
             raise GrokError(f"请求等待已超时（超过 {config.timeout:g} 秒），任务可能仍在云端处理，请在 Grok Bot 客户端查阅。") from None
 
 
 async def check(config: GrokConfig) -> str:
     async with make_client() as client:
-        gateway = Gateway(config, client)
+        gateway = Gateway(config, client, connect=make_client)
         health = await gateway.request("health")
         if not isinstance(health, dict) or health.get("ok") is not True:
             raise GrokError("Grok Bot 网关运行状态检测异常。")
