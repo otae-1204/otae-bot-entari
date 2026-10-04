@@ -1404,6 +1404,12 @@ class _BindingStopped(Exception):
         self.stage, self.reason = stage, reason
 
 
+def _binding_log(qq_user_id: str, step: str, **fields) -> None:
+    # Steps and counts only: never a phone number, SMS code or token.
+    details = "".join(f" {key}={value}" for key, value in fields.items())
+    logger.info(f"[endfield-bind] user={qq_user_id} step={step}{details}")
+
+
 async def _prompt_binding(message: str, *, timeout: int, stage: str) -> str:
     answer = await prompt(message, timeout=timeout)
     if answer is None:
@@ -1416,10 +1422,15 @@ async def _prompt_binding(message: str, *, timeout: int, stage: str) -> str:
 
 
 async def _handle_binding(matcher, qq_user_id: str, cipher: CredentialCipher) -> None:
+    _binding_log(qq_user_id, "start")
     try:
         return await _run_binding(matcher, qq_user_id, cipher)
     except _BindingStopped as stopped:
+        _binding_log(qq_user_id, stopped.reason, at=stopped.stage)
         return await matcher.finish(_BINDING_STOPPED[stopped.reason])
+    except EndfieldAPIError as exc:
+        _binding_log(qq_user_id, "failed", operation=exc.operation, code=exc.code)
+        raise
 
 
 async def _run_binding(matcher, qq_user_id: str, cipher: CredentialCipher) -> None:
@@ -1436,7 +1447,9 @@ async def _run_binding(matcher, qq_user_id: str, cipher: CredentialCipher) -> No
     elif normalized_region in {"2", "亚服", "亞洲", "亚洲", "asia", "skport"}:
         provider = ACCOUNT_PROVIDER_SKPORT
     else:
+        _binding_log(qq_user_id, "abort", at="region", reason="unrecognized")
         return await matcher.finish("未识别服务器，绑定已取消。")
+    _binding_log(qq_user_id, "region", provider=provider)
 
     if provider == ACCOUNT_PROVIDER_SKPORT:
         await matcher.send(
@@ -1455,19 +1468,22 @@ async def _run_binding(matcher, qq_user_id: str, cipher: CredentialCipher) -> No
             "请发送 content 双引号内的 Token；回复“取消”退出。", timeout=150, stage="token"
         )
         account_token = encode_account_credential(raw_account_token, provider)
+        _binding_log(qq_user_id, "token_received", provider=provider)
     else:
-        account_token = await _bind_cn_account_token(matcher)
+        account_token = await _bind_cn_account_token(matcher, qq_user_id)
         if account_token is None:
             return None
 
     roles = await official_client.discover_roles(account_token)
     if provider == ACCOUNT_PROVIDER_SKPORT:
         roles = [role for role in roles if is_asia_role(role)]
-        if not roles:
-            return await matcher.finish("该 Gryphline 账号下未找到终末地亚服角色。")
-    elif not roles:
-        return await matcher.finish("该鹰角账号下未找到终末地角色。")
-    selected = await _select_binding_roles(roles)
+    _binding_log(qq_user_id, "roles", count=len(roles))
+    if not roles:
+        return await matcher.finish(
+            "该 Gryphline 账号下未找到终末地亚服角色。" if provider == ACCOUNT_PROVIDER_SKPORT
+            else "该鹰角账号下未找到终末地角色。"
+        )
+    selected = await _select_binding_roles(roles, qq_user_id)
     previous_roles = account_store.list_roles(qq_user_id)
     previous_keys = {(role.role_id, role.server_id) for role in previous_roles}
     bound_roles = account_store.bind_roles(qq_user_id, account_token, selected, cipher)
@@ -1493,6 +1509,7 @@ async def _run_binding(matcher, qq_user_id: str, cipher: CredentialCipher) -> No
             "[endfield-ownership] binding refresh unavailable "
             f"error_type={type(exc).__module__}.{type(exc).__name__}"
         )
+    _binding_log(qq_user_id, "done", provider=provider, added=added_count, updated=updated_count, total=len(bound_roles))
     return await matcher.finish(
         summary + "\n" + "\n".join(
             f"- {role.nickname} · {server_label(role.server_name or role.server_id)} · UID {role.role_id}" for role in selected
@@ -1500,7 +1517,7 @@ async def _run_binding(matcher, qq_user_id: str, cipher: CredentialCipher) -> No
     )
 
 
-async def _bind_cn_account_token(matcher) -> str | None:
+async def _bind_cn_account_token(matcher, qq_user_id: str) -> str | None:
     method = await _prompt_binding(
         "请选择绑定方式：\n1. Token 绑定\n2. 手机号验证码绑定\n"
         "二维码绑定暂不支持。\n"
@@ -1510,32 +1527,40 @@ async def _bind_cn_account_token(matcher) -> str | None:
     )
     normalized = method.casefold()
     if normalized in {"1", "token", "t"}:
+        _binding_log(qq_user_id, "method", method="token")
         await matcher.send(
             "请在浏览器登录森空岛后打开：\nhttps://web-api.skland.com/account/info/hg\n"
             "复制响应中 data.content 的完整内容并发送。不要在群聊或其他平台公开该内容。"
         )
         account_token = await _prompt_binding("请发送 data.content；回复“取消”退出。", timeout=150, stage="token")
+        _binding_log(qq_user_id, "token_received", provider=ACCOUNT_PROVIDER_CN)
     elif normalized in {"2", "短信", "手机", "sms"}:
+        _binding_log(qq_user_id, "method", method="sms")
         phone = await _prompt_binding("请输入用于鹰角账号登录的手机号；回复“取消”退出。", timeout=90, stage="phone")
         if not re.fullmatch(r"1\d{10}", phone):
+            _binding_log(qq_user_id, "abort", at="phone", reason="format")
             await matcher.finish("手机号格式不正确，绑定已取消。")
             return None
+        _binding_log(qq_user_id, "send_code")
         await official_client.send_phone_code(phone)
+        _binding_log(qq_user_id, "code_sent")
         code = await _prompt_binding("验证码已发送，请输入短信验证码；回复“取消”退出。", timeout=120, stage="code")
         if not re.fullmatch(r"\d{4,8}", code):
+            _binding_log(qq_user_id, "abort", at="code", reason="format")
             await matcher.finish("验证码格式不正确，绑定已取消。")
             return None
+        _binding_log(qq_user_id, "verify")
         account_token = await official_client.token_by_phone_code(phone, code)
+        _binding_log(qq_user_id, "verified")
     # 暂时禁用二维码绑定，保留以下代码以便后续恢复：
     # elif normalized in {"3", "二维码", "扫码", "qr", "qrcode"}:
     #     account_token = await _bind_cn_qr_account(matcher)
     #     if account_token is None:
     #         return None
     else:
-        if normalized in {"3", "二维码", "扫码", "qr", "qrcode"}:
-            await matcher.finish("二维码绑定暂不支持，请选择 1 或 2。")
-        else:
-            await matcher.finish("未识别绑定方式，绑定已取消。")
+        qr = normalized in {"3", "二维码", "扫码", "qr", "qrcode"}
+        _binding_log(qq_user_id, "abort", at="method", reason="qr" if qr else "unrecognized")
+        await matcher.finish("二维码绑定暂不支持，请选择 1 或 2。" if qr else "未识别绑定方式，绑定已取消。")
         return None
     return encode_account_credential(account_token, ACCOUNT_PROVIDER_CN)
 
@@ -1604,8 +1629,9 @@ def parse_binding_selection(answer: str, roles: list[RoleCandidate]) -> list[Rol
     return [role for index, role in enumerate(roles) if index in picked]
 
 
-async def _select_binding_roles(roles: list[RoleCandidate]) -> list[RoleCandidate]:
+async def _select_binding_roles(roles: list[RoleCandidate], qq_user_id: str) -> list[RoleCandidate]:
     if len(roles) == 1:
+        _binding_log(qq_user_id, "select", selected=1, total=1)
         return roles
     listing = "\n".join(
         f"{index}. {role.nickname} · {server_label(role.server_name or role.server_id)} · UID {role.role_id}"
@@ -1615,10 +1641,12 @@ async def _select_binding_roles(roles: list[RoleCandidate]) -> list[RoleCandidat
         "检测到多个终末地角色，请回复序号或 UID，可一次回复多个（用空格、逗号或顿号分隔），"
         "也可回复“全部”；回复“取消”退出：\n" + listing
     )
-    for _ in range(BINDING_SELECT_ATTEMPTS):
+    for attempt in range(1, BINDING_SELECT_ATTEMPTS + 1):
         selected = parse_binding_selection(await _prompt_binding(message, timeout=120, stage="select"), roles)
         if selected:
+            _binding_log(qq_user_id, "select", selected=len(selected), total=len(roles), attempt=attempt)
             return selected
+        _binding_log(qq_user_id, "select_invalid", attempt=attempt, limit=BINDING_SELECT_ATTEMPTS)
         message = "编号无效，请回复列表前面的序号（或列表中的 UID）：\n" + listing
     raise _BindingStopped("select", "invalid")
 
