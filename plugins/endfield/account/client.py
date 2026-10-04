@@ -289,7 +289,7 @@ class EndfieldOfficialClient:
         )
         token = str((payload.get("data") or {}).get("token") or "")
         if not token:
-            raise EndfieldAPIError("验证码登录", message="官方接口未返回账号凭据")
+            raise EndfieldAPIError("验证码登录", message="官方接口未返回有效凭据，请重新尝试。")
         return token
 
     async def create_qr_login(self) -> QrLoginTicket:
@@ -306,7 +306,7 @@ class EndfieldOfficialClient:
         scan_id = str(data.get("scanId") or "").strip()
         scan_url = str(data.get("scanUrl") or "").strip()
         if not scan_id or not scan_url:
-            raise EndfieldAPIError("生成登录二维码", message="官方接口未返回扫码凭据")
+            raise EndfieldAPIError("生成登录二维码", message="官方接口未返回扫码凭据，请重试。")
         return QrLoginTicket(scan_id=scan_id, scan_url=scan_url)
 
     async def check_qr_login(self, scan_id: str) -> QrLoginStatus:
@@ -330,7 +330,7 @@ class EndfieldOfficialClient:
             return QrLoginStatus("expired")
         scan_code = str((payload.get("data") or {}).get("scanCode") or "").strip()
         if not scan_code:
-            raise EndfieldAPIError("查询扫码状态", message="官方接口未返回扫码授权码")
+            raise EndfieldAPIError("查询扫码状态", message="官方接口未返回有效授权码，请重试。")
         return QrLoginStatus("confirmed", scan_code)
 
     async def token_by_scan_code(self, scan_code: str) -> str:
@@ -346,7 +346,7 @@ class EndfieldOfficialClient:
         )
         token = str((payload.get("data") or {}).get("token") or "").strip()
         if not token:
-            raise EndfieldAPIError("扫码登录", message="官方接口未返回账号凭据")
+            raise EndfieldAPIError("扫码登录", message="官方接口未返回有效凭据，请重试。")
         return token
 
     async def discover_roles(self, account_token: str) -> list[RoleCandidate]:
@@ -474,7 +474,7 @@ class EndfieldOfficialClient:
             payload = await request(context)
         detail = (payload.get("data") or {}).get("detail")
         if not isinstance(detail, dict) or not detail:
-            raise EndfieldAPIError("查询终末地档案", message="官方接口未返回角色档案")
+            raise EndfieldAPIError("查询终末地档案", message="官方接口未返回角色档案数据，请稍后重试。")
         return detail
 
     async def _personal_card_payload(
@@ -536,7 +536,7 @@ class EndfieldOfficialClient:
         if result is None:
             return {}
         if not isinstance(result, dict):
-            raise EndfieldAPIError("查询影拓丰碑", message="官方接口未返回影拓丰碑数据")
+            raise EndfieldAPIError("查询影拓丰碑", message="官方接口未返回影拓丰碑记录，请稍后重试。")
         return result
 
     async def war_echoes(
@@ -561,7 +561,7 @@ class EndfieldOfficialClient:
         if result is None:
             return {}
         if not isinstance(result, dict):
-            raise EndfieldAPIError("查询战争回响", message="官方接口未返回战争回响数据")
+            raise EndfieldAPIError("查询战争回响", message="官方接口未返回战争回响记录，请稍后重试。")
         return result
 
     async def currency_balances(
@@ -687,7 +687,7 @@ class EndfieldOfficialClient:
     ) -> dict[str, str]:
         provider, raw_account_token = decode_account_credential(account_token)
         if provider == ACCOUNT_PROVIDER_SKPORT:
-            message = "亚服暂不支持货币查询" if operation == "查询终末地货币" else "亚服暂不支持资源流水查询"
+            message = "亚服暂不支持查询货币数据" if operation == "查询终末地货币" else "亚服暂不支持查询资源流水"
             raise EndfieldAPIError(operation, message=message)
         role_token = await self.get_u8_token(account_token, str(role.binding_uid))
         return {
@@ -739,7 +739,7 @@ class EndfieldOfficialClient:
         data = payload.get("data") or {}
         token = str(data.get("token") or data.get("u8Token") or data.get("u8_token") or "")
         if not token:
-            raise EndfieldAPIError("获取抽卡凭据", message="官方接口未返回 U8 凭据")
+            raise EndfieldAPIError("获取抽卡凭据", message="官方接口未返回抽卡凭据，请稍后重试。")
         scoped_token = encode_service_token(token, provider)
         self._u8_cache[cache_key] = (scoped_token, time.monotonic() + 540)
         return scoped_token
@@ -880,7 +880,7 @@ class EndfieldOfficialClient:
                 raise EndfieldAPIError(
                     operation,
                     code,
-                    "官方服务冷却中，请稍后重试",
+                    "官方请求过于频繁，请稍候再试。",
                     retry_after_seconds=blocked_for,
                 )
             delay = self._next_skland_exchange_at - time.monotonic()
@@ -968,7 +968,7 @@ class EndfieldOfficialClient:
             credential_data = credential_payload.get("data") or {}
             cred = str(credential_data.get("cred") or "")
             if not cred:
-                raise EndfieldAPIError("获取社区凭据", message="官方接口未返回 cred")
+                raise EndfieldAPIError("获取社区凭据", message="官方接口未返回社区认证凭据，请稍后重试。")
             sign_token = str(credential_data.get("token") or credential_data.get("salt") or "")
             server_time = _as_int(credential_payload.get("timestamp"))
         if not sign_token:
@@ -985,7 +985,7 @@ class EndfieldOfficialClient:
             data = refresh_payload.get("data") or {}
             sign_token = str(data.get("token") or data.get("salt") or "")
             if not sign_token:
-                raise EndfieldAPIError("刷新社区签名", message="官方接口未返回签名凭据")
+                raise EndfieldAPIError("刷新社区签名", message="官方接口未返回签名凭据，请稍后重试。")
             server_time = _as_int(refresh_payload.get("timestamp"))
         now = int(time.time())
         context = _SklandContext(
@@ -1010,7 +1010,7 @@ class EndfieldOfficialClient:
         )
         value = str((payload.get("data") or {}).get(field) or "")
         if not value:
-            raise EndfieldAPIError("账号授权", message="官方接口未返回授权凭据")
+            raise EndfieldAPIError("账号授权", message="官方接口未返回授权信息，请稍后重试。")
         return value
 
     async def _signed_skland_request(
@@ -1075,7 +1075,7 @@ class EndfieldOfficialClient:
                 if attempt + 1 < attempts:
                     await asyncio.sleep(0.4)
                     continue
-                raise EndfieldAPIError(operation, message="网络请求失败，请稍后重试") from None
+                raise EndfieldAPIError(operation, message="网络请求失败，请稍候再试。") from None
         retry_after = _response_retry_after(response)
         try:
             payload = response.json()
@@ -1084,19 +1084,19 @@ class EndfieldOfficialClient:
                 raise EndfieldAPIError(
                     operation,
                     code=str(response.status_code),
-                    message="官方服务暂时不可用",
+                    message="官方服务响应异常，请稍后重试。",
                     retry_after_seconds=retry_after,
                 ) from None
-            raise EndfieldAPIError(operation, message="官方接口返回了无法解析的数据") from None
+            raise EndfieldAPIError(operation, message="官方接口返回数据无法解析，请稍后重试。") from None
         if not isinstance(payload, dict):
             if response.status_code >= 400:
                 raise EndfieldAPIError(
                     operation,
                     code=str(response.status_code),
-                    message="官方服务暂时不可用",
+                    message="官方服务响应异常，请稍后重试。",
                     retry_after_seconds=retry_after,
                 )
-            raise EndfieldAPIError(operation, message="官方接口返回格式异常")
+            raise EndfieldAPIError(operation, message="官方接口数据格式异常，请稍后重试。")
         code = payload.get("code")
         if code not in (None, 0, "0"):
             raise EndfieldAPIError(
@@ -1118,7 +1118,7 @@ class EndfieldOfficialClient:
             raise EndfieldAPIError(
                 operation,
                 code=str(response.status_code),
-                message="官方服务暂时不可用",
+                message="官方服务响应异常，请稍后重试。",
                 retry_after_seconds=retry_after,
             )
         return payload

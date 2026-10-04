@@ -131,13 +131,13 @@ async def handle_bili(event: Event, rest: ArgVal):
     parts = _parse_args(_rest(rest))
     if not parts or parts[0] == "help":
         await bili_cmd.finish(
-            "用法:\n"
-            "/bili follow <all|live|video|dynamic> <UID> [更多UID]\n"
-            "/bili follow <all|live> room:<直播间号>    （或直接贴直播间链接）\n"
-            "/bili unfollow <all|live|video|dynamic> <UID 或 room:直播间号>\n"
-            "/bili list [all|live|video|dynamic]\n"
-            "/bili refresh <all|live|video|dynamic> <UID 或 room:直播间号>\n"
-            "提示：纯数字一律按 UID 处理；按直播间号操作请加 room: 前缀。"
+            "B站订阅指令指南：\n"
+            "/bili follow <all|live|video|dynamic> <UID> [更多UID] - 关注 UP 主\n"
+            "/bili follow <all|live> room:<直播间号> - 关注直播间（亦可直接发送直播间链接）\n"
+            "/bili unfollow <all|live|video|dynamic> <UID 或 room:直播间号> - 取消关注\n"
+            "/bili list [all|live|video|dynamic] - 查看当前订阅列表\n"
+            "/bili refresh <all|live|video|dynamic> <UID 或 room:直播间号> - 立即刷新状态\n"
+            "注：输入纯数字默认按 UID 识别；若针对直播间号请加上 room: 前缀。"
         )
 
     action = parts[0].lower()
@@ -145,31 +145,31 @@ async def handle_bili(event: Event, rest: ArgVal):
 
     if action in {"follow", "unfollow", "refresh"}:
         if len(parts) < 3:
-            await bili_cmd.finish("参数不足，请使用 /bili help 查看用法")
+            await bili_cmd.finish("参数不足：格式为 /bili <follow|unfollow|refresh> <类型> <目标>")
         kind_arg = parts[1]
         values = parts[2:]
         try:
             expand_kinds(kind_arg)
         except ValueError:
-            await bili_cmd.finish("类型必须是 all/live/video/dynamic")
+            await bili_cmd.finish("订阅类型错误：仅支持 all、live、video 或 dynamic。")
         if action == "follow":
             ok, failed = await service.follow(kind_arg, values, subscriber_type, subscriber_id)
-            await _handle_result("B站订阅结果", ok, failed)
+            await _handle_result("B站关注处理结果：", ok, failed)
         if action == "unfollow":
             ok, failed = await service.unfollow(kind_arg, values, subscriber_type, subscriber_id)
-            await _handle_result("B站取关结果", ok, failed)
+            await _handle_result("B站取消关注处理结果：", ok, failed)
         ok, failed = await service.refresh(kind_arg, values)
-        await _handle_result("B站刷新结果", ok, failed)
+        await _handle_result("B站信息刷新结果：", ok, failed)
 
     if action == "list":
         kind_arg = parts[1] if len(parts) > 1 else None
         try:
             lines = await service.list_subscriptions(subscriber_type, subscriber_id, kind_arg)
         except ValueError:
-            await bili_cmd.finish("类型必须是 all/live/video/dynamic")
+            await bili_cmd.finish("订阅类型错误：仅支持 all、live、video 或 dynamic。")
         await bili_cmd.finish("\n".join(lines))
 
-    await bili_cmd.finish("未知子命令，请使用 /bili help 查看用法")
+    await bili_cmd.finish("未知子命令：请发送 /bili help 获取完整使用指南。")
 
 
 async def _has_bili_link(event: Event) -> bool:

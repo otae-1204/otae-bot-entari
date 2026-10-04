@@ -360,9 +360,9 @@ async def broadcast():
                 else:
                     suppressed += len(group_errors)
             if lines:
-                suffix = f"\n已节流 {suppressed} 项重复错误" if suppressed else ""
+                suffix = f"\n已折叠 {suppressed} 条重复异常" if suppressed else ""
                 await ChainMsg.text(
-                    f"广播轮次错误汇总 ({len(lines)} 项):\n" + "\n---\n".join(lines[-5:]) + suffix
+                    f"广播异常摘要（共 {len(lines)} 条）：\n" + "\n---\n".join(lines[-5:]) + suffix
                 ).send(target, bot)
         except Exception:
             pass

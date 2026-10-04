@@ -450,15 +450,15 @@ async def _notify_superuser(bot: Bot, guild_name: str, user_name: str, key: str,
             account_adapter_name(bot),
         )
         lines = [
-            "收到群邀请",
-            f"群名: {guild_name}",
+            "收到入群邀请：",
+            f"群名：{guild_name}",
         ]
         if guild_id:
-            lines.append(f"群号: {guild_id}")
+            lines.append(f"群号：{guild_id}")
         lines.extend([
-            f"邀请人: {user_name}",
+            f"邀请人：{user_name}",
             "",
-            "回复 同意 尝试自动加群，或 拒绝 忽略",
+            "请回复「同意」加入群聊，或回复「拒绝」忽略此邀请。",
         ])
         await ChainMsg.text("\n".join(lines)).send(target, bot)
         logger.info(f"群邀请已转发给超级用户: {guild_name}")
@@ -476,12 +476,11 @@ async def _notify_ark_invite(bot: Bot, guild_name: str, user_name: str, info: di
             account_adapter_name(bot),
         )
         await ChainMsg.text(
-            f"检测到群邀请卡片\n"
-            f"群名: {guild_name}\n"
-            f"群号: {text_or_empty(info.get('group_code')) or '未知'}\n"
-            f"邀请人: {user_name}\n\n"
-            f"这是 Ark 群卡片，不是 LLOneBot 暴露的系统入群请求。\n"
-            f"当前没有 request_id/flag，无法自动同意；请在 QQ 客户端手动处理。"
+            f"收到群邀请卡片消息：\n"
+            f"群名：{guild_name}\n"
+            f"群号：{text_or_empty(info.get('group_code')) or '未知'}\n"
+            f"邀请人：{user_name}\n\n"
+            f"该卡片非系统底层入群请求，缺少 request_id/flag 标识，无法自动通过，请在 QQ 客户端内手动操作。"
         ).send(target, bot)
         logger.info(f"群邀请卡片已转发给超级用户（不可自动审批）: {guild_name}")
     except Exception as e:
@@ -529,12 +528,12 @@ async def handle_approve_reply(event: Event, bot: Bot):
             label = text_or_empty(info.get("guild_name"), info.get("guild_id"), info.get("group_code")) or "该群"
             if decision:
                 await _approve_invite(bot, key, info, api_type)
-                await approve_handler.send(f"已同意 {label}")
+                await approve_handler.send(f"已同意加入 {label}。")
             else:
                 await _reject_invite(bot, key, info, api_type)
-                await approve_handler.send(f"已拒绝 {label}")
+                await approve_handler.send(f"已拒绝加入 {label}。")
         except Exception as e:
-            await approve_handler.send(f"操作失败: {e}")
+            await approve_handler.send(f"操作执行失败：{e}")
             logger.error(f"群邀请审批失败: {e}")
         finally:
             del _pending[key]

@@ -122,7 +122,7 @@ class RoleTaskRegistry:
         key = (role.role_id, role.server_id)
         async with self._guard:
             if key in self._active:
-                raise TaskAlreadyRunning("任务正在进行")
+                raise TaskAlreadyRunning("当前角色已有任务正在执行中。")
             self._active.add(key)
         try:
             yield

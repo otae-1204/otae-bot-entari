@@ -38,8 +38,8 @@ def format_release(release: Release, *, number: int, total: int) -> list[str]:
 def format_latest(changelog: Changelog) -> list[str]:
     lines = format_release(changelog.latest, number=1, total=len(changelog.releases))
     lines.append(
-        f"查看全部 {len(changelog.releases)} 个版本：/更新日志 列表"
-        f"；按版本号或序号查看：/更新日志 {changelog.latest.version}、/更新日志 2"
+        f"/更新日志 列表：浏览全部 {len(changelog.releases)} 个版本"
+        f"；/更新日志 {changelog.latest.version} 或 /更新日志 2：按版本或序号查看"
     )
     return lines
 
@@ -64,25 +64,24 @@ def format_index(changelog: Changelog, *, page: int = 1, page_size: int = 12) ->
             f"{release.title}{tags}（{kinds}）"
         )
     lines.append(
-        "查看详情：/更新日志 <版本号|序号>，例如 /更新日志 "
-        f"{changelog.latest.version} 或 /更新日志 1；也可按关键词检索。"
+        f"/更新日志 <版本号|序号>：查看指定版本详情，如 /更新日志 {changelog.latest.version} 或 /更新日志 1；支持输入关键词搜索。"
     )
     if pages > 1:
-        lines.append(f"翻页：/更新日志 列表 {min(page + 1, pages)}")
+        lines.append(f"/更新日志 列表 {min(page + 1, pages)}：翻至下一页")
     return lines
 
 
 def format_search(results: tuple[Release, ...], query: str, *, limit: int = 6) -> list[str]:
     if not results:
-        return [f"没有找到与「{query}」相关的更新。试试 /更新日志 列表 看全部版本。"]
+        return [f"未查到「{query}」相关的更新，可输入 /更新日志 列表 查看完整目录。"]
     lines = [f"与「{query}」相关的更新（{len(results)} 个版本）："]
     for release in results[:limit]:
         lines.append(
             f"{release.version} {release.date_range} {release.title} — {release.summary}"
         )
     if len(results) > limit:
-        lines.append(f"（只显示前 {limit} 个，共 {len(results)} 个版本）")
-    lines.append(f"查看详情：/更新日志 {results[0].version}")
+        lines.append(f"（仅展示前 {limit} 项，共 {len(results)} 个版本）")
+    lines.append(f"/更新日志 {results[0].version}：查看该版本详情")
     return lines
 
 
@@ -107,12 +106,13 @@ def format_stats(changelog: Changelog) -> list[str]:
 
 def format_help() -> list[str]:
     return [
-        "更新日志：/更新日志 —— 看最近一次版本更新",
-        "/更新日志 列表 [页码] —— 全部版本目录，每页 12 个",
-        "/更新日志 <版本号|序号> —— 查看指定版本，例如 /更新日志 v1.13.0、/更新日志 1",
-        "/更新日志 <日期|关键词> —— 例如 /更新日志 2026-09-05、/更新日志 雷达",
-        "/更新日志 统计 —— 版本、更新条数与提交数汇总",
-        "/更新日志 帮助 —— 显示本帮助",
+        "更新日志命令帮助：",
+        "/更新日志 —— 查看最新版本更新内容",
+        "/更新日志 列表 [页码] —— 浏览完整版本目录，每页展示 12 项",
+        "/更新日志 <版本号|序号> —— 查看指定版本详情，如 /更新日志 v1.13.0、/更新日志 1",
+        "/更新日志 <日期|关键词> —— 按日期或关键字检索，如 /更新日志 2026-09-05、/更新日志 雷达",
+        "/更新日志 统计 —— 汇总统计版本数、更新条目与提交总数",
+        "/更新日志 帮助 —— 查看帮助说明",
         "别名：/更新、/changelog、/版本",
         FOOTNOTE,
     ]

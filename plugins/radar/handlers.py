@@ -146,7 +146,7 @@ async def _run(session: Session, coro, *, timeout: float) -> None:
     if sum(_active.values()) >= max(1, _config.concurrency):
         # _dispatch() is constructed by the caller before admission.
         coro.close()
-        await send(session, "雷达当前较忙，请稍后再试。")
+        await send(session, "雷达系统正忙，请稍后再试。")
         return
     # 准入与占位之间不得 await，否则计数会被并发穿透。
     _active[key] = _active.get(key, 0) + 1
@@ -159,7 +159,7 @@ async def _run(session: Session, coro, *, timeout: float) -> None:
         await asyncio.wait_for(execute(), timeout=timeout)
     except asyncio.TimeoutError:
         logger.warning("[radar] command timed out after {:.0f}s", timeout)
-        await send(session, "雷达查询超时，请稍后重试或改用更轻的命令。")
+        await send(session, "雷达请求响应超时，请稍后重试或选用轻量指令。")
         return
     except RadarError as error:
         # 上游响应体原文绝不进用户可见消息（plugin_api §2）。
@@ -169,7 +169,7 @@ async def _run(session: Session, coro, *, timeout: float) -> None:
         raise
     except Exception as error:  # noqa: BLE001 - 边界只记类型名，绝不记载荷
         logger.warning("[radar] command failed: {}", type(error).__name__)
-        await send(session, "雷达查询失败，请稍后重试。")
+        await send(session, "雷达查询异常，请稍后重试。")
         return
     finally:
         _active[key] = max(0, _active.get(key, 1) - 1)
@@ -202,7 +202,7 @@ async def handle_radar(event: Event, rest: ArgVal, session: Session) -> None:
     sub, *args = tokens
     key = _SUBCOMMANDS.get(sub) or _SUBCOMMANDS.get(sub.casefold())
     if key is None:
-        await send(session, format_error(InvalidArgument(f"未知子命令「{sub}」，试试 /radar 帮助。", detail="unknown subcommand")))
+        await send(session, format_error(InvalidArgument(f"未知子命令「{sub}」，可发送 /radar 帮助 查看指令列表。", detail="unknown subcommand")))
         return
     timeout = _config.table_timeout if sub in _TABLE_COMMANDS else max(30.0, _config.timeout * 1.5)
     await _run(session, _dispatch(key, args), timeout=timeout)
@@ -221,13 +221,13 @@ async def _dispatch(key: str, args: list[str]) -> list[str]:
         return views.RadarReply(format_model_list(rows, meta), views.ranking_pages(rows, meta))
 
     if key == "model":
-        name, effort = _model_and_effort(args, "用法：/radar 模型 <名> [档位]")
+        name, effort = _model_and_effort(args, "格式：/radar 模型 <名> [档位]")
         profile = await _service.model_profile(name, effort=effort, benchmark=benchmark)
         return views.RadarReply(format_model_profile(profile), views.profile_pages(profile))
 
     if key == "compare":
         if len(args) < 2:
-            raise InvalidArgument("用法：/radar 对比 <A> <B> [档位]", detail="missing models")
+            raise InvalidArgument("格式：/radar 对比 <A> <B> [档位]", detail="missing models")
         effort = args[2] if len(args) > 2 else None
         cmp = await _service.compare(args[0], args[1], effort=effort, benchmark=benchmark)
         return views.RadarReply(format_comparison(cmp), views.comparison_pages(cmp))
@@ -246,7 +246,7 @@ async def _dispatch(key: str, args: list[str]) -> list[str]:
         return views.RadarReply(format_value_picks(points, meta), views.value_pages(points, meta))
 
     if key == "trend":
-        name, effort = _model_and_effort(args, "用法：/radar 趋势 <名> [档位]")
+        name, effort = _model_and_effort(args, "格式：/radar 趋势 <名> [档位]")
         points, meta = await _service.trend(name, effort=effort, benchmark=benchmark)
         label = name + (f"[{effort}]" if effort else "") + f" · {meta.note}"
         lines = format_trend(points, label=label)

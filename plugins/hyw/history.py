@@ -38,7 +38,7 @@ class HistoryStore:
             content = message["content"]
             if isinstance(content, list):
                 content = "\n".join(
-                    part["text"] if part["type"] == "text" else "[上一轮图片，需再次分析时请重新发送]"
+                    part["text"] if part["type"] == "text" else "[前序对话图片，如需重新分析请再次发送]"
                     for part in content
                 )
             entry = {"role": message["role"], "content": str(content)[:6000]}

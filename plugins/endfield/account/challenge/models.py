@@ -222,7 +222,7 @@ class ChallengeAmbiguousError(ChallengeResolutionError):
         self.query = query
         self.candidates = tuple(dict.fromkeys(str(item) for item in candidates if item))
         self.path = tuple(dict.fromkeys(str(item) for item in path if item))
-        super().__init__(f"“{query}”有多个可能：{'、'.join(self.candidates[:5])}")
+        super().__init__(f"匹配到多个“{query}”相关结果：{'、'.join(self.candidates[:5])}")
 
 
 def _current_item(items, now_ts, *, active_attr):

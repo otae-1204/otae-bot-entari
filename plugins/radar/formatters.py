@@ -640,17 +640,17 @@ def format_pulse(pulse: FleetPulse | None, race: FlagRace | None, meta: RadarMet
 def format_help() -> list[str]:
     """帮助文本。"""
     return [
-        "AI 智商雷达 · 命令",
-        "· /radar 总览 — 模型与档位矩阵",
-        "· /radar 榜 [频道] — 档位排行",
-        "· /radar 模型 <名> [档位] — 模型档案",
-        "· /radar 对比 <A> <B> [档位] — 对比",
-        "· /radar 推荐 [频道] — 上游推荐",
-        "· /radar 预警 [频道] — 降智预警",
-        "· /radar 性价比 [频道] — 性价比榜",
-        "· /radar 趋势 <名> [档位] — IQ 趋势",
-        "· /radar 频道 — 频道清单",
-        "· /radar 档位 [频道] — 模型档位清单",
+        "AI 智商雷达 · 命令帮助：",
+        "· /radar 总览 —— 查看模型与档位矩阵",
+        "· /radar 榜 [频道] —— 查看档位表现排行",
+        "· /radar 模型 <名> [档位] —— 查看模型详细档案",
+        "· /radar 对比 <A> <B> [档位] —— 对比两款模型数据",
+        "· /radar 推荐 [频道] —— 查看官方推荐模型",
+        "· /radar 预警 [频道] —— 查看模型降智预警",
+        "· /radar 性价比 [频道] —— 查看模型性价比榜",
+        "· /radar 趋势 <名> [档位] —— 追踪历史智商趋势",
+        "· /radar 频道 —— 查看所有评测频道",
+        "· /radar 档位 [频道] —— 查看模型档位清单",
         "数据来源 api.codexradar.com（只读）。",
     ]
 

@@ -155,7 +155,7 @@ class AkeDataStageSource:
         tables = await self._load_tables(*table_names)
         records, _series = _resolve_stage_records(key, tables[0], tables[1])
         if not records:
-            raise StageDataIncomplete(f"AkeData 中没有关卡“{key}”。")
+            raise StageDataIncomplete(f"AkeData 数据源中未找到关卡“{key}”。")
         spawners_by_scene, scripts_by_scene = await self._load_stage_spawners(records)
         buff_ids = _stage_buff_ids(records, tables[5], spawners_by_scene, scripts_by_scene)
         buff_table = await self._load_buffs(buff_ids)
@@ -253,7 +253,7 @@ class AkeDataStageSource:
         spawner_paths = await self._asset_json_paths(f"SpawnerConfig/{scene_id}")
         script_paths = await self._asset_json_paths(f"LevelScriptData/{scene_id}")
         if not spawner_paths and not script_paths:
-            raise StageDataIncomplete(f"AkeData 场景 {scene_id} 缺少刷怪配置清单。")
+            raise StageDataIncomplete(f"AkeData 场景 {scene_id} 未配置敌人刷新列表。")
         resources = await asyncio.gather(
             *(
                 self._load_resource(f"public/Json/{path}")
@@ -325,10 +325,10 @@ def parse_akedata_version(manifest: dict[str, Any]) -> AkeDataVersion:
         None,
     )
     if not latest or row is None:
-        raise StageDataIncomplete("AkeData 版本清单缺少当前版本。")
+        raise StageDataIncomplete("AkeData 版本清单未包含当前版本信息。")
     table_cfg_path = str(row.get("tableCfgPath") or "").strip("/")
     if not table_cfg_path:
-        raise StageDataIncomplete("AkeData 当前版本缺少表路径。")
+        raise StageDataIncomplete("AkeData 当前版本数据表路径缺失。")
     updated_at = str(
         manifest.get("updatedAt") or row.get("publishedAt") or manifest.get("sharedRevision") or ""
     ).strip()
@@ -404,7 +404,7 @@ def parse_akedata_stage(
 ) -> Stage:
     records, series = _resolve_stage_records(key, series_table, dungeon_table)
     if not records or series is None:
-        raise StageDataIncomplete(f"AkeData 中没有关卡“{key}”的详情。")
+        raise StageDataIncomplete(f"AkeData 数据源中未包含关卡“{key}”的详细数据。")
     series_id = str(series.get("id") or "")
     series_name = _translated(series.get("name"), text_table) or series_id
     representative = records[0]

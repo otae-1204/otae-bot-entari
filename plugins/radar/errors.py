@@ -27,14 +27,14 @@ CODE_PRIVATE_PATH_REFUSED = "private_path_refused"
 #: 面向用户的固定话术。``{detail}`` 只允许由本模块拼装的**本地**信息（可用 id、候选列表、
 #: 合法取值），绝不来自上游响应体。
 _MESSAGES: dict[str, str] = {
-    CODE_UPSTREAM_UNAVAILABLE: "雷达数据源暂时不可用，请稍后重试。",
-    CODE_UNKNOWN_BENCHMARK: "没有这个评测频道。",
-    CODE_UNKNOWN_MODEL: "没有该模型档位的实测数据。",
-    CODE_INVALID_ARGUMENT: "参数不合法。",
-    CODE_PAYLOAD_TOO_LARGE: "该查询的数据量过大，请改用轻量命令。",
-    CODE_SCHEMA_DRIFT: "数据源结构发生变化，请反馈给维护者。",
-    CODE_RATE_LIMITED: "数据源正在限流，请稍后再试。",
-    CODE_PRIVATE_PATH_REFUSED: "内部错误：插件不应访问私有接口。",
+    CODE_UPSTREAM_UNAVAILABLE: "雷达数据源暂不可用，请稍后重试。",
+    CODE_UNKNOWN_BENCHMARK: "未找到该评测频道，请核对频道名称。",
+    CODE_UNKNOWN_MODEL: "未查询到该模型档位的实测记录。",
+    CODE_INVALID_ARGUMENT: "输入参数有误，请核对后重试。",
+    CODE_PAYLOAD_TOO_LARGE: "查询返回的数据量过大，请使用轻量查询指令。",
+    CODE_SCHEMA_DRIFT: "数据源格式出现变动，请联系维护者处理。",
+    CODE_RATE_LIMITED: "数据源请求过于频繁已被限流，请稍后重试。",
+    CODE_PRIVATE_PATH_REFUSED: "内部错误：禁止请求私有接口。",
 }
 
 #: 脱敏用的常见敏感片段（上游 401/403 体里可能出现 token 形态的字符串）。

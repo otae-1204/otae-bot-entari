@@ -155,7 +155,7 @@ class FZStageSource:
         """Returns the stage plus the enemy articles this call could not reach."""
         title, entry_key = split_stage_key(key)
         if title in HUB_TITLES:
-            raise StageDataIncomplete(f"“{title}”只是玩法说明条目，暂无可查询的关卡资料。")
+            raise StageDataIncomplete(f"“{title}”属于玩法机制说明，无独立关卡数据可供查询。")
         item = await self._catalog_item_for(title, entry_key)
         titles = (title, *(item.extra_titles if item is not None else ()))
         payloads = await asyncio.gather(*(self.client.fz_article_by_title(one) for one in titles))
@@ -367,7 +367,7 @@ def parse_fz_stage(
         # An unmodelled template still renders: the generic reader turns whatever the
         # source publishes into facts, variants and blocks the card already knows.
         return _parse_generic_stage(article, revision, attrs, family_key)
-    raise StageDataIncomplete(f"暂不支持该关卡条目：{title or '未知条目'}")
+    raise StageDataIncomplete(f"暂未收录该关卡条目：{title or '未知条目'}。")
 
 
 def _parse_boss_stage(article: dict[str, Any], revision: dict[str, Any]) -> Stage:
@@ -376,7 +376,7 @@ def _parse_boss_stage(article: dict[str, Any], revision: dict[str, Any]) -> Stag
     depths_wrapper = attrs.get("depths") if isinstance(attrs.get("depths"), dict) else {}
     depths = [item for item in depths_wrapper.get("depths") or () if isinstance(item, dict)]
     if not depths:
-        raise StageDataIncomplete("该危境关卡暂未提供深度资料。")
+        raise StageDataIncomplete("该危境关卡尚未收录深度阶段数据。")
     categories = {_text(item) for item in article.get("categories") or ()}
     family_key = "crisis_fragment" if "危境碎片" in categories else "boss_rush"
     family_name = FAMILY_NAMES[family_key]
@@ -697,7 +697,7 @@ def _parse_resource_stage(
     hero = _dict(attrs.get("hero"))
     tiers = _dicts(_dig(attrs, "tiers", "tiers"))
     if not tiers:
-        raise StageDataIncomplete("该资源副本暂未提供层数资料。")
+        raise StageDataIncomplete("该资源副本尚未收录层数规格数据。")
     feature_title = _text(_dig(attrs, "tiers", "featureTitle")) or _text(hero.get("featureTitle"))
     series_name = _text(hero.get("seriesName"))
     name = series_name.split("·", 1)[-1] if "·" in series_name else series_name
@@ -777,10 +777,10 @@ def _parse_war_echo_stage(
         themes[0] if themes and not entry_key else None,
     )
     if theme is None:
-        raise StageDataIncomplete("该战争回响赛季暂未提供该关卡资料。")
+        raise StageDataIncomplete("当前战争回响赛季暂未收录该关卡数据。")
     difficulties = _dicts(theme.get("difficulties"))
     if not difficulties:
-        raise StageDataIncomplete("该战争回响关卡暂未提供难度资料。")
+        raise StageDataIncomplete("该战争回响关卡尚未收录难度规格数据。")
     season = _localized(overview.get("name"))
     name = _localized(theme.get("name"))
     variants = tuple(
@@ -1230,7 +1230,7 @@ def _parse_activity_stage(
     phases = _dicts(_dig(cards.get("endfieldCardActivityPhases", {}), "phases"))
     rows = stages or phases
     if not rows:
-        raise StageDataIncomplete(f"“{name}”暂无可查询的关卡阶段资料。")
+        raise StageDataIncomplete(f"“{name}”暂未收录关卡阶段详情。")
     entries = tuple(
         StageBlockEntry(
             name=_localized(one.get("name")),
@@ -1326,7 +1326,7 @@ def _parse_generic_stage(
     )
     variants = _generic_variants(attrs)
     if not variants:
-        raise StageDataIncomplete(f"“{name}”的资料结构暂未被识别，无法生成关卡卡。")
+        raise StageDataIncomplete(f"“{name}”的数据格式暂未适配，暂无法生成关卡图卡。")
     blocks = tuple(
         block
         for block in (_generic_block(key, value) for key, value in attrs.items())

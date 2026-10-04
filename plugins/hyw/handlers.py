@@ -22,15 +22,14 @@ from .config import HywConfig, HywError
 from .history import HistoryStore, Scope, SourceBook
 from .messages import expand_special
 
-HELP = """HYW / 何意味
-/q 问题：搜索问答，也可附带图片（最多 4 张）。
-引用一条消息后发送 /q 问题：分析引用内容。
-引用自己的 HYW 回答后发送 /q 追问：继续对话，有效期 1 小时。
-/q 清空：清除自己在当前会话中的历史和来源记录。
-/qstop：取消自己在当前会话中正在进行的问答。
-/link：回复一条 HYW 回答后再发送，才会取回该次来源。
+HELP = """HYW 搜索问答服务
+/q <问题> —— 联网搜索并作答，支持附加至多 4 张图片
+/q <追问> —— 引用自己此前的 HYW 回答可接续对话（有效期 1 小时）
+/q 清空 —— 清除个人在当前会话的上下文及参考来源
+/qstop —— 终止个人在当前会话中正在生成的问答
+/link —— 回复某条 HYW 回答以提取对应的参考资料与网页链接
 别名：/hyw、/何意味、/qlink。
-输入和引用内容会发送给配置的模型；搜索词会发送给所选搜索服务；读网页时网址会发给 Jina。"""
+提问与引用内容将递交至大语言模型处理，检索词由搜索引擎解析，网页抓取将请求 Jina 接口。"""
 history_store = HistoryStore()
 sources = SourceBook()
 _active: dict[Scope, int] = {}
@@ -120,7 +119,7 @@ def _jpeg(data: bytes) -> str:
     try:
         with PILImage.open(BytesIO(data)) as original:
             if original.width * original.height > 20_000_000:
-                raise HywError("图片像素过大，请压缩后再发送。")
+                raise HywError("图片分辨率超出限制，请适当压缩后再尝试发送。")
             image = ImageOps.exif_transpose(original)
             image.thumbnail((1280, 1280))
             rgba = image.convert("RGBA")
@@ -132,9 +131,9 @@ def _jpeg(data: bytes) -> str:
     except HywError:
         raise
     except (UnidentifiedImageError, OSError, ValueError, PILImage.DecompressionBombError):
-        raise HywError("无法读取图片，请使用 PNG、JPEG 或 WebP 图片。") from None
+        raise HywError("图片格式无法识别，请使用标准的 PNG、JPEG 或 WebP 图片。") from None
     if len(encoded) > 7_000_000:
-        raise HywError("压缩后的图片仍然过大。")
+        raise HywError("图片压缩后体积仍然过大，请降低原图质量后再试。")
     return encoded
 
 
@@ -146,24 +145,24 @@ async def _download(client: httpx.AsyncClient, url: str) -> bytes:
                 raise ValueError("invalid data URI")
             data = base64.b64decode(encoded, validate=True)
         except (ValueError, binascii.Error):
-            raise HywError("图片编码无效。") from None
+            raise HywError("图片 base64 编码损坏或格式无效。") from None
     else:
         async with client.stream("GET", url, follow_redirects=True, timeout=20) as response:
             if response.status_code != 200:
-                raise HywError(f"图片下载失败（HTTP {response.status_code}）。")
+                raise HywError(f"网络图片拉取失败（HTTP {response.status_code}）。")
             data = bytearray()
             async for chunk in response.aiter_bytes():
                 data.extend(chunk)
                 if len(data) > 20_000_000:
-                    raise HywError("单张原图不能超过 20 MB。")
+                    raise HywError("单张原图体积不得超过 20 MB。")
     if len(data) > 20_000_000:
-        raise HywError("单张原图不能超过 20 MB。")
+        raise HywError("单张原图体积不得超过 20 MB。")
     return bytes(data)
 
 
 async def _model_images(config: HywConfig, images: list[str]) -> list[dict]:
     if len(images) > 20:
-        raise HywError("展开后的图片不能超过 20 张。")
+        raise HywError("展开包含的图片总数不得超过 20 张。")
     if not images:
         return []
     prepared = []
@@ -240,7 +239,7 @@ def _google_home(config: HywConfig) -> Path:
     except HywError:
         raise
     except Exception:
-        raise HywError("服务账号 JSON 无法交给 Vertex。请管理员检查 HYW_CREDENTIALS_FILE。") from None
+        raise HywError("服务账号凭证无法加载至 Vertex，请联系管理员核对 HYW_CREDENTIALS_FILE 配置。") from None
     return home
 
 
@@ -259,11 +258,11 @@ async def run_request(session: Session, config: HywConfig, scope: Scope, text: s
         from hyw_frontier.errors import FrontierError
         from hyw_frontier.rendering import RenderError
     except ImportError:
-        raise HywError("HYW 核心库未安装，请管理员安装 hyw-frontier 与 md2png。") from None
+        raise HywError("HYW 运行依赖缺失，请联系管理员安装 hyw-frontier 与 md2png。") from None
     if len(text) > 32_000:
-        raise HywError("问题和引用内容合计不能超过 32000 字。")
+        raise HywError("提问文本与引用正文累计上限为 32000 字。")
     if not rich and len(images) > 4:
-        raise HywError("每次最多分析 4 张图片。")
+        raise HywError("单次提问最多仅支持附带 4 张图片。")
     model_images = [] if rich else await _model_images(config, images)
     message_content = await _prepared_blocks(config, text, images) if rich else None
     previous_search_proxy = os.environ.get("DDGS_PROXY")
@@ -299,7 +298,7 @@ async def run_request(session: Session, config: HywConfig, scope: Scope, text: s
             )
         except RenderError:
             logger.warning("[hyw] card render failed")
-            raise HywError("回答已生成，但出图失败。请稍后重试。") from None
+            raise HywError("文本回答已生成完毕，但生成渲染卡片时失败，请稍后重试。") from None
         except FrontierError as error:
             raise HywError(str(error)) from None
     finally:
@@ -338,11 +337,11 @@ async def handle_hyw(session: Session, result: Arparma):
         return
     if text.lower() in {"清空", "重置", "clear", "reset"} and not images:
         if scope in _active:
-            await send_text(session, "当前仍有问题在处理中，请全部完成后再清空。")
+            await send_text(session, "当前仍有正在处理的问答任务，请等待完成之后再清空。")
             return
         history_store.clear(scope)
         sources.clear_sender(channel_for(scope), scope[4])
-        await send_text(session, "已清除你在当前会话中的 HYW 历史。")
+        await send_text(session, "已清空你在当前会话的 HYW 对话历史与参考资料缓存。")
         return
     try:
         config = HywConfig.from_env()
@@ -350,15 +349,15 @@ async def handle_hyw(session: Session, result: Arparma):
         await send_text(session, str(error))
         return
     if sum(_active.values()) >= config.max_concurrent:
-        await send_text(session, "HYW 当前较忙，请稍后重试。")
+        await send_text(session, "HYW 当前处理负载已满，请稍等片刻后再提问。")
         return
     if not config.configured:
         if config.auth_mode == "none" and config.auth_error:
-            await send_text(session, f"{config.auth_error}请管理员检查 HYW_CREDENTIALS_FILE 指向的服务账号 JSON。")
+            await send_text(session, f"{config.auth_error}请联系管理员核对 HYW_CREDENTIALS_FILE 所指服务账号 JSON 文件。")
         elif config.credentials_file:
-            await send_text(session, "HYW 尚未配置模型密钥。请管理员填写 HYW_API_KEY、HYW_BASE_URL、HYW_MODEL，或设置 HYW_CONFIG_SOURCE 复用现有模型配置。")
+            await send_text(session, "HYW 尚未完成模型密钥配置，请联系管理员配置 HYW_API_KEY、HYW_BASE_URL、HYW_MODEL，或设置 HYW_CONFIG_SOURCE 复用已有模型。")
         else:
-            await send_text(session, "HYW 尚未配置模型密钥。请管理员填写 HYW_API_KEY，或把 Google 服务账号 JSON 放到 HYW_CREDENTIALS_FILE 指向的路径。")
+            await send_text(session, "HYW 尚未配置模型密钥，请联系管理员设置 HYW_API_KEY，或将 Google 服务账号凭证放置于 HYW_CREDENTIALS_FILE 指定路径。")
         return
     prior = []
     if session.reply and session.reply.origin:
@@ -378,12 +377,12 @@ async def handle_hyw(session: Session, result: Arparma):
     except HywError as error:
         await send_text(session, str(error))
     except asyncio.TimeoutError:
-        await send_text(session, f"本次问答超过 {int(config.timeout)} 秒，请稍后重试或缩小问题范围。")
+        await send_text(session, f"问答超时（已超过 {int(config.timeout)} 秒），请适当精简提问范围或稍后再试。")
     except asyncio.CancelledError:
         raise
     except Exception as error:  # noqa: BLE001 - Chat boundary: always report failure, redact upstream payloads.
         logger.warning("[hyw] request failed: {}", type(error).__name__)
-        await send_text(session, "HYW 处理失败，请稍后重试。")
+        await send_text(session, "HYW 处理异常，请稍后重新发送。")
     finally:
         if task is not None:
             _inflight.get(scope, set()).discard(task)
@@ -403,20 +402,20 @@ async def handle_stop(session: Session, result: Arparma):
         for task in group
     ]
     if not tasks:
-        await send_text(session, "你在当前会话中没有正在进行的 HYW 问答。")
+        await send_text(session, "你在当前会话下并无正在执行的问答任务。")
         return
     for task in tasks:
         task.cancel()
-    await send_text(session, "已取消你在当前会话中的 HYW 问答。")
+    await send_text(session, "已中止你在当前会话中正在处理的 HYW 问答。")
 
 
 async def handle_link(session: Session, result: Arparma):
     if not session.reply or not session.reply.origin:
-        await send_text(session, "请回复一条 HYW 回答后再发送 /link。")
+        await send_text(session, "请先引用或回复一条 HYW 生成的回答消息，再发送 /link。")
         return
     listed = sources.get(channel_for(scope_for(session)), str(session.reply.origin.id))
     if not listed:
-        await send_text(session, "这条消息没有可查询的 HYW 来源。请回复 HYW 的回答后再发 /link。")
+        await send_text(session, "该条消息暂无可查询的参考来源记录，请确认引用的确为 HYW 的回答。")
         return
     lines = ["参考资料："]
     for index, item in enumerate(listed, 1):

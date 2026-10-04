@@ -71,4 +71,4 @@ def parse_target_ref(raw: str) -> TargetRef:
 
 
 def _unrecognised(raw: str) -> str:
-    return f'无法识别 "{raw}"，请使用 UID、room:直播间号 或直播间链接'
+    return f'无法识别「{raw}」，支持输入 UID、room:直播间号 或直播间链接。'

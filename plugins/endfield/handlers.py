@@ -456,10 +456,10 @@ async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand,
                 raise
             except (VersionCalendarError, WarfarinAPIError, StageDataIncomplete) as exc:
                 logger.error(f"[endfield] version calendar unavailable: {exc}")
-                return await matcher.finish("当前版本日历暂不可用，请稍后重试")
+                return await matcher.finish("版本日历数据暂不可用，请稍后再试。")
             except Exception:
                 logger.exception("[endfield] version calendar render failed")
-                return await matcher.finish("当前版本日历生成失败，请稍后重试")
+                return await matcher.finish("版本日历图生成失败，请稍后再试。")
     if command.action == "dev":
         if not dev_visible_for_user(str(event_user_id(event)), Config.SUPERUSERS):
             return await matcher.finish(format_unknown())
@@ -485,16 +485,16 @@ async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand,
     if command.action not in {"query", "search"}:
         return await matcher.finish(format_unknown())
     if command.scope == "stage" and command.source and command.source != "akedata":
-        return await matcher.finish(f"{source_label(command.source)} 暂不支持关卡资料；关卡仅使用 AkeData。")
+        return await matcher.finish(f"{source_label(command.source)} 暂不支持关卡资料，关卡数据仅支持 AkeData。")
     if (
         command.scope in ENCYCLOPEDIA_SCOPES
         and command.source
         and command.source not in source_order(command.scope)
     ):
-        return await matcher.finish("该类资料只提供 AkeData")
+        return await matcher.finish("该类资料仅由 AkeData 提供。")
     if command.scope == "archive_entry" and archive_store.load_current_view() is None:
         # 显式档案范围且没有快照：直接回文案，不抛异常、不走「资料暂时不可用」。
-        return await matcher.finish("档案资料尚未就绪，先发送 /ef 档案 刷新")
+        return await matcher.finish("档案数据尚未构建，请先发送 /ef 档案 刷新。")
     if not command.query:
         if command.action == "query" and command.scope in {"operator", "weapon", "equipment"}:
             command = ParsedEndfieldCommand(
@@ -536,12 +536,12 @@ async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand,
             candidates = await _collect_candidates(command.scope, command.query, command.source, command.rarity)
             fallback = await _item_scope_fallback(command, candidates)
             if fallback == "medal":
-                return await matcher.finish("奖章请用 /ef 奖章")
+                return await matcher.finish("奖章查询请使用 /ef 奖章 指令。")
             if fallback is not None:
                 candidates = fallback
             candidate_seconds = perf_counter() - candidate_started
             if command.action == "search":
-                title = "搜索结果" if candidates else "未找到相关结果"
+                title = "检索结果" if candidates else "未匹配到相关条目"
                 logger.info(
                     f"[endfield] perf action=search scope={command.scope} "
                     f"candidate={candidate_seconds:.3f}s total={perf_counter() - started:.3f}s"
@@ -559,10 +559,10 @@ async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand,
                 text = answer.extract_plain_text() if hasattr(answer, "extract_plain_text") else str(answer or "")
                 text = text.strip()
                 if text.casefold() in {"取消", "cancel", "q", "quit"}:
-                    return await matcher.finish("已取消候选查询。")
+                    return await matcher.finish("已取消候选选择。")
                 selection = parse_candidate_selection(text, len(options))
                 if selection is None:
-                    return await matcher.finish(f"编号无效，请输入 1-{len(options)}。")
+                    return await matcher.finish(f"序号输入有误，请输入 1–{len(options)}。")
                 selected = options[selection]
             if selected is None:
                 return await matcher.finish(format_not_found(command.scope, command.query))
@@ -583,38 +583,38 @@ async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand,
                 raise
             except Exception as exc:
                 logger.exception(f"[endfield] send failed for {selected.kind} {command.query}: {exc}")
-                return await matcher.finish("图片发送失败，请稍后重试")
+                return await matcher.finish("图片发送失败，请稍后再试。")
     except _ExitException:
         raise
     except WarfarinAPIError as exc:
         logger.warning(f"[endfield] data API failed for {command.scope} {command.query}: {exc}")
         if command.scope == "stage":
-            return await matcher.finish("关卡数据源暂时不可用")
-        return await matcher.finish("数据源暂时不可用")
+            return await matcher.finish("关卡数据源暂时响应异常，请稍后再试。")
+        return await matcher.finish("数据源暂时响应异常，请稍后再试。")
     except (StageVariantNotFound, StageDataIncomplete) as exc:
         return await matcher.finish(str(exc))
     except PropEffectIncomplete as exc:
         logger.warning(f"[endfield] prop effect incomplete for {command.scope} {command.query}: {exc}")
-        return await matcher.finish("道具效果数值未收录")
+        return await matcher.finish("该道具效果数值暂未收录。")
     except AkeDataIncomplete as exc:
         logger.warning(f"[endfield] AKE data incomplete for {command.scope} {command.query}: {exc}")
-        return await matcher.finish("资料暂时不可用")
+        return await matcher.finish("该资料暂时不可用，请稍后再试。")
     except Exception as exc:
         logger.exception(f"[endfield] card failed for {command.scope} {command.query}: {exc}")
-        return await matcher.finish("图片生成失败")
+        return await matcher.finish("卡片图片生成失败，请稍后再试。")
 
 
 async def _handle_medal(matcher, command: ParsedEndfieldCommand) -> None:
     """F1：查看蚀刻章统计/新增；刷新时重抓 AKEData 数据 + 上一版本基线（源和源对比）。"""
     if command.action == "medal_refresh":
         async with _MEDAL_LOCK:
-            await matcher.send("正在抓取 AKEData 蚀刻章数据…")
+            await matcher.send("正在同步 AKEData 蚀刻章最新数据…")
             started = perf_counter()
             try:
                 snapshot = await service.fetch_medal_snapshot_akedata()
             except Exception as exc:
                 logger.warning(f"[endfield] medal refresh failed: {exc}")
-                return await matcher.finish("AKEData 数据源暂时不可用，请稍后重试。")
+                return await matcher.finish("AKEData 奖章数据源响应异常，请稍后再试。")
             # 先抓基线，再成对写盘；基线暂时不可用时保留旧基线，避免丢失版本对比。
             try:
                 baseline = await service.fetch_akedata_baseline()
@@ -631,7 +631,7 @@ async def _handle_medal(matcher, command: ParsedEndfieldCommand) -> None:
                     await medal_store.replace_current(snapshot)
             except Exception as exc:
                 logger.exception(f"[endfield] medal snapshot persistence failed: {exc}")
-                return await matcher.finish("蚀刻章数据保存失败，请稍后重试。")
+                return await matcher.finish("蚀刻章本地快照保存失败，请稍后再试。")
             stored_baseline = medal_store.load_baseline_view()
             baseline_info = (
                 f"{stored_baseline.version}({len(stored_baseline.ids)} ids)"
@@ -644,7 +644,7 @@ async def _handle_medal(matcher, command: ParsedEndfieldCommand) -> None:
 
     current = medal_store.load_current_view()
     if current is None:
-        return await matcher.finish("暂无蚀刻章数据，请先发送「/ef 奖章 刷新」。")
+        return await matcher.finish("本地暂无蚀刻章数据快照，请先执行 /ef 奖章 刷新。")
     baseline = medal_store.load_baseline_view()
     try:
         diff = service.build_medal_diff(current, baseline)
@@ -655,10 +655,10 @@ async def _handle_medal(matcher, command: ParsedEndfieldCommand) -> None:
             pngs = await draw_medal_stats_card(diff)
     except WarfarinAPIError as exc:
         logger.warning(f"[endfield] medal card data failed: {exc}")
-        return await matcher.finish("数据源暂时不可用。")
+        return await matcher.finish("数据源暂时响应异常，请稍后再试。")
     except Exception as exc:
         logger.exception(f"[endfield] medal card failed: {exc}")
-        return await matcher.finish("蚀刻章图片生成失败")
+        return await matcher.finish("蚀刻章统计卡生成失败，请稍后再试。")
     return await _finish_pngs(matcher, pngs)
 
 
@@ -666,13 +666,13 @@ async def _handle_archive(matcher, command: ParsedEndfieldCommand) -> None:
     """档案库版本统计/新增；刷新时重抓 AKEData 档案表 + 上一版本基线（源和源对比）。"""
     if command.action == "archive_refresh":
         async with _ARCHIVE_LOCK:
-            await matcher.send("正在抓取 AKEData 档案库数据…")
+            await matcher.send("正在同步 AKEData 档案库最新数据…")
             started = perf_counter()
             try:
                 snapshot = await service.fetch_archive_snapshot_akedata()
             except Exception as exc:
                 logger.warning(f"[endfield] archive refresh failed: {exc}")
-                return await matcher.finish("AKEData 数据源暂时不可用，请稍后重试。")
+                return await matcher.finish("AKEData 档案数据源响应异常，请稍后再试。")
             # 先抓基线，再成对写盘；基线暂时不可用时保留旧基线，避免丢失版本对比。
             try:
                 baseline = await service.fetch_archive_baseline()
@@ -689,7 +689,7 @@ async def _handle_archive(matcher, command: ParsedEndfieldCommand) -> None:
                     await archive_store.replace_current(snapshot)
             except Exception as exc:
                 logger.exception(f"[endfield] archive snapshot persistence failed: {exc}")
-                return await matcher.finish("档案库数据保存失败，请稍后重试。")
+                return await matcher.finish("档案库本地快照保存失败，请稍后再试。")
             stored_baseline = archive_store.load_baseline_view()
             baseline_info = (
                 f"{stored_baseline.version}({len(stored_baseline.ids)} ids)"
@@ -702,7 +702,7 @@ async def _handle_archive(matcher, command: ParsedEndfieldCommand) -> None:
 
     current = archive_store.load_current_view()
     if current is None:
-        return await matcher.finish("暂无档案库数据，请先发送「/ef 档案 刷新」。")
+        return await matcher.finish("本地暂无档案库数据快照，请先执行 /ef 档案 刷新。")
     baseline = archive_store.load_baseline_view()
     try:
         diff = service.build_archive_diff(current, baseline)
@@ -713,7 +713,7 @@ async def _handle_archive(matcher, command: ParsedEndfieldCommand) -> None:
             pngs = await draw_archive_stats_card(diff)
     except Exception as exc:
         logger.exception(f"[endfield] archive card failed: {exc}")
-        return await matcher.finish("档案库图片生成失败")
+        return await matcher.finish("档案库统计卡生成失败，请稍后再试。")
     return await _finish_pngs(matcher, pngs)
 
 
@@ -729,7 +729,7 @@ async def _handle_ownership_stats(
     if scope == "auto":
         scope = "group" if group_chat else "global"
     if scope == "group" and not group_chat:
-        return await matcher.finish("私聊中无法统计“群内”范围，请改用 /ef 持有率 全局。")
+        return await matcher.finish("私聊环境不支持群内统计，请使用 /ef 持有率 全局。")
 
     user_id = str(event_user_id(event))
     active_bot = bot
@@ -737,18 +737,18 @@ async def _handle_ownership_stats(
         try:
             active_bot = get_bot()
         except RuntimeError:
-            return await matcher.finish("当前无法获取群成员列表，请稍后重试。")
+            return await matcher.finish("群成员列表获取失败，请稍后再试。")
 
     if command.action == "ownership_refresh":
         if scope == "global":
             if not _is_endfield_superuser(user_id):
-                return await matcher.finish("仅 SUPERUSER 可以刷新全局持有率快照。")
+                return await matcher.finish("权限不足：仅机器人管理员可刷新全局持有率快照。")
         else:
             guild_id = get_group_id(event)
             if not _is_endfield_superuser(user_id) and not await is_group_manager(
                 active_bot, event, guild_id, user_id
             ):
-                return await matcher.finish("仅群主、群管理员或 SUPERUSER 可以刷新当前群快照。")
+                return await matcher.finish("权限不足：仅群主、群管理员或机器人管理员可刷新本群持有率快照。")
 
     if scope == "group":
         try:
@@ -759,7 +759,7 @@ async def _handle_ownership_stats(
                 f"standard_error_type={exc.standard_error_type} "
                 f"fallback_error_type={exc.fallback_error_type}"
             )
-            return await matcher.finish("获取当前群成员列表失败，已取消统计；不会回退为全局范围。")
+            return await matcher.finish("获取本群成员列表失败，已终止统计任务。")
         roles = account_store.list_all_roles(member_ids)
     else:
         roles = account_store.list_all_roles()
@@ -784,7 +784,7 @@ async def _handle_ownership_stats(
         with cold_start_command(matcher):
             rendered = await render_ownership_stats(report)
     except OwnershipStatsRendererUnavailable:
-        return await matcher.finish("持有率统计数据已生成，但展示组件尚未接入。")
+        return await matcher.finish("持有率数据已统计完成，但渲染展示模块暂未就绪。")
     if isinstance(rendered, bytes):
         return await _finish_png(matcher, rendered)
     if isinstance(rendered, (list, tuple)) and all(isinstance(item, bytes) for item in rendered):
@@ -802,27 +802,27 @@ def _is_endfield_superuser(user_id: str) -> bool:
 def _format_ownership_refresh_result(scope: str, refresh: OwnershipRefreshResult) -> str:
     scope_label = "全局" if scope == "global" else "当前群"
     if refresh.catalog_error:
-        catalog_label = f"目录检查失败（{refresh.catalog_error}）"
+        catalog_label = f"干员目录核对失败（{refresh.catalog_error}）"
     elif not refresh.catalog_checked:
-        catalog_label = "目录未检查"
+        catalog_label = "未核对干员目录"
     else:
-        catalog_label = "目录已更新" if refresh.catalog_updated else "目录无变化"
+        catalog_label = "干员目录已更新" if refresh.catalog_updated else "干员目录无变动"
     elapsed = max(0, int(refresh.finished_at) - int(refresh.started_at))
     eligible = refresh.eligible or refresh.attempted
     result = (
-        f"{scope_label}持有率刷新完成：候选 {eligible}，入队 {refresh.attempted}，"
-        f"角色请求 {refresh.requested}，成功 {refresh.succeeded}，失败 {refresh.failed}，"
-        f"跳过 {refresh.skipped}，延后 {refresh.deferred}；{catalog_label}；"
-        f"耗时 {elapsed} 秒。"
+        f"{scope_label}干员持有率刷新完毕：符合条件 {eligible} 个，加入队列 {refresh.attempted} 个，"
+        f"发起查询 {refresh.requested} 个，成功 {refresh.succeeded} 个，失败 {refresh.failed} 个，"
+        f"跳过 {refresh.skipped} 个，延后 {refresh.deferred} 个；{catalog_label}；"
+        f"总计耗时 {elapsed} 秒。"
     )
     if refresh.issues:
-        result += "分类：" + "、".join(
+        result += "异常归类：" + "、".join(
             f"{item.label} × {item.count}" for item in refresh.issues[:5]
         ) + "。"
     if refresh.stopped_early:
-        result += f"{refresh.stop_reason}；旧快照仍按 48 小时有效期参与统计。"
+        result += f"{refresh.stop_reason}；历史快照在 48 小时有效期内仍将继续生效。"
     elif refresh.failed:
-        result += "失败通常由绑定登录过期或官方接口异常导致；账号所有者可私聊使用 /ef 绑定更新凭证。"
+        result += "更新失败通常由于登录态失效或接口波动，账号持有者可私聊发送 /ef 绑定 重新授权。"
     return result
 
 
@@ -832,22 +832,22 @@ async def _handle_medal_missing(
     """F2：查询绑定账号未获得/未升满/未镀层的蚀刻章。"""
     role = account_store.resolve_role(qq_user_id, command.account_selector)
     if role is None:
-        return await matcher.finish("未找到对应账号，请先私聊使用 /ef 绑定。")
+        return await matcher.finish("未找到对应的终末地账号，请先私聊发送 /ef 绑定 进行添加。")
     snapshot = medal_store.load_current_view()
     if snapshot is None:
-        return await matcher.finish("暂无蚀刻章数据，请先发送「/ef 奖章 刷新」建立快照。")
+        return await matcher.finish("本地暂无蚀刻章数据快照，请先发送 /ef 奖章 刷新。")
     try:
         async with ROLE_TASKS.claim(role):
             token = account_store.decrypt_token(role, cipher)
             raw_progress = await official_client.endfield_card_detail(token, role)
     except EndfieldAPIError as exc:
         logger.warning(f"[endfield-medal] player progress API failed: {exc}")
-        return await matcher.finish("奖章进度查询失败，请稍后重试。")
+        return await matcher.finish("奖章进度查询失败，请稍后再试。")
     except CredentialKeyError as exc:
         return await matcher.finish(str(exc))
     except Exception as exc:
         logger.exception(f"[endfield-medal] progress query failed: {exc}")
-        return await matcher.finish("奖章进度查询失败。")
+        return await matcher.finish("奖章进度查询异常，请稍后再试。")
     view = service.build_medal_missing_view(
         raw_progress, snapshot,
         nickname=role.nickname, uid=role.masked_uid, server_name=server_label(role.server_name or role.server_id),
@@ -856,7 +856,7 @@ async def _handle_medal_missing(
         pngs = await draw_medal_missing_card(view)
     except Exception as exc:
         logger.exception(f"[endfield-medal] missing card failed: {exc}")
-        return await matcher.finish("缺章图片生成失败")
+        return await matcher.finish("缺章统计图生成失败，请稍后再试。")
     return await _finish_pngs(matcher, pngs)
 
 
@@ -866,22 +866,22 @@ async def _handle_archive_progress(
     """查询绑定账号的档案收集进度。森空岛只给 docNum 总数、无逐条明细，仅展示已获得/总数。"""
     role = account_store.resolve_role(qq_user_id, command.account_selector)
     if role is None:
-        return await matcher.finish("未找到对应账号，请先私聊使用 /ef 绑定。")
+        return await matcher.finish("未找到对应的终末地账号，请先私聊发送 /ef 绑定 进行添加。")
     snapshot = archive_store.load_current_view()
     if snapshot is None:
-        return await matcher.finish("暂无档案库数据，请先发送「/ef 档案 刷新」建立快照。")
+        return await matcher.finish("本地暂无档案库数据快照，请先发送 /ef 档案 刷新。")
     try:
         async with ROLE_TASKS.claim(role):
             token = account_store.decrypt_token(role, cipher)
             raw_detail = await official_client.endfield_card_detail(token, role)
     except EndfieldAPIError as exc:
         logger.warning(f"[endfield-archive] player progress API failed: {exc}")
-        return await matcher.finish("档案进度查询失败，请稍后重试。")
+        return await matcher.finish("档案进度查询失败，请稍后再试。")
     except CredentialKeyError as exc:
         return await matcher.finish(str(exc))
     except Exception as exc:
         logger.exception(f"[endfield-archive] progress query failed: {exc}")
-        return await matcher.finish("档案进度查询失败。")
+        return await matcher.finish("档案进度查询异常，请稍后再试。")
     view = service.build_archive_progress_view(
         raw_detail, snapshot,
         nickname=role.nickname, uid=role.masked_uid, server_name=server_label(role.server_name or role.server_id),
@@ -890,14 +890,14 @@ async def _handle_archive_progress(
         pngs = await draw_archive_progress_card(view)
     except Exception as exc:
         logger.exception(f"[endfield-archive] progress card failed: {exc}")
-        return await matcher.finish("档案进度图片生成失败")
+        return await matcher.finish("档案进度图生成失败，请稍后再试。")
     return await _finish_pngs(matcher, pngs)
 
 
 async def _handle_personal_command(matcher, event: Event, command: ParsedEndfieldCommand, bot=None) -> None:
     private_only = {"bind", "primary", "unbind", "gacha_import"}
     if command.action in private_only and is_group(event):
-        return await matcher.finish("该命令涉及账号凭据或手机号，仅支持私聊使用。")
+        return await matcher.finish("该功能涉及个人隐私凭证或手机号，请在私聊中发起。")
     qq_user_id = str(event_user_id(event))
 
     try:
@@ -922,12 +922,12 @@ async def _handle_personal_command(matcher, event: Event, command: ParsedEndfiel
         if command.action == "primary":
             role = account_store.set_primary(qq_user_id, command.account_selector)
             return await matcher.finish(
-                f"已将 {role.nickname}（{role.role_id}）设为主账号。" if role else "未找到对应账号，请使用 /ef 账号 查看编号。"
+                f"已将 {role.nickname}（{role.role_id}）设为默认主账号。" if role else "未找到指定账号，发送 /ef 账号 可查看有效编号。"
             )
         if command.action == "unbind":
             role = account_store.unbind(qq_user_id, command.account_selector)
             return await matcher.finish(
-                f"已解绑 {role.nickname}（{role.role_id}）。" if role else "未找到对应账号，请使用 /ef 账号 查看编号。"
+                f"已解除绑定角色：{role.nickname}（{role.role_id}）。" if role else "未找到指定账号，发送 /ef 账号 可查看有效编号。"
             )
         if command.action == "attendance":
             cipher = CredentialCipher.from_env()
@@ -951,7 +951,7 @@ async def _handle_personal_command(matcher, event: Event, command: ParsedEndfiel
         if command.action == "gacha_history":
             return await _handle_gacha_history(matcher, qq_user_id, command, group=is_group(event))
     except TaskAlreadyRunning:
-        return await matcher.finish("任务正在进行")
+        return await matcher.finish("当前任务正在处理中，请稍候。")
     except CredentialKeyError as exc:
         return await matcher.finish(str(exc))
     except EndfieldAPIError as exc:
@@ -959,7 +959,7 @@ async def _handle_personal_command(matcher, event: Event, command: ParsedEndfiel
         return await matcher.finish(str(exc))
     except InvestmentDataUnavailable as exc:
         logger.warning(f"[endfield-investment] AKEData unavailable: {exc}")
-        return await matcher.finish("终末地养成数据源暂时不可用，请稍后重试。")
+        return await matcher.finish("角色养成数据源暂时响应异常，请稍后再试。")
     except ChallengeAmbiguousError as exc:
         if command.action == "challenge":
             monument = command.challenge_kind == "monument"
@@ -972,7 +972,7 @@ async def _handle_personal_command(matcher, event: Event, command: ParsedEndfiel
             label = _challenge_monument_difficulty_label if monument else _challenge_difficulty_label
             difficulty = label(command.challenge_difficulty) if command.challenge_difficulty else ""
             example = " ".join(item for item in (head, scope, candidate, difficulty) if item)
-            return await matcher.finish(f"{exc}\n示例：/ef {example}")
+            return await matcher.finish(f"{exc}\n参考格式：/ef {example}")
         return await matcher.finish(str(exc))
     except ChallengeResolutionError as exc:
         return await matcher.finish(str(exc))
@@ -980,7 +980,7 @@ async def _handle_personal_command(matcher, event: Event, command: ParsedEndfiel
         return await matcher.finish(str(exc))
     except aiohttp.ClientConnectionError:
         logger.warning(f"[endfield-account] message connection interrupted: action={command.action}")
-        return await matcher.finish("QQ 消息连接中断，请重新执行当前命令。")
+        return await matcher.finish("网络连接中断，请重新发送指令。")
     except _ExitException:
         raise
     except Exception as exc:
@@ -988,7 +988,7 @@ async def _handle_personal_command(matcher, event: Event, command: ParsedEndfiel
             f"[endfield-account] action failed: action={command.action} "
             f"error_type={type(exc).__module__}.{type(exc).__name__}"
         )
-        return await matcher.finish("终末地账号功能暂时不可用，请稍后重试。")
+        return await matcher.finish("账号服务暂时响应异常，请稍后再试。")
 
 
 def _challenge_mention_targets(event: Event, bot=None) -> tuple[str, ...]:
@@ -1030,16 +1030,16 @@ async def _handle_challenge(
     """Render one personal challenge query without prompting in group chats."""
     mentioned_users = _challenge_mention_targets(event, bot)
     if mentioned_users and not is_group(event):
-        return await matcher.finish("仅群聊支持通过 @群友查询对方的挑战数据。")
+        return await matcher.finish("通过 @群友 查询他人挑战数据仅限在群聊中使用。")
     if len(mentioned_users) > 1:
-        return await matcher.finish("一次只能 @ 一名群友。")
+        return await matcher.finish("单次查询仅支持 @ 一位群友。")
 
     target_user_id = mentioned_users[0] if mentioned_users else qq_user_id
     roles = account_store.list_roles(target_user_id)
     if not roles:
         if mentioned_users:
-            return await matcher.finish("被 @ 的用户尚未绑定终末地账号。")
-        return await matcher.finish("尚未绑定终末地账号。使用 /ef 绑定 开始绑定。")
+            return await matcher.finish("所选群友暂未绑定终末地账号。")
+        return await matcher.finish("尚未绑定终末地账号，请先私聊发送 /ef 绑定 进行添加。")
     # Mention queries deliberately use the target user's primary account.  An
     # account selector remains meaningful only for the command sender's own
     # bindings, so it cannot expose a target user's secondary account by index.
@@ -1053,20 +1053,20 @@ async def _handle_challenge(
             role = candidates[0]
         elif candidates:
             group_chat = is_group(event)
-            lines = ["账号选择存在歧义，请从候选中选择："]
+            lines = ["匹配到多个候选账号，请明确选择序号："]
             for candidate in candidates[:5]:
                 index = roles.index(candidate) + 1
                 uid = candidate.masked_uid if group_chat else candidate.role_id
                 lines.append(f"{index}. {candidate.nickname}（UID {uid}）")
-            lines.append("示例：/ef 影拓 账号 1")
+            lines.append("参考格式：/ef 影拓 账号 1")
             return await matcher.finish("\n".join(lines))
         else:
-            return await matcher.finish("未找到对应账号，请使用 /ef 账号 查看编号。")
+            return await matcher.finish("未找到指定账号，发送 /ef 账号 可查看有效编号。")
 
     token = account_store.decrypt_token(role, cipher)
     provider, _raw_token = decode_account_credential(token)
     if provider == ACCOUNT_PROVIDER_SKPORT or is_asia_role(role):
-        return await matcher.finish("影拓丰碑和战争回响目前仅支持国服账号，亚服暂不支持。")
+        return await matcher.finish("影拓丰碑与战争回响目前仅支持国服角色，亚服暂未接入。")
 
     group_chat = is_group(event)
     identity = ChallengeIdentity(
@@ -1190,7 +1190,7 @@ async def _render_challenge_cards(
                 )
                 return await _finish_challenge_pages(matcher, event, bot, rendered, "/ef 影拓 历史 第N页")
             if command.page > len(pages):
-                return await matcher.finish(f"影拓历史共 {len(pages)} 页，请输入 1-{len(pages)}。")
+                return await matcher.finish(f"影拓历史记录共 {len(pages)} 页，请输入 1–{len(pages)} 范围内的页码。")
             rendered = await cached_pages(
                 "monument", "history", "", "", command.page,
                 lambda: _one_page(draw_monument_history(identity, pages[command.page - 1], page=command.page, page_count=len(pages), variant=variant)),
@@ -1234,7 +1234,7 @@ async def _render_challenge_cards(
             )
             return await _finish_challenge_pages(matcher, event, bot, rendered, "/ef 回响 历史 第N页")
         if command.page > len(pages):
-            return await matcher.finish(f"战争回响历史共 {len(pages)} 页，请输入 1-{len(pages)}。")
+            return await matcher.finish(f"战争回响历史记录共 {len(pages)} 页，请输入 1–{len(pages)} 范围内的页码。")
         season = pages[command.page - 1][0]
         rendered = await cached_pages(
             "war_echo", "history", "", "", command.page,
@@ -1271,7 +1271,7 @@ async def _finish_challenge_pages(matcher, event, bot, pngs: tuple[bytes, ...], 
         raise
     except Exception as exc:
         logger.warning(f"[endfield-challenge] merged forward unavailable: {type(exc).__name__}")
-        return await matcher.finish(f"历史记录共 {len(pngs)} 页，当前连接不支持合并转发，请使用 {page_hint} 分页查看。")
+        return await matcher.finish(f"历史记录共 {len(pngs)} 页，当前环境暂不支持合并转发，请通过 {page_hint} 分页浏览。")
     return await matcher.finish()
 
 
@@ -1368,8 +1368,8 @@ async def _finish_gacha_pngs(matcher, event, bot, pngs: tuple[bytes, ...]) -> No
     remaining = pngs[sent:]
     batches = [remaining[index:index + GACHA_FALLBACK_BATCH] for index in range(0, len(remaining), GACHA_FALLBACK_BATCH)]
     notice = (
-        f"抽卡分析共 {len(pngs)} 页，合并转发不可用，分 {len(batches)} 条发送。" if not sent
-        else f"抽卡分析共 {len(pngs)} 页，第 {sent + 1}–{len(pngs)} 页合并转发失败，分 {len(batches)} 条发送。"
+        f"抽卡分析长图共 {len(pngs)} 页，当前环境无法合并转发，已分 {len(batches)} 条消息发送。" if not sent
+        else f"抽卡分析长图共 {len(pngs)} 页，第 {sent + 1}–{len(pngs)} 页转发异常，已分 {len(batches)} 条消息补发。"
     )
     for index, batch in enumerate(batches):
         prefix = [Text(notice)] if index == 0 else []
@@ -1387,39 +1387,39 @@ async def _one_page(page) -> tuple[bytes, ...]:
 
 async def _handle_binding(matcher, qq_user_id: str, cipher: CredentialCipher) -> None:
     region = await _prompt_text(
-        "请选择服务器：\n1. 国服（森空岛，支持 Token/短信；二维码绑定暂不支持）\n"
-        "2. 亚服（SKPORT，当前仅支持 Token）\n"
-        "回复 1 或 2；回复“取消”退出。",
+        "请选择服务器分区：\n1. 国服（森空岛，支持 Token 与短信验证，二维码暂未开放）\n"
+        "2. 亚服（SKPORT，当前支持 Token）\n"
+        "回复数字 1 或 2，如需放弃请回复“取消”。",
         timeout=90,
     )
     if region is None:
-        return await matcher.finish("绑定已取消或等待超时。")
+        return await matcher.finish("绑定流程已取消或等待超时。")
     normalized_region = region.casefold()
     if normalized_region in {"1", "国服", "cn", "china"}:
         provider = ACCOUNT_PROVIDER_CN
     elif normalized_region in {"2", "亚服", "亞洲", "亚洲", "asia", "skport"}:
         provider = ACCOUNT_PROVIDER_SKPORT
     else:
-        return await matcher.finish("未识别服务器，绑定已取消。")
+        return await matcher.finish("无法识别所选服务器，绑定流程已终止。")
 
     if provider == ACCOUNT_PROVIDER_SKPORT:
         await matcher.send(
-            "请在浏览器登录 SKPORT（https://www.skport.com/）后打开：\n"
+            "请在浏览器登录 SKPORT（https://www.skport.com/）后访问：\n"
             "https://web-api.skport.com/cookie_store/account_token\n"
-            "页面会返回类似下面的内容（仅为格式范例，范例 Token 不能用于绑定）：\n"
+            "页面将返回类似以下示例内容（仅为格式示意，切勿直接发送范例 Token）：\n"
             '{"code":0,"data":{"content":"FlJTn48gU1OwP9R7lQUpDFZJ"},"msg":""}\n'
-            "上面的例子中，正确复制的内容是：\n"
+            "示例中需提取的关键内容为：\n"
             "FlJTn48gU1OwP9R7lQUpDFZJ\n"
-            "请从你自己的页面中，只复制 content 后面双引号里的 Token。\n"
-            "不要复制双引号，也不要复制整段 JSON。\n"
-            "不要发送上面的范例 Token。\n"
-            "不要在群聊或其他平台公开该内容。"
+            "请从你访问的页面中，仅提取 content 双引号包裹的字符串。\n"
+            "切勿包含外层双引号或完整 JSON 数据。\n"
+            "切勿发送上述示范 Token。\n"
+            "请妥善保管凭证，切勿在群聊或公共渠道公开。"
         )
         raw_account_token = await _prompt_text(
-            "请发送 content 双引号内的 Token；回复“取消”退出。", timeout=150
+            "请发送 content 对应的 Token 字符串，如需放弃请回复“取消”。", timeout=150
         )
         if raw_account_token is None:
-            return await matcher.finish("绑定已取消或等待超时。")
+            return await matcher.finish("绑定流程已取消或等待超时。")
         account_token = encode_account_credential(raw_account_token, provider)
     else:
         account_token = await _bind_cn_account_token(matcher)
@@ -1430,12 +1430,12 @@ async def _handle_binding(matcher, qq_user_id: str, cipher: CredentialCipher) ->
     if provider == ACCOUNT_PROVIDER_SKPORT:
         roles = [role for role in roles if is_asia_role(role)]
         if not roles:
-            return await matcher.finish("该 Gryphline 账号下未找到终末地亚服角色。")
+            return await matcher.finish("该 Gryphline 通行证下未检索到终末地亚服角色。")
     elif not roles:
-        return await matcher.finish("该鹰角账号下未找到终末地角色。")
+        return await matcher.finish("该鹰角网络通行证下未检索到终末地角色。")
     selected = await _select_binding_roles(roles)
     if selected is None:
-        return await matcher.finish("绑定已取消或等待超时。")
+        return await matcher.finish("绑定流程已取消或等待超时。")
     previous_roles = account_store.list_roles(qq_user_id)
     previous_keys = {(role.role_id, role.server_id) for role in previous_roles}
     bound_roles = account_store.bind_roles(qq_user_id, account_token, selected, cipher)
@@ -1444,10 +1444,10 @@ async def _handle_binding(matcher, qq_user_id: str, cipher: CredentialCipher) ->
     )
     updated_count = len(selected) - added_count
     region_label = "亚服" if provider == ACCOUNT_PROVIDER_SKPORT else "国服"
-    summary = f"{region_label}绑定完成：新增 {added_count} 个账号"
+    summary = f"{region_label}角色绑定成功：新增 {added_count} 个账号"
     if updated_count:
         summary += f"，更新 {updated_count} 个账号"
-    summary += f"；当前共绑定 {len(bound_roles)} 个账号。"
+    summary += f"；目前累计绑定 {len(bound_roles)} 个账号。"
     selected_keys = {(role.role_id, role.server_id) for role in selected}
     try:
         refresh = await ownership_stats_service.refresh_roles(
@@ -1470,39 +1470,39 @@ async def _handle_binding(matcher, qq_user_id: str, cipher: CredentialCipher) ->
 
 async def _bind_cn_account_token(matcher) -> str | None:
     method = await _prompt_text(
-        "请选择绑定方式：\n1. Token 绑定\n2. 手机号验证码绑定\n"
-        "二维码绑定暂不支持。\n"
-        "可重复绑定其他鹰角账号，已有账号不会被覆盖。\n回复 1 或 2；回复“取消”退出。",
+        "请选择绑定授权途径：\n1. Token 授权绑定\n2. 手机短信验证码绑定\n"
+        "二维码扫码绑定暂未开放。\n"
+        "支持追加绑定多个鹰角账号，已绑定的角色数据不会被覆盖。\n回复数字 1 或 2，如需放弃请回复“取消”。",
         timeout=90,
     )
     if method is None:
-        await matcher.finish("绑定已取消或等待超时。")
+        await matcher.finish("绑定流程已取消或等待超时。")
         return None
     normalized = method.casefold()
     if normalized in {"1", "token", "t"}:
         await matcher.send(
-            "请在浏览器登录森空岛后打开：\nhttps://web-api.skland.com/account/info/hg\n"
-            "复制响应中 data.content 的完整内容并发送。不要在群聊或其他平台公开该内容。"
+            "请在浏览器中登录森空岛并访问：\nhttps://web-api.skland.com/account/info/hg\n"
+            "复制页面响应中 data.content 对应的完整字符串并发送。请妥善保管凭据，切勿向他人公开。"
         )
-        account_token = await _prompt_text("请发送 data.content；回复“取消”退出。", timeout=150)
+        account_token = await _prompt_text("请发送 data.content 内容，如需放弃请回复“取消”。", timeout=150)
         if account_token is None:
-            await matcher.finish("绑定已取消或等待超时。")
+            await matcher.finish("绑定流程已取消或等待超时。")
             return None
     elif normalized in {"2", "短信", "手机", "sms"}:
-        phone = await _prompt_text("请输入用于鹰角账号登录的手机号；回复“取消”退出。", timeout=90)
+        phone = await _prompt_text("请输入鹰角网络账号对应的 11 位手机号，如需放弃请回复“取消”。", timeout=90)
         if phone is None:
-            await matcher.finish("绑定已取消或等待超时。")
+            await matcher.finish("绑定流程已取消或等待超时。")
             return None
         if not re.fullmatch(r"1\d{10}", phone):
-            await matcher.finish("手机号格式不正确，绑定已取消。")
+            await matcher.finish("手机号格式不符合标准，绑定流程已终止。")
             return None
         await official_client.send_phone_code(phone)
-        code = await _prompt_text("验证码已发送，请输入短信验证码；回复“取消”退出。", timeout=120)
+        code = await _prompt_text("短信验证码已下发，请输入收到的验证码，如需放弃请回复“取消”。", timeout=120)
         if code is None:
-            await matcher.finish("绑定已取消或等待超时。")
+            await matcher.finish("绑定流程已取消或等待超时。")
             return None
         if not re.fullmatch(r"\d{4,8}", code):
-            await matcher.finish("验证码格式不正确，绑定已取消。")
+            await matcher.finish("验证码格式输入有误，绑定流程已终止。")
             return None
         account_token = await official_client.token_by_phone_code(phone, code)
     # 暂时禁用二维码绑定，保留以下代码以便后续恢复：
@@ -1512,9 +1512,9 @@ async def _bind_cn_account_token(matcher) -> str | None:
     #         return None
     else:
         if normalized in {"3", "二维码", "扫码", "qr", "qrcode"}:
-            await matcher.finish("二维码绑定暂不支持，请选择 1 或 2。")
+            await matcher.finish("二维码扫码暂未开放，请回复 1 或 2 选择其他方式。")
         else:
-            await matcher.finish("未识别绑定方式，绑定已取消。")
+            await matcher.finish("无法识别所选绑定方式，流程已终止。")
         return None
     return encode_account_credential(account_token, ACCOUNT_PROVIDER_CN)
 
@@ -1563,7 +1563,7 @@ async def _bind_cn_account_token(matcher) -> str | None:
 async def _select_binding_roles(roles: list[RoleCandidate]) -> list[RoleCandidate] | None:
     if len(roles) == 1:
         return roles
-    lines = ["检测到多个终末地角色，请回复编号、逗号分隔的多个编号，或“全部”："]
+    lines = ["检测到通行证下包含多个角色，请回复序号（如需多个可用逗号隔开），或回复“全部”全选："]
     lines.extend(
         f"{index}. {role.nickname} · {server_label(role.server_name or role.server_id)} · UID {role.role_id}"
         for index, role in enumerate(roles, 1)
@@ -1587,11 +1587,11 @@ async def _handle_accounts(
 ) -> None:
     roles = account_store.list_roles(qq_user_id)
     if not roles:
-        return await matcher.finish("尚未绑定终末地账号。使用 /ef 绑定 开始绑定。")
+        return await matcher.finish("尚未绑定终末地账号，请先私聊发送 /ef 绑定 进行添加。")
     if command.account_selector:
         role = account_store.resolve_role(qq_user_id, command.account_selector)
         if role is None:
-            return await matcher.finish("未找到对应账号，请使用 /ef 账号 查看编号。")
+            return await matcher.finish("未找到指定账号，发送 /ef 账号 可查看有效编号。")
         return await _render_account_detail(matcher, role, cipher, group=group)
     if len(roles) == 1:
         return await _render_account_detail(matcher, roles[0], cipher, group=group)
@@ -1608,7 +1608,7 @@ async def _handle_accounts(
     selection = parse_candidate_selection(text, len(roles))
     role = roles[selection] if selection is not None else account_store.resolve_role(qq_user_id, text)
     if role is None:
-        return await matcher.finish(f"编号无效，请输入 1-{len(roles)}。")
+        return await matcher.finish(f"序号输入有误，请输入 1–{len(roles)}。")
     return await _render_account_detail(matcher, role, cipher, group=group)
 
 
@@ -1680,11 +1680,11 @@ async def _handle_account_investment(
 ) -> None:
     roles = account_store.list_roles(qq_user_id)
     if not roles:
-        return await matcher.finish("尚未绑定终末地账号。使用 /ef 绑定 开始绑定。")
+        return await matcher.finish("尚未绑定终末地账号，请先私聊发送 /ef 绑定 进行添加。")
     if command.account_selector:
         role = account_store.resolve_role(qq_user_id, command.account_selector)
         if role is None:
-            return await matcher.finish("未找到对应账号，请使用 /ef 账号 查看编号。")
+            return await matcher.finish("未找到指定账号，发送 /ef 账号 可查看有效编号。")
         return await _render_account_investment(matcher, role, cipher, group=group)
     if len(roles) == 1:
         return await _render_account_investment(matcher, roles[0], cipher, group=group)
@@ -1697,11 +1697,11 @@ async def _handle_account_investment(
     text = answer.extract_plain_text() if hasattr(answer, "extract_plain_text") else str(answer or "")
     text = text.strip()
     if not text or text.casefold() in {"取消", "cancel", "q", "quit"}:
-        return await matcher.finish("已取消账号养成统计。")
+        return await matcher.finish("已取消账号养成统计查询。")
     selection = parse_candidate_selection(text, len(roles))
     role = roles[selection] if selection is not None else account_store.resolve_role(qq_user_id, text)
     if role is None:
-        return await matcher.finish(f"编号无效，请输入 1-{len(roles)}。")
+        return await matcher.finish(f"序号输入有误，请输入 1–{len(roles)}。")
     return await _render_account_investment(matcher, role, cipher, group=group)
 
 
@@ -1715,7 +1715,7 @@ async def _render_account_investment(
     token = account_store.decrypt_token(role, cipher)
     provider, _raw_token = decode_account_credential(token)
     if provider == ACCOUNT_PROVIDER_SKPORT or is_asia_role(role):
-        return await matcher.finish("养成统计目前仅支持国服账号，亚服暂不支持。")
+        return await matcher.finish("养成统计功能目前仅支持国服角色，亚服暂未接入。")
 
     with cold_start_command(matcher):
         await notice_default_ake_public()
@@ -1753,11 +1753,11 @@ async def _handle_account_currency(
 ) -> None:
     roles = account_store.list_roles(qq_user_id)
     if not roles:
-        return await matcher.finish("尚未绑定终末地账号。请先私聊使用 /ef 绑定。")
+        return await matcher.finish("尚未绑定终末地账号，请先私聊发送 /ef 绑定 进行添加。")
     if command.account_selector:
         role = account_store.resolve_role(qq_user_id, command.account_selector)
         if role is None:
-            return await matcher.finish("未找到对应账号，请使用 /ef 账号 查看编号。")
+            return await matcher.finish("未找到指定账号，发送 /ef 账号 可查看有效编号。")
         return await _render_account_currency(matcher, role, command, cipher, group=group)
     if len(roles) == 1:
         return await _render_account_currency(matcher, roles[0], command, cipher, group=group)
@@ -1774,7 +1774,7 @@ async def _handle_account_currency(
     selection = parse_candidate_selection(text, len(roles))
     role = roles[selection] if selection is not None else account_store.resolve_role(qq_user_id, text)
     if role is None:
-        return await matcher.finish(f"编号无效，请输入 1-{len(roles)}。")
+        return await matcher.finish(f"序号输入有误，请输入 1–{len(roles)}。")
     return await _render_account_currency(matcher, role, command, cipher, group=group)
 
 
@@ -1789,7 +1789,7 @@ async def _render_account_currency(
     token = account_store.decrypt_token(role, cipher)
     provider, _raw_token = decode_account_credential(token)
     if provider == ACCOUNT_PROVIDER_SKPORT or is_asia_role(role):
-        return await matcher.finish("资源流水查询目前仅支持国服账号，亚服暂不支持。")
+        return await matcher.finish("资源流水查询目前仅支持国服角色，亚服暂未接入。")
 
     try:
         start, end = resolve_query_dates(
@@ -1890,11 +1890,11 @@ async def _handle_account_base(
 ) -> None:
     roles = account_store.list_roles(qq_user_id)
     if not roles:
-        return await matcher.finish("尚未绑定终末地账号。使用 /ef 绑定 开始绑定。")
+        return await matcher.finish("尚未绑定终末地账号，请先私聊发送 /ef 绑定 进行添加。")
     if command.account_selector:
         role = account_store.resolve_role(qq_user_id, command.account_selector)
         if role is None:
-            return await matcher.finish("未找到对应账号，请使用 /ef 账号 查看编号。")
+            return await matcher.finish("未找到指定账号，发送 /ef 账号 可查看有效编号。")
         return await _render_account_base(matcher, role, cipher, group=group)
     if len(roles) == 1:
         return await _render_account_base(matcher, roles[0], cipher, group=group)
@@ -1911,7 +1911,7 @@ async def _handle_account_base(
     selection = parse_candidate_selection(text, len(roles))
     role = roles[selection] if selection is not None else account_store.resolve_role(qq_user_id, text)
     if role is None:
-        return await matcher.finish(f"编号无效，请输入 1-{len(roles)}。")
+        return await matcher.finish(f"序号输入有误，请输入 1–{len(roles)}。")
     return await _render_account_base(matcher, role, cipher, group=group)
 
 
@@ -2011,7 +2011,7 @@ async def _handle_attendance(
 ) -> None:
     roles = account_store.resolve_roles(qq_user_id, command.account_selector)
     if not roles:
-        return await matcher.finish("未找到对应账号，请先私聊使用 /ef 绑定。")
+        return await matcher.finish("未找到对应的终末地账号，请先私聊发送 /ef 绑定 进行添加。")
     views: list[AttendanceRoleView] = []
     for role in roles:
         try:
@@ -2020,7 +2020,7 @@ async def _handle_attendance(
                 result = await official_client.attendance(token, role)
             views.append(_attendance_view(role, result))
         except TaskAlreadyRunning:
-            views.append(AttendanceRoleView(role.nickname, role.masked_uid, role.server_name, "failed", "任务正在进行"))
+            views.append(AttendanceRoleView(role.nickname, role.masked_uid, role.server_name, "failed", "当前任务正在处理中"))
         except EndfieldAPIError as exc:
             views.append(AttendanceRoleView(role.nickname, role.masked_uid, role.server_name, "failed", str(exc)))
         except CredentialKeyError as exc:
@@ -2029,7 +2029,7 @@ async def _handle_attendance(
             logger.error(
                 f"[endfield-account] attendance failed: stored_role={role.id} error_type={type(exc).__name__}"
             )
-            views.append(AttendanceRoleView(role.nickname, role.masked_uid, role.server_name, "failed", "签到失败，请稍后重试"))
+            views.append(AttendanceRoleView(role.nickname, role.masked_uid, role.server_name, "failed", "签到执行失败，请稍后再试"))
     png = await draw_attendance_card(
         AttendanceCardView(views, format_timestamp(int(__import__("time").time())))
     )
@@ -2047,7 +2047,7 @@ async def _handle_daily(
     """日常仪表盘：逐账号读取森空岛 card/detail，展示理智/活跃度/每周事务/通行证。"""
     roles = account_store.resolve_roles(qq_user_id, command.account_selector)
     if not roles:
-        return await matcher.finish("未找到对应账号，请先私聊使用 /ef 绑定。")
+        return await matcher.finish("未找到对应的终末地账号，请先私聊发送 /ef 绑定 进行添加。")
     accounts: list[DailyAccountView] = []
     for role in roles:
         try:
@@ -2063,7 +2063,7 @@ async def _handle_daily(
             ))
         except TaskAlreadyRunning:
             accounts.append(DailyAccountView(
-                role.nickname, role.masked_uid, role.server_name, status="failed", message="任务正在进行"))
+                role.nickname, role.masked_uid, role.server_name, status="failed", message="当前任务正在处理中"))
         except EndfieldAPIError as exc:
             accounts.append(DailyAccountView(
                 role.nickname, role.masked_uid, role.server_name, status="failed", message=str(exc)))
@@ -2075,7 +2075,7 @@ async def _handle_daily(
                 f"[endfield-account] daily dashboard failed: stored_role={role.id} error_type={type(exc).__name__}"
             )
             accounts.append(DailyAccountView(
-                role.nickname, role.masked_uid, role.server_name, status="failed", message="查询失败，请稍后重试"))
+                role.nickname, role.masked_uid, role.server_name, status="failed", message="数据获取失败，请稍后再试"))
     png = await draw_daily_dashboard_card(
         DailyDashboardView(accounts, format_timestamp(int(__import__("time").time())))
     )
@@ -2088,7 +2088,7 @@ async def _handle_gacha(
 ) -> None:
     role = account_store.resolve_role(qq_user_id, command.account_selector)
     if role is None:
-        return await matcher.finish("未找到对应账号，请先私聊使用 /ef 绑定。")
+        return await matcher.finish("未找到对应的终末地账号，请先私聊发送 /ef 绑定 进行添加。")
     gacha_service = EndfieldGachaService(account_store, official_client, cipher)
     states = account_store.list_sync_states(role)
     effective_full = command.full or not states
@@ -2098,10 +2098,10 @@ async def _handle_gacha(
         role, full=effective_full, pool_rules=existing_pool_rules,
     )
     if command.action == "gacha_sync":
-        failed = f"，{len(result.failed)} 个卡池失败" if result.failed else ""
-        mode = "官方近 90 天窗口全量" if effective_full else "增量"
-        suffix = "；本地会持续保留已同步记录" if effective_full else ""
-        return await matcher.finish(f"{role.nickname} {mode}同步完成：新增 {result.inserted} 条{failed}{suffix}。")
+        failed = f"，{len(result.failed)} 个卡池拉取失败" if result.failed else ""
+        mode = "近 90 天全量窗口" if effective_full else "增量"
+        suffix = "；本地已同步记录将持续保留" if effective_full else ""
+        return await matcher.finish(f"{role.nickname} 抽卡记录{mode}同步完毕：新增收录 {result.inserted} 条{failed}{suffix}。")
     records = account_store.list_gacha_records(role, limit=100000)
     xhh_import = account_store.get_xhh_gacha_import(role)
     xhh_names = [item.item_name for item in xhh_import.six_stars] if xhh_import else []
@@ -2124,11 +2124,11 @@ async def _handle_gacha(
 async def _handle_gacha_history(matcher, qq_user_id: str, command: ParsedEndfieldCommand, *, group: bool) -> None:
     role = account_store.resolve_role(qq_user_id, command.account_selector)
     if role is None:
-        return await matcher.finish("未找到对应账号，请先私聊使用 /ef 绑定。")
+        return await matcher.finish("未找到对应的终末地账号，请先私聊发送 /ef 绑定 进行添加。")
     total = account_store.count_gacha_records(role, command.pool_filter)
     total_pages = max(1, (total + 19) // 20)
     if command.page > total_pages and total:
-        return await matcher.finish(f"页码超出范围，当前共 {total_pages} 页。")
+        return await matcher.finish(f"页码超出有效范围，当前记录共 {total_pages} 页。")
     records = account_store.list_gacha_records(
         role, page=command.page, page_size=20, pool_filter=command.pool_filter
     )
@@ -2154,28 +2154,28 @@ async def _handle_gacha_history(matcher, qq_user_id: str, command: ParsedEndfiel
 async def _handle_xhh_import(matcher, qq_user_id: str, command: ParsedEndfieldCommand) -> None:
     role = account_store.resolve_role(qq_user_id, command.account_selector)
     if role is None:
-        return await matcher.finish("未找到对应账号，请先私聊使用 /ef 绑定。")
-    phone = await _prompt_text("请输入小黑盒账号绑定的手机号；回复“取消”退出。", timeout=90)
+        return await matcher.finish("未找到对应的终末地账号，请先私聊发送 /ef 绑定 进行添加。")
+    phone = await _prompt_text("请输入小黑盒账号绑定的 11 位手机号，如需放弃请回复“取消”。", timeout=90)
     if phone is None:
-        return await matcher.finish("导入已取消或等待超时。")
+        return await matcher.finish("导入流程已取消或等待超时。")
     if not re.fullmatch(r"1\d{10}", phone):
-        return await matcher.finish("手机号格式不正确，导入已取消。")
+        return await matcher.finish("手机号格式不符合规范，导入已取消。")
 
     session: XhhLoginSession | None = None
     try:
         async with ROLE_TASKS.claim(role):
             session = await XhhLoginSession.start(phone)
             code = await _prompt_text(
-                "小黑盒验证码已发送，请输入短信验证码；回复“取消”退出。", timeout=120
+                "小黑盒短信验证码已发送，请输入验证码，如需放弃请回复“取消”。", timeout=120
             )
             if code is None:
-                return await matcher.finish("导入已取消或等待超时。")
+                return await matcher.finish("导入流程已取消或等待超时。")
             if not re.fullmatch(r"\d{4,8}", code):
-                return await matcher.finish("验证码格式不正确，导入已取消。")
+                return await matcher.finish("验证码格式输入有误，导入已取消。")
             imported = await session.login_and_fetch(code)
             if imported.source_uid != role.role_id:
                 return await matcher.finish(
-                    f"小黑盒终末地 UID 与所选账号不一致，请切换账号后重试。所选账号 UID {role.masked_uid}。"
+                    f"小黑盒绑定的终末地 UID 与当前所选账号不一致，请切换对应账号后再试。当前账号 UID：{role.masked_uid}。"
                 )
             candidate_names = [item.item_name for item in imported.six_stars]
             xhh_metadata = await gacha_asset_cache.prepare_names(candidate_names)
@@ -2186,7 +2186,7 @@ async def _handle_xhh_import(matcher, qq_user_id: str, command: ParsedEndfieldCo
             }
             if unresolved_names:
                 return await matcher.finish(
-                    "FZ Wiki 星级目录暂未覆盖本次小黑盒记录，已取消导入以避免误判星级，请稍后重试。"
+                    "FZ Wiki 星级数据暂未覆盖本次小黑盒记录，为避免星级误判已终止导入，请稍后再试。"
                 )
             imported = filter_xhh_import_six_stars(imported, xhh_metadata)
             account_store.replace_xhh_gacha_import(role, imported)
@@ -2195,9 +2195,9 @@ async def _handle_xhh_import(matcher, qq_user_id: str, command: ParsedEndfieldCo
             await session.close()
 
     return await matcher.finish(
-        f"{role.nickname} 的小黑盒历史统计导入完成：{len(imported.pools)} 个卡池，"
-        f"{imported.total_count} 抽，{len(imported.six_stars)} 条六星记录。\n"
-        "发送 /ef 抽卡 查看补齐后的分析卡；逐抽历史页仍只展示官方明细。"
+        f"{role.nickname} 小黑盒历史抽卡统计导入成功：涵盖 {len(imported.pools)} 个卡池，"
+        f"累计 {imported.total_count} 抽，共包含 {len(imported.six_stars)} 条六星记录。\n"
+        "发送 /ef 抽卡 即可查阅合并统计后的分析卡片；逐抽明细页仍以官方接口记录为准。"
     )
 
 
@@ -2220,15 +2220,15 @@ def _attendance_view(role: EndfieldRole, result: AttendanceResult) -> Attendance
 
 def _format_accounts(roles: list[EndfieldRole], *, reveal_uid: bool, detail_hint: bool = False) -> str:
     if not roles:
-        return "尚未绑定终末地账号。使用 /ef 绑定 开始绑定。"
-    lines = ["已绑定的终末地账号："]
+        return "尚未绑定终末地账号，请先私聊发送 /ef 绑定 进行添加。"
+    lines = ["已绑定的终末地账号列表："]
     for index, role in enumerate(roles, 1):
         marker = " [主账号]" if role.is_primary else ""
         uid = role.role_id if reveal_uid else role.masked_uid
         lines.append(f"{index}. {role.nickname}{marker} · {server_label(role.server_name or role.server_id)} · UID {uid}")
     if detail_hint:
-        lines.append("回复编号查看该账号详情，或回复“取消”退出。")
-    lines.append("可使用 /ef 添加账号 继续绑定，或用 /ef 主账号 <编号>、/ef 解绑 <编号> 管理。")
+        lines.append("引用本条消息并回复对应编号即可查看该账号详情，如需放弃请回复“取消”。")
+    lines.append("发送 /ef 添加账号 可追加新账号，发送 /ef 主账号 <编号> 或 /ef 解绑 <编号> 可进行管理。")
     return "\n".join(lines)
 
 
@@ -2250,7 +2250,7 @@ async def _handle_loadout(matcher, command: ParsedEndfieldCommand) -> None:
         else:
             spec, error = await _prompt_loadout_spec(command.enhance)
         if error or spec is None:
-            return await matcher.finish(f"配装参数错误：{error or '已取消'}")
+            return await matcher.finish(f"配装参数有误：{error or '已取消操作'}。")
 
         with cold_start_command(matcher):
             await notice_default_ake_public()
@@ -2260,17 +2260,17 @@ async def _handle_loadout(matcher, command: ParsedEndfieldCommand) -> None:
                 candidate = await _resolve_loadout_candidate(candidate_kind, item.name)
                 if candidate is None:
                     label = "干员" if index == 0 else "武器或装备"
-                    return await matcher.finish(f"未找到{label}：{item.name}")
+                    return await matcher.finish(f"未匹配到目标{label}：{item.name}。")
                 if item.forge_levels and candidate.kind != "equipment":
-                    return await matcher.finish(f"只有装备可以设置词条锻造：{item.name}")
+                    return await matcher.finish(f"仅装备支持设定词条锻造等级：{item.name}。")
                 resolved.append((candidate, item.forge_levels))
 
             operators = [item for item, _ in resolved if item.kind == "operator"]
             weapons = [item for item, _ in resolved if item.kind == "weapon"]
             if len(operators) != 1:
-                return await matcher.finish("配装命令需要且只能包含一个干员")
+                return await matcher.finish("配装指令必须且仅可指定一位干员。")
             if len(weapons) > 1:
-                return await matcher.finish("配装命令最多包含一把武器")
+                return await matcher.finish("配装指令最多仅可携带一把武器。")
             operator = operators[0]
             weapon_title = weapons[0].key if weapons else await service.get_recommended_weapon_title(operator.key)
             equipment = [
@@ -2301,10 +2301,10 @@ async def _handle_loadout(matcher, command: ParsedEndfieldCommand) -> None:
         raise
     except (WarfarinAPIError, ValueError) as exc:
         logger.warning(f"[endfield] loadout rejected: {exc}")
-        return await matcher.finish(f"配装计算失败：{exc}")
+        return await matcher.finish(f"配装计算异常：{exc}")
     except Exception as exc:
         logger.exception(f"[endfield] loadout failed: {exc}")
-        return await matcher.finish("配装图片生成失败")
+        return await matcher.finish("配装图生成失败，请稍后再试。")
 
 
 class _IncompleteLoadoutImage(Exception):
@@ -2335,16 +2335,16 @@ async def _render_loadout_view(view: LoadoutView) -> bytes:
 
 async def _prompt_loadout_spec(default_enhance: int) -> tuple[ParsedLoadoutSpec | None, str]:
     answer = await prompt(
-        "请先发送干员名称，再填写可选武器和装备名称，使用空格分隔；武器与装备顺序任意。\n"
-        "单独调整词条可在装备后追加：词条2锻造2",
+        "请输入干员名称及可选的武器、装备名称（空格分隔，武器与装备位置不限）。\n"
+        "单独自定义词条可在对应装备后追加（如：词条2锻造2）。",
         timeout=90,
     )
     if answer is None:
-        return None, "等待输入超时"
+        return None, "等待输入超时。"
     text = answer.extract_plain_text() if hasattr(answer, "extract_plain_text") else str(answer or "")
     text = text.strip()
     if text.lower() in {"取消", "cancel", "q", "quit"}:
-        return None, "已取消"
+        return None, "已取消配置。"
     return parse_loadout_spec(text, default_enhance)
 
 
@@ -2373,7 +2373,7 @@ async def _resolve_loadout_candidate(kind: str, query: str) -> EndfieldCandidate
     if not options:
         return None
     options = options[:8]
-    lines = [f"“{query}”有多个匹配结果，请回复编号："]
+    lines = [f"“{query}”匹配到多个候选结果，请引用本条消息并回复对应编号："]
     lines.extend(f"{index}. {item.display_name}" for index, item in enumerate(options, 1))
     answer = await prompt("\n".join(lines), timeout=60)
     if answer is None:
@@ -3428,47 +3428,47 @@ async def _handle_dev_command(command: ParsedEndfieldCommand) -> str:
     if command.dev_action == "resolve":
         query = " ".join(command.args).strip()
         if not query:
-            return "用法：/ef dev resolve <关键词>"
+            return "指令格式：/ef dev resolve <关键词>。"
         candidates = await _collect_candidates("all", query)
         if not candidates:
-            return "未找到候选。"
-        lines = ["解析候选："]
+            return "未匹配到解析候选。"
+        lines = ["解析候选列表："]
         for item in sorted(candidates, key=lambda candidate: candidate.score, reverse=True)[:10]:
             lines.append(f"- {item.kind} {item.display_name} key={item.key} score={item.score} source={item.source}")
         return "\n".join(lines)
     if command.dev_action == "refresh":
         scope = _normalize_cache_scope(command.args[0] if command.args else "all")
         if scope is None or scope == "icon":
-            return "用法：/ef dev refresh <all|干员|武器|装备|关卡> [关键词]"
+            return "指令格式：/ef dev refresh <all|干员|武器|装备|关卡> [关键词]。"
         query = " ".join(command.args[1:]).strip()
         removed = await _clear_endfield_caches(scope)
         if not query:
-            return f"已刷新 {scope} 缓存，清除 {removed} 项。"
+            return f"已刷新 {scope} 缓存，清理 {removed} 项。"
         candidates = await _collect_candidates(scope, query)
         selected, ambiguous = choose_candidate(candidates)
         if ambiguous:
-            return format_candidates(ambiguous, title="刷新时找到多个可能结果")
+            return format_candidates(ambiguous, title="刷新时匹配到多个可能结果")
         if selected is None:
             return format_not_found(scope, query)
         started = perf_counter()
         output = await _render_candidate(selected)
         if output is None:
             return format_not_found(selected.kind, query)
-        return f"已刷新并预热 {selected.display_name}，耗时 {perf_counter() - started:.2f}s。"
+        return f"已成功刷新并预热 {selected.display_name}，耗时 {perf_counter() - started:.2f} 秒。"
     if command.dev_action == "cache":
         action = command.args[0].lower() if command.args else "status"
         if action == "clear":
             scope = _normalize_cache_scope(command.args[1] if len(command.args) > 1 else "all")
             if scope is None:
-                return "用法：/ef dev cache clear <all|operator|weapon|equipment|stage|icon>"
+                return "指令格式：/ef dev cache clear <all|operator|weapon|equipment|stage|icon>。"
             removed = await _clear_endfield_caches(scope)
-            return f"已清理 {scope} 缓存，共 {removed} 项。"
+            return f"已清空 {scope} 缓存，共清除 {removed} 项。"
         return "\n".join(await _cache_status_lines())
-    return "dev 命令：status | resolve | refresh | cache"
+    return "dev 支持的子指令：status | resolve | refresh | cache。"
 
 
 async def _handle_alias_command(command: ParsedEndfieldCommand) -> str:
-    usage = "用法：/ef 别名 添加 <干员|武器|装备|物品|道具|敌人|词条|档案> <正式名称> <新别名>"
+    usage = "指令格式：/ef 别名 添加 <干员|武器|装备|物品|道具|敌人|词条|档案> <正式名称> <新别名>。"
     if command.alias_action != "add" or len(command.args) < 3:
         return usage
     kind = normalize_alias_kind(command.args[0])
@@ -3481,18 +3481,18 @@ async def _handle_alias_command(command: ParsedEndfieldCommand) -> str:
     if kind not in FILE_ALIAS_KINDS:
         # 档案条目没有 AkeSnapshot 索引，正式名来自 archive_store 的当前快照。
         if kind != "archive_entry" and kind not in encyclopedia_index.supported_kinds():
-            return f"{label}尚未开放，暂时不能添加别名"
+            return f"{label}分类暂未开放，无法新增别名。"
         lookup = await _encyclopedia_lookup(kind)
     try:
         canonical, added = add_alias(kind, canonical_name, alias, lookup=lookup)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         logger.warning(f"[endfield] alias update rejected: {exc}")
-        return f"添加别名失败：{exc}"
+        return f"别名添加失败：{exc}"
     if not added:
-        return f"{label}别名已存在：{alias} → {canonical}"
+        return f"{label}别名已存在：{alias} → {canonical}。"
     targets = alias_targets(kind, alias)
-    collision = f"\n该别名同时匹配：{'、'.join(targets)}" if len(targets) > 1 else ""
-    return f"已添加{label}别名：{alias} → {canonical}{collision}"
+    collision = f"\n该别名同时指向：{'、'.join(targets)}" if len(targets) > 1 else ""
+    return f"已成功添加{label}别名：{alias} → {canonical}。{collision}"
 
 
 async def _encyclopedia_lookup(kind: str):

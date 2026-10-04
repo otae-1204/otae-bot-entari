@@ -103,12 +103,12 @@ async def ping(server_address: str, server_type: str = "java") -> dict:
         return {"status": "success", "data": server_info}
 
     except DNSException:
-        return {"status": "error", "data": "DNS 解析超时或失败，请检查服务器地址后重试"}
+        return {"status": "error", "data": "域名解析失败或请求超时，请核对服务器地址。"}
     except (OSError, ValueError):
-        return {"status": "error", "data": "服务器未开启或服务器地址错误"}
+        return {"status": "error", "data": "目标服务器尚未启动或地址填写错误。"}
     except Exception:
         logger.exception("Minecraft ping failed unexpectedly for %s", server_address)
-        return {"status": "error", "data": "出现未知错误"}
+        return {"status": "error", "data": "查询遇到未知异常，请稍后重试。"}
 
 
 def base64_to_image(base64_str: str) -> PILImage:

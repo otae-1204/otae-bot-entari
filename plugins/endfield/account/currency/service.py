@@ -167,7 +167,7 @@ def aggregate_currency_logs(
 
 def date_bounds(start: date, end: date) -> tuple[int, int]:
     if start > end:
-        raise ValueError("资源流水查询的开始日期不能晚于结束日期")
+        raise ValueError("资源流水查询的开始日期不得晚于结束日期。")
     start_dt = datetime.combine(start, time.min, tzinfo=TIMEZONE)
     end_dt = datetime.combine(end, time.max.replace(microsecond=0), tzinfo=TIMEZONE)
     return int(start_dt.timestamp()), int(end_dt.timestamp())
@@ -200,15 +200,15 @@ def resolve_query_dates(
     current = today or datetime.now(TIMEZONE).date()
     if days is not None:
         if int(days) <= 0:
-            raise ValueError("资源流水查询天数必须大于 0")
+            raise ValueError("资源流水查询天数须为大于 0 的整数。")
         if start_text or end_text:
-            raise ValueError("资源流水查询天数不能与日期范围同时使用")
+            raise ValueError("资源流水查询天数不能与指定日期范围同时使用。")
         end = current
         return end - timedelta(days=int(days) - 1), end
     end = _parse_date_text(end_text) if end_text else current
     start = _parse_date_text(start_text) if start_text else _month_before(end, DEFAULT_QUERY_MONTHS)
     if start > end:
-        raise ValueError("资源流水查询的开始日期不能晚于结束日期")
+        raise ValueError("资源流水查询的开始日期不得晚于结束日期。")
     return start, end
 
 
@@ -230,14 +230,14 @@ def format_currency_log_report(
     ]
     total_count = sum(len(item.records) for item in summaries)
     if total_count == 0:
-        lines.append("查询范围内没有流水记录。")
+        lines.append("所选查询范围内暂无流水记录。")
         return "\n".join(lines)
 
     for summary in summaries:
         lines.append("")
         lines.append(f"【{currency_name(summary.currency_type)}】共 {len(summary.records)} 条")
         if not summary.records:
-            lines.append("  查询范围内无记录")
+            lines.append("  所选时间段内暂无记录")
             continue
         lines.append(
             "  "

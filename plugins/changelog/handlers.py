@@ -119,7 +119,7 @@ async def handle_changelog(rest: ArgVal, session: Session) -> None:
         changelog = load_changelog()
     except ChangelogDataError as error:
         logger.warning("[changelog] data unavailable: {}", error)
-        await send(session, "更新日志数据暂时不可用，请稍后再试。")
+        await send(session, "更新日志暂不可用，请稍后再试。")
         return
 
     tokens = [token for token in (get_rest(rest) or "").split() if token]

@@ -29,7 +29,7 @@ class ReplyRelay:
             await asyncio.wait_for(self.deliver(reply), 130)
             self.delivered = True
         except asyncio.TimeoutError:
-            raise GrokError("QQ 回复发送未确认，请检查当前会话；本次未重复发送。") from None
+            raise GrokError("消息发送状态未确认，请检查当前会话接收情况；为避免刷屏本次未重复推送。") from None
 
     async def publish(self, snapshot: Reply) -> None:
         if self.worker is not None and self.worker.done():
@@ -37,12 +37,12 @@ class ReplyRelay:
         # Completed outgoing messages append to the transcript. Refuse a
         # rewritten prefix rather than resend text or invent a matching answer.
         if not snapshot.text.startswith(self.text):
-            raise GrokError("云端已发送的回复发生变化，后续结果请在 Grok Bot 应用中查看；未重复转发。")
+            raise GrokError("云端已推送的回复内容出现变更，为避免错乱后续请在 Grok Bot 客户端查阅；已停止重复转发。")
         delta = snapshot.text[len(self.text):20000].strip()
         self.text = snapshot.text
         if len(self.text) > 20000 and not self.text_limit_reported:
             self.text_limit_reported = True
-            delta += "\n\n回答过长，剩余内容请在 Grok Bot 应用中查看。"
+            delta += "\n\n回复篇幅已超限，剩余内容请前往 Grok Bot 客户端查阅。"
         if delta:
             await self.emit(Reply(delta))
         for item in snapshot.attachments:
@@ -53,7 +53,7 @@ class ReplyRelay:
             if len(self.seen) > MAX_REPLY_FILES:
                 if not self.file_limit_reported:
                     self.file_limit_reported = True
-                    await self.emit(Reply(f"本次附件超过 {MAX_REPLY_FILES} 个，其余附件请在 Grok Bot 应用中查看。"))
+                    await self.emit(Reply(f"本次生成附件数量已超 {MAX_REPLY_FILES} 个上限，剩余附件请在 Grok Bot 客户端查阅。"))
                 continue
             self.files.put_nowait(item)
             self.pending_files += 1

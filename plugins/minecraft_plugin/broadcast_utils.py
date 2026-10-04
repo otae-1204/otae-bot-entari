@@ -24,12 +24,12 @@ def build_player_change_messages(
     playtime_deltas: dict[str, int] = {}
 
     if current_players is None and previous_players is not None:
-        return [f"[MC_Server] 服务器 {server_name} 已关闭"], playtime_deltas
+        return [f"[MC_Server] 服务器 {server_name} 已关闭。"], playtime_deltas
     if current_players is not None and previous_players is None:
         if current_players:
             joined = "、".join(sorted(current_players))
-            return [f"[MC_Server] 服务器 {server_name} 已启动，当前在线: {joined}"], playtime_deltas
-        return [f"[MC_Server] 服务器 {server_name} 已启动"], playtime_deltas
+            return [f"[MC_Server] 服务器 {server_name} 已开启，当前在线：{joined}"], playtime_deltas
+        return [f"[MC_Server] 服务器 {server_name} 已开启。"], playtime_deltas
 
     if current_players is None or previous_players is None:
         return messages, playtime_deltas
@@ -40,15 +40,15 @@ def build_player_change_messages(
     left = sorted(previous_set - current_set)
 
     if joined:
-        messages.append(f"[MC_Server] {server_name}: {'、'.join(joined)} 加入了服务器")
+        messages.append(f"[MC_Server] {server_name}：{'、'.join(joined)} 加入了服务器。")
 
     if left:
         left_parts = []
         for player in left:
             duration = timestamp - int(previous_players.get(player, timestamp))
             playtime_deltas[player] = duration
-            left_parts.append(f"{player}({format_duration(duration)})")
-        messages.append(f"[MC_Server] {server_name}: {'、'.join(left_parts)} 离开了服务器")
+            left_parts.append(f"{player}（{format_duration(duration)}）")
+        messages.append(f"[MC_Server] {server_name}：{'、'.join(left_parts)} 离开了服务器。")
 
     return messages, playtime_deltas
 

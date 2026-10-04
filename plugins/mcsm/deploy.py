@@ -87,20 +87,20 @@ def parse_deploy_args(parts: list[str]) -> DeployParseResult:
             continue
         if token in {"--port", "--node", "--image", "--cmd", "--mem"}:
             if i + 1 >= len(parts):
-                errors.append(f"{token} 缺少参数")
+                errors.append(f"{token} 缺少参数值。")
                 break
             values[token[2:].replace("-", "_")] = parts[i + 1]
             i += 2
             continue
         if token.startswith("--"):
-            errors.append(f"未知参数: {token}")
+            errors.append(f"不支持的参数：{token}。")
             i += 1
             continue
         positional.append(token)
         i += 1
 
     if len(positional) < 2:
-        errors.append("用法: /mcsm deploy <别名> <闪传URL> [--port 宿主端口] [--node 节点] [--image 镜像] [--cmd 启动命令]")
+        errors.append("命令格式：/mcsm deploy <别名> <闪传URL> [--port 宿主端口] [--node 节点] [--image 镜像] [--cmd 启动命令]")
 
     port_text = str(values.get("port") or "")
     if not port_text:
@@ -109,25 +109,25 @@ def parse_deploy_args(parts: list[str]) -> DeployParseResult:
         try:
             port = int(port_text)
         except ValueError:
-            errors.append("--port 必须是数字")
+            errors.append("--port 参数必须为纯数字。")
             port = 0
         else:
             if not 1 <= port <= 65535:
-                errors.append("--port 必须在 1-65535 之间")
+                errors.append("--port 端口范围须在 1-65535 之间。")
 
     mem_text = str(values.get("mem") or "2048")
     try:
         memory_mb = int(mem_text)
     except ValueError:
-        errors.append("--mem 必须是数字，单位 MB")
+        errors.append("--mem 内存大小必须为纯数字（单位 MB）。")
         memory_mb = 2048
     else:
         if memory_mb < 512:
-            errors.append("--mem 不能小于 512 MB")
+            errors.append("--mem 内存配置不可低于 512 MB。")
 
     url = positional[1] if len(positional) >= 2 else ""
     if url and not is_valid_download_url(url):
-        errors.append("闪传URL必须是 http(s) 下载链接")
+        errors.append("闪传链接必须是以 http:// 或 https:// 开头的网络地址。")
 
     if errors:
         return DeployParseResult(None, errors)

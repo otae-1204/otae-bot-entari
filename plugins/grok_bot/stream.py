@@ -82,13 +82,13 @@ class LiveConversation:
         except Exception as error:  # noqa: BLE001 - Background errors must be delivered and redacted.
             self.closing = True
             if isinstance(error, asyncio.TimeoutError):
-                message = (f"Grok Bot 本轮接收等待超过 {self.config.timeout:g} 秒，任务可能仍在云端运行；后续结果请在应用中查看。"
-                           if acquired else "Grok Bot 等待会话名额超时，本次输入尚未提交。")
+                message = (f"本轮响应等待已达 {self.config.timeout:g} 秒上限，云端生成可能仍在继续，后续内容请在 Grok Bot 客户端查阅。"
+                           if acquired else "排队等待会话名额超时，本次内容尚未提交。")
             elif isinstance(error, GrokError):
                 message = str(error)
             else:
                 logger.warning("[grok_bot] conversation receiver failed: {}", type(error).__name__)
-                message = "Grok Bot 会话接收失败，请管理员检查日志；已提交的任务可能仍在云端运行。"
+                message = "会话消息接收中断，请管理员查看运行日志；已提交的任务可能仍在云端处理中。"
             if self.submissions:
                 try:
                     await asyncio.wait_for(self.emit(Reply(message)), 130)
@@ -98,7 +98,7 @@ class LiveConversation:
                 self.fail_waiting(message)
         finally:
             self.closing = True
-            self.fail_waiting("Grok Bot 当前接收任务已结束，本次问题尚未提交，请重新发送。")
+            self.fail_waiting("当前接收流程已终止，本次提问尚未提交成功，请重新发送。")
             if acquired:
                 async with self.hub.capacity:
                     self.hub.active -= 1
@@ -122,20 +122,20 @@ class LiveConversation:
                     continue
                 remaining = item.deadline - asyncio.get_running_loop().time()
                 if remaining <= 0:
-                    raise GrokError("Grok Bot 提交等待超时，本次问题尚未发送。")
+                    raise GrokError("请求排队等待超时，本次提问尚未发出。")
                 await asyncio.wait_for(self.send_one(client, item), remaining)
                 if not item.done.done():
                     item.done.set_result(Reply())
             except asyncio.CancelledError:
                 if not item.done.done():
-                    item.done.set_exception(GrokError("Grok Bot 本次提交已停止，请在应用中确认是否收到；本次未重复提交。"))
+                    item.done.set_exception(GrokError("提问提交过程已终止，请在 Grok Bot 客户端确认接收状态；本次未重复推送。"))
                 raise
             except Exception as error:  # noqa: BLE001 - Preserve the receiver after one failed input.
                 if isinstance(error, asyncio.TimeoutError):
-                    error = GrokError("Grok Bot 本次提交等待超时，请在应用中确认是否收到；本次未重复提交。")
+                    error = GrokError("请求提交等待超时，请在 Grok Bot 客户端核实是否已接收；本次未重复推送。")
                 elif not isinstance(error, GrokError):
                     logger.warning("[grok_bot] input submission failed: {}", type(error).__name__)
-                    error = GrokError("Grok Bot 本次输入处理失败，请管理员检查日志。")
+                    error = GrokError("本次输入处理遇到异常，请管理员查阅运行日志。")
                 if not item.done.done():
                     # Do not share a live worker's traceback with the caller.
                     item.done.set_exception(GrokError(str(error)))
@@ -178,7 +178,7 @@ class LiveConversation:
 
     def require_enabled(self) -> None:
         if not feature_store.is_enabled(self.scope.feature_scope, "grok_bot"):
-            raise GrokError("当前会话的 Grok Bot 已关闭，本次问题尚未发送。")
+            raise GrokError("当前会话的 Grok Bot 服务已停用，提问尚未发送。")
 
     async def work(self) -> None:
         self.require_enabled()
@@ -203,7 +203,7 @@ class LiveConversation:
         previous = None
         while True:
             if not feature_store.is_enabled(self.scope.feature_scope, "grok_bot"):
-                raise GrokError("当前会话的 Grok Bot 已关闭，本轮接收已停止；已提交的任务可能仍在云端运行。")
+                raise GrokError("当前会话的 Grok Bot 服务已停用，接收流程已中止；已提交的任务可能仍在云端处理。")
             revision = self.revision
             for submission in list(self.submissions):
                 if submission.status in {"submitting", "accepted"}:
@@ -211,7 +211,7 @@ class LiveConversation:
                 submission.status = await gateway.acceptance(submission.nonce)
                 if submission.status == "rejected":
                     self.submissions.remove(submission)
-                    await submission.item.deliver(Reply("Grok Bot 拒绝了本次输入，请在应用中查看原因。"), reply_to=True)
+                    await submission.item.deliver(Reply("Grok Bot 未接受本次输入请求，详情请在客户端查阅。"), reply_to=True)
             if not self.submissions:
                 if not self.preparing and self.inputs.empty():
                     self.closing = True
@@ -266,19 +266,19 @@ class RequestQueue:
                   *, repair_only: bool = False, images: tuple[str, ...] = (), account=None,
                   on_reply: Callable[..., Awaitable[None]] | None = None) -> Reply | str:
         if self.closed:
-            raise GrokError("Grok Bot 插件正在停止，请稍后重试。")
+            raise GrokError("Grok Bot 模块正在停止服务，请稍候重试。")
         if repair_only:
             if scope.key in self.slots or scope.key in self.repairs:
-                raise GrokError("当前会话正在接收回复或修复绑定，请结束后再修复。")
+                raise GrokError("当前会话正处于回复接收或修复处理中，请等待完成后再试。")
             task = self.repairs[scope.key] = asyncio.create_task(conversations.repair(config, scope))
             try:
                 return await task
             finally:
                 self.repairs.pop(scope.key, None)
         if on_reply is None:
-            raise GrokError("Grok Bot 缺少会话回复通道。")
+            raise GrokError("缺少可用应答通道，无法完成回复推送。")
         if self.pending >= config.max_pending:
-            raise GrokError("Grok Bot 提交队列已满，请稍后重试。")
+            raise GrokError("当前并发请求队列已达上限，请稍候再试。")
         self.pending += 1
         enqueued = False
         item = Input(prompt, images, account, on_reply, asyncio.get_running_loop().create_future(),
@@ -289,7 +289,7 @@ class RequestQueue:
             while (live := self.slots.get(scope.key)) is not None and live.closing:
                 await asyncio.wait_for(asyncio.shield(live.task), config.timeout)
             if self.closed:
-                raise GrokError("Grok Bot 插件正在停止，请稍后重试。")
+                raise GrokError("Grok Bot 模块正在停止服务，请稍候重试。")
             if live is None:
                 live = self.slots[scope.key] = LiveConversation(self, config, scope, item)
                 live.enqueue(item)
@@ -298,10 +298,10 @@ class RequestQueue:
                 live.enqueue(item)
             enqueued = True
             if self.active >= config.max_concurrent and live.relay is None:
-                await progress("Grok Bot 正在处理其他会话，本次输入等待提交。")
+                await progress("当前正忙于处理其他会话请求，本次输入已进入等待队列。")
             return await asyncio.wait_for(asyncio.shield(item.done), max(.001, item.deadline - asyncio.get_running_loop().time()))
         except asyncio.TimeoutError:
-            raise GrokError("Grok Bot 提交等待超时，请在应用中确认是否收到；本次未重复提交。") from None
+            raise GrokError("请求提交等待超时，请在 Grok Bot 客户端核对接收情况；本次未重复推送。") from None
         finally:
             if not item.done.done():
                 item.done.cancel()
@@ -318,5 +318,5 @@ class RequestQueue:
         await asyncio.gather(*tasks, return_exceptions=True)
         # A task cancelled before its first step never enters run()'s finally.
         for live in self.slots.values():
-            live.fail_waiting("Grok Bot 插件已停止，本次问题尚未提交。")
+            live.fail_waiting("Grok Bot 服务已终止，本次提问未提交。")
         self.slots.clear()

@@ -58,7 +58,7 @@ class XhhLoginSession:
 
     async def login_and_fetch(self, code: str) -> XhhGachaImport:
         if self._context is None:
-            raise XhhAPIError("小黑盒登录会话已失效，请重新执行导入。")
+            raise XhhAPIError("小黑盒登录会话已过期，请重新发起导入。")
         encrypted_phone = _encrypt_phone(f"+86{self._phone}")
         payload = await self._request(
             "POST", LOGIN_CODE_PATH, query={"code": code}, form={"phone_num": encrypted_phone}
@@ -72,7 +72,7 @@ class XhhLoginSession:
         ).strip()
         pkey = str(result.get("pkey") or "").strip()
         if not self._heybox_id or not pkey:
-            raise XhhAPIError("小黑盒登录状态不完整，请稍后重试。")
+            raise XhhAPIError("小黑盒登录鉴权信息不完整，请稍后重试。")
         expires = int(time.time()) + 30 * 60
         await self._context.add_cookies(
             [
@@ -89,7 +89,7 @@ class XhhLoginSession:
         overview = await self._request("GET", OVERVIEW_PATH)
         parsed = parse_xhh_overview(overview)
         if not parsed.source_uid:
-            raise XhhAPIError("小黑盒数据缺少终末地 UID，无法安全导入。")
+            raise XhhAPIError("小黑盒数据中未检测到终末地 UID，无法安全导入。")
         return parsed
 
     async def close(self) -> None:
@@ -149,11 +149,11 @@ class XhhLoginSession:
                     break
                 await page.wait_for_timeout(250)
             else:
-                raise XhhAPIError("小黑盒设备验证初始化失败，请稍后重试。")
+                raise XhhAPIError("小黑盒设备指纹验证初始化失败，请稍后重试。")
         except XhhAPIError:
             raise
         except Exception as exc:
-            raise XhhAPIError("无法启动小黑盒安全登录环境，请检查 Playwright 浏览器组件。") from exc
+            raise XhhAPIError("无法拉起小黑盒安全登录环境，请确认 Playwright 浏览器组件已就绪。") from exc
 
     async def _send_code(self) -> None:
         payload = await self._request(
@@ -170,7 +170,7 @@ class XhhLoginSession:
         form: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         if self._context is None:
-            raise XhhAPIError("小黑盒登录会话尚未初始化。")
+            raise XhhAPIError("小黑盒登录会话未建立或已提前关闭。")
         timestamp = int(time.time())
         nonce = secrets.token_hex(16).upper()
         params = dict(self._common_params)
@@ -193,9 +193,9 @@ class XhhLoginSession:
             )
             payload = await response.json()
         except Exception as exc:
-            raise XhhAPIError("小黑盒官方接口请求失败，请稍后重试。") from exc
+            raise XhhAPIError("请求小黑盒服务接口超时或失败，请稍后重试。") from exc
         if not isinstance(payload, dict):
-            raise XhhAPIError("小黑盒官方接口返回了无法识别的数据。")
+            raise XhhAPIError("小黑盒服务接口响应数据结构异常。")
         return payload
 
 
@@ -233,17 +233,17 @@ async def _launch_xhh_browser(playwright):
             return await playwright.chromium.launch(channel="msedge", **options)
         except Exception as edge_error:
             raise XhhAPIError(
-                "无法启动小黑盒安全登录环境；Playwright Chromium 和系统 Edge 均不可用。"
+                "未能拉起小黑盒登录环境，内置 Chromium 与系统 Edge 均无法调用。"
             ) from edge_error
 
 
 def parse_xhh_overview(payload: object) -> XhhGachaImport:
     root = _as_dict(payload)
     if root.get("status") and root.get("status") != "ok":
-        raise XhhAPIError(_safe_api_message(root.get("msg"), "小黑盒历史数据获取失败。"))
+        raise XhhAPIError(_safe_api_message(root.get("msg"), "获取小黑盒寻访历史记录失败。"))
     data = _as_dict(root.get("result")) or root
     if data.get("is_bind") is False:
-        raise XhhAPIError("该小黑盒账号未绑定终末地数据。")
+        raise XhhAPIError("当前小黑盒账号尚未绑定终末地游戏角色。")
     user_info = _as_dict(data.get("user_info") or data.get("player_info") or data.get("role_info"))
     source_uid = str(_first(user_info, "uid", "game_uid", "role_id", "roleId") or "").strip()
     nickname = str(_first(user_info, "nickname", "nick_name", "name") or "").strip()
@@ -297,9 +297,9 @@ def parse_xhh_overview(payload: object) -> XhhGachaImport:
         )
         six_stars.extend(parsed_six)
     if not pools:
-        raise XhhAPIError("小黑盒返回数据中未找到终末地卡池记录。")
+        raise XhhAPIError("小黑盒返回数据中未检索到终末地卡池记录。")
     if not source_uid:
-        raise XhhAPIError("小黑盒数据缺少终末地 UID，无法安全导入。")
+        raise XhhAPIError("小黑盒返回数据缺少终末地 UID，无法安全导入。")
     pools = _mark_current_pools(pools, pool_order)
     statistic = _as_dict(data.get("statistic_info") or data.get("statistics"))
     total_count = _first_int(statistic, "total_count", "total", "gacha_count", "draw_count")
@@ -452,9 +452,9 @@ def _require_ok(payload: dict[str, Any], fallback: str) -> dict[str, Any]:
         return _as_dict(payload.get("result"))
     status = str(payload.get("status") or "")
     if status == "show_captcha":
-        raise XhhAPIError("小黑盒要求完成图形验证，本次自动导入无法继续，请稍后重试。")
+        raise XhhAPIError("小黑盒触发了人机图形验证，当前无法自动完成导入，请稍后重试。")
     if status == "need_google_check":
-        raise XhhAPIError("该小黑盒账号启用了二次验证，暂不支持自动导入。")
+        raise XhhAPIError("该小黑盒账号开启了两步安全验证，暂不支持全自动导入。")
     raise XhhAPIError(_safe_api_message(payload.get("msg"), fallback))
 
 

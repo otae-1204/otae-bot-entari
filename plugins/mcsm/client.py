@@ -140,19 +140,19 @@ class MCSMClient:
                 resp = await client.request(method, url, params=params, json=json_data)
                 resp.raise_for_status()
         except httpx.TimeoutException as exc:
-            raise MCSMAPIError("连接面板超时，请检查面板地址或网络") from exc
+            raise MCSMAPIError("连接面板超时，请检查面板地址与网络连通性。") from exc
         except httpx.HTTPStatusError as exc:
             status = exc.response.status_code
             body = redact_sensitive_text(exc.response.text[:200].strip())
-            raise MCSMAPIError(f"面板返回 HTTP {status}: {body or '无响应内容'}") from exc
+            raise MCSMAPIError(f"面板响应异常（HTTP {status}）：{body or '无响应内容'}。") from exc
         except httpx.HTTPError as exc:
-            raise MCSMAPIError(f"连接面板失败: {redact_sensitive_text(exc)}") from exc
+            raise MCSMAPIError(f"连接面板失败：{redact_sensitive_text(exc)}。") from exc
 
         try:
             return resp.json()
         except ValueError as exc:
             text = redact_sensitive_text(resp.text[:200].strip())
-            raise MCSMAPIError(f"面板返回的不是 JSON: {text or '空响应'}") from exc
+            raise MCSMAPIError(f"面板未返回有效 JSON 数据：{text or '响应内容为空'}。") from exc
 
     async def _get(self, path: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """发送 GET 请求."""
@@ -209,7 +209,7 @@ class MCSMClient:
         """Replace daemon-local upload host with the selected daemon host when possible."""
         url = str(raw_url or "").strip()
         if not url:
-            raise MCSMAPIError("获取上传地址失败: 面板未返回上传地址")
+            raise MCSMAPIError("获取上传地址失败：面板未下发上传接口地址。")
         parsed = urlsplit(url if re.match(r"^https?://", url, re.I) else f"http://{url}")
         if parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
             return urlunsplit(parsed)
@@ -230,9 +230,9 @@ class MCSMClient:
         addr = config.get("addr") or config.get("address")
         password = config.get("password")
         if not addr:
-            raise MCSMAPIError("获取上传地址失败: 面板未返回 daemon 地址")
+            raise MCSMAPIError("获取上传地址失败：面板未下发节点地址。")
         if not password:
-            raise MCSMAPIError("获取上传地址失败: 面板未返回上传密码")
+            raise MCSMAPIError("获取上传地址失败：面板未下发上传凭据。")
 
         base = self._normalize_upload_url(str(addr), daemon_id).rstrip("/")
         return f"{base}/upload/{quote(str(password), safe='')}"
@@ -248,7 +248,7 @@ class MCSMClient:
             if part not in {"", ".", "..", "/"}
         ]
         if not parts:
-            raise MCSMAPIError("实例文件路径不能为空")
+            raise MCSMAPIError("参数错误：实例文件路径不能为空。")
         return "/" + "/".join(parts)
 
     # ── Daemon 相关 ──
@@ -259,7 +259,7 @@ class MCSMClient:
         if data.get("status") != 200:
             err = self._api_error_message(data)
             logger.error(f"[MCSM] 获取节点列表失败: {data}")
-            raise MCSMAPIError(f"获取节点列表失败: {err}")
+            raise MCSMAPIError(f"拉取节点列表失败：{err}。")
         daemons = data.get("data", [])
         self._daemon_cache = daemons
         return daemons
@@ -289,7 +289,7 @@ class MCSMClient:
         data = await self._get("/api/environment/image", {"daemonId": daemon_id})
         if data.get("status") != 200:
             err = self._api_error_message(data)
-            raise MCSMAPIError(f"获取 Docker 镜像失败: {err}")
+            raise MCSMAPIError(f"拉取 Docker 镜像列表失败：{err}。")
         images = data.get("data", [])
         return images if isinstance(images, list) else []
 
@@ -386,7 +386,7 @@ class MCSMClient:
         if data.get("status") != 200:
             err = self._api_error_message(data)
             logger.warning(f"[MCSM] 获取 daemon {daemon_id} 实例列表失败: {err}")
-            raise MCSMAPIError(f"获取节点实例失败: {err}")
+            raise MCSMAPIError(f"拉取节点实例列表失败：{err}。")
         result = data.get("data", {})
         instances = result.get("data", [])
         if instances:
@@ -418,7 +418,7 @@ class MCSMClient:
         """创建 Docker 类型实例."""
         daemon_id = str(daemon_id or "").strip()
         if not daemon_id:
-            raise MCSMAPIError("创建 Docker 实例失败: 缺少 daemonId，请重新选择节点")
+            raise MCSMAPIError("创建 Docker 实例失败：缺少 daemonId，请重新选择部署节点。")
         payload = {
             "nickname": name,
             "startCommand": start_command,
@@ -438,7 +438,7 @@ class MCSMClient:
         data = await self._post("/api/instance", {"daemonId": daemon_id}, payload)
         if data.get("status") != 200:
             err = self._api_error_message(data)
-            raise MCSMAPIError(f"创建 Docker 实例失败: {err}")
+            raise MCSMAPIError(f"创建 Docker 实例失败：{err}。")
         return data
 
     async def delete_instance(
@@ -452,9 +452,9 @@ class MCSMClient:
         daemon_id = str(daemon_id or "").strip()
         uuid = str(uuid or "").strip()
         if not daemon_id:
-            raise MCSMAPIError("删除实例失败: 缺少 daemonId")
+            raise MCSMAPIError("删除实例失败：缺少目标节点标识（daemonId）。")
         if not uuid:
-            raise MCSMAPIError("删除实例失败: 缺少实例 UUID")
+            raise MCSMAPIError("删除实例失败：缺少实例 UUID。")
         data = await self._delete(
             "/api/instance",
             {"daemonId": daemon_id},
@@ -462,7 +462,7 @@ class MCSMClient:
         )
         if data.get("status") != 200:
             err = self._api_error_message(data)
-            raise MCSMAPIError(f"删除实例失败: {err}")
+            raise MCSMAPIError(f"删除实例失败：{err}。")
         return data
 
     async def install_instance_from_url(
@@ -487,7 +487,7 @@ class MCSMClient:
         )
         if data.get("status") != 200:
             err = self._api_error_message(data)
-            raise MCSMAPIError(f"安装实例文件失败: {err}")
+            raise MCSMAPIError(f"安装实例文件失败：{err}。")
         return data
 
     async def get_upload_config(self, uuid: str, daemon_id: str, upload_dir: str = "/") -> Dict[str, Any]:
@@ -499,10 +499,10 @@ class MCSMClient:
         )
         if data.get("status") != 200:
             err = self._api_error_message(data)
-            raise MCSMAPIError(f"获取上传地址失败: {err}")
+            raise MCSMAPIError(f"获取上传地址配置失败：{err}。")
         config = data.get("data")
         if not isinstance(config, dict):
-            raise MCSMAPIError("获取上传地址失败: 面板返回格式不正确")
+            raise MCSMAPIError("获取上传地址失败：面板返回的数据格式异常。")
         return config
 
     async def upload_file_to_instance(
@@ -515,7 +515,7 @@ class MCSMClient:
         """上传本地文件到实例目录，返回实例内文件名."""
         path = Path(file_path)
         if not path.is_file():
-            raise MCSMAPIError(f"上传文件失败: 本地文件不存在 {path}")
+            raise MCSMAPIError(f"上传文件失败：本地待传文件不存在（{path}）。")
         config = await self.get_upload_config(uuid, daemon_id, upload_dir)
         upload_url = self._build_upload_url(config, daemon_id)
         params = dict(config.get("params") or {})
@@ -528,9 +528,9 @@ class MCSMClient:
                     resp.raise_for_status()
         except httpx.HTTPStatusError as exc:
             body = redact_sensitive_text(exc.response.text[:200].strip())
-            raise MCSMAPIError(f"上传到 daemon 失败: HTTP {exc.response.status_code}: {body or '无响应内容'}") from exc
+            raise MCSMAPIError(f"上传文件到节点失败（HTTP {exc.response.status_code}）：{body or '无响应内容'}。") from exc
         except httpx.HTTPError as exc:
-            raise MCSMAPIError(f"上传到 daemon 失败: {redact_sensitive_text(exc)}") from exc
+            raise MCSMAPIError(f"上传文件到节点失败：{redact_sensitive_text(exc)}。") from exc
         return path.name
 
     async def extract_instance_archive(self, uuid: str, daemon_id: str, archive_name: str, target: str = "/") -> Dict[str, Any]:
@@ -550,7 +550,7 @@ class MCSMClient:
         )
         if data.get("status") != 200:
             err = self._api_error_message(data)
-            raise MCSMAPIError(f"解压压缩包失败: {err}")
+            raise MCSMAPIError(f"解压实例压缩包失败：{err}。")
         return data
 
     async def delete_instance_file(self, uuid: str, daemon_id: str, target: str) -> Dict[str, Any]:
@@ -563,7 +563,7 @@ class MCSMClient:
         )
         if data.get("status") != 200:
             err = self._api_error_message(data)
-            raise MCSMAPIError(f"删除临时文件失败: {err}")
+            raise MCSMAPIError(f"清理临时文件失败：{err}。")
         return data
 
     async def read_instance_file(self, uuid: str, daemon_id: str, target: str) -> str:
@@ -576,7 +576,7 @@ class MCSMClient:
         )
         if data.get("status") != 200:
             err = self._api_error_message(data)
-            raise MCSMAPIError(f"读取实例文件失败: {err}")
+            raise MCSMAPIError(f"读取实例文件失败：{err}。")
         content = data.get("data")
         if isinstance(content, dict):
             for key in ("text", "content", "value", "data"):
@@ -594,7 +594,7 @@ class MCSMClient:
         )
         if data.get("status") != 200:
             err = self._api_error_message(data)
-            raise MCSMAPIError(f"写入实例文件失败: {err}")
+            raise MCSMAPIError(f"写入实例文件失败：{err}。")
         return data
 
     async def update_instance_start_command(
@@ -607,18 +607,18 @@ class MCSMClient:
         daemon_id = str(daemon_id or "").strip()
         uuid = str(uuid or "").strip()
         if not daemon_id:
-            raise MCSMAPIError("更新启动命令失败: 缺少 daemonId")
+            raise MCSMAPIError("更新启动命令失败：缺少目标节点标识（daemonId）。")
         if not uuid:
-            raise MCSMAPIError("更新启动命令失败: 缺少实例 UUID")
+            raise MCSMAPIError("更新启动命令失败：缺少实例 UUID。")
         detail = await self.get_instance_detail(uuid, daemon_id)
         if not detail:
-            raise MCSMAPIError("实例创建后无法读取详情，不能更新启动命令")
+            raise MCSMAPIError("更新启动命令失败：实例已创建但无法读取详情配置。")
         config = dict(detail.get("config") or detail)
         config["startCommand"] = command
         data = await self._put("/api/instance", {"uuid": uuid, "daemonId": daemon_id}, config)
         if data.get("status") != 200:
             err = self._api_error_message(data)
-            raise MCSMAPIError(f"更新启动命令失败: {err}")
+            raise MCSMAPIError(f"更新启动命令失败：{err}。")
         return data
 
     @staticmethod
@@ -717,7 +717,7 @@ class MCSMClient:
         )
         if data.get("status") != 200:
             err = self._api_error_message(data)
-            raise MCSMAPIError(f"读取实例文件列表失败: {err}")
+            raise MCSMAPIError(f"读取实例文件目录失败：{err}。")
         files = self._extract_file_entries(data.get("data", []))
         if not files and isinstance(data.get("data"), dict):
             total = data["data"].get("total")

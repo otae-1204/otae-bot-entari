@@ -75,7 +75,16 @@ from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_clea
 # alconna/aptimer 已在 bot.py 中预加载，localstore 由 import 自动加载
 
 
-STEAM_HELP_USAGE = ""
+STEAM_HELP_USAGE = """Steam 插件使用指南：
+/steambind <Steam ID 或 好友代码> - 绑定账号
+/steamunbind - 解除当前账号绑定
+/steaminfo [@某人 或 Steam ID] - 查看个人名片及游戏状态
+/steamcheck - 查看本群所有绑定成员的当前状态
+/steamgame <游戏名 或 AppID> - 统计本群该游戏的游玩时长榜
+/steamnickname <昵称> - 设置群内 Steam 播报昵称
+/steamenable - 开启本群 Steam 动态播报
+/steamdisable - 关闭本群 Steam 动态播报
+/steamupdate [群名] [配图] - 更新本群名片与头像缓存"""
 help = _cmd("steamhelp", aliases={"steam帮助"}, priority=5, block=True)
 bind = _cmd("steambind", aliases={"绑定steam"}, priority=5, block=True)
 unbind = _cmd("steamunbind", aliases={"解绑steam"}, priority=5, block=True)
@@ -375,12 +384,12 @@ def _game_candidate_label(candidate: Any) -> str:
 
 
 def _game_candidate_prompt(query: str, candidates: List[Any]) -> str:
-    lines = ["可能的 Steam 游戏名不止一个，请回复序号或直接回复游戏名："]
+    lines = ["匹配到多个可能的 Steam 游戏，请回复序号或直接回复游戏名："]
     lines.extend(
         f"{index}. {_game_candidate_label(candidate)}"
         for index, candidate in enumerate(candidates, start=1)
     )
-    lines.append(f"鍘熻緭鍏ワ細{query}")
+    lines.append(f"搜索原词：{query}")
     return "\n".join(lines)
 
 
@@ -418,21 +427,21 @@ async def _confirm_custom_game(
             allow_cache_match=False,
         )
     if app is None:
-        await game.finish(f"未找到游戏 {custom_query}")
+        await game.finish(f"未检索到游戏：{custom_query}")
 
     answer = await prompt(
-        f"Found {app.get('name') or app['appid']} ({app['appid']}). Reply yes or no.",
+        f"已找到游戏：{app.get('name') or app['appid']}（AppID: {app['appid']}）。请回复 yes 或 no 进行确认：",
         timeout=45,
     )
     if answer is None:
-        await game.finish("等待确认超时，请重新执行 steamgame 查询")
+        await game.finish("等待确认超时，本次查询已自动取消。")
     text = answer.extract_plain_text()
     if _is_yes_reply(text):
         append_app_ambiguous_cache(original_query, avatar_path, app, "user_confirmed")
         return app
     if _is_no_reply(text):
-        await game.finish("已取消本次查询")
-    await game.finish("确认无效，请重新执行 steamgame 查询")
+        await game.finish("已取消当前游戏查询。")
+    await game.finish("输入无效，查询已取消，请重新发送指令。")
 
 
 async def _resolve_steam_game_query(query: str) -> tuple[str, Optional[str], Optional[dict]]:
@@ -532,10 +541,10 @@ async def _resolve_steam_game_query(query: str) -> tuple[str, Optional[str], Opt
     )
     reply = await prompt(_game_candidate_prompt(query, candidates), timeout=45)
     if reply is None:
-        await game.finish("等待选择超时，请重新执行 steamgame 查询")
+        await game.finish("等待选择超时，本次查询已自动取消。")
     selected = _resolve_candidate_reply(reply.extract_plain_text(), candidates)
     if selected is None:
-        await game.finish("选择无效，请重新执行 steamgame 查询")
+        await game.finish("序号或名称选择无效，请重新发起查询。")
     if isinstance(selected, dict):
         append_app_ambiguous_cache(query, avatar_path, selected, selected.get("source", "user_selected"))
         return str(selected.get("name") or selected["appid"]), None, selected
@@ -592,16 +601,16 @@ def _parse_cache_app(args: List[str]) -> Optional[dict]:
 
 def _steam_cache_usage() -> str:
     return (
-        "Usage:\n"
-        "/steamcache refresh\n"
-        "/steamcache alias list [keyword]\n"
-        "/steamcache alias set <alias> <appid> <name>\n"
-        "/steamcache alias del <alias>\n"
-        "/steamcache lookup list [keyword]\n"
-        "/steamcache lookup set <query> <appid> <name>\n"
-        "/steamcache lookup del <query>\n"
-        "/steamcache ambiguous list [keyword]\n"
-        "/steamcache ambiguous del <query>"
+        "格式说明：\n"
+        "/steamcache refresh —— 刷新游戏列表缓存\n"
+        "/steamcache alias list [关键词] —— 查看别名映射\n"
+        "/steamcache alias set <别名> <appid> <游戏名> —— 设定别名\n"
+        "/steamcache alias del <别名> —— 删除别名\n"
+        "/steamcache lookup list [关键词] —— 查看精确检索缓存\n"
+        "/steamcache lookup set <词条> <appid> <游戏名> —— 设定检索缓存\n"
+        "/steamcache lookup del <词条> —— 删除检索缓存\n"
+        "/steamcache ambiguous list [关键词] —— 查看歧义候选缓存\n"
+        "/steamcache ambiguous del <词条> —— 删除歧义候选缓存"
     )
 
 
@@ -835,7 +844,7 @@ async def help_handle():
 @steam_cache.handle()
 async def steam_cache_handle(event: Event, rest: ArgVal[str]):
     if not _is_superuser(event):
-        await steam_cache.finish("Permission denied")
+        await steam_cache.finish("权限不足：仅机器人超级管理员可使用此命令。")
 
     raw_arg = get_rest(rest)
     args = raw_arg.split()
@@ -850,7 +859,7 @@ async def steam_cache_handle(event: Event, rest: ArgVal[str]):
             _steam_api_keys(),
             force_refresh=True,
         )
-        await steam_cache.finish(f"Steam app list refreshed: {len(apps)} apps")
+        await steam_cache.finish(f"Steam 应用列表已刷新完成，共缓存 {len(apps)} 款应用。")
 
     if action not in {"alias", "lookup", "ambiguous"} or len(args) < 2:
         await steam_cache.finish(_steam_cache_usage())
@@ -912,13 +921,13 @@ async def bind_handle(
 ):
     parent_id = _parent_id(target)
     if not parent_id:
-        await bind.finish("Steam 插件仅支持群聊/频道使用")
+        await bind.finish("请在群聊或频道中使用 Steam 相关指令。")
 
     arg = get_rest(rest)
 
     if not arg.isdigit():
         await bind.finish(
-            "请输入正确的 Steam ID 或 Steam 好友代码，格式: steambind [Steam ID 或 Steam好友代码]"
+            "账号输入有误，格式：/steambind <Steam ID 或 好友代码>"
         )
 
     steam_id = get_steam_id(arg)
@@ -927,20 +936,20 @@ async def bind_handle(
         user_data["steam_id"] = steam_id
         bind_data.save()
 
-        await bind.finish(f"已更新你的 Steam ID 为 {steam_id}")
+        await bind.finish(f"Steam ID 更新成功：{steam_id}")
     else:
         bind_data.add(
             parent_id, {"user_id": event_user_id(event), "steam_id": steam_id, "nickname": None})
         bind_data.save()
 
-        await bind.finish(f"已绑定你的 Steam ID 为 {steam_id}")
+        await bind.finish(f"Steam ID 绑定成功：{steam_id}")
 
 
 @unbind.handle()
 async def unbind_handle(event: Event, target: Optional[SendDest] = inject(get_target)):
     parent_id = _parent_id(target)
     if not parent_id:
-        await unbind.finish("Steam 插件仅支持群聊/频道使用")
+        await unbind.finish("请在群聊或频道中使用 Steam 相关指令。")
     user_id = event_user_id(event)
 
     removed_records = bind_data.remove(parent_id, user_id)
@@ -956,9 +965,9 @@ async def unbind_handle(event: Event, target: Optional[SendDest] = inject(get_ta
             f"user={user_id} removed={len(removed_records)}"
         )
 
-        await unbind.finish("已解绑 Steam ID")
+        await unbind.finish("Steam ID 解绑成功。")
     else:
-        await unbind.finish("未绑定 Steam ID")
+        await unbind.finish("当前未绑定任何 Steam ID。")
 
 
 @info.handle()
@@ -970,7 +979,7 @@ async def info_handle(
 ):
     parent_id = _parent_id(target)
     if not parent_id or target is None:
-        await info.finish("Steam 插件仅支持群聊/频道使用")
+        await info.finish("请在群聊或频道中使用 Steam 相关指令。")
 
     uni_arg = await ChainMsg.generate(message=event_chain(event), event=event, bot=bot)
     at = uni_arg[At]
@@ -979,19 +988,19 @@ async def info_handle(
     if at:
         user_data = bind_data.get(parent_id, at[0].target)
         if user_data is None:
-            await info.finish("该用户未绑定 Steam ID")
+            await info.finish("目标成员尚未绑定 Steam ID。")
         steam_id = user_data["steam_id"]
         steam_friend_code = str(int(steam_id) - STEAM_ID_OFFSET)
     elif plain_arg:
         if not plain_arg.isdigit():
-            await info.finish("请输入正确的 Steam ID 或 Steam 好友代码")
+            await info.finish("输入有误：请输入有效的 Steam ID 或好友代码。")
         steam_id = get_steam_id(plain_arg)
         steam_friend_code = str(int(steam_id) - STEAM_ID_OFFSET)
     else:
         user_data = bind_data.get(parent_id, event_user_id(event))
         if user_data is None:
             await info.finish(
-                "未绑定 Steam ID，请使用 steambind [Steam ID 或 Steam好友代码] 绑定 Steam ID"
+                "你尚未绑定 Steam ID，请先使用：/steambind <Steam ID 或 好友代码>"
             )
         steam_id = user_data["steam_id"]
         steam_friend_code = str(int(steam_id) - STEAM_ID_OFFSET)
@@ -1036,7 +1045,7 @@ async def check_handle(
 
     parent_id = _parent_id(target)
     if not parent_id or target is None:
-        await check.finish("Steam 插件仅支持群聊/频道使用")
+        await check.finish("请在群聊或频道中使用 Steam 相关指令。")
 
     steam_ids = bind_data.get_all(parent_id)
 
@@ -1073,24 +1082,24 @@ async def game_handle(
 ):
     parent_id = _parent_id(target)
     if not parent_id or target is None:
-        await game.finish("Steam 插件仅支持群聊/频道使用")
+        await game.finish("请在群聊或频道中使用 Steam 相关指令。")
 
     query = get_rest(rest)
     if not query:
-        await game.finish("请输入游戏名或 appid，格式: steamgame [游戏名或 appid]")
+        await game.finish("格式错误：/steamgame <游戏名 或 AppID>")
 
     if not _steam_api_keys():
-        await game.finish("未配置 Steam API Key，无法查询玩家游戏库数据")
+        await game.finish("未配置 Steam API Key，暂无法查询玩家游戏数据。")
 
     bound_players = _bound_players(parent_id)
     if not bound_players:
-        await game.finish("本群还没有绑定 Steam ID")
+        await game.finish("当前群聊尚未有成员绑定 Steam ID。")
 
     original_query = query
     query, confirmed_query, resolved_app = await _resolve_steam_game_query(query)
     app = resolved_app
     if app is None:
-        await game.finish(f"未找到游戏 {query}")
+        await game.finish(f"未检索到游戏：{query}")
 
     if confirmed_query and confirmed_query != original_query:
         write_app_lookup_cache(confirmed_query, avatar_path, app)
@@ -1165,7 +1174,7 @@ async def game_handle(
 
     if not rows:
         await game.finish(
-            f"No public playtime data found for {app_name} among {len(bound_players)} bound players."
+            f"已绑定的 {len(bound_players)} 位成员中，暂无关于 {app_name} 的公开游玩时长数据。"
         )
 
     total_players = len(rows)
@@ -1216,7 +1225,7 @@ async def update_parent_info_handle(
 ):
     parent_id = _parent_id(target)
     if not parent_id:
-        await update_parent_info.finish("Steam 插件仅支持群聊/频道使用")
+        await update_parent_info.finish("请在群聊或频道中使用 Steam 相关指令。")
 
     msg = await ChainMsg.generate(message=event_chain(event), event=event, bot=bot)
     info = {}
@@ -1228,34 +1237,34 @@ async def update_parent_info_handle(
             info["avatar"] = PILImage.open(BytesIO(await to_image_data(seg)))
 
     if "avatar" not in info or "name" not in info:
-        await update_parent_info.finish("文本中应包含图片和文字")
+        await update_parent_info.finish("格式要求：消息需同时包含群名文本与头像图片。")
 
     parent_data.update(parent_id, info["avatar"], info["name"])
-    await update_parent_info.finish("更新成功")
+    await update_parent_info.finish("群信息已成功更新。")
 
 
 @enable.handle()
 async def enable_handle(target: Optional[SendDest] = inject(get_target)):
     parent_id = _parent_id(target)
     if not parent_id:
-        await enable.finish("Steam 插件仅支持群聊/频道使用")
+        await enable.finish("请在群聊或频道中使用 Steam 相关指令。")
 
     disable_parent_data.remove(parent_id)
     disable_parent_data.save()
 
-    await enable.finish("已启用 Steam 播报")
+    await enable.finish("已开启本群 Steam 游戏动态播报。")
 
 
 @disable.handle()
 async def disable_handle(target: Optional[SendDest] = inject(get_target)):
     parent_id = _parent_id(target)
     if not parent_id:
-        await disable.finish("Steam 插件仅支持群聊/频道使用")
+        await disable.finish("请在群聊或频道中使用 Steam 相关指令。")
 
     disable_parent_data.add(parent_id)
     disable_parent_data.save()
 
-    await disable.finish("已禁用 Steam 播报")
+    await disable.finish("已停用本群 Steam 游戏动态播报。")
 
 
 @set_nickname.handle()
@@ -1266,16 +1275,16 @@ async def set_nickname_handle(
 ):
     parent_id = _parent_id(target)
     if not parent_id:
-        await set_nickname.finish("Steam 插件仅支持群聊/频道使用")
+        await set_nickname.finish("请在群聊或频道中使用 Steam 相关指令。")
 
     nickname = get_rest(rest)
     if not nickname:
-        await set_nickname.finish("璇疯緭鍏ユ樀绉帮紝鏍煎紡: steamnickname [鏄电О]")
+        await set_nickname.finish("格式错误：/steamnickname <昵称>")
 
     user_data = bind_data.get(parent_id, event_user_id(event))
     if user_data is None:
-        await set_nickname.finish("未绑定 Steam ID，请先使用 steambind 绑定 Steam ID 后再设置昵称")
+        await set_nickname.finish("尚未绑定账号，请先通过 /steambind 绑定 Steam ID 后再设置昵称。")
 
     user_data["nickname"] = nickname
     bind_data.save()
-    await set_nickname.finish(f"已设置你的 Steam 播报昵称为 {nickname}")
+    await set_nickname.finish(f"Steam 播报昵称已设置为：{nickname}")

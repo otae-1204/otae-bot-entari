@@ -114,7 +114,7 @@ async def _finish_reply(event: Event, text: str):
 async def handle_wiki(event: Event, content: ArgVal[str]):
     keyword = content.result.strip() if content.available else ""
     if not keyword:
-        await _finish_reply(event, "用法: /wiki ＜搜索内容＞")
+        await _finish_reply(event, "格式：/wiki <搜索内容>")
 
     proxy_url = SYSTEM_PROXY.get("http") if isinstance(SYSTEM_PROXY, dict) else None
 
@@ -125,10 +125,10 @@ async def handle_wiki(event: Event, content: ArgVal[str]):
             path = _extract_first_result_path(resp.text)
 
         if path is None:
-            await _finish_reply(event, f'未找到与 "{keyword}" 相关的内容')
+            await _finish_reply(event, f"未找到与「{keyword}」相关的内容。")
 
         # 使用 ChainMsg 发送回复，不再用 CQ 字符串注入
-        await _reply_message(event, "图片生成中, 请稍后").send()
+        await _reply_message(event, "正在生成 Wiki 页面截图，请稍候……").send()
 
         web_url = _wiki_article_url(path)
         try:
@@ -139,23 +139,23 @@ async def handle_wiki(event: Event, content: ArgVal[str]):
             )
         except Exception:
             logger.exception("McWiki screenshot failed: url={}", web_url)
-            await _finish_reply(event, "Wiki 页面截图失败，请稍后再试")
+            await _finish_reply(event, "页面截取失败，请稍后重试。")
 
         try:
             await _reply_message(event, *_image_segments_from_png(image)).finish()
         except Exception:
-            await _finish_reply(event, "消息可能被风控或出现其他问题, 请尝试重新查询")
+            await _finish_reply(event, "发送截图遇到异常，可能是消息触发拦截，请稍后再试。")
 
     except httpx.HTTPStatusError as e:
         status_code = e.response.status_code if e.response else "unknown"
         logger.exception("McWiki search HTTP error: status={}, keyword={}", status_code, keyword)
-        await _finish_reply(event, f"Wiki 搜索请求失败: HTTP {status_code}")
+        await _finish_reply(event, f"Wiki 搜索请求异常：HTTP {status_code}")
     except httpx.TimeoutException:
         logger.exception("McWiki search timeout: keyword={}", keyword)
-        await _finish_reply(event, "Wiki 搜索请求超时，请稍后再试")
+        await _finish_reply(event, "Wiki 检索超时，请稍后重试。")
     except httpx.RequestError:
         logger.exception("McWiki search request failed: keyword={}", keyword)
-        await _finish_reply(event, "Wiki 搜索网络请求失败，请检查代理或稍后再试")
+        await _finish_reply(event, "Wiki 搜索网络异常，请确认网络连接或稍后再试。")
     except IndexError:
         logger.exception("McWiki search result parse failed: keyword={}", keyword)
-        await _finish_reply(event, "Wiki 搜索结果解析失败，请稍后再试")
+        await _finish_reply(event, "Wiki 结果解析失败，请稍后再试。")

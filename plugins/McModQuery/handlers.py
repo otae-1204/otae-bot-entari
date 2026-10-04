@@ -29,12 +29,12 @@ def _parse_search_results(html_text: str, count: int = 3):
 
 def _build_result_msg(name: str, hrefs: list, titles: list, prefix: str) -> str:
     if not hrefs:
-        return "找不到您搜索的内容，请尝试更换关键词"
+        return "未找到相关搜索结果，建议更换关键词重试。"
     for i in range(len(titles)):
         titles[i][0] = "".join(titles[i])
     msg = prefix
     for i in range(len(hrefs)):
-        msg += f"{titles[i][0]}:\n{hrefs[i]}\n"
+        msg += f"{titles[i][0]}：\n{hrefs[i]}\n"
     return msg
 
 
@@ -55,7 +55,7 @@ def _search_url(keyword: str, *, filter_args: str = "") -> str:
 async def handle_mod(rest: ArgVal[str]):
     text = rest.result.strip() if rest.available else ""
     if not text:
-        await mod.finish("用法: /mod ＜模组名＞ [数量]")
+        await mod.finish("格式：/mod <模组名> [数量]")
         return
     content = text.split(" ")
     name = "".join(content[:-1]) if content[-1].isdigit() else "".join(content)
@@ -67,12 +67,12 @@ async def handle_mod(rest: ArgVal[str]):
     try:
         html_text = await _fetch_search_html(name)
     except httpx.TimeoutException:
-        await mod.finish("Mcmod 搜索请求超时，请稍后再试")
+        await mod.finish("MC 百科搜索请求超时，请稍后再试。")
     except httpx.HTTPError:
-        await mod.finish("Mcmod 搜索请求失败，请稍后再试")
+        await mod.finish("MC 百科搜索请求失败，请稍后重试。")
 
     hrefs, titles = _parse_search_results(html_text, count)
-    msg = _build_result_msg(name, hrefs, titles, f"Mcmod中符合您搜索的mod如下(仅显示前{len(hrefs)}个)\n")
+    msg = _build_result_msg(name, hrefs, titles, f"MC 百科相关模组结果如下（仅展示前 {len(hrefs)} 项）：\n")
     await ChainMsg.text(msg).finish()
 
 
@@ -80,17 +80,17 @@ async def handle_mod(rest: ArgVal[str]):
 async def handle_item(rest: ArgVal[str]):
     text = rest.result.strip() if rest.available else ""
     if not text:
-        await item.finish("用法: /资料 ＜资料名＞")
+        await item.finish("格式：/资料 <资料名>")
         return
     name = "".join(text.split(" "))
 
     try:
         html_text = await _fetch_search_html(name, filter_args="&filter=3&mold=0")
     except httpx.TimeoutException:
-        await item.finish("Mcmod 搜索请求超时，请稍后再试")
+        await item.finish("MC 百科搜索请求超时，请稍后再试。")
     except httpx.HTTPError:
-        await item.finish("Mcmod 搜索请求失败，请稍后再试")
+        await item.finish("MC 百科搜索请求失败，请稍后重试。")
 
     hrefs, titles = _parse_search_results(html_text, 5)
-    msg = _build_result_msg(name, hrefs, titles, f"Mcmod中符合您搜索的资料如下(仅显示前{len(hrefs)}个)\n")
+    msg = _build_result_msg(name, hrefs, titles, f"MC 百科相关资料结果如下（仅展示前 {len(hrefs)} 项）：\n")
     await ChainMsg.text(msg).finish()

@@ -56,7 +56,7 @@ def scope_from_session(session) -> ConversationScope:
         peer = guild or (channel_id if kind in (ChannelType.TEXT, "text") else "")
         scope = ConversationScope(platform, self_id, "group", peer, channel_id or peer)
     if not platform or not self_id or not scope.peer_id:
-        raise GrokError("无法确定当前 QQ 会话，问题尚未发送。请管理员检查适配器事件信息。")
+        raise GrokError("未能识别当前 QQ 会话标识，问题尚未发送，请管理员排查适配器上报的事件字段。")
     return scope
 
 
@@ -84,7 +84,7 @@ class SessionStore:
                 os.fsync(stream.fileno())
             os.replace(temp_path, self.path)
         except OSError:
-            raise GrokError("Grok Bot 会话绑定保存失败，请管理员检查 data/grok_bot/sessions.json 和目录权限。") from None
+            raise GrokError("会话映射持久化失败，请管理员核实 data/grok_bot/sessions.json 及其父目录的写入权限。") from None
         finally:
             if temp_path is not None:
                 temp_path.unlink(missing_ok=True)
@@ -112,7 +112,7 @@ class SessionStore:
                 data = {"version": 1, "installation": str(uuid4()), "bindings": {}}
                 self._save(data)
             except (OSError, ValueError, TypeError, KeyError, AttributeError):
-                raise GrokError("Grok Bot 会话绑定无法读取或已损坏，请管理员检查 data/grok_bot/sessions.json；未使用共享会话。") from None
+                raise GrokError("会话映射文件无法读取或数据损毁，请管理员检查 data/grok_bot/sessions.json；当前未回退至共享会话。") from None
             self._data = data
         return self._data
 
@@ -124,7 +124,7 @@ class SessionStore:
         with self._lock:
             data = copy.deepcopy(self._load())
             if agent_id and any(k != key and entry["agent_id"] == agent_id for k, entry in data["bindings"].items()):
-                raise GrokError("Grok Bot 会话绑定冲突，问题尚未发送，请管理员检查会话映射。")
+                raise GrokError("会话映射出现冲突，当前问题未发送，请管理员检查会话对应关系。")
             data["bindings"][key] = {"agent_id": agent_id, "nonce": nonce}
             self._save(data)
 
@@ -167,9 +167,9 @@ def owned_agent(rows: list[dict], marker: str, entry: dict | None) -> dict | Non
     matches = [row for row in rows if row.get("purpose") == marker
                or f"[{marker}]" in str(row.get("description", "")).splitlines()]
     if len(matches) > 1:
-        raise GrokError("发现重复的 Grok Bot 会话标记，问题尚未发送，请管理员检查云端 Bot。")
+        raise GrokError("检测到云端存在重复的会话识别标识，提问未发送，请管理员检查云端 Bot 实例。")
     if entry and entry["agent_id"] and (not matches or matches[0].get("id") != entry["agent_id"]):
-        raise GrokError("当前会话的 Grok Bot 不存在或绑定不匹配，请管理员检查会话映射和云端 Bot。")
+        raise GrokError("当前会话绑定的 Grok Bot 缺失或实例信息不一致，请管理员核实映射配置与云端 Bot。")
     return matches[0] if matches else None
 
 
@@ -181,7 +181,7 @@ def agent_id_from(agent: dict, gateway: Gateway) -> str:
     except (ValueError, TypeError, KeyError, AttributeError):
         raise GrokError(PROTOCOL_ERROR) from None
     if agent_id == gateway.config.agent_id:
-        raise GrokError("会话绑定意外指向原 QQBOT，问题尚未发送，请管理员检查映射。")
+        raise GrokError("会话异常映射到了原 QQBOT 实例，问题尚未发送，请管理员核查绑定配置。")
     return agent_id
 
 
@@ -199,7 +199,7 @@ async def resolve_agent(gateway: Gateway, scope: ConversationScope, store: Sessi
     agent = owned_agent(rows, marker, entry)
     if agent is None:
         if entry:
-            raise GrokError("Grok Bot 上次创建结果尚未确认。请 SuperUser 确认云端没有对应 Bot 后，在当前会话执行 /grok 修复会话，再重新提问。")
+            raise GrokError("上一轮 Bot 实例创建结果尚未明确，请 SuperUser 在确认云端无多余 Bot 后，于本会话执行 /grok 修复会话，随后即可重新提问。")
         nonce = str(uuid4())
         # Persist before the RPC: a timeout must not trigger repeated creation.
         store.put(scope.key, None, nonce)
@@ -217,7 +217,7 @@ async def resolve_agent(gateway: Gateway, scope: ConversationScope, store: Sessi
         agent = created.get("agent") if isinstance(created, dict) else None
         agent_id = agent_id_from(agent, gateway)
         if any(row.get("id") == agent_id for row in rows):
-            raise GrokError("Grok Bot 创建接口返回了已有 Bot，问题尚未发送，请管理员检查网关版本。")
+            raise GrokError("创建实例接口返回了已有 Bot 标识，提问未发送，请管理员检查网关服务版本。")
     agent_id = agent_id_from(agent, gateway)
     if not entry or entry["agent_id"] != agent_id:
         pending = store.snapshot()["bindings"].get(scope.key)
@@ -229,7 +229,7 @@ async def resolve_agent(gateway: Gateway, scope: ConversationScope, store: Sessi
         profile["description"] = description
         updated = await gateway.request("updateAgent", {"id": agent_id, "profile": profile})
         if not isinstance(updated, dict) or updated.get("id") != agent_id or updated.get("description") != description:
-            raise GrokError("Grok Bot 人设同步失败，本次问题尚未发送，请管理员检查网关版本。")
+            raise GrokError("同步预设人设失败，当前提问尚未发出，请管理员检查网关兼容性。")
     return agent_id
 
 
@@ -238,17 +238,17 @@ async def repair_binding(gateway: Gateway, scope: ConversationScope, store: Sess
     data = store.snapshot()
     entry = data["bindings"].get(scope.key)
     if entry is None:
-        return "当前会话没有待修复的创建记录，可以重新提问。"
+        return "当前会话无待处理的异常创建记录，可直接发起提问。"
     rows = await roster(gateway)
     agent = owned_agent(rows, conversation_marker(data, scope), entry)
     if agent is not None:
         store.put(scope.key, agent_id_from(agent, gateway), entry["nonce"])
-        return "已确认当前会话的 Grok Bot 绑定，可以继续提问。"
+        return "当前会话的 Grok Bot 绑定已核验无误，可继续进行提问。"
     # Do not adopt an unmarked legacy Bot by display name, or orphan it by retry.
     if any(row.get("name") == conversation_name(scope) for row in rows):
-        raise GrokError("云端存在同名 Bot，但缺少会话标记；本次未清除绑定，请管理员核对该 Bot 的身份。")
+        raise GrokError("云端发现同名 Bot 但未包含有效会话标识，本次保留了现有绑定，请管理员确认云端实例属性。")
     store.clear_pending(scope.key, entry["nonce"])
-    return "已清除当前会话失败的创建记录，未删除任何云端 Bot。请重新发送 /grok 问题。"
+    return "已重置当前会话的失败记录，未改动云端任何 Bot 实例，请重新发送 /grok 提问。"
 
 
 async def repair(config: GrokConfig, scope: ConversationScope) -> str:
@@ -256,7 +256,7 @@ async def repair(config: GrokConfig, scope: ConversationScope) -> str:
         try:
             return await asyncio.wait_for(repair_binding(Gateway(config, client), scope, session_store), config.timeout)
         except asyncio.TimeoutError:
-            raise GrokError("Grok Bot 会话修复检查超时，请检查网关连接后重试。") from None
+            raise GrokError("核验会话修复状态超时，请排查网关连通性后重试。") from None
 
 
 async def ask(config: GrokConfig, prompt: str, scope: ConversationScope, *, images: tuple[str, ...] = (), account=None,
@@ -284,8 +284,8 @@ async def ask(config: GrokConfig, prompt: str, scope: ConversationScope, *, imag
                 if relay is not None:
                     await relay.finish()
                     if relay.delivered:
-                        raise GrokError(f"已转发当前回复，但云端任务在 {config.timeout:g} 秒内未结束；后续结果请在 Grok Bot 应用中查看。") from None
-                raise GrokError(f"Grok Bot 本次等待超过 {config.timeout:g} 秒，任务可能仍在云端运行，请在应用中查看。") from None
+                        raise GrokError(f"已转交部分回复，但云端任务超过 {config.timeout:g} 秒尚未结束，后续内容请在 Grok Bot 客户端查阅。") from None
+                raise GrokError(f"请求耗时已超 {config.timeout:g} 秒限制，任务可能仍在云端处理中，请前往 Grok Bot 客户端查阅。") from None
             if relay is not None:
                 await relay.publish(reply)
                 await relay.finish()

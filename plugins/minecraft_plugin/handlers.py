@@ -161,7 +161,7 @@ async def handle_ping_command(event: Event, rest: ArgVal[str]):
     if not command_args:
         server_list = data_manager.get_group_serverlist(group_id) or []
         if not server_list:
-            await server_ping.finish("当前群没有保存的服务器，请使用 /addserver 添加。")
+            await server_ping.finish("当前群尚未添加任何服务器，可发送 /addserver <名称> <地址> 进行添加。")
 
         async def _ping_one(s):
             r = await ping(s.get("address"), "java")
@@ -214,19 +214,19 @@ async def handle_add_server_command(event: Event, rest: ArgVal[str]):
     group_id = _get_group_id(event)
 
     if not command_args or " " not in command_args:
-        await add_server.finish("指令格式错误，请使用 /addserver <服务器昵称> <服务器地址>")
+        await add_server.finish("格式错误：/addserver <服务器昵称> <服务器地址>")
 
     parts = command_args.split(" ", 1)
     if len(parts) < 2:
-        await add_server.finish("指令格式错误，请使用 /addserver <服务器昵称> <服务器地址>")
+        await add_server.finish("格式错误：/addserver <服务器昵称> <服务器地址>")
 
     server_name, server_address = parts[0], parts[1]
     result = data_manager.add_group_server(group_id, server_name, server_address)
 
     if result:
-        await add_server.finish(f"已添加服务器: {server_name} ({server_address})")
+        await add_server.finish(f"服务器添加成功：{server_name}（{server_address}）")
     else:
-        await add_server.finish("添加失败: 服务器已存在或数据错误")
+        await add_server.finish("添加失败：服务器已存在或地址格式有误。")
 
 
 # add_server_nickname
@@ -237,14 +237,14 @@ async def handle_add_server_nickname_command(event: Event, rest: ArgVal[str]):
     group_id = _get_group_id(event)
 
     if not command_args or " " not in command_args:
-        await add_server_nickname.finish("指令格式错误，请使用 /addservernickname <服务器名称> <服务器昵称>")
+        await add_server_nickname.finish("格式错误：/addservernickname <服务器名称> <服务器昵称>")
 
     parts = command_args.split(" ", 1)
     result = data_manager.update_server_nickname(group_id, parts[0], parts[1])
     if result:
-        await add_server_nickname.finish(f"已为服务器 {parts[0]} 添加昵称: {parts[1]}")
+        await add_server_nickname.finish(f"已成功为服务器 {parts[0]} 设置昵称：{parts[1]}")
     else:
-        await add_server_nickname.finish("添加昵称失败，请检查服务器名称是否正确。")
+        await add_server_nickname.finish("设置昵称失败：未找到对应的服务器名称。")
 
 
 # remove_server
@@ -255,13 +255,13 @@ async def handle_remove_server_command(event: Event, rest: ArgVal[str]):
     group_id = _get_group_id(event)
 
     if not command_args:
-        await remove_server.finish("指令格式错误，请使用 /removeserver <服务器名称>")
+        await remove_server.finish("格式错误：/removeserver <服务器名称>")
 
     result = data_manager.remove_group_server(group_id, command_args)
     if result:
-        await remove_server.finish(f"已删除服务器: {command_args}")
+        await remove_server.finish(f"已成功删除服务器：{command_args}")
     else:
-        await remove_server.finish("删除失败，请检查服务器名称。")
+        await remove_server.finish("删除失败：未找到指定的服务器。")
 
 
 # remove_server_nickname
@@ -272,13 +272,13 @@ async def handle_remove_server_nickname_command(event: Event, rest: ArgVal[str])
     group_id = _get_group_id(event)
 
     if not command_args:
-        await remove_server_nickname.finish("指令格式错误，请使用 /removeservernickname <服务器名称>")
+        await remove_server_nickname.finish("格式错误：/removeservernickname <服务器名称>")
 
     result = data_manager.remove_server_nickname(group_id, command_args)
     if result:
-        await remove_server_nickname.finish(f"已删除服务器 {command_args} 的昵称")
+        await remove_server_nickname.finish(f"已成功清除服务器 {command_args} 的昵称。")
     else:
-        await remove_server_nickname.finish("删除失败。")
+        await remove_server_nickname.finish("清除昵称失败：未找到指定的服务器。")
 
 
 # update_server_nickname
@@ -289,14 +289,14 @@ async def handle_update_server_nickname_command(event: Event, rest: ArgVal[str])
     group_id = _get_group_id(event)
 
     if not command_args or " " not in command_args:
-        await update_server_nickname.finish("指令格式错误，请使用 /updateservername <服务器名称> <新名称>")
+        await update_server_nickname.finish("格式错误：/updateservername <服务器名称> <新名称>")
 
     parts = command_args.split(" ", 1)
     result = data_manager.update_server_name(group_id, parts[0], parts[1])
     if result:
-        await update_server_nickname.finish("已更新服务器名称。")
+        await update_server_nickname.finish("服务器名称更新成功。")
     else:
-        await update_server_nickname.finish("更新失败。")
+        await update_server_nickname.finish("更新失败：未找到指定的服务器。")
 
 
 # update_server_address
@@ -307,14 +307,14 @@ async def handle_update_server_address_command(event: Event, rest: ArgVal[str]):
     group_id = _get_group_id(event)
 
     if not command_args or " " not in command_args:
-        await update_server_address.finish("指令格式错误，请使用 /updateserveraddress <服务器名称> <新地址>")
+        await update_server_address.finish("格式错误：/updateserveraddress <服务器名称> <新地址>")
 
     parts = command_args.split(" ", 1)
     success = data_manager.update_server_address(group_id, parts[0], parts[1])
     if success:
-        await update_server_address.finish("已更新服务器地址。")
+        await update_server_address.finish("服务器地址更新成功。")
     else:
-        await update_server_address.finish("更新失败。")
+        await update_server_address.finish("更新失败：未找到指定的服务器。")
 
 
 # ping_list
@@ -325,9 +325,9 @@ async def handle_ping_list_command(event: Event, rest: ArgVal[str]):
     server_list = data_manager.get_group_serverlist(group_id) or []
 
     if not server_list:
-        await ping_list.finish("当前群没有保存的服务器。")
+        await ping_list.finish("当前群尚未保存任何服务器。")
 
-    lines = ["当前群保存的服务器:"]
+    lines = ["本群已保存的服务器列表："]
     for s in server_list:
         name = s.get("name", "未知")
         addr = s.get("address", "未知")
@@ -345,7 +345,7 @@ async def handle_add_broadcast_command(event: Event, rest: ArgVal[str]):
     group_id = _get_group_id(event)
 
     if not command_args:
-        await add_broadcast.finish("指令格式错误，请使用 /addbroadcast <服务器名称> <服务器地址>\n或 /addbroadcast <已保存的服务器名称>")
+        await add_broadcast.finish("格式错误：/addbroadcast <服务器名称> [服务器地址]\n（若服务器尚未保存，需同时提供地址）")
 
     parts = command_args.split(" ")
     server_name = parts[0]
@@ -358,12 +358,12 @@ async def handle_add_broadcast_command(event: Event, rest: ArgVal[str]):
 
     if existing:
         await broadcast_manager.add_broadcast_server_by_name(group_id, existing["name"], server_name)
-        await add_broadcast.finish(f"已将 {existing['name']} 加入播报列表")
+        await add_broadcast.finish(f"已成功将 {existing['name']} 加入播报名单。")
     elif server_address:
         await broadcast_manager.add_broadcast_server_by_address(group_id, server_address, server_name)
-        await add_broadcast.finish(f"已添加 {server_name} ({server_address}) 到播报列表")
+        await add_broadcast.finish(f"已成功将 {server_name}（{server_address}）添加到播报名单。")
     else:
-        await add_broadcast.finish(f"服务器 {server_name} 未在本地找到，请同时提供地址: /addbroadcast <名称> <地址>")
+        await add_broadcast.finish(f"未在已存列表中找到 {server_name}，请附带地址：/addbroadcast <名称> <地址>")
 
 
 # remove_broadcast
@@ -374,10 +374,10 @@ async def handle_remove_broadcast_command(event: Event, rest: ArgVal[str]):
     group_id = _get_group_id(event)
 
     if not command_args:
-        await remove_broadcast.finish("指令格式错误，请使用 /removebroadcast <服务器名称>")
+        await remove_broadcast.finish("格式错误：/removebroadcast <服务器名称>")
 
     await broadcast_manager.remove_broadcast_server(group_id, command_args)
-    await remove_broadcast.finish(f"已将 {command_args} 从播报列表中移除")
+    await remove_broadcast.finish(f"已成功将 {command_args} 从播报名单中移除。")
 
 
 # update_broadcast_address
@@ -388,11 +388,11 @@ async def handle_update_broadcast_address_command(event: Event, rest: ArgVal[str
     group_id = _get_group_id(event)
 
     if not command_args or " " not in command_args:
-        await update_broadcast_address.finish("指令格式错误，请使用 /updatebroadcastaddress <服务器名称> <新地址>")
+        await update_broadcast_address.finish("格式错误：/updatebroadcastaddress <服务器名称> <新地址>")
 
     parts = command_args.split(" ", 1)
     await broadcast_manager.update_broadcast_server_address(group_id, parts[0], parts[1])
-    await update_broadcast_address.finish(f"已更新播报服务器 {parts[0]} 的地址。")
+    await update_broadcast_address.finish(f"播报服务器 {parts[0]} 的地址已更新。")
 
 
 # update_broadcast_name
@@ -403,11 +403,11 @@ async def handle_update_broadcast_name_command(event: Event, rest: ArgVal[str]):
     group_id = _get_group_id(event)
 
     if not command_args or " " not in command_args:
-        await update_broadcast_name.finish("指令格式错误，请使用 /updatebroadcastname <服务器名称> <新的播报名称>")
+        await update_broadcast_name.finish("格式错误：/updatebroadcastname <服务器名称> <新播报名称>")
 
     parts = command_args.split(" ", 1)
     await broadcast_manager.update_broadcast_server_name(group_id, parts[0], parts[1])
-    await update_broadcast_name.finish("已更新播报服务器名称。")
+    await update_broadcast_name.finish("播报服务器名称已成功更新。")
 
 
 # broadcast_list
@@ -418,11 +418,11 @@ async def handle_broadcast_list_command(event: Event, rest: ArgVal[str]):
     servers = await broadcast_manager.get_group_broadcast_servers(group_id) or {}
 
     if not servers:
-        await broadcast_list.finish("当前群没有播报服务器。")
+        await broadcast_list.finish("当前群尚未开启任何服务器的播报。")
 
-    lines = ["当前群的播报服务器:"]
+    lines = ["本群启用的播报服务器列表："]
     current_interval = data_manager.get_group_broadcast_interval(group_id, MC_BROADCAST_INTERVAL)
-    lines.append(f"播报间隔: {_format_interval(current_interval)}")
+    lines.append(f"当前轮询间隔：{_format_interval(current_interval)}")
     for name, info in servers.items():
         addr = info.get("address", "未知") if isinstance(info, dict) else str(info)
         lines.append(f"  {name} - {addr}")
@@ -439,25 +439,25 @@ async def handle_broadcast_interval_command(event: Event, rest: ArgVal[str]):
 
     if not command_args:
         await broadcast_interval.finish(
-            f"当前群播报间隔: {_format_interval(current)}\n"
-            f"全局默认间隔: {_format_interval(MC_BROADCAST_INTERVAL)}"
+            f"当前群播报间隔：{_format_interval(current)}\n"
+            f"全局预设间隔：{_format_interval(MC_BROADCAST_INTERVAL)}"
         )
 
     if command_args.lower() in {"reset", "default", "默认", "重置"}:
         data_manager.reset_group_broadcast_interval(group_id)
         await broadcast_interval.finish(
-            f"已恢复全局默认播报间隔: {_format_interval(MC_BROADCAST_INTERVAL)}"
+            f"已恢复为全局默认播报间隔：{_format_interval(MC_BROADCAST_INTERVAL)}"
         )
 
     seconds = _parse_interval_seconds(command_args)
     if seconds is None:
-        await broadcast_interval.finish("格式错误，请使用 60s、5m、1h，或裸数字表示分钟。")
+        await broadcast_interval.finish("时间格式错误，支持 60s、5m、1h 或纯数字（单位：分钟）。")
 
     if seconds < 60 or seconds > 24 * 3600:
-        await broadcast_interval.finish("播报间隔必须在 60 秒到 24 小时之间。")
+        await broadcast_interval.finish("播报间隔范围须在 60 秒至 24 小时之间。")
 
     data_manager.set_group_broadcast_interval(group_id, seconds)
-    await broadcast_interval.finish(f"已设置当前群播报间隔为: {_format_interval(seconds)}")
+    await broadcast_interval.finish(f"本群播报间隔已调整为：{_format_interval(seconds)}")
 
 
 @online_rank.handle()
@@ -477,7 +477,7 @@ async def handle_online_command(event: Event, rest: ArgVal[str]):
     if command_args:
         server = data_manager.get_server_by_identifier(group_id, command_args)
         if not server:
-            await online_rank.finish(f"未找到服务器: {command_args}")
+            await online_rank.finish(f"未查询到服务器：{command_args}")
             return
         top_players = data_manager.get_top_players(gid_int, server["address"], limit=limit)
         total_count = len(data_manager.get_server_player_gametimes(group_id, server["address"]))
@@ -518,7 +518,7 @@ async def handle_online_command(event: Event, rest: ArgVal[str]):
             server_name = server_name[:19] + "..."
 
     if not top_players:
-        await online_rank.finish("暂无玩家游戏时长数据。\n玩家数据会在离开服务器时自动记录。")
+        await online_rank.finish("暂无玩家时长记录。\n（数据将在玩家断开连接离开服务器时自动统计）")
         return
 
     player_names = [p["player_id"] for p in top_players]

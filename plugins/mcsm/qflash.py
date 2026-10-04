@@ -119,7 +119,7 @@ async def refresh_qflash_archive(source_url: str, selected: QFlashArchive) -> QF
     for archive in archives:
         if qflash_archive_same_file(selected, archive):
             return archive
-    raise QFlashError(f"重新解析闪传直链失败: 未找到原压缩包 {selected.name} ({format_size(selected.size)})")
+    raise QFlashError(f"重新解析闪传下载直链失败：未找到对应的压缩包 {selected.name}（{format_size(selected.size)}）。")
 
 
 def safe_archive_filename(name: str) -> str:
@@ -135,7 +135,7 @@ async def preflight_qflash_archive(item: QFlashArchive) -> None:
         async with httpx.AsyncClient(timeout=20, follow_redirects=True, trust_env=False, verify=await ashared_ssl_context(trust_env=False)) as client:
             async with client.stream("GET", url, headers={"User-Agent": USER_AGENT}) as resp:
                 if resp.status_code != 200:
-                    raise QFlashError(f"闪传压缩包预检失败: HTTP {resp.status_code}")
+                    raise QFlashError(f"闪传压缩包预检未通过（HTTP {resp.status_code}）。")
                 content_type = str(resp.headers.get("content-type") or "").lower()
                 first = b""
                 async for chunk in resp.aiter_bytes(4096):
@@ -143,13 +143,13 @@ async def preflight_qflash_archive(item: QFlashArchive) -> None:
                     if len(first) >= 8:
                         break
     except httpx.HTTPError as exc:
-        raise QFlashError(f"连接闪传下载地址失败: {exc}") from exc
+        raise QFlashError(f"连接闪传下载地址失败：{exc}。") from exc
     if not first:
-        raise QFlashError("闪传压缩包预检失败: 文件为空")
+        raise QFlashError("闪传压缩包预检未通过：远程文件大小为 0。")
     if "text/html" in content_type:
-        raise QFlashError("闪传压缩包预检失败: 下载地址返回 HTML 页面")
+        raise QFlashError("闪传压缩包预检未通过：下载链接返回了网页而非文件流。")
     if item.name.lower().endswith(".zip") and not first.startswith(b"PK"):
-        raise QFlashError("闪传压缩包预检失败: ZIP 文件头不正确")
+        raise QFlashError("闪传压缩包预检未通过：ZIP 格式校验未通过。")
 
 
 async def download_qflash_archive(item: QFlashArchive, target: Path) -> None:
@@ -160,15 +160,15 @@ async def download_qflash_archive(item: QFlashArchive, target: Path) -> None:
         async with httpx.AsyncClient(timeout=None, follow_redirects=True, trust_env=False, verify=await ashared_ssl_context(trust_env=False)) as client:
             async with client.stream("GET", url, headers={"User-Agent": USER_AGENT}) as resp:
                 if resp.status_code != 200:
-                    raise QFlashError(f"下载闪传压缩包失败: HTTP {resp.status_code}")
+                    raise QFlashError(f"下载闪传压缩包失败（HTTP {resp.status_code}）。")
                 with target.open("wb") as fp:
                     async for chunk in resp.aiter_bytes(1024 * 1024):
                         if chunk:
                             fp.write(chunk)
     except httpx.HTTPError as exc:
-        raise QFlashError(f"下载闪传压缩包失败: {exc}") from exc
+        raise QFlashError(f"下载闪传压缩包时发生网络异常：{exc}。") from exc
     if target.stat().st_size <= 0:
-        raise QFlashError("下载闪传压缩包失败: 文件为空")
+        raise QFlashError("下载闪传压缩包失败：下载所得文件为空。")
 
 
 def _json_body(body: dict[str, Any]) -> str:
@@ -205,7 +205,7 @@ class QFlashResolver:
     async def resolve_archives(self, url: str) -> list[QFlashArchive]:
         code = extract_qflash_code(url)
         if not code:
-            raise QFlashError("不是有效的 QQ 闪传链接")
+            raise QFlashError("链接无效：所提供的不是标准的 QQ 闪传分享链接。")
 
         fileset_id = await self._fileset_id_by_code(code, url)
         fileset = await self._get_fileset(fileset_id, url)
@@ -213,7 +213,7 @@ class QFlashResolver:
         files = await self._get_file_list(fileset_id, url)
         archive_entries = [entry for entry in files if _entry_name(entry) and is_archive_name(_entry_name(entry))]
         if not archive_entries:
-            raise QFlashError("闪传内没有可部署的压缩包文件")
+            raise QFlashError("解析失败：该闪传分享中未包含可用于部署的压缩包文件。")
 
         urls = await self._batch_download(archive_entries, url)
         archives: list[QFlashArchive] = []
@@ -232,21 +232,21 @@ class QFlashResolver:
                 )
             )
         if not archives:
-            raise QFlashError("闪传压缩包没有返回可用下载地址")
+            raise QFlashError("解析失败：未能获取到闪传压缩包的有效下载地址。")
         return archives
 
     async def _fileset_id_by_code(self, code: str, referer: str) -> str:
         data = await self._rpc(GET_FILESET_ID_BY_CODE, {"code": code}, referer)
         fileset_id = str(_nested(data, "data", "fileset_id") or _nested(data, "data", "filesetId") or "")
         if not fileset_id:
-            raise QFlashError(_api_message(data) or "闪传链接失效或无法读取 fileset")
+            raise QFlashError(_api_message(data) or "闪传链接已失效或无法读取文件集信息。")
         return fileset_id
 
     async def _get_fileset(self, fileset_id: str, referer: str) -> dict[str, Any]:
         data = await self._rpc(GET_FILESET, {"fileset_id": fileset_id}, referer)
         fileset = _nested(data, "data", "fileset")
         if not isinstance(fileset, dict):
-            raise QFlashError(_api_message(data) or "无法读取闪传文件集信息")
+            raise QFlashError(_api_message(data) or "无法解析闪传文件集数据。")
         return fileset
 
     async def _get_file_list(self, fileset_id: str, referer: str) -> list[dict[str, Any]]:
@@ -275,7 +275,7 @@ class QFlashResolver:
                 if isinstance(raw, list):
                     files.extend(entry for entry in raw if isinstance(entry, dict) and not entry.get("is_dir"))
         if not files:
-            raise QFlashError(_api_message(data) or "闪传内没有可下载文件")
+            raise QFlashError(_api_message(data) or "该闪传分享中没有包含可下载的文件。")
         return files
 
     async def _batch_download(self, files: list[dict[str, Any]], referer: str) -> list[str]:
@@ -294,11 +294,11 @@ class QFlashResolver:
                 }
             )
         if not download_info:
-            raise QFlashError("闪传文件缺少 physical id，无法换取下载地址")
+            raise QFlashError("解析失败：文件缺少必要标识（physical id），无法换取下载地址。")
         data = await self._rpc(BATCH_DOWNLOAD, {"req_head": {"agent": 8}, "download_info": download_info}, referer)
         rows = _nested(data, "data", "download_rsp") or _nested(data, "data", "downloadRsp") or []
         if not isinstance(rows, list):
-            raise QFlashError(_api_message(data) or "闪传下载接口返回格式异常")
+            raise QFlashError(_api_message(data) or "闪传下载接口返回的数据格式异常。")
         return [str(row.get("url") or "") for row in rows if isinstance(row, dict)]
 
     async def _rpc(self, api: str, body: dict[str, Any], referer: str) -> dict[str, Any]:
@@ -311,11 +311,11 @@ class QFlashResolver:
                 resp.raise_for_status()
                 data = resp.json()
         except httpx.HTTPError as exc:
-            raise QFlashError(f"连接 QQ 闪传接口失败: {exc}") from exc
+            raise QFlashError(f"连接 QQ 闪传接口失败：{exc}。") from exc
         except ValueError as exc:
-            raise QFlashError("QQ 闪传接口返回的不是 JSON") from exc
+            raise QFlashError("QQ 闪传接口未返回有效 JSON 数据。") from exc
         if data.get("retcode") not in (0, "0", None):
-            raise QFlashError(_api_message(data) or "QQ 闪传接口返回错误")
+            raise QFlashError(_api_message(data) or "QQ 闪传接口返回错误。")
         return data
 
 

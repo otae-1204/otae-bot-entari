@@ -145,17 +145,17 @@ class TiboRadarService:
             if event.status == EVENT_EXPECTED_WINDOW:
                 if event.window_end and event.window_end >= now:
                     label = "官方预告窗口进行中"
-                    detail = event.window_label or "预计窗口尚未结束"
+                    detail = event.window_label or "当前处于预计时间窗口内"
                     return RadarStatus(label, detail, event, active=True)
                 if age <= timedelta(days=2):
-                    return RadarStatus("预告窗口已过，尚未核验完成", "不能把预告时间当成已完成事实", event, active=False)
+                    return RadarStatus("预告窗口已届满，暂未核验完成", "预告时间节点不可直接作为已重置依据", event, active=False)
             elif event.status == EVENT_OFFICIAL_ANNOUNCEMENT and age <= timedelta(days=2):
-                return RadarStatus("官方重置预告", "等待完成证据", event, active=True)
+                return RadarStatus("官方重置预告", "等待核验完成证据", event, active=True)
             elif event.status == EVENT_SUSPECTED and age <= timedelta(days=2):
-                return RadarStatus("疑似重置信号", "来源尚未给出可核验的完成确认", event, active=True)
+                return RadarStatus("疑似重置信号", "数据源尚无已核验的完成凭据", event, active=True)
         if latest_rejected and (latest_rejected.announced_at and now - latest_rejected.announced_at <= timedelta(days=2)):
-            return RadarStatus("预告未被核验", "上游已将该候选标记为 rejected", latest_rejected, active=False)
-        return RadarStatus("暂无进行中的重置信号", "最近一次已确认重置请查看 /tibo 最近", None, active=False)
+            return RadarStatus("预告未获核验", "数据源已将该候选标记为 rejected", latest_rejected, active=False)
+        return RadarStatus("暂无进行中的重置信号", "可发送 /tibo 最近 查看最近一次已确认重置", None, active=False)
 
     def stats(self) -> dict:
         return self.store.reset_stats()
@@ -168,9 +168,9 @@ class TiboRadarService:
                 freshness = "从未成功"
             else:
                 freshness = f"成功于 {_format_duration(now - state.last_success_at)} 前"
-            suffix = "（陈旧/部分失败）" if state.stale or state.last_error else ""
+            suffix = "（缓存陈旧/存在部分失败）" if state.stale or state.last_error else ""
             lines.append(f"{state.source_name}: {freshness}{suffix}")
-        return lines or ["暂无采集记录"]
+        return lines or ["暂无数据采集记录"]
 
     @staticmethod
     def relevance_label(value: str) -> str:

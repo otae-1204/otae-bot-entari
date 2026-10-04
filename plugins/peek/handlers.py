@@ -65,7 +65,7 @@ async def handle_peek(
 ):
     group_id = _get_group_id(event)
     if not group_id:
-        await peek.finish("该命令仅在群聊/频道中可用")
+        await peek.finish("该指令仅支持在群聊或频道中使用。")
 
     if group_id not in white_list:
         return
@@ -78,19 +78,19 @@ async def handle_peek(
             webpath = peek_list[command_args]
             nickname = command_args
         else:
-            await peek.finish(f"未找到名为 '{command_args}' 的目标")
+            await peek.finish(f"未找到名为「{command_args}」的监控目标。")
     else:
         def_peek_config = config.plugin_content.get(group_id, {}).get("def_peek_path", None)
         if def_peek_config is not None:
             webpath = def_peek_config.get("peek_http_path")
             nickname = def_peek_config.get("nickname")
         else:
-            await peek.finish("当前群组没有设置默认 peek 地址")
+            await peek.finish("当前群暂未配置默认 peek 地址。")
         if webpath is None:
-            await peek.finish("当前群组没有设置默认 peek 地址，请添加新的 peek 地址")
+            await peek.finish("当前群未设置默认 peek 地址，请先添加可用地址。")
 
     if not (webpath.startswith("http://") or webpath.startswith("https://")):
-        await peek.finish("请提供正确的 peek 地址，必须以 http:// 或 https:// 开头")
+        await peek.finish("peek 地址格式不正确，须以 http:// 或 https:// 开头。")
 
     screen_url = _join_endpoint(webpath, screen_end)
 
@@ -99,7 +99,7 @@ async def handle_peek(
             response = await client.get(screen_url)
             response.raise_for_status()
     except httpx.HTTPError:
-        await peek.finish("获取图片失败，可能是目标没有启动服务")
+        await peek.finish("获取屏幕截图失败，目标服务可能未启动。")
 
     if response.status_code == 200:
         await ChainMsg([
@@ -107,7 +107,7 @@ async def handle_peek(
             _image_segment_from_bytes(response.content),
         ]).finish()
     else:
-        await peek.finish("获取图片失败，可能是目标没有启动服务")
+        await peek.finish("获取屏幕截图失败，目标服务可能未启动。")
 
 
 # list
@@ -119,19 +119,19 @@ async def handle_add_whitelist(
 ):
     user_id = str(event_user_id(event))
     if user_id not in owner:
-        await add_whitelist.finish("你没有权限执行此操作")
+        await add_whitelist.finish("权限不足，无法执行该操作。")
 
     gid = group_id.result.strip() if group_id.available else ""
     if not gid:
-        await add_whitelist.finish("请提供要添加的群号")
+        await add_whitelist.finish("请输入待添加的群号。")
 
     if gid not in white_list:
         white_list.append(gid)
         config.plugin_content["white_list"] = white_list
         config.update()
-        await add_whitelist.finish(f"群号 {gid} 已添加到白名单")
+        await add_whitelist.finish(f"群号 {gid} 已加入白名单。")
     else:
-        await add_whitelist.finish(f"群号 {gid} 已在白名单中")
+        await add_whitelist.finish(f"群号 {gid} 已在白名单列表中。")
 
 
 # helpers
@@ -144,30 +144,30 @@ async def handle_add_peek(
 ):
     user_id = str(event_user_id(event))
     if user_id not in owner:
-        await add_peek.finish("你没有权限执行此操作")
+        await add_peek.finish("权限不足，无法执行该操作。")
 
     nick = nickname.result.strip() if nickname.available else ""
     path = peek_http_path.result.strip() if peek_http_path.available else ""
 
     if not nick or not path:
-        await add_peek.finish("用法: /add_peek <昵称> <http地址>")
+        await add_peek.finish("格式：/add_peek <昵称> <http地址>")
 
     group_id = _get_group_id(event)
     if not group_id:
-        await add_peek.finish("该命令仅在群聊/频道中可用")
+        await add_peek.finish("该指令仅支持在群聊或频道中使用。")
 
     if nick in config.plugin_content.get(group_id, {}).get("peek_list", {}):
-        await add_peek.finish(f"昵称 {nick} 已存在")
+        await add_peek.finish(f"目标昵称「{nick}」已存在。")
 
     if not (path.startswith("http://") or path.startswith("https://")):
-        await add_peek.finish("请提供正确的 peek 地址")
+        await add_peek.finish("请输入有效的 peek 地址。")
 
     try:
         async with httpx.AsyncClient(timeout=5, verify=await ashared_ssl_context()) as client:
             resp = await client.get(_join_endpoint(path, screen_end))
             resp.raise_for_status()
     except httpx.HTTPError:
-        await add_peek.finish(f"无法访问: {path}")
+        await add_peek.finish(f"无法连通目标地址：{path}")
 
     if group_id not in config.plugin_content:
         config.plugin_content[group_id] = {"peek_list": {}}
@@ -178,12 +178,12 @@ async def handle_add_peek(
         config.plugin_content[group_id]["def_peek_path"] = {
             "nickname": nick, "peek_http_path": path
         }
-        add_msg = "\n已设为默认 peek 地址"
+        add_msg = "\n已同步设为默认 peek 地址。"
 
     peek_list[nick] = path
     config.plugin_content[group_id]["peek_list"] = peek_list
     config.update()
-    await add_peek.finish(f"已添加 {nick}: {path}" + add_msg)
+    await add_peek.finish(f"已成功添加 {nick}: {path}" + add_msg)
 
 
 # helpers
@@ -195,22 +195,22 @@ async def handle_del_peek(
 ):
     user_id = str(event_user_id(event))
     if user_id not in owner:
-        await del_peek.finish("你没有权限执行此操作")
+        await del_peek.finish("权限不足，无法执行该操作。")
 
     nick = nickname.result.strip() if nickname.available else ""
     if not nick:
-        await del_peek.finish("请提供要删除的昵称")
+        await del_peek.finish("请输入待删除的目标昵称。")
 
     group_id = _get_group_id(event)
     if not group_id:
-        await del_peek.finish("该命令仅在群聊/频道中可用")
+        await del_peek.finish("该指令仅支持在群聊或频道中使用。")
 
     if group_id not in config.plugin_content:
-        await del_peek.finish(f"群组 {group_id} 没有配置")
+        await del_peek.finish(f"群组 {group_id} 尚未配置任何目标。")
 
     peek_list = config.plugin_content.get(group_id, {}).get("peek_list", {})
     if nick not in peek_list:
-        await del_peek.finish(f"昵称 {nick} 不存在")
+        await del_peek.finish(f"目标昵称「{nick}」不存在。")
 
     del peek_list[nick]
     config.plugin_content[group_id]["peek_list"] = peek_list
@@ -219,10 +219,10 @@ async def handle_del_peek(
     if def_peek and def_peek.get("nickname") == nick:
         del config.plugin_content[group_id]["def_peek_path"]
         config.update()
-        await del_peek.finish(f"已删除 {nick}（含默认地址）")
+        await del_peek.finish(f"已移除 {nick}（包含默认地址）。")
     else:
         config.update()
-        await del_peek.finish(f"已删除 {nick}")
+        await del_peek.finish(f"已移除 {nick}。")
 
 
 # helpers
@@ -234,22 +234,22 @@ async def handle_set_def_peek(
 ):
     user_id = str(event_user_id(event))
     if user_id not in owner:
-        await set_def_peek.finish("你没有权限执行此操作")
+        await set_def_peek.finish("权限不足，无法执行该操作。")
 
     nick = nickname.result.strip() if nickname.available else ""
     if not nick:
-        await set_def_peek.finish("用法: /set_default_peek <昵称>")
+        await set_def_peek.finish("格式：/set_default_peek <昵称>")
 
     group_id = _get_group_id(event)
     if not group_id:
-        await set_def_peek.finish("该命令仅在群聊/频道中可用")
+        await set_def_peek.finish("该指令仅支持在群聊或频道中使用。")
 
     peek_list = config.plugin_content.get(group_id, {}).get("peek_list", {})
     if nick not in peek_list:
-        await set_def_peek.finish(f"昵称 {nick} 不存在")
+        await set_def_peek.finish(f"目标昵称「{nick}」不存在。")
 
     config.plugin_content[group_id]["def_peek_path"] = {
         "nickname": nick, "peek_http_path": peek_list[nick]
     }
     config.update()
-    await set_def_peek.finish(f"已将默认 peek 设置为 {nick}")
+    await set_def_peek.finish(f"已将默认 peek 目标切换为 {nick}。")

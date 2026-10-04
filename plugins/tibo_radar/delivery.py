@@ -55,14 +55,14 @@ def _clip(text: str, limit: int) -> str:
 
 
 def fallback_text(posts: list[TiboPost], relevance_label: Callable[[str], str]) -> str:
-    lines = ["Tibo 新帖订阅 · 图片暂不可用，已转为文字", ""]
+    lines = ["Tibo 新帖推送（图片渲染降级，已切换为纯文本模式）", ""]
     for post in posts:
         lines.append(f"[{post.post_id}] {relevance_label(post.relevance)}")
         lines.append("原文：" + _clip(post.text, 300))
         if post.translation:
             lines.append("翻译：" + _clip(post.translation, 260))
         if post.analysis:
-            lines.append("模型解读（非核验结论）：" + _clip(post.analysis, 160))
+            lines.append("模型解读（非官方核验结果）：" + _clip(post.analysis, 160))
         if post.url:
             lines.append(post.url)
         lines.append("")

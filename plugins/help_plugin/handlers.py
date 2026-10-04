@@ -9,13 +9,13 @@ from otae_bot.adapters.entari import cmd as _cmd, get_rest
 from otae_bot.infrastructure.rendering.help_runtime import cached_help_image
 
 HELP_IMAGE_DIR = Path(IMAGE_PATH) / "help"
-HYW_HELP = "HYW 搜索问答：/q 问题，可附带图片；引用自己的回答后 /q 追问。\n/q 帮助 查看详细用法，/q 清空 删除当前会话历史。\n别名：/hyw、/何意味。管理员需先配置 HYW_* 模型参数。"
+HYW_HELP = "HYW 搜索问答：\n/q <问题> —— 搜索并回答，支持附带图片\n/q <追问> —— 引用自己之前的回答即可继续追问\n/q 帮助 —— 查看详细说明\n/q 清空 —— 清空当前会话历史\n别名：/hyw、/何意味；管理员需先配置 HYW_* 模型参数。"
 TEXT_TOPICS = {name: HYW_HELP for name in ("hyw", "q", "何意味")}
-GROK_HELP = "Grok Bot 问答：/grok 问题；引用消息后提问可附上引用正文。\n别名：/grokbot，/grok 帮助 查看说明。每群与每个私聊独立，同会话排队，不同会话可并行，默认花园多惠人设。\n默认关闭，需 SuperUser 在目标群执行 /功能 开启 grok；管理员和群主可关闭。\n私聊默认关闭，SuperUser 可用 /grok 开启 管理自己的私聊；管理员需先配置 GROKBOT_*。"
+GROK_HELP = "Grok Bot 问答：\n/grok <问题> —— 发送文本或附带图片提问，支持引用消息提问\n/grok 帮助 —— 查看详细使用说明\n别名：/grokbot；各群与各私聊会话相互独立，默认采用花园多惠人设。\n功能默认关闭，群内需 SuperUser 执行 /功能 开启 grok（管理员与群主可关闭）；私聊需 SuperUser 使用 /grok 开启；管理员需先配置 GROKBOT_* 参数。"
 TEXT_TOPICS.update({name: GROK_HELP for name in ("grok", "grokbot", "grok_bot")})
-GROUP_FEATURE_HELP = "群内插件开关：/功能 列表、/功能 关闭 hyw、/功能 开启 hyw。\n支持插件名和 ef、steam、bili、mc、tibo 等别名。\n仅 SuperUser、本群管理员或群主可执行，只影响当前群，重启后保留。\nGrok Bot 默认关闭，仅 SuperUser 可开启，管理员和群主可关闭。"
+GROUP_FEATURE_HELP = "本群插件开关：\n/功能 列表 —— 查看本群插件启用状态\n/功能 开启 <插件名> —— 在本群启用指定插件\n/功能 关闭 <插件名> —— 在本群禁用指定插件\n支持插件原名及别名（如 ef、steam、bili、mc、tibo 等）。\n仅 SuperUser、本群管理员或群主可操作，设置仅对当前群生效且持久保存。Grok Bot 默认关闭，仅限 SuperUser 开启，管理员与群主可关闭。"
 TEXT_TOPICS.update({name: GROUP_FEATURE_HELP for name in ("功能", "插件", "plugin")})
-CHANGELOG_HELP = "更新日志：/更新日志 看最新版本，/更新日志 列表 看全部版本目录（每页 12 个）。\n按版本号、序号或关键词查看：/更新日志 v1.14.0、/更新日志 2、/更新日志 雷达；/更新日志 统计 看汇总。\n别名：/更新、/changelog、/版本。版本号按时间段划定；每条更新都对应仓库里的真实提交。"
+CHANGELOG_HELP = "更新日志查询：\n/更新日志 —— 查看最新版本更新说明\n/更新日志 列表 —— 查看版本目录列表（每页 12 项）\n/更新日志 <版本号/序号/关键词> —— 查询指定版本的更新条目（如 /更新日志 v1.14.0、/更新日志 2）\n/更新日志 统计 —— 查看版本与提交汇总数据\n别名：/更新、/changelog、/版本；版本按阶段划分，每项条目均对应仓库真实提交。"
 TEXT_TOPICS.update({name: CHANGELOG_HELP for name in ("更新", "更新日志", "changelog", "版本")})
 
 # 子指令 → 图片文件名（不含扩展名）映射
@@ -73,8 +73,8 @@ async def handle_help_command(rest: ArgVal[str]):
     if command_args.lower() in ("list", "列表"):
         available = _available_topics()
         if available:
-            await help_cmd.finish("可用的帮助主题:\n" + "\n".join(f"  /help {t}" for t in available))
-        await help_cmd.finish("暂无帮助图片，请将图片放入 assets/image/help/")
+            await help_cmd.finish("可用帮助主题：\n" + "\n".join(f"  /help {t}" for t in available))
+        await help_cmd.finish("暂无可用的帮助图，请联系管理员检查 assets/image/help/ 目录。")
         return
 
     # 未给出主题时默认发主帮助图；给了未知主题则不匹配，落到下面的提示。
@@ -86,5 +86,5 @@ async def handle_help_command(rest: ArgVal[str]):
 
     # 无匹配图片 → 提示
     available = _available_topics()
-    tip = "可用的帮助主题:\n" + "\n".join(f"  /help {t}" for t in available) if available else "暂无帮助图片，请将图片放入 assets/image/help/"
+    tip = "可用帮助主题：\n" + "\n".join(f"  /help {t}" for t in available) if available else "暂无可用的帮助图，请联系管理员检查 assets/image/help/ 目录。"
     await help_cmd.finish(tip)

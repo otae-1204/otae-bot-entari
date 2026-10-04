@@ -28,7 +28,7 @@ from .providers.akedata import (
 from .providers.warfarin import API_CACHE_NAMESPACE, WarfarinClient
 
 
-COLD_START_NOTICE = "终末地资料正在首次加载，可能需要十几秒，加载完会继续发送结果。"
+COLD_START_NOTICE = "终末地数据正在初次加载，预计耗时约十余秒，完成后将自动发送结果。"
 
 REMOTE_ASSET_NAMESPACE = "endfield-assets"
 ACCOUNT_UI_ASSET_NAMESPACE = "endfield-account-ui-assets"

@@ -220,7 +220,7 @@ class AkeDataVersionCalendarSource:
         calendar = load_calendar_manifest()
         version = await self._latest_version()
         if calendar.version != game_version_label(version.id):
-            raise VersionCalendarError("AKE 日历缺少当前版本的完整事件覆盖清单")
+            raise VersionCalendarError("AKE 日历暂未覆盖当前版本的完整事件清单，请稍后重试。")
         tables = await self._load_tables(*self.TABLES)
         return hydrate_calendar_from_akedata(calendar, version, *tables)
 

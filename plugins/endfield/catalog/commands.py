@@ -300,7 +300,7 @@ def parse_command(rest: str) -> ParsedEndfieldCommand:
 
 
 def _parse_quick_calc_command(parts: list[str]) -> ParsedEndfieldCommand:
-    usage = "用法：/ef 速算 2腐蚀 200（效果可选腐蚀、导电、碎甲，等级为 1–4）"
+    usage = "指令格式：/ef 速算 <等级+效果> <技艺强度>（如：/ef 速算 2腐蚀 200，效果支持腐蚀、导电、碎甲，等级范围 1–4）。"
     if len(parts) != 2:
         return ParsedEndfieldCommand("quick_calc", error=usage)
 
@@ -316,9 +316,9 @@ def _parse_quick_calc_command(parts: list[str]) -> ParsedEndfieldCommand:
 
     level = int(level_text)
     if level not in range(1, 5):
-        return ParsedEndfieldCommand("quick_calc", error="异常效果等级必须在 1–4 之间")
+        return ParsedEndfieldCommand("quick_calc", error="异常效果等级需介于 1 至 4 之间。")
     if not re.fullmatch(r"\d+", parts[1].strip()):
-        return ParsedEndfieldCommand("quick_calc", error="源石技艺强度必须是大于或等于 0 的整数")
+        return ParsedEndfieldCommand("quick_calc", error="源石技艺强度需为非负整数。")
 
     return ParsedEndfieldCommand(
         "quick_calc",
@@ -351,10 +351,10 @@ def _parse_personal_command(parts: list[str]) -> ParsedEndfieldCommand | None:
         return _parse_currency_log_command(parts[1:])
     if head in PRIMARY_ALIASES:
         selector = " ".join(parts[1:]).strip()
-        return ParsedEndfieldCommand("primary", account_selector=selector, error="请指定账号编号" if not selector else "")
+        return ParsedEndfieldCommand("primary", account_selector=selector, error="请提供目标账号编号。" if not selector else "")
     if head in UNBIND_ALIASES:
         selector = " ".join(parts[1:]).strip()
-        return ParsedEndfieldCommand("unbind", account_selector=selector, error="请指定账号编号" if not selector else "")
+        return ParsedEndfieldCommand("unbind", account_selector=selector, error="请提供目标账号编号。" if not selector else "")
     if head in ATTENDANCE_ALIASES:
         return ParsedEndfieldCommand("attendance", account_selector=" ".join(parts[1:]).strip() or "全部")
     if head in DASHBOARD_ALIASES:
@@ -374,7 +374,7 @@ def _parse_personal_command(parts: list[str]) -> ParsedEndfieldCommand | None:
         if len(remaining) >= 2 and remaining[-1].isdigit():
             page = int(remaining.pop())
             if page < 1:
-                return ParsedEndfieldCommand("gacha_history", error="页码必须大于 0")
+                return ParsedEndfieldCommand("gacha_history", error="查询页码需为正整数。")
         return ParsedEndfieldCommand(
             "gacha_history",
             account_selector=" ".join(remaining).strip(),
@@ -428,22 +428,22 @@ def _parse_ownership_command(parts: list[str]) -> ParsedEndfieldCommand:
         token = raw.casefold()
         if token in MEDAL_REFRESH_ALIASES:
             if refresh:
-                return ParsedEndfieldCommand("ownership_stats", error="“刷新”参数不能重复")
+                return ParsedEndfieldCommand("ownership_stats", error="刷新选项不可重复输入。")
             refresh = True
             continue
         if token in OWNERSHIP_GROUP_ALIASES:
             if scope != "auto":
-                return ParsedEndfieldCommand("ownership_stats", error="统计范围只能指定一次")
+                return ParsedEndfieldCommand("ownership_stats", error="统计范围仅可指定一次。")
             scope = "group"
             continue
         if token in OWNERSHIP_GLOBAL_ALIASES:
             if scope != "auto":
-                return ParsedEndfieldCommand("ownership_stats", error="统计范围只能指定一次")
+                return ParsedEndfieldCommand("ownership_stats", error="统计范围仅可指定一次。")
             scope = "global"
             continue
         return ParsedEndfieldCommand(
             "ownership_stats",
-            error="用法：/ef 持有率 [群内|全局]，或 /ef 持有率 刷新 [群内|全局]",
+            error="指令格式：/ef 持有率 [群内|全局] 或 /ef 持有率 刷新 [群内|全局]。",
         )
     return ParsedEndfieldCommand("ownership_refresh" if refresh else "ownership_stats", scope=scope)
 
@@ -491,7 +491,7 @@ def _parse_challenge_command(kind: str, parts: list[str]) -> ParsedEndfieldComma
             if match is not None:
                 page = int(match.group(1))
                 if page < 1:
-                    return ParsedEndfieldCommand("challenge", challenge_kind=kind, error="页码必须大于 0")
+                    return ParsedEndfieldCommand("challenge", challenge_kind=kind, error="查询页码需为正整数。")
                 all_history = False
                 remaining.pop(index)
                 break
@@ -503,7 +503,7 @@ def _parse_challenge_command(kind: str, parts: list[str]) -> ParsedEndfieldComma
                 account_selector=account_selector,
                 page=page,
                 all_history=all_history,
-                error="历史查询只接受可选页码和账号参数",
+                error="历史查询仅支持指定页码与账号参数。",
             )
         return ParsedEndfieldCommand(
             "challenge",
@@ -543,7 +543,7 @@ def _parse_challenge_command(kind: str, parts: list[str]) -> ParsedEndfieldComma
                 normalized = None
         if normalized:
             if difficulty and difficulty != normalized:
-                return ParsedEndfieldCommand("challenge", challenge_kind=kind, error="只能指定一个难度")
+                return ParsedEndfieldCommand("challenge", challenge_kind=kind, error="关卡难度仅可指定一项。")
             difficulty = normalized
         if not consumed:
             filtered.append(token)
@@ -593,9 +593,9 @@ def _parse_currency_log_command(parts: list[str]) -> ParsedEndfieldCommand:
                 return ParsedEndfieldCommand("currency_log", error=error)
             parsed = _parse_change_type(value)
             if parsed is None:
-                return ParsedEndfieldCommand("currency_log", error=f"不支持的流水类型 {value}，可选全部、获取、消耗")
+                return ParsedEndfieldCommand("currency_log", error=f"流水变动类型不支持 {value}，可选范围：全部、获取、消耗。")
             if change_type and change_type != parsed:
-                return ParsedEndfieldCommand("currency_log", error="只能指定一个流水类型")
+                return ParsedEndfieldCommand("currency_log", error="流水变动类型仅可指定一项。")
             change_type = parsed
             continue
         if option_lower in {"--开始", "--起始", "--from", "--start"}:
@@ -604,9 +604,9 @@ def _parse_currency_log_command(parts: list[str]) -> ParsedEndfieldCommand:
                 return ParsedEndfieldCommand("currency_log", error=error)
             normalized = _normalize_currency_date(value)
             if normalized is None:
-                return ParsedEndfieldCommand("currency_log", error=f"日期格式不正确：{value}")
+                return ParsedEndfieldCommand("currency_log", error=f"起始日期格式有误：{value}。")
             if start_date:
-                return ParsedEndfieldCommand("currency_log", error="只能指定一个开始日期")
+                return ParsedEndfieldCommand("currency_log", error="起始日期仅可指定一个。")
             start_date = normalized
             continue
         if option_lower in {"--结束", "--截止", "--to", "--end"}:
@@ -615,9 +615,9 @@ def _parse_currency_log_command(parts: list[str]) -> ParsedEndfieldCommand:
                 return ParsedEndfieldCommand("currency_log", error=error)
             normalized = _normalize_currency_date(value)
             if normalized is None:
-                return ParsedEndfieldCommand("currency_log", error=f"日期格式不正确：{value}")
+                return ParsedEndfieldCommand("currency_log", error=f"结束日期格式有误：{value}。")
             if end_date:
-                return ParsedEndfieldCommand("currency_log", error="只能指定一个结束日期")
+                return ParsedEndfieldCommand("currency_log", error="结束日期仅可指定一个。")
             end_date = normalized
             continue
         if option_lower in {"--天数", "--天", "--days", "--day", "-d"}:
@@ -625,15 +625,15 @@ def _parse_currency_log_command(parts: list[str]) -> ParsedEndfieldCommand:
             if error:
                 return ParsedEndfieldCommand("currency_log", error=error)
             if not re.fullmatch(r"\d+", value) or int(value) <= 0:
-                return ParsedEndfieldCommand("currency_log", error="天数必须是大于 0 的整数")
+                return ParsedEndfieldCommand("currency_log", error="查询天数需为正整数。")
             parsed_days = int(value)
             if days and days != parsed_days:
-                return ParsedEndfieldCommand("currency_log", error="只能指定一个查询天数")
+                return ParsedEndfieldCommand("currency_log", error="查询天数仅可指定一次。")
             days = parsed_days
             continue
         if option_lower in {"-a", "--all", "--全部"}:
             if equals and inline_value.strip():
-                return ParsedEndfieldCommand("currency_log", error=f"{part} 不需要参数")
+                return ParsedEndfieldCommand("currency_log", error=f"参数 {part} 无需提供取值。")
             all_history = True
             index += 1
             continue
@@ -641,7 +641,7 @@ def _parse_currency_log_command(parts: list[str]) -> ParsedEndfieldCommand:
         range_values = _currency_date_values(part)
         if range_values is not None:
             if not range_values:
-                return ParsedEndfieldCommand("currency_log", error=f"日期格式不正确：{part}")
+                return ParsedEndfieldCommand("currency_log", error=f"日期格式有误：{part}。")
             date_values.extend(range_values)
             index += 1
             continue
@@ -650,7 +650,7 @@ def _parse_currency_log_command(parts: list[str]) -> ParsedEndfieldCommand:
         elif lowered in _CHANGE_TYPE_ALIASES:
             parsed = _CHANGE_TYPE_ALIASES[lowered]
             if change_type and change_type != parsed:
-                return ParsedEndfieldCommand("currency_log", error="只能指定一个流水类型")
+                return ParsedEndfieldCommand("currency_log", error="流水变动类型仅可指定一项。")
             change_type = parsed
         else:
             remaining.append(part)
@@ -658,17 +658,17 @@ def _parse_currency_log_command(parts: list[str]) -> ParsedEndfieldCommand:
 
     if date_values:
         if start_date or end_date:
-            return ParsedEndfieldCommand("currency_log", error="日期请使用位置参数或 --开始/--结束，不要混用")
+            return ParsedEndfieldCommand("currency_log", error="请在位置参数与 --开始/--结束 选项中二选一指定日期，不可混用。")
         if len(date_values) > 2:
-            return ParsedEndfieldCommand("currency_log", error="最多指定开始和结束两个日期")
+            return ParsedEndfieldCommand("currency_log", error="日期范围最多指定起始与结束两个日期。")
         start_date = date_values[0]
         end_date = date_values[-1]
     if all_history and (start_date or end_date):
-        return ParsedEndfieldCommand("currency_log", error="--all 不能与日期范围同时使用")
+        return ParsedEndfieldCommand("currency_log", error="--all 选项不可与日期范围同时使用。")
     if days and (start_date or end_date):
-        return ParsedEndfieldCommand("currency_log", error="天数不能与日期范围同时使用")
+        return ParsedEndfieldCommand("currency_log", error="查询天数不可与日期范围同时使用。")
     if all_history and days:
-        return ParsedEndfieldCommand("currency_log", error="--all 不能与天数同时使用")
+        return ParsedEndfieldCommand("currency_log", error="--all 选项不可与查询天数同时使用。")
     return ParsedEndfieldCommand(
         "currency_log",
         account_selector=" ".join(remaining).strip(),
@@ -711,14 +711,14 @@ def _take_currency_option_value(parts: list[str], index: int, inline_value: str)
     if inline_value.strip():
         return inline_value.strip(), index + 1, ""
     if index + 1 >= len(parts):
-        return "", index + 1, f"{parts[index]} 后需要参数"
+        return "", index + 1, f"选项 {parts[index]} 缺少对应参数。"
     return parts[index + 1].strip(), index + 2, ""
 
 
 def _parse_currency_types(value: str) -> tuple[tuple[int, ...], str]:
     tokens = [token.strip() for token in re.split(r"[+,，、/／|｜]+", str(value or "")) if token.strip()]
     if not tokens:
-        return (), "资源类型不能为空"
+        return (), "资源类型不可为空。"
     result: list[int] = []
     for token in tokens:
         lowered = token.casefold()
@@ -730,7 +730,7 @@ def _parse_currency_types(value: str) -> tuple[tuple[int, ...], str]:
             continue
         currency_type = _CURRENCY_TYPE_ALIASES.get(lowered)
         if currency_type is None:
-            return (), f"不支持的资源类型 {token}，可选源石、嵌晶玉、武库配额"
+            return (), f"资源类型不支持 {token}，可选范围：源石、嵌晶玉、武库配额。"
         result.append(currency_type)
     return tuple(dict.fromkeys(result)), ""
 
@@ -780,7 +780,7 @@ def _parse_pool_option(parts: list[str]) -> tuple[list[str], str, str]:
         lowered = part.lower()
         if lowered in {"--池", "--pool"}:
             if index + 1 >= len(parts):
-                return remaining, pool_filter, f"{part} 后需要卡池名称"
+                return remaining, pool_filter, f"选项 {part} 缺少卡池名称。"
             value = parts[index + 1].strip()
             index += 2
         elif lowered.startswith("--池=") or lowered.startswith("--pool="):
@@ -791,9 +791,9 @@ def _parse_pool_option(parts: list[str]) -> tuple[list[str], str, str]:
             index += 1
             continue
         if not value:
-            return remaining, pool_filter, "卡池名称不能为空"
+            return remaining, pool_filter, "卡池名称不可为空。"
         if pool_filter and pool_filter != value:
-            return remaining, pool_filter, "只能指定一个卡池筛选"
+            return remaining, pool_filter, "卡池筛选仅可指定一个。"
         pool_filter = value
     return remaining, pool_filter, ""
 
@@ -804,7 +804,7 @@ def _parse_full_option(parts: list[str]) -> tuple[list[str], bool, str]:
     for part in parts:
         if part.lower() == "--full":
             if full:
-                return remaining, full, "--full 只能指定一次"
+                return remaining, full, "--full 选项仅可指定一次。"
             full = True
         else:
             remaining.append(part)
@@ -896,36 +896,36 @@ def normalize_alias_kind(value: str) -> str:
 def format_help() -> str:
     return "\n".join(
         [
-            "终末地查询用法：",
-            "  /ef 绑定 | /ef 添加账号（仅私聊；国服支持 Token/短信，二维码绑定暂不支持；亚服支持 Token；可重复追加多个账号）",
-            "  /ef 账号 [编号]（账号详情图：干员、装备、武器、技能等级、潜能）",
-            "  /ef 养成统计 [编号]（当前档案可见养成投入与材料明细；别名：资源消耗）",
-            "  /ef 影拓 [账号 <编号|昵称|UID后四位>] [@群友]（当前主题个人进度）",
-            "  /ef 影拓 历史 [第N页] [账号 ...] [@群友]（全部历史；超过 2 页合并转发）",
-            "  /ef 影拓 <主题> [关卡] [普通|苦难] [账号 ...] [@群友]（个人记录详情）",
-            "  /ef 回响 [账号 ...] [@群友]（当前赛季星数、轮换和个人记录）",
-            "  /ef 回响 历史 [第N页] [账号 ...] [@群友]（赛季历史分页）",
-            "  /ef 回响 <赛季> [轮换] [关卡] [普通|困难|残酷] [账号 ...] [@群友]",
+            "终末地功能指令一览：",
+            "  /ef 绑定 | /ef 添加账号 —— 绑定游戏账号（限私聊；国服支持 Token 与短信验证，二维码暂未开放；亚服支持 Token；可添加多个账号）",
+            "  /ef 账号 [编号] —— 生成账号概览图（干员阵容、武器装备、技能与潜能阶数）",
+            "  /ef 养成统计 [编号] —— 统计当前档案内角色养成消耗与材料总览（别名：/ef 资源消耗）",
+            "  /ef 影拓 [账号 <编号|昵称|UID后四位>] [@群友] —— 查询当前主题个人通关进度",
+            "  /ef 影拓 历史 [第N页] [账号 ...] [@群友] —— 浏览往期主题通关总览（超 2 页合并转发）",
+            "  /ef 影拓 <主题> [关卡] [普通|苦难] [账号 ...] [@群友] —— 查看指定主题关卡的详细记录",
+            "  /ef 回响 [账号 ...] [@群友] —— 查看当期赛季星数、轮换进度及个人成绩",
+            "  /ef 回响 历史 [第N页] [账号 ...] [@群友] —— 分页浏览往期赛季历史",
+            "  /ef 回响 <赛季> [轮换] [关卡] [普通|困难|残酷] [账号 ...] [@群友] —— 查询特定赛季关卡挑战详情",
             "  群聊末尾 @群友 时查询对方绑定的主账号；未绑定时仅返回文字提示",
-            "  /ef 资源流水 [账号] [日期|开始日期 结束日期|--天数 N/-d N]（源石、嵌晶玉、武库配额；默认最近一个月）",
-            "  /ef 资源流水 [账号] [--资源 源石|嵌晶玉|武库配额] [--类型 获取|消耗] [-a/--all]",
-            "  /ef 账号 基建 [账号]（据点存票、增长速度与帝江号心情）",
-            "  /ef 主账号 <编号> | /ef 解绑 <编号>（仅私聊）",
-            "  /ef 签到 [全部|编号|昵称|UID后四位]",
-            "  /ef 日常 [全部|编号|昵称|UID后四位]（理智、活跃度、每周事务、通行证仪表盘）",
-            "  /ef 抽卡 [账号] | /ef 抽卡同步 [账号] [--full]（分析图超过 3 张合并转发）",
-            "  /ef 抽卡导入 [账号]（仅私聊，手机号验证码导入小黑盒历史统计）",
-            "  /ef 抽卡记录 [账号] [页码] [--池 <名称>]",
-            "  /ef 奖章（查看蚀刻章总数与本版本新增）",
-            "  /ef 奖章 刷新（重新抓取 AKEData 数据并更新上一游戏版本基线）",
-            "  /ef 奖章 缺章 [账号]（查询自己未获得/未升满/未镀层）",
-            "  /ef 档案（查看档案库三大页签总数与本版本新增）",
-            "  /ef 档案 刷新（重新抓取 AKEData 数据并更新上一游戏版本基线）",
-            "  /ef 档案 收集 [账号]（查询已获得档案数/全库总数）",
-            "  /ef 持有率 [群内|全局]（匿名干员持有率；群聊默认群内，私聊默认全局）",
-            "  /ef 持有率 刷新 [群内|全局]（群管理员可刷新本群，SUPERUSER 可刷新全局）",
-            "  /ef 速算 2腐蚀 200（效果可替换为导电或碎甲）",
-            "  /ef 版本日历（查看当前版本全部开放日程）",
+            "  /ef 资源流水 [账号] [日期|开始日期 结束日期|--天数 N/-d N] —— 检索源石、嵌晶玉与武库配额流水（默认最近 30 天）",
+            "  /ef 资源流水 [账号] [--资源 源石|嵌晶玉|武库配额] [--类型 获取|消耗] [-a/--all] —— 按币种与变动类型筛选收支明细",
+            "  /ef 账号 基建 [账号] —— 查看集成工业据点产出效率、票据库存与干员心情",
+            "  /ef 主账号 <编号> | /ef 解绑 <编号> —— 设定默认主账号或解除绑定（限私聊）",
+            "  /ef 签到 [全部|编号|昵称|UID后四位] —— 执行森空岛每日签到并获取奖励",
+            "  /ef 日常 [全部|编号|昵称|UID后四位] —— 展示理智回复、日常活跃、每周事务及通行证进度看板",
+            "  /ef 抽卡 [账号] | /ef 抽卡同步 [账号] [--full] —— 统计抽卡记录与欧气分析（超 3 张图合并转发）",
+            "  /ef 抽卡导入 [账号] —— 通过手机验证码导入小黑盒历史抽卡统计（限私聊）",
+            "  /ef 抽卡记录 [账号] [页码] [--池 <名称>] —— 分页检视抽卡历史明细",
+            "  /ef 奖章 —— 统计当前版本蚀刻章总数及新增奖章",
+            "  /ef 奖章 刷新 —— 同步 AKEData 最新奖章数据并更新版本对比基准",
+            "  /ef 奖章 缺章 [账号] —— 检查当前账号未解锁、未升满或未镀层的奖章",
+            "  /ef 档案 —— 统计中枢档案、音像存档与见闻辑录总数及新增项",
+            "  /ef 档案 刷新 —— 同步 AKEData 最新档案数据并更新版本对比基准",
+            "  /ef 档案 收集 [账号] —— 统计当前账号已解锁档案与全库收录进度",
+            "  /ef 持有率 [群内|全局] —— 统计匿名干员持有率（群聊默认统计本群，私聊默认全局）",
+            "  /ef 持有率 刷新 [群内|全局] —— 手动更新持有率快照（管理员可刷新本群，机器人管理员可刷新全局）",
+            "  /ef 速算 2腐蚀 200 —— 计算异常效果与技艺强度的伤害数值（支持腐蚀、导电、碎甲）",
+            "  /ef 版本日历 —— 查看当前版本各项活动与关卡开放日程表",
             "",
             "  /ef <关键词>",
             "  /ef 干员 <名称> | /ef op <名称>",
@@ -950,17 +950,17 @@ def format_help() -> str:
             "  /ef <关键词> --source <fz|akedata|warfarin>（关卡仅支持 AkeData）",
             "  /ef 数据源",
             "",
-            "参数：-s/--source 可指定 FZ Wiki、AkeData 或 Warfarin Wiki；关卡固定使用 AkeData。",
-            "干员速查：/ef 干员；可按元素或职业筛选，例如 /ef 干员 灼热、/ef 干员 术师。",
-            "武器速查：/ef 武器；可按类型筛选，例如 /ef 武器 单手剑。",
-            "装备目录：默认仅金色；--all 显示全部，--rarity 可选 gold、purple、blue、all。",
-            "装备属性筛选：主/副可省略，写“力量 敏捷”表示两条属性都要有；多条件同时满足才会列出。",
-            "图鉴：物品、道具、敌人、词条与档案条目只使用 AkeData；/ef 档案 <名称> 是条目详情，/ef 档案 仍是版本统计。",
-            "配装第一个名称固定为干员；之后武器与装备无需固定顺序，省略武器时自动使用推荐武器。干员/武器默认90级，角色/武器潜能默认5，装备词条默认3锻。",
-            "潜能指定：追加“角色潜能2 武器潜能3”。",
-            "武器技能指定：追加“武器技能1等级5”；可重复指定多个技能。",
-            "单独调整词条：在装备后追加“词条2锻造2”；可重复追加多个词条设置。",
-            "快捷：/efop <名称>、/efwp <名称>、/efeq <名称>、/终末地干员 <名称>、/终末地武器 <名称>、/终末地装备 <名称>",
+            "参数说明：-s/--source 可选 FZ Wiki、AkeData 或 Warfarin Wiki；关卡数据固定使用 AkeData。",
+            "干员速览：/ef 干员；支持按属性或职业过滤，例如 /ef 干员 灼热、/ef 干员 术师。",
+            "武器速览：/ef 武器；支持按类型过滤，例如 /ef 武器 单手剑。",
+            "装备目录：默认筛选金色品质；--all 展示全品阶，--rarity 支持 gold、purple、blue、all。",
+            "属性检索：主副词条可省略前缀，如“力量 敏捷”即匹配同时拥有这两项属性的装备。",
+            "百科图鉴：物品、道具、敌人、词条与档案条目均使用 AkeData；/ef 档案 <名称> 查看详情，/ef 档案 查看版本总览。",
+            "配装规则：首个名称必须为干员；武器与装备位置不限，省略武器时默认使用推荐配置。默认干员与武器 90 级、潜能 5 阶、词条 3 锻。",
+            "潜能调整：在末尾追加“角色潜能2 武器潜能3”。",
+            "技能调整：在末尾追加“武器技能1等级5”；支持多次输入以调整多个技能。",
+            "词条锻造：在对应装备后追加“词条2锻造2”；支持单独为多件装备设定锻造层数。",
+            "快捷指令：/efop <名称>、/efwp <名称>、/efeq <名称>、/终末地干员 <名称>、/终末地武器 <名称>、/终末地装备 <名称>",
         ]
     )
 
@@ -968,23 +968,23 @@ def format_help() -> str:
 def format_source() -> str:
     return "\n".join(
         [
-            "数据源：各类资料按下列顺序使用。",
+            "资料来源：各类别优先检索顺序如下。",
             f"干员：{source_labels(source_order('operator'))}",
             f"武器：{source_labels(source_order('weapon'))}",
             f"装备：{source_labels(source_order('equipment'))}",
             f"关卡：{source_labels(source_order('stage'))}",
-            "关卡数据仅使用 AkeData；其他资料会按顺序尝试备选源。",
-            "物品、道具、敌人、词条与档案条目只使用 AkeData。",
+            "关卡数据独家采用 AkeData；其他类别按顺序回退备选来源。",
+            "物品、道具、敌人、词条及档案条目均固定采用 AkeData。",
         ]
     )
 
 
 def format_unknown() -> str:
-    return "未知命令或参数错误。发送 /ef help 查看用法。"
+    return "指令不存在或输入参数有误。发送 /ef help 查看完整指令指引。"
 
 
 def format_error(error: str) -> str:
-    return f"参数错误：{error}\n发送 /ef help 查看用法。"
+    return f"输入参数有误：{error}\n发送 /ef help 查看完整指令指引。"
 
 
 def _encyclopedia_catalog_scope(scope: str) -> str:
@@ -1001,18 +1001,18 @@ def _encyclopedia_catalog_scope(scope: str) -> str:
 def format_not_found(scope: str, query: str) -> str:
     label = SCOPE_LABELS.get(scope, "内容")
     if scope in {"stage", "stage_catalog"}:
-        return f"未找到{label}：{query}\n可以发送 /ef 副本 浏览关卡资料目录"
+        return f"未能检索到{label}：{query}。\n可发送 /ef 副本 翻阅关卡资料总览。"
     if scope == "equipment_attribute":
         return (
-            f"没有同时满足 {query} 的装备。\n"
-            "可以少写一条属性，例如 /ef 装备 主力量；或加 --all 放开稀有度限制"
+            f"未找到同时匹配 {query} 条件的装备。\n"
+            "建议减少一项属性条件（如：/ef 装备 主力量），或追加 --all 参数查看全部品阶装备。"
         )
     catalog_scope = _encyclopedia_catalog_scope(scope)
     if catalog_scope:
         word = ENCYCLOPEDIA_SCOPE_WORDS[catalog_scope]
         # 用范围词拼目录名：label 对 *_catalog 已经是「物品目录」，再补一次会写成「物品目录目录」。
-        return f"未找到{label}：{query}\n可以发送 /ef {word} 浏览{word}目录"
-    return f"未找到{label}：{query}\n可以尝试 /ef 搜索 {query}"
+        return f"未能检索到{label}：{query}。\n可发送 /ef {word} 查阅{word}完整目录。"
+    return f"未能检索到{label}：{query}。\n可尝试使用 /ef 搜索 {query} 进行全局检索。"
 
 
 def candidate_options(
@@ -1059,11 +1059,11 @@ def parse_candidate_selection(value: str, option_count: int) -> int | None:
 def format_candidates(
     candidates: Sequence[EndfieldCandidate],
     *,
-    title: str = "找到多个可能结果",
+    title: str = "存在多个匹配结果",
     interactive: bool = False,
 ) -> str:
     if not candidates:
-        return "未找到相关结果。"
+        return "未匹配到相关条目。"
     options = candidate_options(candidates)
     lines = [f"{title}："]
     for index, item in enumerate(options, 1):
@@ -1071,11 +1071,11 @@ def format_candidates(
         suffix = f" ({item.key})" if item.key and item.key != item.display_name else ""
         lines.append(f"{index}. [{label}] {item.display_name}{suffix}")
     if interactive:
-        lines.append(f"可引用本消息并回复 1-{len(options)} 查询对应内容，也可不回复并忽略本消息。")
+        lines.append(f"引用本条消息并回复序号 1–{len(options)} 可查看详情，如需放弃请回复“取消”。")
     else:
         words = ["干员", "武器", "装备"]
         words.extend(ENCYCLOPEDIA_SCOPE_WORDS[scope] for scope in ENCYCLOPEDIA_SCOPES)
-        lines.append("请使用 " + "、".join(f"/ef {word} <名称>" for word in words) + " 精确查询。")
+        lines.append("建议使用精确格式检索：" + "、".join(f"/ef {word} <名称>" for word in words) + "。")
     return "\n".join(lines)
 
 
@@ -1107,7 +1107,7 @@ def _parse_source_option(parts: list[str]) -> tuple[list[str], str, str]:
         value = ""
         if lowered in {"-s", "--source"}:
             if index + 1 >= len(parts):
-                return remaining, source, f"{part} 后需要数据源名称"
+                return remaining, source, f"选项 {part} 缺少数据源名称。"
             value = parts[index + 1]
             index += 2
         elif lowered.startswith("--source="):
@@ -1120,9 +1120,9 @@ def _parse_source_option(parts: list[str]) -> tuple[list[str], str, str]:
 
         normalized = normalize_source(value)
         if not normalized:
-            return remaining, source, f"不支持的数据源 {value}，可选 fz、akedata、warfarin"
+            return remaining, source, f"数据源不支持 {value}，可选范围：fz、akedata、warfarin。"
         if source and source != normalized:
-            return remaining, source, "只能指定一个数据源"
+            return remaining, source, "数据源选项仅可指定一项。"
         source = normalized
     return remaining, source, ""
 
@@ -1153,7 +1153,7 @@ def _parse_rarity_option(parts: list[str]) -> tuple[list[str], str, str]:
             index += 1
         elif lowered == "--rarity":
             if index + 1 >= len(parts):
-                return remaining, rarity, "--rarity 后需要稀有度名称"
+                return remaining, rarity, "选项 --rarity 缺少稀有度名称。"
             value = parts[index + 1]
             index += 2
         elif lowered.startswith("--rarity="):
@@ -1165,9 +1165,9 @@ def _parse_rarity_option(parts: list[str]) -> tuple[list[str], str, str]:
             continue
         normalized = aliases.get(str(value).strip().lower(), "")
         if not normalized:
-            return remaining, rarity, f"不支持的装备稀有度 {value}，可选 gold、purple、blue、all"
+            return remaining, rarity, f"装备稀有度不支持 {value}，可选范围：gold、purple、blue、all。"
         if rarity and rarity != normalized:
-            return remaining, rarity, "只能指定一个装备稀有度"
+            return remaining, rarity, "装备稀有度仅可指定一项。"
         rarity = normalized
     return remaining, rarity, ""
 
@@ -1240,19 +1240,19 @@ def parse_loadout_spec(query: str, default_enhance: int = 3) -> tuple[ParsedLoad
             continue
         forge_syntax = re.fullmatch(r"(.*?)(?:词条)?([1-9]\d*)锻造(\d+)", raw_token)
         if forge_syntax and not 0 <= int(forge_syntax.group(3)) <= 3:
-            return None, f"词条锻造等级必须在 0–3：{raw_token}"
+            return None, f"词条锻造等级需介于 0 至 3 之间：{raw_token}。"
         token, inline_forge = _split_inline_forge(raw_token)
         if token:
             items.append(LoadoutSlotSpec(token))
         if inline_forge is not None:
             if not items:
-                return None, "词条锻造设置前需要先写装备名称"
+                return None, "设定词条锻造前需先指定装备名称。"
             item = items[-1]
             forge_levels = dict(item.forge_levels)
             forge_levels[inline_forge[0]] = inline_forge[1]
             items[-1] = LoadoutSlotSpec(item.name, tuple(sorted(forge_levels.items())))
     if not items:
-        return None, "请至少填写一个干员"
+        return None, "配装参数中至少需包含一名干员。"
     return ParsedLoadoutSpec(tuple(items)), ""
 
 
@@ -1281,15 +1281,15 @@ def _parse_loadout_options(
     while index < len(parts):
         part = parts[index]
         if re.fullmatch(r"潜能\d+", part):
-            return remaining, tuple(values), tuple(sorted(weapon_skill_levels.items())), "潜能类型不明确，请写角色潜能N或武器潜能N"
+            return remaining, tuple(values), tuple(sorted(weapon_skill_levels.items())), "潜能类型不明确，请明确指定角色潜能N或武器潜能N。"
         if part.lower() == "--potential" or part.lower().startswith("--potential="):
-            return remaining, tuple(values), tuple(sorted(weapon_skill_levels.items())), "请使用 --weapon-potential 指定武器潜能"
+            return remaining, tuple(values), tuple(sorted(weapon_skill_levels.items())), "设定武器潜能请使用 --weapon-potential 选项。"
         skill_match = re.fullmatch(r"武器技能([1-9]\d*)等级([1-9]\d*)", part)
         if skill_match:
             skill_index = int(skill_match.group(1))
             skill_level = int(skill_match.group(2))
             if skill_level > 9:
-                return remaining, tuple(values), tuple(sorted(weapon_skill_levels.items())), "武器技能等级必须在 1–9"
+                return remaining, tuple(values), tuple(sorted(weapon_skill_levels.items())), "武器技能等级需介于 1 至 9 之间。"
             weapon_skill_levels[skill_index] = skill_level
             index += 1
             continue
@@ -1308,7 +1308,7 @@ def _parse_loadout_options(
             target, minimum, maximum, label = compact_definitions[compact_match.group(1)]
             value = int(compact_match.group(2))
             if not minimum <= value <= maximum:
-                return remaining, tuple(values), tuple(sorted(weapon_skill_levels.items())), f"{label}必须在 {minimum}–{maximum}"
+                return remaining, tuple(values), tuple(sorted(weapon_skill_levels.items())), f"{label}需介于 {minimum} 至 {maximum} 之间。"
             values[target] = value
             index += 1
             continue
@@ -1325,14 +1325,14 @@ def _parse_loadout_options(
             raw_value = parts[index + 1]
             index += 2
         else:
-            return remaining, tuple(values), tuple(sorted(weapon_skill_levels.items())), f"{part} 后需要数值"
+            return remaining, tuple(values), tuple(sorted(weapon_skill_levels.items())), f"选项 {part} 缺少数值参数。"
         target, minimum, maximum, label = definition
         try:
             value = int(raw_value)
         except ValueError:
-            return remaining, tuple(values), tuple(sorted(weapon_skill_levels.items())), f"{label}必须是整数"
+            return remaining, tuple(values), tuple(sorted(weapon_skill_levels.items())), f"{label}需为整数。"
         if not minimum <= value <= maximum:
-            return remaining, tuple(values), tuple(sorted(weapon_skill_levels.items())), f"{label}必须在 {minimum}–{maximum}"
+            return remaining, tuple(values), tuple(sorted(weapon_skill_levels.items())), f"{label}需介于 {minimum} 至 {maximum} 之间。"
         values[target] = value
     return remaining, tuple(values), tuple(sorted(weapon_skill_levels.items())), ""
 

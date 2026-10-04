@@ -186,7 +186,7 @@ class RadarService:
         if len(exact) == 1:
             return exact[0]
         if len(exact) > 1:
-            raise UnknownModel(f"模型名「{raw}」对应多个候选：{'、'.join(exact)}", detail="ambiguous")
+            raise UnknownModel(f"模型名称「{raw}」存在多个匹配项：{'、'.join(exact)}", detail="ambiguous")
 
         alias = _ALIASES.get(target)
         if alias:
@@ -194,7 +194,7 @@ class RadarService:
                 return alias
             # 别名指向的模型不在该频道（例如视觉档位只出现在某些频道）。
             raise UnknownModel(
-                f"「{raw}」对应的 {alias} 在当前频道没有实测数据。",
+                f"「{raw}」对应的模型 {alias} 在当前评测频道暂无实测数据。",
                 detail="alias-not-in-benchmark",
             )
 
@@ -203,7 +203,7 @@ class RadarService:
             return partial[0]
         if len(partial) > 1:
             raise UnknownModel(
-                f"「{raw}」对应多个候选：{'、'.join(partial[:8])}", detail="ambiguous"
+                f"「{raw}」匹配到多个候选模型：{'、'.join(partial[:8])}", detail="ambiguous"
             )
         raise UnknownModel(detail=f"unknown model: {raw}")
 
@@ -216,7 +216,7 @@ class RadarService:
             if _normalize(tier) == target:
                 return tier
         raise InvalidArgument(
-            f"档位「{effort}」不合法，可选：{'/'.join(EFFORT_TIERS)}。", detail="unknown effort"
+            f"档位「{effort}」无效，可选范围：{'/'.join(EFFORT_TIERS)}。", detail="unknown effort"
         )
 
     @staticmethod
@@ -321,7 +321,7 @@ class RadarService:
         note = ""
         if wanted_effort is None:
             rows = self.highest_effort(rows)
-            note = "已取各模型最高档"
+            note = "已筛选各模型最高档位"
 
         if by == "iq":
             rows = tuple(sorted(rows, key=_sort_key))
@@ -344,10 +344,10 @@ class RadarService:
                     ),
                 )
             )
-            note = f"{note}；成本为上游估算口径".lstrip("；")
+            note = f"{note}；成本采用上游估算口径".lstrip("；")
         else:
             raise InvalidArgument(
-                f"排序字段「{by}」不合法，可选：iq/pass_rate/cost。", detail="unknown sort"
+                f"排序字段「{by}」无效，可选：iq/pass_rate/cost。", detail="unknown sort"
             )
 
         cap = limit if limit is not None else self.config.max_models_listed
@@ -374,7 +374,7 @@ class RadarService:
         variants = self._filter(rows, model=model, effort=wanted)
         if not variants:
             raise UnknownModel(
-                f"{model} 在当前频道没有该档位的实测数据。", detail="no variant"
+                f"{model} 在当前频道暂无该档位的实测数据。", detail="no variant"
             )
 
         efficiency = None
@@ -417,7 +417,7 @@ class RadarService:
 
         note = ""
         if wanted is None and len(variants) > 1:
-            note = "含全部档位"
+            note = "已包含全部档位"
         # 只请求了单一档位时，样本量就是那一档的 ``graded``（上游给的真实运行数）；
         # 请求了全部档位时各档位行自带 ``n=``，脚注不造一个含糊的总数。
         samples = variants[0].graded if len(variants) == 1 else None
@@ -583,17 +583,17 @@ class RadarService:
                 continue
             if wanted is None and item.effort is None:
                 points = item.points
-                note = "跨档位合并口径"
+                note = "跨档位综合口径"
                 break
             if wanted is not None and item.effort == wanted:
                 points = item.points
-                note = f"单档位 {wanted}"
+                note = f"单档位 {wanted} 口径"
                 break
         if hours and points:
             points = points[-max(1, int(hours)) :]
         # 趋势的样本量取序列末点（``/iq-history`` 的 ``n`` 是该时刻的有效样本数）。
         samples = points[-1].samples if points else None
-        meta = replace(payload.meta, note=note or "无匹配序列", samples=samples)
+        meta = replace(payload.meta, note=note or "暂无匹配的时间序列", samples=samples)
         return points, meta
 
     # ── 题目 ──
@@ -613,7 +613,7 @@ class RadarService:
                 task = matched[0]
             elif len(matched) > 1:
                 raise InvalidArgument(
-                    f"「{key}」匹配多道题：{'、'.join(item.id for item in matched[:5])}",
+                    f"「{key}」匹配到多道题目：{'、'.join(item.id for item in matched[:5])}",
                     detail="ambiguous task",
                 )
             else:
@@ -667,7 +667,7 @@ class RadarService:
         )
         note = ""
         if len(scored) < len(payload.tasks):
-            note = f"{len(payload.tasks) - len(scored)} 道题无区分度数据，未参与排序"
+            note = f"{len(payload.tasks) - len(scored)} 道题目缺少区分度数据，未计入排序"
         meta = replace(payload.meta, note=note)
         cap = limit if limit is not None else self.config.max_tasks_listed
         return ordered[: max(0, cap)], meta
@@ -687,7 +687,7 @@ class RadarService:
         payload = await self.client.leaderboard(target)
         if scope not in ("month", "total"):
             raise InvalidArgument(
-                f"榜单范围「{scope}」不合法，可选：month/total。", detail="unknown scope"
+                f"榜单统计范围「{scope}」无效，可选：month/total。", detail="unknown scope"
             )
         key = (lambda row: -row.month_points) if scope == "month" else (lambda row: -row.points)
         ordered = tuple(sorted(payload.contributors, key=lambda row: (key(row), row.display_name)))
@@ -705,7 +705,7 @@ class RadarService:
         self, *, limit: int = 10, benchmark: str | None = None
     ) -> tuple[tuple[RadarEvent, ...], RadarMeta]:
         if limit > 50:
-            raise InvalidArgument("流水条数上限为 50。", detail="limit too large")
+            raise InvalidArgument("流水条数单次最多支持 50 条。", detail="limit too large")
         target = benchmark or self.config.default_benchmark
         payload = await self.client.events(n=max(1, limit), benchmark=target)
         return payload.events[: max(0, limit)], payload.meta

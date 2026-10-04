@@ -153,7 +153,7 @@ def resolve_monument_detail(
     difficulty: str = "hard",
 ) -> tuple[MonumentGroup, MonumentDungeon]:
     if not terms:
-        raise ChallengeResolutionError("请指定影拓主题或关卡名称")
+        raise ChallengeResolutionError("请提供影拓主题或关卡名称。")
     normalized_difficulty = difficulty if difficulty in {"normal", "hard"} else "hard"
     group: MonumentGroup | None = None
     stage_query = " ".join(str(item) for item in terms).strip()
@@ -167,7 +167,7 @@ def resolve_monument_detail(
         stages = [pair[0 if normalized_difficulty == "normal" else 1] for pair in group.stages]
         if len(terms) == 1:
             if not stages:
-                raise ChallengeResolutionError(f"主题“{group.name}”暂无关卡记录")
+                raise ChallengeResolutionError(f"主题“{group.name}”下暂无关卡记录。")
             return group, stages[0]
         stage = _pick(
             stage_query,
@@ -198,7 +198,7 @@ def resolve_war_detail(
     difficulty: str = "cruel",
 ) -> tuple[WarSeason, WarWeek, WarGroup, WarDungeon]:
     if not terms:
-        raise ChallengeResolutionError("请指定战争回响赛季、轮换或关卡名称")
+        raise ChallengeResolutionError("请提供战争回响赛季、轮换或关卡名称。")
     normalized_difficulty = difficulty if difficulty in {"normal", "hard", "cruel"} else "cruel"
     season: WarSeason | None = _pick_or_none(
         str(terms[0]),
@@ -223,7 +223,7 @@ def resolve_war_detail(
         if week is None:
             week = season.current_week() or (season.weeks[-1] if season.weeks else None)
         if week is None:
-            raise ChallengeResolutionError(f"赛季“{season.name}”暂无轮换记录")
+            raise ChallengeResolutionError(f"赛季“{season.name}”下暂无轮换记录。")
         if rest:
             group = _pick_or_none(" ".join(rest), week.groups, lambda item: item.name)
             if group is not None:
@@ -247,7 +247,7 @@ def resolve_war_detail(
         group = week.groups[0] if week.groups else None
         dungeon = group.dungeon(normalized_difficulty) if group else None
         if group is None or dungeon is None:
-            raise ChallengeResolutionError(f"轮换“{week.name}”暂无{_difficulty_label(normalized_difficulty)}数据")
+            raise ChallengeResolutionError(f"轮换“{week.name}”暂无{_difficulty_label(normalized_difficulty)}数据。")
         return season, week, group, dungeon
 
     candidates = [
@@ -405,14 +405,14 @@ def _pick(query, items, label, *, rank=None, path=None):
     ambiguity message can suggest an example that really resolves.
     """
     if not items:
-        raise ChallengeResolutionError(f"未找到“{query}”")
+        raise ChallengeResolutionError(f"未查询到“{query}”。")
     normalized = _normalize(query)
     exact = [item for item in items if _normalize(label(item)) == normalized]
     if exact:
         return _best(exact, rank)
     scored = sorted(((item, _score(normalized, _normalize(label(item)))) for item in items), key=lambda pair: pair[1], reverse=True)
     if not scored or scored[0][1] < 0.38:
-        raise ChallengeResolutionError(f"未找到“{query}”，请使用“历史”查看可用名称")
+        raise ChallengeResolutionError(f"未查询到“{query}”，可使用“历史”指令查看可用名称。")
     best = scored[0][1]
     close = [item for item, score in scored if best - score < 0.08]
     if len({_normalize(label(item)) for item in close}) > 1:

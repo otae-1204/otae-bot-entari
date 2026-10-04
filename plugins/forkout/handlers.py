@@ -184,7 +184,7 @@ async def handle_forkout(session: Session, account: Account):
 
         result = await _make_fork_image(target_uid, avatar_url, account)
         if not result:
-            await session.send("叉出去图片不存在")
+            await session.send("底图资源缺失，无法生成叉出去图片。")
             session.stop()
             return
 
@@ -194,7 +194,7 @@ async def handle_forkout(session: Session, account: Account):
 
     fork_img = imgpath + "forkout.jpg"
     if not os.path.exists(fork_img):
-        await session.send("叉出去图片不存在")
+        await session.send("底图资源缺失，无法生成叉出去图片。")
         session.stop()
         return
     await _send_fork_image(session, fork_img, reply_id)
@@ -204,7 +204,7 @@ async def handle_forkout(session: Session, account: Account):
 async def handle_fork_rank(event: Event, bot: Account):
     group_id = _get_group_id(event)
     if not group_id:
-        await fork_rank.finish("这个命令只能在群聊/频道中使用")
+        await fork_rank.finish("该指令仅支持在群聊或频道中使用。")
 
     prefix = f"{group_id}."
     records: list[tuple[str, int]] = []
@@ -214,7 +214,7 @@ async def handle_fork_rank(event: Event, bot: Account):
             records.append((uid, count))
 
     if not records:
-        await fork_rank.finish("本群还没有人被叉过")
+        await fork_rank.finish("本群暂无被叉记录。")
 
     records.sort(key=lambda x: x[1], reverse=True)
     top = records[:15]

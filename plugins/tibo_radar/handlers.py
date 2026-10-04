@@ -179,7 +179,7 @@ async def _is_subscription_manager(bot: Bot, event: Event, group_id: str, user_i
 
 
 def _subscription_permission_text() -> str:
-    return "仅群主、群管理员或 SUPERUSER 可管理 Tibo 新帖订阅。"
+    return "权限不足：仅限群主、群管理员或 SUPERUSER 操作 Tibo 新帖订阅。"
 
 
 def _post_cursor(post: TiboPost) -> tuple[str, str]:
@@ -381,24 +381,24 @@ def _parse_count(parts: list[str], default: int, maximum: int = 20) -> tuple[int
     try:
         value = int(parts[1])
     except ValueError:
-        return None, "数量必须是整数"
+        return None, "参数错误：数量需为整数"
     if not 1 <= value <= maximum:
-        return None, f"数量必须在 1–{maximum} 之间"
+        return None, f"参数错误：数量需介于 1～{maximum} 之间"
     return value, None
 
 
 def _help_text() -> str:
     return (
-        "Tibo 雷达用法：\n"
-        "/tibo 或 /雷达 —— 雷达总览\n"
-        "/tibo 动态 [数量] —— 最近 X 动态（原文+翻译+解读），默认 6 条合一图，超过 6 条自动分页\n"
-        "/tibo 状态 —— 当前预告、窗口或疑似信号\n"
-        "/tibo 最近 —— 最近一次已核验完成的重置\n"
-        "/tibo 历史 [数量] —— 重置事件历史，默认 6 条\n"
-        "/tibo 订阅 —— 本群订阅 Tibo 新帖（仅群主/管理员/SUPERUSER）\n"
-        "/tibo 取消订阅 —— 停止本群的新帖推送（仅群主/管理员/SUPERUSER）\n"
-        "/tibo 订阅状态 —— 查看本群订阅状态\n"
-        "/tibo 帮助 —— 显示本帮助"
+        "Tibo 雷达使用指南：\n"
+        "/tibo 或 /雷达 —— 查看雷达综合看板\n"
+        "/tibo 动态 [数量] —— 查看近期相关 X 动态（含原文、翻译与解读，默认 6 条，超出自动分页）\n"
+        "/tibo 状态 —— 查看当前重置预告、窗口期或疑似信号\n"
+        "/tibo 最近 —— 查看最近一次已完成严格核验的重置记录\n"
+        "/tibo 历史 [数量] —— 查询重置事件历史列表（默认 6 条）\n"
+        "/tibo 订阅 —— 开启本群 Tibo 新帖实时推送（仅限群主、管理员或 SUPERUSER）\n"
+        "/tibo 取消订阅 —— 关闭本群 Tibo 新帖推送（仅限群主、管理员或 SUPERUSER）\n"
+        "/tibo 订阅状态 —— 查询本群新帖订阅与推送情况\n"
+        "/tibo 帮助 —— 显示此帮助信息"
     )
 
 
@@ -434,7 +434,7 @@ async def handle_tibo(rest: ArgVal[str], event: Event, bot: Bot):
     if action == "订阅":
         group_id = get_group_id(event)
         if not group_id:
-            await tibo_cmd.finish("Tibo 新帖订阅只支持在群内使用。")
+            await tibo_cmd.finish("使用场景限制：Tibo 新帖订阅仅限在群聊中配置。")
             return
         if not await _is_subscription_manager(bot, event, group_id, event_user_id(event)):
             await tibo_cmd.finish(_subscription_permission_text())
@@ -442,36 +442,36 @@ async def handle_tibo(rest: ArgVal[str], event: Event, bot: Bot):
         _remember_account(bot)
         already_enabled, _subscription = store.subscribe(group_id, get_channel_id(event) or group_id, account_key=_account_key(bot))
         if already_enabled:
-            await tibo_cmd.finish("本群已经订阅 Tibo 新帖；新帖子会按采集周期推送。")
+            await tibo_cmd.finish("本群此前已启用 Tibo 新帖订阅，新动态将依采集周期自动推送。")
         else:
-            await tibo_cmd.finish("已订阅本群的 Tibo 新帖；从下一条新帖开始推送，附 X 风格卡片和源帖链接。")
+            await tibo_cmd.finish("已成功开启本群 Tibo 新帖订阅，后续新帖将携图文卡片及源帖链接实时推送。")
         return
     if action == "取消订阅":
         group_id = get_group_id(event)
         if not group_id:
-            await tibo_cmd.finish("Tibo 新帖订阅只支持在群内使用。")
+            await tibo_cmd.finish("使用场景限制：Tibo 新帖订阅仅限在群聊中配置。")
             return
         if not await _is_subscription_manager(bot, event, group_id, event_user_id(event)):
             await tibo_cmd.finish(_subscription_permission_text())
             return
         if store.unsubscribe(group_id):
-            await tibo_cmd.finish("已停止本群的 Tibo 新帖推送。")
+            await tibo_cmd.finish("已成功关闭本群的 Tibo 新帖推送服务。")
         else:
-            await tibo_cmd.finish("本群当前没有启用 Tibo 新帖订阅。")
+            await tibo_cmd.finish("本群当前尚未启用 Tibo 新帖订阅，无需退订。")
         return
     if action == "订阅状态":
         group_id = get_group_id(event)
         if not group_id:
-            await tibo_cmd.finish("Tibo 新帖订阅只支持在群内使用。")
+            await tibo_cmd.finish("使用场景限制：Tibo 新帖订阅仅限在群聊中配置。")
             return
         subscription = store.subscription(group_id)
         if subscription and subscription.enabled:
             cursor = subscription.last_notified_at.astimezone().strftime("%Y-%m-%d %H:%M:%S") if subscription.last_notified_at else "尚未推送"
             mode = {"image": "图片", "text": "文字兜底"}.get(subscription.last_delivery_mode, "暂无")
             retry = f"\n连续失败：{subscription.delivery_failures} 次（{subscription.last_delivery_error}）；退避后继续重试" if subscription.delivery_failures else ""
-            await tibo_cmd.finish(f"本群已订阅 Tibo 新帖。\n最近推送游标：{cursor}\n最近发送：{mode}{retry}")
+            await tibo_cmd.finish(f"当前群订阅状态：已开启 Tibo 新帖推送\n最新推送记录：{cursor}\n最近投递方式：{mode}{retry}")
         else:
-            await tibo_cmd.finish("本群未启用 Tibo 新帖订阅。使用 /tibo 订阅 开启。")
+            await tibo_cmd.finish("当前群尚未启用 Tibo 新帖订阅；可使用 /tibo 订阅 进行开启。")
         return
     if action in {"总览", "概览"}:
         sections, links = _overview_sections()
@@ -480,7 +480,7 @@ async def handle_tibo(rest: ArgVal[str], event: Event, bot: Bot):
     if action == "动态":
         count, error = _parse_count(parts, 6)
         if error:
-            await tibo_cmd.finish(error + "。使用 /tibo 帮助查看用法")
+            await tibo_cmd.finish(error + "；格式示例：/tibo 动态 6")
             return
         posts = service.latest_posts(count or 6)
         if not posts:
@@ -532,7 +532,7 @@ async def handle_tibo(rest: ArgVal[str], event: Event, bot: Bot):
     if action == "历史":
         count, error = _parse_count(parts, 6)
         if error:
-            await tibo_cmd.finish(error + "。使用 /tibo 帮助查看用法")
+            await tibo_cmd.finish(error + "；格式示例：/tibo 历史 6")
             return
         events = service.history(count or 6)
         if not events:
@@ -542,7 +542,7 @@ async def handle_tibo(rest: ArgVal[str], event: Event, bot: Bot):
         for page_index, page_events in enumerate(pages, 1):
             await _finish_card("Tibo 重置历史", "预告、窗口、疑似与完成状态分开标注", event_sections(page_events, service.event_label), [*_event_links(page_events), *_source_links()], page=f"{page_index}/{len(pages)}", finish=page_index == len(pages))
         return
-    await tibo_cmd.finish("未知子命令。\n\n" + _help_text())
+    await tibo_cmd.finish("未知子命令，请参考以下说明：\n\n" + _help_text())
 
 
 _startup_started = False

@@ -13,7 +13,7 @@ def main() -> int:
         print(str(error))
         return 1
     except Exception as error:  # noqa: BLE001 - A CLI diagnostic must not print tokens.
-        print(f"Grok Bot 检查失败（{type(error).__name__}）。")
+        print(f"Grok Bot 状态检测异常（{type(error).__name__}）。")
         return 1
     print(message)
     return 0

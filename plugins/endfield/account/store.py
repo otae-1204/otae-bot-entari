@@ -1286,7 +1286,7 @@ class EndfieldStore:
 
     def replace_xhh_gacha_import(self, role: EndfieldRole, imported: XhhGachaImport) -> None:
         if str(imported.source_uid).strip() != role.role_id:
-            raise ValueError("小黑盒终末地 UID 与绑定角色不一致")
+            raise ValueError("小黑盒绑定的终末地 UID 与当前角色不一致。")
         imported_at = int(imported.imported_at or time.time())
         with self._lock:
             try:

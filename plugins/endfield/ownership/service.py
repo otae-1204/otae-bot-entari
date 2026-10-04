@@ -201,7 +201,7 @@ def register_ownership_stats_renderer(renderer: OwnershipStatsRenderer | None) -
 
 async def render_ownership_stats(report: OwnershipStatsReport) -> Any:
     if _ownership_stats_renderer is None:
-        raise OwnershipStatsRendererUnavailable("持有率展示组件尚未接入")
+        raise OwnershipStatsRendererUnavailable("持有率统计展示组件未就绪。")
     result = _ownership_stats_renderer(report)
     return await result if inspect.isawaitable(result) else result
 
@@ -601,12 +601,12 @@ class OwnershipStatsService:
                     started_at=started,
                     finished_at=int(time.time()),
                     stopped_early=True,
-                    stop_reason="干员目录不可用，已停止本批刷新",
+                    stop_reason="干员目录暂时不可用，已终止本轮批量刷新",
                     eligible=eligible,
                     requested=0,
                     deferred=deferred,
                     catalog_checked=catalog_checked,
-                    catalog_error=catalog_error or "干员目录为空",
+                    catalog_error=catalog_error or "干员目录数据为空",
                     issues=(issue,),
                 )
                 return self._finalize_refresh_result(
@@ -636,7 +636,7 @@ class OwnershipStatsService:
                     started_at=started,
                     finished_at=int(time.time()),
                     stopped_early=True,
-                    stop_reason=self._circuit_reason or "官方社区接口冷却中",
+                    stop_reason=self._circuit_reason or "官方社区接口处于调用冷却中",
                     eligible=eligible,
                     requested=0,
                     deferred=deferred,
@@ -671,7 +671,7 @@ class OwnershipStatsService:
                 issue_counts[
                     (
                         "community-protective-stop",
-                        "官方社区接口保护性停止",
+                        "官方社区接口触发保护性熔断",
                     )
                 ] += queue_skipped
             self.store.cleanup_orphan_operator_snapshots()
@@ -768,8 +768,8 @@ class OwnershipStatsService:
                         retry_after = _error_retry_after(outcome.error)
                         if matching_failures >= self.systemic_failure_threshold:
                             stop_reason = (
-                                f"官方社区接口近期多次返回 {systemic_code}，"
-                                "已保护性停止剩余刷新"
+                                f"官方社区接口近期频繁返回 {systemic_code}，"
+                                "已触发保护机制停止剩余刷新"
                             )
                             self._circuit_open_until = time.monotonic() + max(
                                 self.systemic_circuit_seconds,
@@ -855,7 +855,7 @@ class OwnershipStatsService:
                 "skipped",
                 requested=requested,
                 issue_key="role-busy",
-                issue_label="同角色已有任务",
+                issue_label="同角色存在进行中的任务",
             )
         attempted_at = fixed_timestamp or int(time.time())
         failure_count = (previous.failure_count if previous is not None else 0) + 1

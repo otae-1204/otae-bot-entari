@@ -41,7 +41,7 @@ def remote_path(source: str) -> str:
         if not source.startswith("/") or source.startswith("//") or "\\" in source or any(ord(c) < 32 for c in source):
             raise ValueError
     except (ValueError, UnicodeError):
-        raise GrokError("云端附件路径无效，未读取本地文件。") from None
+        raise GrokError("云端附件路径格式异常，已终止访问本地文件系统。") from None
     return source
 
 
@@ -87,7 +87,7 @@ def decode_data_url(source: str, limit: int) -> tuple[bytes, str]:
             raise ValueError
         return data, header[5:-7]
     except (ValueError, binascii.Error):
-        raise GrokError("附件编码无效或超过大小限制。") from None
+        raise GrokError("附件内容编码格式有误，或已超出体积上限。") from None
 
 
 async def public_request(url: str) -> tuple[httpx.URL, dict, dict]:
@@ -104,7 +104,7 @@ async def public_request(url: str) -> tuple[httpx.URL, dict, dict]:
         if not addresses or any(not ipaddress.ip_address(row[4][0]).is_global for row in addresses):
             raise ValueError
     except (ValueError, OSError, httpx.InvalidURL):
-        raise GrokError("附件地址不可访问，仅支持公开的 HTTP/HTTPS 地址和当前适配器的内部图片。") from None
+        raise GrokError("无法请求该附件地址，仅支持公网可达的 HTTP/HTTPS 链接与适配器内置图片。") from None
     return target.copy_with(host=addresses[0][4][0]), {"Host": target.netloc.decode()}, {"sni_hostname": target.host}
 
 
@@ -114,7 +114,7 @@ async def download_url(url: str, *, limit: int, account=None) -> tuple[bytes, st
     via_bridge = isinstance(proxies, (list, tuple)) and any(isinstance(prefix, str) and prefix and url.startswith(prefix) for prefix in proxies)
     if url.startswith("internal:") or via_bridge:
         if account is None or not callable(getattr(account, "ensure_url", None)):
-            raise GrokError("无法读取适配器内部图片，请重新发送图片。")
+            raise GrokError("适配器内部图片解析失败，请尝试重新发送该图片。")
         trusted = str(account.ensure_url(url))
         url = trusted
     try:
@@ -123,37 +123,37 @@ async def download_url(url: str, *, limit: int, account=None) -> tuple[bytes, st
                 if url == trusted:
                     target, headers, extensions = httpx.URL(url), {}, {}
                     if target.scheme not in {"http", "https"} or target.username or target.password:
-                        raise GrokError("适配器内部图片地址无效。")
+                        raise GrokError("适配器提供的内部图片地址无效。")
                 else:
                     target, headers, extensions = await public_request(url)
                 async with client.stream("GET", target, headers=headers, extensions=extensions) as response:
                     if response.is_redirect:
                         location = response.headers.get("location")
                         if not location:
-                            raise GrokError("附件地址重定向无效。")
+                            raise GrokError("附件请求发生异常重定向，无法获取目标资源。")
                         url = urljoin(url, location)
                         continue
                     if response.status_code != 200:
-                        raise GrokError(f"附件下载失败（HTTP {response.status_code}），请重新发送或稍后重试。")
+                        raise GrokError(f"附件获取未成功（HTTP {response.status_code}），请重新上传或稍候重试。")
                     size = response.headers.get("content-length", "")
                     if size.isdigit() and int(size) > limit:
-                        raise GrokError("附件超过大小限制，未下载。")
+                        raise GrokError("附件文件体积已超出下载上限，未执行拉取。")
                     data = bytearray()
                     async for chunk in response.aiter_bytes(chunk_size=65536):
                         if len(data) + len(chunk) > limit:
-                            raise GrokError("附件超过大小限制，已停止下载。")
+                            raise GrokError("附件下载中超出体积限制，已中止传输。")
                         data.extend(chunk)
                     return bytes(data), response.headers.get("content-type", "application/octet-stream").split(";", 1)[0]
     except (httpx.HTTPError, httpx.InvalidURL):
-        raise GrokError("附件下载失败或超时，请重新发送图片或稍后重试。") from None
-    raise GrokError("附件地址重定向次数过多。")
+        raise GrokError("附件拉取超时或网络连接异常，请重新上传图片或稍后重试。") from None
+    raise GrokError("附件链接重定向层级过多，已中止请求。")
 
 
 def normalize_image(data: bytes) -> bytes:
     try:
         with PILImage.open(BytesIO(data)) as original:
             if original.width * original.height > 20_000_000:
-                raise GrokError("图片像素过大，请压缩后再发送。")
+                raise GrokError("图片分辨率超出限制，请调整尺寸或压缩后再试。")
             original.seek(0)
             normalized = ImageOps.exif_transpose(original)
             normalized.thumbnail((2048, 2048))
@@ -164,15 +164,15 @@ def normalize_image(data: bytes) -> bytes:
             rgb.save(stream, format="JPEG", quality=90)
             result = stream.getvalue()
             if len(result) > MAX_IMAGE_BYTES:
-                raise GrokError("图片转换后超过大小限制，请压缩后重新发送。")
+                raise GrokError("图片处理后体积依然超出限制，请压缩文件后重新上传。")
             return result
     except (UnidentifiedImageError, OSError, ValueError, PILImage.DecompressionBombError):
-        raise GrokError("无法读取图片，请使用有效的 PNG、JPEG、WebP 或 GIF 图片。") from None
+        raise GrokError("图像格式无法识别，请使用合规的 PNG、JPEG、WebP 或 GIF 文件。") from None
 
 
 async def input_images(sources: tuple[str, ...], account=None) -> tuple[Attachment, ...]:
     if len(sources) > MAX_INPUT_IMAGES:
-        raise GrokError(f"发送和引用的图片合计不能超过 {MAX_INPUT_IMAGES} 张。")
+        raise GrokError(f"消息内输入与引用的图片累计上限为 {MAX_INPUT_IMAGES} 张。")
     result = []
     for index, source in enumerate(sources, 1):
         if source.startswith("data:"):
@@ -196,7 +196,7 @@ async def send_llonebot_file(session, attachment: Attachment, name: str) -> None
         action, key = "upload_group_file", "group_id"
         peer = getattr(getattr(event, "guild", None), "id", "") or getattr(channel, "id", "")
     if not str(peer).isascii() or not str(peer).isdigit() or int(peer) <= 0:
-        raise GrokError("无法确定 QQ 文件接收者，附件尚未发送。")
+        raise GrokError("未能获取当前会话接收目标，附件尚未转交发送。")
     try:
         result = await asyncio.wait_for(session.account.protocol.internal(
             "onebot11/" + action, **{key: int(peer), "name": name,
@@ -205,14 +205,14 @@ async def send_llonebot_file(session, attachment: Attachment, name: str) -> None
     except asyncio.CancelledError:
         raise
     except Exception:  # noqa: BLE001 - Do not retry an upload with an unknown outcome.
-        raise GrokError("LLOneBot 文件发送未确认，请检查当前会话和适配器；本次未重复发送。") from None
+        raise GrokError("LLOneBot 端未返回文件发送确认，请检查会话与适配器状态；本次未重复推送。") from None
     if not isinstance(result, dict) or result.get("status") != "ok" or result.get("retcode") != 0:
-        raise GrokError("LLOneBot 文件上传或发送失败，请检查适配器的群文件或私聊文件支持。")
+        raise GrokError("LLOneBot 上传或发送文件失败，请确认适配器是否已开启群文件与私聊文件能力。")
 
 
 async def send_attachment(session, attachment: Attachment, *, reply_to=True) -> None:
     if attachment.data is None:
-        raise GrokError(attachment.error or "附件内容不可用，请在 Grok Bot 应用中查看。")
+        raise GrokError(attachment.error or "附件数据不可用，请前往 Grok Bot 客户端查阅。")
     name = filename(attachment.name, "image.jpg" if attachment.image else "attachment.bin")
     if not attachment.image and str(getattr(session.account, "adapter", "") or "").casefold() == "llonebot":
         await send_llonebot_file(session, attachment, name)
@@ -236,10 +236,10 @@ async def send_attachment(session, attachment: Attachment, *, reply_to=True) -> 
         quote = (reply_to() if callable(reply_to) else reply_to) and attachment.image
         receipts = await asyncio.wait_for(session.send(MessageChain([element]), reply_to=quote), 60)
         if not receipts:
-            raise GrokError("适配器未确认附件发送，请在 Grok Bot 应用中查看。")
+            raise GrokError("协议端未返回附件发送确认，请前往 Grok Bot 客户端查阅。")
     except asyncio.CancelledError:
         raise
     except GrokError:
         raise
     except Exception:  # noqa: BLE001 - Never expose base64 or bridge credentials.
-        raise GrokError("QQ 附件发送失败，请检查适配器的图片或文件发送支持。") from None
+        raise GrokError("附件投递失败，请排查适配器是否具备图片或文件发送功能。") from None

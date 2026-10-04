@@ -40,7 +40,7 @@ class StageVariantNotFound(ValueError):
         self.selector = selector
         self.valid_labels = tuple(variant.label for variant in variants)
         super().__init__(
-            f"{stage_name} 没有“{selector}”变体；可选：{'、'.join(self.valid_labels)}"
+            f"{stage_name} 不存在“{selector}”难度变体；可选：{'、'.join(self.valid_labels)}"
         )
 
 
@@ -71,7 +71,7 @@ class EndfieldStageService:
         if not catalogs:
             if errors:
                 raise errors[-1]
-            raise StageDataIncomplete("暂无可用的关卡数据源。")
+            raise StageDataIncomplete("关卡数据源当前均不可用。")
         return _merge_catalogs(catalogs)
 
     async def discover_matches(self, query: str, source: str = "") -> tuple[StageMatch, ...]:
@@ -101,7 +101,7 @@ class EndfieldStageService:
     def _source(self, source: str):
         adapter = self.sources.get(source)
         if adapter is None:
-            raise StageDataIncomplete(f"{source or '该数据源'} 暂不支持关卡资料。")
+            raise StageDataIncomplete(f"{source or '所选数据源'} 尚未收录关卡资料。")
         return adapter
 
 
