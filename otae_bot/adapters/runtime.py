@@ -45,11 +45,11 @@ def set_account(account: Account, status: Any = None) -> None:
 def clear_account(account_id: str | None = None) -> None:
     """Forget one account that went offline, or every account."""
     global _status, _updated_at
-    keys = list(_accounts) if account_id is None else [str(account_id)]
-    for key in keys:
-        _accounts.pop(key, None)
-        _guilds.pop(key, None)
-        _guilds_at.pop(key, None)
+    for table in (_accounts, _guilds, _guilds_at, _guild_locks):
+        if account_id is None:
+            table.clear()
+        else:
+            table.pop(str(account_id), None)
     _status = None
     _updated_at = datetime.now(timezone.utc)
 
@@ -121,17 +121,15 @@ async def _refresh_guilds(account: Any, max_age: float) -> None:
             return
         try:
             guilds = await asyncio.wait_for(_list_guilds(account), GUILD_LIST_TIMEOUT_SECONDS)
-        except asyncio.CancelledError:
-            raise
         except Exception as exc:  # noqa: BLE001 - Keep the previous listing; retry after max_age.
             logger.warning(f"[runtime] guild.list failed for account {key}: {type(exc).__name__}: {exc}")
-            _guilds_at[key] = monotonic()
-            return
+            guilds = None
         if key not in _accounts:
             return  # Went offline meanwhile.
-        _guilds[key] = guilds
         _guilds_at[key] = monotonic()
-        logger.info(f"[runtime] account {key} is in {len(guilds)} groups")
+        if guilds is not None:
+            _guilds[key] = guilds
+            logger.info(f"[runtime] account {key} is in {len(guilds)} groups")
 
 
 async def _list_guilds(account: Any) -> frozenset[str]:
