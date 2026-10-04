@@ -602,8 +602,34 @@ class GatewayMediaTests(unittest.IsolatedAsyncioTestCase):
             host.respond = fail_upload
             with self.assertRaises(GrokError) as caught:
                 await conversations.ask(CONFIG, "解释", SCOPE, images=(data_url(png()),))
-            self.assertNotIn("secret-token", str(caught.exception))
+            self.assertEqual(str(caught.exception), gateway.UPLOAD_FAILED)
             self.assertFalse(any(command == "sendPrompt" for command, _ in host.calls))
+
+    async def test_upload_dropped_by_the_gateway_is_resent_and_a_persistent_failure_asks_for_a_resend(self):
+        host = MediaHost()
+        original, drops = host.respond, []
+
+        def drop(request):
+            if request.url.path.endswith("uploadAttachment") and len(drops) < limit:
+                drops.append(json.loads(request.content)["filename"])
+                raise httpx.RemoteProtocolError("Server disconnected without sending a response.")
+            return original(request)
+
+        host.respond = drop
+        with tempfile.TemporaryDirectory() as directory, patch.object(conversations, "make_client", side_effect=host.client), \
+             patch.object(conversations, "session_store", SessionStore(Path(directory) / "sessions.json")), \
+             patch.object(gateway, "UNANSWERED_RETRY_DELAYS", (0, 0, 0)):
+            limit = 1  # The 19:10 case: one dropped connection, then a new one succeeds.
+            await conversations.ask(CONFIG, "解释", SCOPE, images=(data_url(png()),))
+            sent = next(body for command, body in host.calls if command == "sendPrompt")
+            self.assertEqual(sent["attachmentPaths"], ["/attachments/" + drops[0]])
+            host.calls.clear()
+            limit = 1 + 1 + len(gateway.UNANSWERED_RETRY_DELAYS)
+            with self.assertRaises(GrokError) as caught:
+                await conversations.ask(CONFIG, "解释", SCOPE, images=(data_url(png()),))
+        self.assertEqual(str(caught.exception), "图片上传失败，问题尚未发送，请重发。")
+        self.assertEqual(len(drops), limit)
+        self.assertFalse(any(command == "sendPrompt" for command, _ in host.calls))
 
     async def test_chunk_offsets_and_size_limits_prevent_partial_or_oversized_files(self):
         host = MediaHost()

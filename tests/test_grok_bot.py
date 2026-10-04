@@ -79,6 +79,32 @@ class Host:
         return httpx.AsyncClient(transport=httpx.MockTransport(self.response), trust_env=False)
 
 
+def _raise(error):
+    raise error
+
+
+class Links:
+    """A pooled client and one-off clients over one handler, recording which served each request."""
+
+    def __init__(self, handler):
+        self.handler, self.after_first = handler, None
+        self.served, self.bodies, self.opened = [], [], []
+        self.pooled = self.client("pooled")
+
+    def client(self, label):
+        def respond(request):
+            self.served.append((request.url.path.rsplit("/", 1)[-1], label))
+            self.bodies.append(json.loads(request.content))
+            if self.after_first is not None and len(self.served) > 1:
+                return self.after_first(request)
+            return self.handler(request)
+        return httpx.AsyncClient(transport=httpx.MockTransport(respond))
+
+    def connect(self):
+        self.opened.append(self.client(f"new-{len(self.opened) + 1}"))
+        return self.opened[-1]
+
+
 class ConfigTests(unittest.TestCase):
     def load(self, **extra):
         values = {"GROKBOT_GATEWAY_URL": CONFIG.base_url, "GROKBOT_GATEWAY_TOKEN": CONFIG.token,
@@ -405,6 +431,112 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         long_read = {"connect": 10, "read": 60, "write": 20, "pool": 20}
         self.assertEqual([call[2].extensions["timeout"] for call in host.calls[:2]], [long_read, long_read])
         self.assertEqual([call[2].extensions["timeout"]["read"] for call in host.calls[2:]], [20, 20])
+
+    async def test_upload_has_longer_write_and_read_timeouts_and_pooled_connections_expire_early(self):
+        host = Host()
+        host.override["uploadAttachment"] = lambda _: {"path": "/attachments/a.jpg"}
+        async with httpx.AsyncClient(transport=httpx.MockTransport(host.response), timeout=httpx.Timeout(20, connect=10)) as client:
+            api = gateway.Gateway(CONFIG, client)
+            await api.request("uploadAttachment", {"agentId": AGENT, "filename": "a.jpg", "bytesBase64": "QUJD"}, response_limit=65536)
+            await api.request("sendPrompt", {"prompt": "问题", "clientNonce": "nonce"})
+        self.assertEqual(host.calls[0][2].extensions["timeout"], {"connect": 10, "read": 30, "write": 60, "pool": 20})
+        self.assertEqual(host.calls[1][2].extensions["timeout"], {"connect": 10, "read": 20, "write": 20, "pool": 20})
+        with patch("plugins.grok_bot.gateway.httpx.AsyncClient") as client:
+            gateway.make_client()
+        limits = client.call_args.kwargs["limits"]
+        self.assertEqual((limits.keepalive_expiry, limits.max_connections, limits.max_keepalive_connections), (2.0, 100, 20))
+
+    async def test_upload_is_retried_on_a_new_connection_only_when_the_host_never_answered(self):
+        class BrokenBody(httpx.AsyncByteStream):
+            async def __aiter__(self):
+                yield b'{"path":'
+                raise httpx.RemoteProtocolError("peer closed connection without sending complete message body")
+
+        body = {"agentId": AGENT, "filename": "0123-qq-image-1.jpg", "bytesBase64": "QUJD"}
+        cases = [
+            (httpx.RemoteProtocolError("Server disconnected without sending a response."), True),
+            (httpx.ReadError("connection reset"), True),
+            (httpx.WriteError("broken pipe"), True),
+            (httpx.ConnectError("refused"), True),
+            (httpx.ConnectTimeout("connect"), True),
+            (httpx.PoolTimeout("pool"), True),
+            # The host answered or may still be storing it: never sent twice.
+            (lambda: httpx.Response(200, stream=BrokenBody()), False),
+            (httpx.ReadTimeout("read"), False),
+            (lambda: httpx.Response(503), False),
+            (lambda: httpx.Response(429), False),
+        ]
+        for failure, retried in cases:
+            links = Links(lambda request, failure=failure: failure() if callable(failure) else _raise(failure))
+            links.after_first = lambda _: httpx.Response(200, json={"path": "/attachments/" + body["filename"]})
+            slept = []
+
+            async def sleep(seconds):
+                slept.append(seconds)
+
+            with self.subTest(failure=failure), patch.object(gateway.asyncio, "sleep", sleep):
+                api = gateway.Gateway(CONFIG, links.pooled, connect=links.connect)
+                try:
+                    result = await api.request("uploadAttachment", body, response_limit=65536)
+                except GatewayError:
+                    result = None
+                if retried:
+                    self.assertEqual(result, {"path": "/attachments/" + body["filename"]})
+                    self.assertEqual(links.served, [("uploadAttachment", "pooled"), ("uploadAttachment", "new-1")])
+                    self.assertEqual(links.bodies[0], links.bodies[1])  # Same file name and bytes.
+                    self.assertEqual(slept, [gateway.UNANSWERED_RETRY_DELAYS[0]])
+                    self.assertTrue(all(client.is_closed for client in links.opened))
+                else:
+                    self.assertIsNone(result)
+                    self.assertEqual(links.served, [("uploadAttachment", "pooled")])
+                    self.assertEqual(slept, [])
+            await links.pooled.aclose()
+
+    async def test_upload_retries_are_bounded(self):
+        links = Links(lambda _: _raise(httpx.RemoteProtocolError("Server disconnected without sending a response.")))
+        slept = []
+
+        async def sleep(seconds):
+            slept.append(seconds)
+
+        self.assertTrue(2 <= len(gateway.UNANSWERED_RETRY_DELAYS) <= 3)
+        self.assertTrue(all(1 <= delay <= 2 for delay in gateway.UNANSWERED_RETRY_DELAYS))
+        self.assertTrue(gateway.UNANSWERED_RETRY_COMMANDS.isdisjoint(gateway.READ_ONLY_COMMANDS))
+        with patch.object(gateway.asyncio, "sleep", sleep), self.assertRaisesRegex(GatewayError, "uploadAttachment / RemoteProtocolError"):
+            await gateway.Gateway(CONFIG, links.pooled, connect=links.connect).request(
+                "uploadAttachment", {"filename": "a.jpg", "bytesBase64": "QUJD"}, response_limit=65536)
+        self.assertEqual(slept, list(gateway.UNANSWERED_RETRY_DELAYS))
+        self.assertEqual([label for _, label in links.served], ["pooled", "new-1", "new-2", "new-3"])
+        self.assertTrue(all(client.is_closed for client in links.opened))
+        await links.pooled.aclose()
+
+    async def test_any_command_after_a_broken_connection_uses_a_new_connection(self):
+        broken = {"listAgents", "sendPrompt"}
+
+        def respond(request):
+            command = request.url.path.rsplit("/", 1)[-1]
+            if command in broken:
+                broken.discard(command)
+                raise httpx.RemoteProtocolError("Server disconnected without sending a response.")
+            if command == "promptAcceptanceStatus":
+                return httpx.Response(200, json={"outcome": "not-found"})
+            return httpx.Response(200, json=[])
+
+        links = Links(respond)
+        api = gateway.Gateway(CONFIG, links.pooled, connect=links.connect)
+        with patch.object(gateway.asyncio, "sleep", AsyncMock()):
+            self.assertEqual(await api.request("listAgents"), [])  # Read-only: retried at once.
+            await api.request("getAsyncTasks", {"id": AGENT})
+            with self.assertRaises(GatewayError):
+                await api.request("sendPrompt", {"prompt": "问题", "clientNonce": "nonce"})
+            await api.request("promptAcceptanceStatus", {"accountSlot": "host", "clientNonce": "nonce"})
+            await api.request("getAsyncTasks", {"id": AGENT})
+        self.assertEqual(links.served, [
+            ("listAgents", "pooled"), ("listAgents", "new-1"), ("getAsyncTasks", "pooled"), ("sendPrompt", "pooled"),
+            ("promptAcceptanceStatus", "new-2"), ("getAsyncTasks", "pooled"),
+        ])
+        self.assertTrue(all(client.is_closed for client in links.opened))
+        await links.pooled.aclose()
 
     async def test_disconnected_older_transcript_page_recovers_without_resubmitting_prompt(self):
         host = Host()
