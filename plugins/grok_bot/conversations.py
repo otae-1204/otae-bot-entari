@@ -348,7 +348,8 @@ async def repair_binding(gateway: Gateway, scope: ConversationScope, store: Sess
 async def repair(config: GrokConfig, scope: ConversationScope) -> str:
     async with make_client() as client:
         try:
-            return await asyncio.wait_for(repair_binding(Gateway(config, client), scope, session_store), config.timeout)
+            return await asyncio.wait_for(repair_binding(Gateway(config, client, connect=make_client), scope, session_store),
+                                          config.timeout)
         except asyncio.TimeoutError:
             raise GrokError("Grok Bot 会话修复检查超时，请检查网关连接后重试。") from None
 
@@ -361,8 +362,8 @@ async def ask(config: GrokConfig, prompt: str, scope: ConversationScope, *, imag
         async def request():
             nonlocal relay
             prepared = await input_images(images, account) if images else ()
-            agent_id = await resolve_agent(Gateway(config, client), scope, session_store)
-            gateway = Gateway(replace(config, agent_id=agent_id), client)
+            agent_id = await resolve_agent(Gateway(config, client, connect=make_client), scope, session_store)
+            gateway = Gateway(replace(config, agent_id=agent_id), client, connect=make_client)
             uploaded = await gateway.upload_images(prepared) if prepared else ()
             if on_reply is not None:
                 relay = ReplyRelay(gateway, on_reply)

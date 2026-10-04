@@ -17,10 +17,13 @@ class GrokError(Exception):
 class GatewayError(GrokError):
     """Transport metadata, without upstream response bodies or credentials."""
 
-    def __init__(self, message: str, *, not_submitted: bool = False, retryable: bool = False):
+    def __init__(self, message: str, *, not_submitted: bool = False, retryable: bool = False,
+                 responded: bool | None = None):
         super().__init__(message)
         self.not_submitted = not_submitted
         self.retryable = retryable
+        # Whether response headers arrived before the failure; None when unknown.
+        self.responded = responded
 
 
 @dataclass(frozen=True)

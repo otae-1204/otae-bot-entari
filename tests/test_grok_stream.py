@@ -242,6 +242,30 @@ class StreamTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(prompt["attachmentNames"], ["input.jpg"])
         self.assertTrue(prompt["attachmentPaths"][0].startswith("/input/"))
 
+    async def test_followup_upload_dropped_once_is_resent_and_a_failed_one_is_not_prompted(self):
+        drops = []
+
+        async def drop(body):
+            if len(drops) < limit:
+                drops.append(body["filename"])
+                raise httpx.RemoteProtocolError("Server disconnected without sending a response.")
+
+        self.host.hooks["uploadAttachment"] = drop
+        await self.submit()
+        with patch.object(gateway, "UNANSWERED_RETRY_DELAYS", (0, 0, 0)), \
+             patch.object(stream, "input_images", AsyncMock(return_value=(Attachment("image.jpg", data=b"jpg"),))):
+            limit = 1
+            self.assertEqual(await self.submit("picture", "B", images=("source",)), Reply())
+            uploads = [body for command, body in self.host.calls if command == "uploadAttachment"]
+            self.assertEqual(len(uploads), 2)
+            self.assertEqual(uploads[0], uploads[1])
+            self.assertEqual(self.host.prompts()[-1]["attachmentPaths"], ["/input/" + drops[0]])
+            limit = len(drops) + 1 + len(gateway.UNANSWERED_RETRY_DELAYS)
+            with self.assertRaisesRegex(GrokError, "^图片上传失败，问题尚未发送，请重发。$"):
+                await self.submit("again", "B", images=("source",))
+        self.assertEqual(len(drops), limit)
+        self.assertEqual(len(self.host.prompts()), 2)
+
     async def test_capacity_wait_does_not_block_followups_to_running_group_and_cancelled_input_is_not_sent(self):
         config = replace(CONFIG, max_concurrent=1)
         await self.hub.run(config, "first", AsyncMock(), SCOPE, on_reply=self.deliver("A"))

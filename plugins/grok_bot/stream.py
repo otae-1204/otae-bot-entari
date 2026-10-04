@@ -150,8 +150,10 @@ class LiveConversation:
         if item.done.cancelled():
             return
         if self.gateway is None:
-            agent_id = await conversations.resolve_agent(Gateway(self.config, client), self.scope, conversations.session_store)
-            gateway = Gateway(replace(self.config, agent_id=agent_id), client)
+            connect = conversations.make_client
+            agent_id = await conversations.resolve_agent(Gateway(self.config, client, connect=connect), self.scope,
+                                                         conversations.session_store)
+            gateway = Gateway(replace(self.config, agent_id=agent_id), client, connect=connect)
             _, busy = await gateway.state()
             self.external_input = busy  # Pre-existing cloud work has no reliable QQ owner.
             self.gateway = gateway

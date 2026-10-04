@@ -172,8 +172,6 @@ async def first_item(
                 except Exception as exc:
                     errors.append(str(exc))
                     continue
-                for rest in pending:
-                    rest.cancel()
                 logger.debug(
                     f"[bilibilibot] RSSHub fallback succeeded via {result['base_url']}{route}"
                 )
@@ -182,9 +180,12 @@ async def first_item(
             f"all RSSHub instances unavailable: {compact_failures(errors)}"
         )
     finally:
+        # Cancel the losers and collect every outcome, so a backup instance that
+        # failed after the winner (or after this race was cancelled) does not end
+        # up as "Task exception was never retrieved".
         for task in tasks:
-            if not task.done():
-                task.cancel()
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 async def fetch_first_item(

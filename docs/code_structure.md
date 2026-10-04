@@ -12,7 +12,7 @@ otae_bot/
   group_features.py            按机器人账号和群保存插件开关
   paths.py                     随源码定位的资源根目录
   config/                      环境变量解析、原有路径配置
-  adapters/                    Entari 会话/命令/定时任务、OneBot、消息构造
+  adapters/                    Entari 会话/命令/定时任务、OneBot、消息构造、[message] 日志脱敏
   infrastructure/
     cache.py                   有界异步缓存
     http/                      HTTP 连接池、资源缓存、User-Agent
