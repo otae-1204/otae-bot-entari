@@ -4,8 +4,8 @@
 （命令读取的性能缓存，避免每次 `档案` 都实时抓取）；``baseline`` 槽存版本对比基线
 （akedata 上一游戏版本 nar_ id 集合，源和源对比）。
 
-底层用 ``utils.json_store.JsonStore``（文件 JSON，每次 set 全量重写）。写盘放线程池、
-模块级 ``asyncio.Lock`` 串行化，避免并发刷新互相覆盖。
+底层使用 JsonStore 读取，写入通过临时文件原子替换。线程池写盘成功后才发布内存视图，
+实例级 ``asyncio.Lock`` 串行化，避免并发刷新互相覆盖。
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from typing import Any
 from otae_bot.infrastructure.storage.json_store import JsonStore
 
 from ..catalog.models import ArchiveBaselineView, ArchiveItemView, ArchiveSnapshotView
+from ..catalog.snapshot_store import persist_snapshot
 from ..catalog.views.archives import normalize_archive_snapshot
 
 _DEFAULT_PATH = str(Path("data") / "endfield" / "archive_snapshot.json")
@@ -27,7 +28,7 @@ _ARCHIVE_ITEM_FIELDS = frozenset(ArchiveItemView.__dataclass_fields__)
 
 
 class ArchiveSnapshotStore:
-    """档案库全量快照：current/baseline 两槽，手动刷新时成对滚动。"""
+    """档案库全量快照：current/baseline 两槽，自动或手动刷新时成对替换。"""
 
     def __init__(self, file_path: str = _DEFAULT_PATH) -> None:
         self._store = JsonStore(file_path)
@@ -35,43 +36,25 @@ class ArchiveSnapshotStore:
 
     async def replace_current(self, snapshot: ArchiveSnapshotView) -> None:
         current_dict = _snapshot_to_dict(snapshot)
-        async with self._lock:
-            await asyncio.to_thread(self._persist_current, current_dict)
+        await persist_snapshot(self._store, self._lock, current=current_dict)
 
     async def replace_current_and_baseline(
         self,
         snapshot: ArchiveSnapshotView,
         baseline: ArchiveBaselineView | None,
     ) -> None:
-        """Persist a current snapshot and its matching baseline in one locked save."""
-        current_dict = _snapshot_to_dict(snapshot)
-        baseline_dict = _baseline_to_dict(baseline) if baseline else None
-        async with self._lock:
-            await asyncio.to_thread(self._persist_current_and_baseline, current_dict, baseline_dict)
-
-    def _persist_current(self, current_dict: dict[str, Any]) -> None:
-        # 直接改底层 _data 再一次 _save，避免 set() 两次全量写盘
-        self._store._data["current"] = current_dict
-        self._store._save()
-
-    def _persist_current_and_baseline(
-        self,
-        current_dict: dict[str, Any],
-        baseline_dict: dict[str, Any] | None,
-    ) -> None:
-        self._store._data["current"] = current_dict
-        self._store._data["baseline"] = baseline_dict
-        self._store._save()
+        """Persist the snapshot and its matching baseline in one atomic replacement."""
+        await persist_snapshot(
+            self._store, self._lock,
+            current=_snapshot_to_dict(snapshot),
+            baseline=_baseline_to_dict(baseline) if baseline else None,
+        )
 
     async def replace_baseline(self, baseline: ArchiveBaselineView | None) -> None:
-        """写入版本对比基线（akedata 上一游戏版本的 nar_ id 集合）；None 清空。"""
-        baseline_dict = _baseline_to_dict(baseline) if baseline else None
-        async with self._lock:
-            await asyncio.to_thread(self._persist_baseline, baseline_dict)
-
-    def _persist_baseline(self, baseline_dict: dict[str, Any] | None) -> None:
-        self._store._data["baseline"] = baseline_dict
-        self._store._save()
+        await persist_snapshot(
+            self._store, self._lock,
+            baseline=_baseline_to_dict(baseline) if baseline else None,
+        )
 
     def load_current_view(self) -> ArchiveSnapshotView | None:
         data = self._store.get("current")
@@ -88,6 +71,7 @@ def _snapshot_to_dict(snapshot: ArchiveSnapshotView) -> dict[str, Any]:
         "version": snapshot.version,
         "fetched_at": snapshot.fetched_at,
         "source": snapshot.source,
+        "source_revision": snapshot.source_revision,
         "total_count": snapshot.total_count,
         "page_counts": dict(snapshot.page_counts),
         "category_counts": dict(snapshot.category_counts),
@@ -118,6 +102,7 @@ def _dict_to_snapshot(data: dict[str, Any]) -> ArchiveSnapshotView:
     return normalize_archive_snapshot(ArchiveSnapshotView(
         items=items,
         version=str(data.get("version") or ""),
+        source_revision=str(data.get("source_revision") or ""),
         fetched_at=int(data.get("fetched_at") or 0),
         source=str(data.get("source") or "akedata"),
         total_count=int(data.get("total_count") or len(items)),

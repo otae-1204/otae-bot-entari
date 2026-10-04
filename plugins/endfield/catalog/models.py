@@ -458,6 +458,7 @@ class MedalSnapshotView:
     platable_count: int = 0
     upgradable_count: int = 0
     category_counts: dict[str, int] = field(default_factory=dict)   # {category_name: 数量}
+    source_revision: str = ""             # 完整来源修订指纹；空值表示需要补全刷新
 
 
 @dataclass(slots=True)
@@ -564,6 +565,7 @@ class ArchiveSnapshotView:
     page_counts: dict[str, int] = field(default_factory=dict)      # {page_name: 数量}
     category_counts: dict[str, int] = field(default_factory=dict)  # {category_name: 数量}
     group_count: int = 0               # 有条目归属的档案组数
+    source_revision: str = ""          # 完整来源修订指纹；空值表示需要补全刷新
 
 
 @dataclass(slots=True)
