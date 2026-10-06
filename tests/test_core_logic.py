@@ -189,7 +189,9 @@ async def _run_scheduled_cleanup_case(path: Path):
 
     path.write_text("temp", encoding="utf-8")
     schedule_temp_file_cleanup(path, delay_seconds=0)
-    await asyncio.sleep(0.05)
+    # delay 0 still takes the task a few loop turns (start, sleep(0), unlink).
+    for _ in range(3):
+        await asyncio.sleep(0)
 
 
 def _image_file_path(segment) -> Path:
@@ -4053,7 +4055,7 @@ remotePort = {{ $v.Second }}
                 started = time.perf_counter()
                 candidates = asyncio.run(
                     steam.resolve_steam_app_candidates(
-                        "unknown game", cache, network_budget=0.1
+                        "unknown game", cache, network_budget=0.01
                     )
                 )
                 elapsed = time.perf_counter() - started

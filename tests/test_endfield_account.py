@@ -595,12 +595,11 @@ def account_base_fixture(*, current_ts: int = 1600, money: int = 1600) -> dict:
 
 class EndfieldAccountBaseViewTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
-        self.store = store_module.EndfieldStore(Path(self.temp.name) / "base.db")
+        # In-memory: same SQL, without the per-commit fsync of an on-disk test DB.
+        self.store = store_module.EndfieldStore(":memory:")
 
     def tearDown(self):
         self.store.close()
-        self.temp.cleanup()
 
     def build(self, detail: dict | None = None, *, name_map=None):
         return account_base_service_module.build_account_base_view(
@@ -737,7 +736,7 @@ class EndfieldAccountBaseViewTests(unittest.TestCase):
 class EndfieldCredentialAndStoreTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        self.store = store_module.EndfieldStore(Path(self.temp.name) / "endfield.db")
+        self.store = store_module.EndfieldStore(":memory:")
         self.cipher = crypto.CredentialCipher(b"k" * 32)
 
     def tearDown(self):
@@ -2713,8 +2712,7 @@ class _FakeGachaClient:
 
 class EndfieldGachaServiceTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.temp = tempfile.TemporaryDirectory()
-        self.store = store_module.EndfieldStore(Path(self.temp.name) / "endfield.db")
+        self.store = store_module.EndfieldStore(":memory:")
         self.cipher = crypto.CredentialCipher(b"k" * 32)
         self.role = self.store.bind_roles(
             "qq", "token", [store_module.RoleCandidate("bind", "role", "server", "甲")], self.cipher
@@ -2722,7 +2720,6 @@ class EndfieldGachaServiceTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncTearDown(self):
         self.store.close()
-        self.temp.cleanup()
 
     def test_weapon_up_without_server_guarantee_falls_back_to_registry_default(self):
         # v3 口径：FZ 没给 hardGuarantee 时按池类型默认值（武器 80）展示，并以 large_pity_source 标明来源。

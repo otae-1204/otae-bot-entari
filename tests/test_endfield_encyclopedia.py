@@ -7,8 +7,10 @@
 from __future__ import annotations
 
 import contextlib
+import functools
 import io
 import json
+import pickle
 import tempfile
 import unittest
 from pathlib import Path
@@ -59,8 +61,14 @@ _EMPTY_ALIAS_DATA = {
 }
 
 
+@functools.lru_cache(maxsize=1)
+def _fixture_pickle() -> bytes:
+    """1.8 MB 夹具每个进程只解析一次；之后每次用 pickle 复制出一份独立、可改的表。"""
+    return pickle.dumps(json.loads(FIXTURE.read_bytes()), protocol=pickle.HIGHEST_PROTOCOL)
+
+
 def _tables() -> dict:
-    return json.loads(FIXTURE.read_bytes())
+    return pickle.loads(_fixture_pickle())
 
 
 def _snapshot(*, shared: str = "fixture") -> AkeSnapshot:

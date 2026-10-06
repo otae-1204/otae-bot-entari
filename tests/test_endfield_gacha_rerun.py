@@ -703,10 +703,6 @@ class SyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(analysis.complete)
         self.assertTrue(analysis.errors)
 
-    def test_default_pool_types_are_shared_with_client(self):
-        self.assertEqual(client_module.CHARACTER_POOL_TYPES, pools_module.DEFAULT_CHARACTER_POOL_TYPES)
-        self.assertEqual(client_module.CHARACTER_POOL_TYPES[-1], RERUN)
-
 
 class StoreMigrationTests(unittest.TestCase):
     def test_legacy_database_gains_pool_version_column(self):
@@ -766,6 +762,10 @@ class StoreMigrationTests(unittest.TestCase):
 
 
 class PoolRuleTests(unittest.TestCase):
+    def test_default_pool_types_are_shared_with_client(self):
+        self.assertEqual(client_module.CHARACTER_POOL_TYPES, pools_module.DEFAULT_CHARACTER_POOL_TYPES)
+        self.assertEqual(client_module.CHARACTER_POOL_TYPES[-1], RERUN)
+
     def test_classify_pool_rule_caches_kind_and_series(self):
         rule = GachaPoolRule(
             "rerun_chr_yvonne", ("chr_0017_yvonne",), 0, "绚丽异彩", "char",

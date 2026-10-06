@@ -809,7 +809,7 @@ class EndfieldChallengeTests(unittest.TestCase):
             max_active = max(max_active, active)
             pages.append(page)
             documents.append(document)
-            await asyncio.sleep(0.01)
+            await asyncio.sleep(0)  # 让出事件循环：若被并发调度，另一页会在此期间开始渲染
             active -= 1
             return f"png-{page}".encode()
 

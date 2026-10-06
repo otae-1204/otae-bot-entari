@@ -227,7 +227,17 @@ class EndfieldPerformanceBehaviorTests(unittest.IsolatedAsyncioTestCase):
                 for index in range(1, 6)
             ],
         )
-        with patch.object(draw, "fetch_many_resilient", AsyncMock(return_value={})):
+        real_screenshot = draw.screenshot_web_element
+
+        async def layout_only_screenshot(*args, **kwargs):
+            # Height and overflow checks run in CSS px, so 1x keeps them while skipping
+            # the 2x PNG encode (2x itself is pinned by test_endfield_screenshot_keeps_two_x...).
+            return await real_screenshot(*args, **{**kwargs, "device_scale_factor": 1.0})
+
+        with (
+            patch.object(draw, "fetch_many_resilient", AsyncMock(return_value={})),
+            patch.object(draw, "screenshot_web_element", layout_only_screenshot),
+        ):
             output = await draw.draw_operator_card(view)
 
         self.assertTrue(output.startswith(b"\x89PNG"))
