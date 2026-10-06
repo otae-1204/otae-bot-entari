@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import json
 import sys
 import unittest
@@ -14,10 +13,9 @@ from types import SimpleNamespace
 from PIL import Image
 
 from otae_bot.config.settings import Config as GlobalConfig
-from plugins.tibo_radar.handlers import _is_subscription_manager, _subscription_image_segment
+from plugins.tibo_radar.handlers import _is_subscription_manager
 from plugins.tibo_radar.client import parse_codex_reset_feed, parse_codex_reset_timeline, parse_codexradar_html
-from plugins.tibo_radar.draw import CardSection, render_card
-from plugins.tibo_radar.draw_x import CardSection as XCardSection, render_card as render_x_card
+from plugins.tibo_radar.draw_scope import CardSection, render_card
 from plugins.tibo_radar.draw_xfeed import render_xfeed
 from plugins.tibo_radar.models import EVENT_CONFIRMED, EVENT_EXPECTED_WINDOW, EVENT_REJECTED, RELEVANCE_DIRECT, RELEVANCE_INDIRECT, RELEVANCE_NONE, ResetEvent, TiboPost
 from plugins.tibo_radar.service import TiboRadarService
@@ -218,16 +216,6 @@ class TiboRadarTests(unittest.TestCase):
             self.assertEqual(image.width, 1080)
             self.assertGreaterEqual(image.height, 430)
 
-    def test_x_design_card_is_valid_png(self):
-        async def render():
-            return await render_x_card("Tibo 测试", "本地缓存", [XCardSection("当前雷达状态", ["官方重置预告窗口进行中", "等待完成核验。"])])
-
-        output = asyncio.run(render())
-        with Image.open(BytesIO(output)) as image:
-            self.assertEqual(image.mode, "RGB")
-            self.assertEqual(image.width, 1080)
-            self.assertGreaterEqual(image.height, 430)
-
     def test_xfeed_card_is_valid_png(self):
         posts = [
             TiboPost(
@@ -263,14 +251,6 @@ class TiboRadarTests(unittest.TestCase):
             self.assertEqual(image.mode, "RGB")
             self.assertEqual(image.width, 1080)
             self.assertGreaterEqual(image.height, 430)
-
-    def test_subscription_image_uses_inline_png_data_url(self):
-        raw = b"\x89PNG\r\nfixture"
-        segment = _subscription_image_segment(raw)
-
-        self.assertTrue(segment.src.startswith("data:image/png;base64,"))
-        encoded = segment.src.split(",", 1)[1]
-        self.assertEqual(base64.b64decode(encoded), raw)
 
 
 if __name__ == "__main__":
