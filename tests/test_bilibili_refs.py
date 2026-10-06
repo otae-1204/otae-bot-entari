@@ -218,9 +218,9 @@ def test_parse_target_ref_rejects_unknown_forms(bili, raw):
 def test_parse_target_ref_error_names_the_accepted_forms(bili):
     with pytest.raises(ValueError) as excinfo:
         bili.refs.parse_target_ref("nope")
-    assert (
-        str(excinfo.value) == '无法识别 "nope"，请使用 UID、room:直播间号 或直播间链接'
-    )
+    message = str(excinfo.value)
+    for part in ("nope", "UID", "room:直播间号", "直播间链接"):
+        assert part in message
 
 
 # --- follow -----------------------------------------------------------------
@@ -436,7 +436,7 @@ def test_follow_reports_unparsable_input_without_subscribing(bili, tmp_path):
 
             ok, failed, subs = run(scenario())
             assert ok == []
-            assert failed == ['无法识别 "nope"，请使用 UID、room:直播间号 或直播间链接']
+            assert failed == [bili.refs._unrecognised("nope")]
             assert subs == []
         finally:
             close_store(store)

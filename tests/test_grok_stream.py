@@ -364,7 +364,7 @@ class StreamTests(unittest.IsolatedAsyncioTestCase):
         self.switches.set_enabled(other.feature_scope, "grok_bot", True)
         waiting = asyncio.create_task(self.hub.run(replace(config, timeout=.05), "wait", AsyncMock(), other, on_reply=self.deliver("B")))
         await until(lambda: self.hub.pending == 1)
-        with self.assertRaisesRegex(GrokError, "队列已满"):
+        with self.assertRaisesRegex(GrokError, "队列已达上限"):
             await self.hub.run(replace(config, max_pending=1), "not accepted", AsyncMock(), SCOPE, on_reply=self.deliver("C"))
         with self.assertRaises(GrokError):
             await waiting
@@ -373,7 +373,7 @@ class StreamTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_repair_refuses_active_receiver_and_new_input_waits_for_repair(self):
         await self.submit()
-        with patch.object(conversations, "repair", AsyncMock()) as repair, self.assertRaisesRegex(GrokError, "正在接收"):
+        with patch.object(conversations, "repair", AsyncMock()) as repair, self.assertRaisesRegex(GrokError, "处于回复接收"):
             await self.hub.run(CONFIG, "", AsyncMock(), SCOPE, repair_only=True)
         repair.assert_not_awaited()
         other = replace(SCOPE, peer_id="101", channel_id="101")
@@ -443,7 +443,7 @@ class StreamTests(unittest.IsolatedAsyncioTestCase):
         live.enqueue(item)
         live.task = asyncio.create_task(live.run())
         await self.hub.close()
-        with self.assertRaisesRegex(GrokError, "尚未提交"):
+        with self.assertRaisesRegex(GrokError, "未提交"):
             await item.done
         self.assertEqual((self.hub.active, self.hub.pending, self.hub.slots), (0, 0, {}))
         self.assertEqual(self.host.calls, [])
@@ -466,7 +466,7 @@ class StreamTests(unittest.IsolatedAsyncioTestCase):
         await self.submit("rejected followup", "B")
         await until(lambda: bool(self.received))
         self.assertEqual(self.received[0][0], "B")
-        self.assertIn("拒绝", self.received[0][1].text)
+        self.assertIn("未接受", self.received[0][1].text)
         self.host.publish(aid, "初始问题仍然回复 A")
         await until(lambda: len(self.received) == 2)
         self.assertEqual(self.received[-1], ("A", Reply("初始问题仍然回复 A"), True))
@@ -494,7 +494,7 @@ class StreamTests(unittest.IsolatedAsyncioTestCase):
         await until(lambda: not self.hub.slots)
         self.assertEqual(self.received[0], ("A", Reply("正文先到"), True))
         self.assertEqual(len(self.received), 2)
-        self.assertIn("接收等待超过", self.received[-1][1].text)
+        self.assertIn("响应等待已达", self.received[-1][1].text)  # Not the queue-slot ("排队等待") timeout.
         self.assertEqual(len(self.host.prompts()), 1)
 
     async def test_qq_upload_checks_interruption_before_image_send(self):

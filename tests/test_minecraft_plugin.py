@@ -62,7 +62,8 @@ class MinecraftPluginTests(unittest.TestCase):
             result = asyncio.run(ping_module.ping("NFWC2", "java"))
 
         self.assertEqual(result["status"], "error")
-        self.assertIn("DNS", result["data"])
+        self.assertIn("域名解析", result["data"])
+        self.assertNotIn("Traceback", result["data"])
 
     def test_ping_command_resolves_saved_identifier_first(self):
         source = (ROOT / "plugins/minecraft_plugin/handlers.py").read_text(encoding="utf-8")

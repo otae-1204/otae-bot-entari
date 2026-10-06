@@ -361,8 +361,9 @@ class TextFormatterTests(unittest.TestCase):
     def test_search_text_reports_hits_and_misses(self):
         hits = formatters.format_search(self.changelog.search("雷达"), "雷达")
         self.assertIn("相关的更新", "\n".join(hits))
+        self.assertNotIn("未查到", "\n".join(hits))
         misses = formatters.format_search((), "绝不可能出现的关键词xyzzy")
-        self.assertIn("没有找到", "\n".join(misses))
+        self.assertIn("未查到「绝不可能出现的关键词xyzzy」", "\n".join(misses))
 
     def test_stats_text_counts_match_the_data(self):
         text = "\n".join(formatters.format_stats(self.changelog))
@@ -592,7 +593,7 @@ class HandlerTests(unittest.TestCase):
             asyncio.run(changelog_handlers.handle_changelog(_Arg("绝不可能出现的关键词xyzzy"), object()))
 
         self.assertTrue(sent)
-        self.assertIn("没有找到", "\n".join(sent))
+        self.assertIn("未查到", "\n".join(sent))
 
     def test_version_query_returns_that_version_not_a_search_list(self):
         changelog = _changelog()
