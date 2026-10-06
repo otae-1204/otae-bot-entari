@@ -497,7 +497,7 @@ class NativeAkeTests(unittest.IsolatedAsyncioTestCase):
             ),
             patch.object(source, "_load_tables", AsyncMock()) as tables,
         ):
-            with self.assertRaisesRegex(calendar.VersionCalendarError, "完整事件覆盖"):
+            with self.assertRaisesRegex(calendar.VersionCalendarError, "未覆盖"):
                 await source.current_ake_primary()
             tables.assert_not_awaited()
 

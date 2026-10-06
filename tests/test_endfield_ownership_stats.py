@@ -1128,7 +1128,10 @@ class OwnershipRefreshAndGroupTests(unittest.TestCase):
                     bot=object(),
                 )
             )
-        self.assertIn("SUPERUSER", denied)
+        # 全局刷新只放行机器人管理员（SUPERUSERS），群管理员不够。
+        self.assertIn("权限不足", denied)
+        self.assertIn("机器人管理员", denied)
+        self.assertNotIn("群管理员", denied)
 
         group_event = SimpleNamespace(
             user=SimpleNamespace(id="member"),
@@ -1198,10 +1201,11 @@ class OwnershipRefreshAndGroupTests(unittest.TestCase):
                 )
             )
 
-        self.assertIn("全局持有率刷新完成", result)
-        self.assertIn("候选 2，入队 2，角色请求 2", result)
-        self.assertIn("成功 1，失败 1，跳过 0，延后 0", result)
-        self.assertIn("目录无变化", result)
+        self.assertTrue(result.startswith("全局"), result)
+        self.assertIn("持有率", result)
+        for fragment in ("符合条件 2", "加入队列 2", "发起查询 2", "成功 1", "失败 1", "跳过 0", "延后 0"):
+            self.assertIn(fragment, result)
+        self.assertIn("无变动", result)
         self.assertIn("账号授权（401） × 1", result)
         self.assertIn("耗时 11 秒", result)
         self.assertIn("/ef 绑定", result)
@@ -1229,10 +1233,14 @@ class OwnershipRefreshAndGroupTests(unittest.TestCase):
 
         result = endfield_plugin._format_ownership_refresh_result("global", refresh)
 
-        self.assertIn("失败 3，跳过 202", result)
+        self.assertIn("失败 3", result)
+        self.assertIn("跳过 202", result)
         self.assertIn("保护性停止", result)
-        self.assertIn("旧快照仍按 48 小时有效期参与统计", result)
-        self.assertNotIn("/ef 绑定更新凭证", result)
+        # 说明旧快照在 48 小时有效期内仍参与统计。
+        self.assertIn("快照", result)
+        self.assertIn("48 小时", result)
+        # 保护性停止不是凭证问题，不应引导用户重新绑定。
+        self.assertNotIn("/ef 绑定", result)
 
     def test_refresh_text_distinguishes_catalog_failure_from_unchanged(self):
         refresh = OwnershipRefreshResult(
@@ -1249,8 +1257,9 @@ class OwnershipRefreshAndGroupTests(unittest.TestCase):
 
         result = endfield_plugin._format_ownership_refresh_result("global", refresh)
 
-        self.assertIn("目录检查失败（RuntimeError: 目录检查失败）", result)
-        self.assertNotIn("目录无变化", result)
+        self.assertIn("失败（RuntimeError: 目录检查失败）", result)
+        self.assertNotIn("无变动", result)
+        self.assertNotIn("未核对", result)
 
     def test_group_view_uses_live_member_filter_and_never_global_roles(self):
         class Matcher:

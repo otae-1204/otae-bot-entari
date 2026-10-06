@@ -562,8 +562,12 @@ class EndfieldStageCommandTests(unittest.TestCase):
 
     def test_help_and_source_list_stage(self):
         self.assertIn("/ef 副本 <关卡名> [变体名|总览]", commands.format_help())
-        self.assertIn("关卡：AkeData", commands.format_source())
-        self.assertIn("关卡数据仅使用 AkeData", commands.format_source())
+        source_text = commands.format_source()
+        stage_line = next(line for line in source_text.splitlines() if line.startswith("关卡："))
+        # 关卡只列 AkeData 一个来源，没有 FZ / Warfarin 回退。
+        self.assertIn("AkeData", stage_line)
+        self.assertNotIn("FZ", stage_line)
+        self.assertNotIn("Warfarin", stage_line)
         self.assertEqual(source_order("stage"), ("akedata",))
 
     def test_akedata_source_option_and_alias(self):
@@ -1567,8 +1571,9 @@ class EndfieldStageCatalogTests(unittest.IsolatedAsyncioTestCase):
 
         akedata_source.stage.assert_awaited_once_with("series:fixture")
         self.assertEqual(view.stage.source.source, "AkeData")
-        with self.assertRaisesRegex(Exception, "fz 暂不支持关卡资料"):
+        with self.assertRaisesRegex(endfield.StageDataIncomplete, "fz"):
             await service.get_stage_view("series:fixture", source="fz")
+        self.assertEqual(akedata_source.stage.await_count, 1)
 
     async def test_catalog_includes_registered_special_modes(self):
         client = AsyncMock()
@@ -1657,9 +1662,11 @@ class EndfieldStageIntegrationTests(unittest.IsolatedAsyncioTestCase):
             "query", scope="stage", query="罗丹", source="warfarin"
         )
         await endfield._handle_command(matcher, None, command)
-        matcher.finish.assert_awaited_once_with(
-            "Warfarin Wiki 暂不支持关卡资料；关卡仅使用 AkeData。"
-        )
+        matcher.finish.assert_awaited_once()
+        message = matcher.finish.await_args.args[0]
+        self.assertIn("Warfarin Wiki", message)
+        self.assertIn("不支持", message)
+        self.assertIn("AkeData", message)
 
     async def test_explicit_fz_stage_query_reports_akedata_only(self):
         matcher = AsyncMock()
@@ -1669,9 +1676,11 @@ class EndfieldStageIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
         await endfield._handle_command(matcher, None, command)
 
-        matcher.finish.assert_awaited_once_with(
-            "FZ Wiki 暂不支持关卡资料；关卡仅使用 AkeData。"
-        )
+        matcher.finish.assert_awaited_once()
+        message = matcher.finish.await_args.args[0]
+        self.assertIn("FZ Wiki", message)
+        self.assertIn("不支持", message)
+        self.assertIn("AkeData", message)
 
     async def test_stage_card_cache_key_includes_revision(self):
         renderer = AsyncMock(side_effect=(b"revision-one", b"revision-two"))

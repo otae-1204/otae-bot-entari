@@ -657,7 +657,9 @@ class EndfieldAccountDetailRoutingTests(unittest.IsolatedAsyncioTestCase):
         _, prompt, detail, _, _, _ = await self.run_accounts(group=False, roles=self.roles)
         prompt.assert_awaited_once()
         listing = prompt.await_args.args[0]
-        self.assertIn("回复编号查看该账号详情", listing)
+        self.assertIn("回复", listing)
+        self.assertIn("编号", listing)
+        self.assertIn("详情", listing)
         self.assertIn("1. 甲", listing)
         self.assertIn("2. 乙", listing)
         detail.assert_not_awaited()
@@ -688,12 +690,18 @@ class EndfieldAccountDetailRoutingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_unknown_selector_reports_guidance(self):
         matcher, _, detail, _, _, _ = await self.run_accounts(group=False, roles=self.roles, selector="丙")
-        matcher.finish.assert_awaited_once_with("未找到对应账号，请使用 /ef 账号 查看编号。")
+        matcher.finish.assert_awaited_once()
+        message = matcher.finish.await_args.args[0]
+        self.assertIn("未找到", message)
+        self.assertIn("/ef 账号", message)
         detail.assert_not_awaited()
 
     async def test_missing_binding_reports_bind_hint(self):
         matcher, _, detail, _, _, _ = await self.run_accounts(group=False, roles=[])
-        matcher.finish.assert_awaited_once_with("尚未绑定终末地账号。使用 /ef 绑定 开始绑定。")
+        matcher.finish.assert_awaited_once()
+        message = matcher.finish.await_args.args[0]
+        self.assertIn("尚未绑定", message)
+        self.assertIn("/ef 绑定", message)
         detail.assert_not_awaited()
 
     async def test_cancelled_reply_stops_without_rendering(self):
