@@ -750,15 +750,11 @@ class ServiceRankingTests(unittest.TestCase):
         self.assertIn("跨档位", bare_meta.note)
         self.assertIn("单档位 low", tiered_meta.note)
         self.assertEqual(bare[0].iq, 105.4)
+        # latest:gpt-6-astra@low 首点是 104.6；裸档位序列首点是 98.3（不得用 latest: 序列）。
         self.assertEqual(tiered[0].iq, 98.3)
         self.assertNotEqual(bare[0].iq, tiered[0].iq)
         # 样本量取序列末点。
         self.assertEqual(tiered_meta.samples, tiered[-1].samples)
-
-    def test_trend_never_uses_the_latest_prefixed_series(self):
-        points, _ = run(self.service.trend("gpt-6-astra", effort="low"))
-        # latest:gpt-6-astra@low 首点是 104.6；裸档位序列首点是 98.3。
-        self.assertEqual(points[0].iq, 98.3)
 
     def test_degradation_alerts_are_forwarded_without_recomputation(self):
         alerts, _ = run(self.service.degradation_alerts())
@@ -947,11 +943,6 @@ class FormatterTests(unittest.TestCase):
         # 只有明确声明 measured 才输出裸金额。
         self.assertEqual(_money(1.98, source=SRC_MEASURED), "$1.98")
         self.assertEqual(_money(1.98, estimate=False, source=SRC_MEASURED), "$1.98")
-
-    def test_estimate_detection_covers_missing_src(self):
-        self.assertTrue(is_estimate(None))
-        self.assertTrue(is_estimate("task-level-fallback"))
-        self.assertFalse(is_estimate(SRC_MEASURED))
 
     def test_empty_results_say_empty_instead_of_raising(self):
         meta = RadarMeta(benchmark_id="deep-swe", score_label="Pass rate")

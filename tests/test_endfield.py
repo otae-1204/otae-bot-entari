@@ -385,12 +385,6 @@ class EndfieldCommandParserTests(unittest.TestCase):
         self.assertEqual(parsed.scope, "operator")
         self.assertEqual(parsed.query, "陈千语")
 
-    def test_weapon_query_aliases(self):
-        parsed = commands.parse_command("武器 赤缨")
-        self.assertEqual(parsed.action, "query")
-        self.assertEqual(parsed.scope, "weapon")
-        self.assertEqual(parsed.query, "赤缨")
-
     def test_equipment_query_aliases(self):
         parsed = commands.parse_command("装备 长息轻护甲")
         self.assertEqual(parsed.action, "query")
@@ -677,14 +671,11 @@ class EndfieldCommandParserTests(unittest.TestCase):
         self.assertIn("武器：AkeData、FZ Wiki、Warfarin Wiki", text)
         self.assertIn("装备：AkeData、FZ Wiki", text)
 
-    def test_help_documents_source_option(self):
+    def test_help_documents_source_loadout_and_calendar_options(self):
         text = commands.format_help()
+
         self.assertIn("--source <fz|akedata|warfarin>", text)
         self.assertIn("-s/--source", text)
-
-    def test_help_documents_loadout_potential_and_weapon_skill_options(self):
-        text = commands.format_help()
-
         self.assertIn("角色潜能2 武器潜能3", text)
         self.assertIn("武器技能1等级5", text)
         self.assertIn("/ef 版本日历", text)

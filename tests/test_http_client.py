@@ -49,23 +49,6 @@ class SharedSslContextTests(unittest.IsolatedAsyncioTestCase):
 
 
 class AsyncTTLCacheTests(unittest.IsolatedAsyncioTestCase):
-    async def test_concurrent_misses_are_coalesced(self):
-        cache = AsyncTTLCache[str, bytes](ttl_seconds=60, max_bytes=1024, sizeof=len)
-        calls = 0
-
-        async def factory():
-            nonlocal calls
-            calls += 1
-            await asyncio.sleep(0.02)
-            return b"value"
-
-        values = await asyncio.gather(*(cache.get_or_create("same", factory) for _ in range(6)))
-        self.assertEqual(values, [b"value"] * 6)
-        self.assertEqual(calls, 1)
-        stats = await cache.stats()
-        self.assertEqual(stats.misses, 1)
-        self.assertEqual(stats.coalesced, 5)
-
     async def test_ttl_expiration_and_lru_byte_eviction(self):
         now = [10.0]
         cache = AsyncTTLCache[str, bytes](

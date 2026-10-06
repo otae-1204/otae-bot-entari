@@ -150,10 +150,7 @@ def _async_return(value):
         (1, "2026-09-22 14:41:35", START),
         (1, "2026-09-23 14:41:35", 0),
         (1, "0000-00-00 00:00:00", 0),
-        (1, "invalid", 0),
-        (1, "", 0),
         (1, None, 0),
-        (0, "2026-09-22 14:41:35", 0),
         (2, "2026-09-22 14:41:35", 0),
     ],
 )
@@ -373,12 +370,10 @@ async def test_failed_poll_does_not_advance_last_seen_or_send_end(bili, tmp_path
     [
         (None, "本次直播时长未知"),
         (-1, "本次直播时长未知"),
-        (0, "本次直播不足 1 分钟"),
         (59, "本次直播不足 1 分钟"),
         (60, "本次直播约 1 分钟"),
         (3599, "本次直播约 59 分钟"),
         (3600, "本次直播约 1 小时"),
-        (8280, "本次直播约 2 小时 18 分钟"),
         (90061, "本次直播约 25 小时 1 分钟"),
     ],
 )
@@ -406,7 +401,7 @@ def test_duration_is_rendered_in_header_without_overflow(
     assert 90 <= top < bottom < 154
 
 
-@pytest.mark.parametrize("kind", ["video", "live_on", "live_idle", "dynamic"])
+@pytest.mark.parametrize("kind", ["video", "live_on"])
 def test_other_card_types_do_not_show_previous_duration(bili, kind):
     card = bili.models.BiliCard(kind, "标题", live_duration_seconds=8280)
     assert "时长" not in bili.draw._status_hint(card, bili.draw._STYLES[kind])

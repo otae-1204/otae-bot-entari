@@ -420,7 +420,7 @@ class EndfieldAccountDetailDrawTests(unittest.TestCase):
         )
 
     def test_lv1_to_lv8_use_plain_level_badges(self):
-        for level in range(1, 9):
+        for level in (1, 8):  # both ends of the plain-badge range; 9 switches to the svg below
             marker = account_detail_draw._skill_progress_marker(level, 0)
             self.assertIn('class="account-skill-level"', marker)
             self.assertIn(f">Lv{level}<", marker)

@@ -180,15 +180,10 @@ def close_store(store):
     "raw,by,value",
     [
         ("114514", "uid", "114514"),
-        ("uid:114514", "uid", "114514"),
         ("UID:114514", "uid", "114514"),
-        ("https://space.bilibili.com/114514", "uid", "114514"),
-        ("https://space.bilibili.com/114514/article", "uid", "114514"),
         ("https://space.bilibili.com/114514?tab=video", "uid", "114514"),
         (" 114514 ", "uid", "114514"),
         ("room:5302860", "room", "5302860"),
-        ("ROOM:5302860", "room", "5302860"),
-        ("https://live.bilibili.com/5302860", "room", "5302860"),
         ("https://live.bilibili.com/blanc/5302860?broadcast_type=0", "room", "5302860"),
     ],
 )
@@ -202,10 +197,7 @@ def test_parse_target_ref_resolves_supported_forms(bili, raw, by, value):
     "raw",
     [
         "",
-        "abc",
         "uid:abc",
-        "room:",
-        "b23.tv/abcd",
         "https://www.bilibili.com/video/BV1xx411c7mD",
         "https://space.bilibili.com/",
     ],

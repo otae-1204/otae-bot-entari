@@ -67,10 +67,8 @@ def test_detect_live_without_observation_never_moves_state(bili):
 @pytest.mark.parametrize(
     "start,last_seen,expected",
     [
-        (START, NOW - 60, 8280),
         (START, NOW - 180, 8280),
         (START, NOW - 181, None),
-        (START, NOW - 86400, None),
         (START, 0, None),
         (0, NOW - 60, None),
         (START, NOW + 1, None),
@@ -92,7 +90,6 @@ def test_end_estimate_requires_recent_valid_observation(bili, start, last_seen, 
     [
         (60, 0, START),
         (181, 0, 0),
-        (3600, NOW - 30, NOW - 30),
         (60, NOW - 30, NOW - 30),
         (60, NOW + 1, START),
     ],

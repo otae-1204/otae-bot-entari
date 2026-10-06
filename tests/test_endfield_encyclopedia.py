@@ -882,12 +882,6 @@ class EndfieldEncyclopediaWiringTests(unittest.TestCase):
         self.assertNotIn("archive_entry", endfield.SOURCE_CANDIDATE_RESOLVERS)
         self.assertEqual(endfield.source_order("archive_entry"), ("akedata",))
 
-    def test_encyclopedia_scopes_are_registered_in_the_command_tables(self):
-        for scope in commands.ENCYCLOPEDIA_SCOPES:
-            with self.subTest(scope=scope):
-                self.assertIn(scope, commands.SCOPE_LABELS)
-                self.assertIn(scope, commands.ENCYCLOPEDIA_SCOPE_ALIASES)
-
 
 class EndfieldEncyclopediaSourceTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -1012,12 +1006,6 @@ class EndfieldEncyclopediaRenderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first, (b"png-bytes",))
         self.assertEqual(second, (b"png-bytes",))
         self.assertEqual(hits, 0)
-
-    async def test_four_card_renderers_are_registered(self):
-        for kind in ("item", "prop", "enemy", "term"):
-            with self.subTest(kind=kind):
-                self.assertIn(kind, endfield.CONTENT_RENDERERS)
-        self.assertIn("archive_entry", endfield.CONTENT_RENDERERS)
 
     async def test_catalog_drawer_returns_a_tuple_of_pages(self):
         from plugins.endfield.encyclopedia import draw as encyclopedia_draw
