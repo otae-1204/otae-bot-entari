@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import os
 import subprocess
 import sys
 from io import BytesIO
@@ -201,9 +202,13 @@ def test_documentation_figure_is_reproducible_by_the_preview_script(tmp_path):
     The figure is generated, so a hand-edited or stale copy would silently
     disagree with the card renderer. Regenerate with:
         python scripts/preview_bilibili_cards.py --write-doc-figure
+    Card timestamps use the host timezone; the committed figure is rendered at
+    UTC+8 like the production host, so the check pins TZ to match.
     """
     preview = _load_preview_script()
     regenerated = tmp_path / "bilibili-cards-sakura.png"
+    # POSIX TZ string: understood by both glibc and the Windows CRT.
+    env = {**os.environ, "TZ": "CST-8"}
     subprocess.run(
         [
             sys.executable,
@@ -216,6 +221,7 @@ def test_documentation_figure_is_reproducible_by_the_preview_script(tmp_path):
         ],
         check=True,
         cwd=ROOT,
+        env=env,
         capture_output=True,
         timeout=180,
     )
