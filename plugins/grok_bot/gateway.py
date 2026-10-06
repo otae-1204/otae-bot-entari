@@ -28,7 +28,6 @@ from .media import (
     MAX_IMAGE_BYTES,
     MAX_REPLY_BYTES,
     MAX_REPLY_FILES,
-    REPLY_DOWNLOAD_TIMEOUT,
     Attachment,
     Reply,
     decode_data_url,
@@ -40,11 +39,18 @@ from .media import (
 
 PROTOCOL_ERROR = "网关响应数据结构异常，请管理员核实网关服务版本。"
 AWAITING_USER = "当前任务正等待人工介入确认，请管理员前往 Grok Bot 客户端处理后再发起提问。"
+DOWNLOAD_TIMEOUT = "附件拉取超时，请在 Grok Bot 客户端查阅。"
 # About 350 KB of base64 JSON per response: some 15 s at the ~23 KB/s of a
 # relayed tailnet path, well inside CHUNK_TIMEOUT.
 CHUNK_BYTES = 256 * 1024
 # A chunk read still unfinished by then has stalled; it is retried on a new connection.
 CHUNK_TIMEOUT = 45
+# Download budget per cloud attachment: the size read, each chunk, and a cap.
+# Retry backoff is not counted. A started download holds the receiving round
+# open, so GROKBOT_TIMEOUT never cuts it short.
+ATTACHMENT_BASE_SECONDS = 30
+ATTACHMENT_CHUNK_SECONDS = 25
+ATTACHMENT_MAX_SECONDS = 300
 # These POST RPCs only read state. Never retry a mutation on a lost response.
 READ_ONLY_COMMANDS = frozenset({
     "health", "listAgents", "getAsyncTasks", "getSubagents", "promptAcceptanceStatus",
@@ -96,10 +102,39 @@ def describe(error: BaseException) -> str:
     return f"{name}: {error}" if str(error) else name
 
 
+def chunk_count(size: int) -> int:
+    return -(-size // CHUNK_BYTES)
+
+
+def download_seconds(size: int) -> float:
+    """The transfer budget of a cloud attachment of `size` bytes."""
+    return min(ATTACHMENT_BASE_SECONDS + ATTACHMENT_CHUNK_SECONDS * chunk_count(size), ATTACHMENT_MAX_SECONDS)
+
+
 @dataclass
 class DownloadBudget:
     remaining: int = MAX_REPLY_BYTES
-    seconds: float = REPLY_DOWNLOAD_TIMEOUT
+    # Called with each new download deadline (loop time).
+    hold: Callable[[float], None] | None = None
+
+
+class Transfer:
+    """One cloud attachment download and its deadline."""
+
+    def __init__(self, path: str, hold: Callable[[float], None] | None = None):
+        self.path, self.hold = path, hold
+        self.size: int | None = None
+        self.deadline: asyncio.Timeout | None = None
+
+    def extend(self, seconds: float) -> None:
+        if self.deadline is not None and not self.deadline.expired():
+            self.deadline.reschedule(self.deadline.when() + seconds)
+            if self.hold is not None:
+                self.hold(self.deadline.when())
+
+    def pause(self, seconds: float) -> None:
+        """Retry backoff: waiting out a dropped link does not use up the budget."""
+        self.extend(seconds)
 
 
 def entries_from(payload: object) -> list[dict]:
@@ -191,7 +226,7 @@ class Gateway:
         self.reconnect = False
 
     async def request(self, command: str, body: dict | None = None, *, response_limit: int | None = None,
-                      attempt_timeout: float | None = None):
+                      attempt_timeout: float | None = None, transfer: Transfer | None = None):
         read_only = command in READ_ONLY_COMMANDS
         delays = (READ_RETRY_DELAYS if read_only
                   else UNANSWERED_RETRY_DELAYS if command in UNANSWERED_RETRY_COMMANDS else ())
@@ -237,6 +272,8 @@ class Gateway:
                     link.__traceback__ = None
                 if not retry:
                     raise
+                if transfer is not None:
+                    transfer.pause(delays[attempt])
                 # Cancellation / the caller's total task timeout also bounds retries.
                 await asyncio.sleep(delays[attempt])
                 continue
@@ -354,26 +391,46 @@ class Gateway:
             uploaded.append(replace(item, source=remote_path(result["path"]), data=None))
         return tuple(uploaded)
 
-    async def read_attachment(self, item: Attachment, limit: int) -> tuple[bytes, str]:
+    async def read_attachment(self, item: Attachment, limit: int, *,
+                              hold: Callable[[float], None] | None = None) -> tuple[bytes, str]:
+        """`hold` is called with each new deadline, so the caller can stay open past it."""
         if item.source.startswith("data:"):
             return decode_data_url(item.source, limit)
         if item.source.startswith(("https://", "http://")):
-            return await download_url(item.source, limit=limit)
-        path = remote_path(item.source)
+            try:
+                async with asyncio.timeout(ATTACHMENT_MAX_SECONDS) as deadline:
+                    if hold is not None:
+                        hold(deadline.when())
+                    return await download_url(item.source, limit=limit)
+            except TimeoutError:
+                raise GrokError(DOWNLOAD_TIMEOUT) from None
+        transfer = Transfer(remote_path(item.source), hold)
+        try:
+            # Until the size is known; then extended to its full budget.
+            async with asyncio.timeout(ATTACHMENT_BASE_SECONDS) as transfer.deadline:
+                transfer.extend(0)  # Tells `hold` the first deadline.
+                return await self._read_chunks(transfer, limit)
+        except TimeoutError:
+            if transfer.size is not None and transfer.size >= 1_000_000:
+                raise GrokError(f"附件拉取超时（文件约 {transfer.size / 1_000_000:.1f} MB，传输速度过慢），"
+                                "请在 Grok Bot 客户端查阅。") from None
+            raise GrokError(DOWNLOAD_TIMEOUT) from None
 
+    async def _read_chunks(self, transfer: Transfer, limit: int) -> tuple[bytes, str]:
         async def chunk_at(offset: int, length: int):
             result = await self.request("readAttachmentChunk", {
-                "agentId": self.config.agent_id, "path": path, "offset": offset, "length": length,
-            }, response_limit=2 * CHUNK_BYTES, attempt_timeout=CHUNK_TIMEOUT)
+                "agentId": self.config.agent_id, "path": transfer.path, "offset": offset, "length": length,
+            }, response_limit=2 * CHUNK_BYTES, attempt_timeout=CHUNK_TIMEOUT, transfer=transfer)
             if not isinstance(result, dict) or type(result.get("totalSize")) is not int or result["totalSize"] < 0:
                 raise GrokError("云端附件数据不可用或协议不兼容，请在 Grok Bot 客户端查阅。")
             return result
 
         # A zero-length read gives the size before allocating/downloading bytes.
         head = await chunk_at(0, 0)
-        size = head["totalSize"]
+        size = transfer.size = head["totalSize"]
         if size > limit:
             raise GrokError("附件体积超过单文件 20 MB 或总计 50 MB 上限，未执行下载。")
+        transfer.extend(download_seconds(size) - ATTACHMENT_BASE_SECONDS)
         data = bytearray()
         mime = mime_type(head.get("mime"))
         while len(data) < size:
@@ -394,26 +451,18 @@ class Gateway:
         return bytes(data), mime
 
     async def collect_attachment(self, item: Attachment, budget: DownloadBudget) -> Attachment:
-        started = asyncio.get_running_loop().time()
         try:
             if budget.remaining <= 0:
                 raise GrokError("本次附件传输累计已达 50 MB 上限，其余附件请在 Grok Bot 客户端查阅。")
-            if budget.seconds <= 0:
-                raise GrokError("本次附件传输超时，其余附件请在 Grok Bot 客户端查阅。")
-            data, mime = await asyncio.wait_for(self.read_attachment(item, min(MAX_FILE_BYTES, budget.remaining)), budget.seconds)
+            data, mime = await self.read_attachment(item, min(MAX_FILE_BYTES, budget.remaining), hold=budget.hold)
             budget.remaining -= len(data)
             mime = mime_type(mime) if mime != "application/octet-stream" else item.mime
             image = mime in {"image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp"}
             image = image or (item.image and mime == "application/octet-stream")
             # QQ cannot display SVG/TIFF as pictures; preserve them as files.
             return replace(item, source="", data=data, mime=mime, image=image)
-        except asyncio.TimeoutError:
-            return replace(item, source="", error="附件拉取超时，请在 Grok Bot 客户端查阅。")
         except GrokError as error:
             return replace(item, source="", error=str(error))
-        finally:
-            # Count download time, excluding model waits and QQ uploads.
-            budget.seconds -= asyncio.get_running_loop().time() - started
 
     async def collect_reply(self, reply: Reply) -> Reply:
         """Copy files while holding the conversation lock; retain partial success."""

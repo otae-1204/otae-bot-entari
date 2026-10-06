@@ -72,6 +72,7 @@ class ChunkHost:
 class AttachmentDownloadTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.clock = FakeClock(self)
+        self.held: list[float] = []
 
     def host(self, size: int) -> ChunkHost:
         host = ChunkHost(payload(size))
@@ -79,7 +80,24 @@ class AttachmentDownloadTests(unittest.IsolatedAsyncioTestCase):
         return host
 
     async def read(self, host: ChunkHost) -> tuple[bytes, str]:
-        return await host.gateway().read_attachment(Attachment("立绘.png", PATH), media.MAX_FILE_BYTES)
+        return await host.gateway().read_attachment(Attachment("立绘.png", PATH), media.MAX_FILE_BYTES, hold=self.held.append)
+
+    def test_budget_follows_the_size_up_to_a_cap(self):
+        self.assertEqual(gateway.download_seconds(0), 30)
+        self.assertEqual(gateway.download_seconds(1), 55)
+        self.assertEqual(gateway.download_seconds(CHUNK), 55)
+        self.assertEqual(gateway.download_seconds(CHUNK + 1), 80)
+        self.assertEqual(gateway.download_seconds(4 * CHUNK), 130)
+        self.assertEqual(gateway.download_seconds(11 * CHUNK), 300)
+        self.assertEqual(gateway.download_seconds(media.MAX_FILE_BYTES), gateway.ATTACHMENT_MAX_SECONDS)
+        # Each chunk's share of the budget is under the point where a read counts as stalled.
+        self.assertLess(gateway.ATTACHMENT_CHUNK_SECONDS, gateway.CHUNK_TIMEOUT)
+
+    async def test_deadline_starts_at_the_base_and_moves_to_the_size_budget(self):
+        host = self.host(4 * CHUNK)
+        start = self.clock.now
+        self.assertEqual(await self.read(host), (host.data, "image/png"))
+        self.assertEqual(self.held, [start + 30, start + 130])
 
     async def test_file_is_read_in_small_chunks(self):
         self.assertTrue(256 * 1024 <= CHUNK <= 512 * 1024)
@@ -114,3 +132,48 @@ class AttachmentDownloadTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("cause=httpx.ReadTimeout: no complete response within 45s", log)
         self.assertIn("INFO [grok_bot] gateway command=readAttachmentChunk attempt=2/6 ", log)
         self.assertIn(f"request_id={host.calls[3][3]} connection=new ok", log)
+        # The stalled 46 s count against the 80 s budget; the 1 s backoff moves its deadline.
+        self.assertEqual(self.held[-1] - self.held[0], 80 - 30 + 1)
+
+    async def test_exhausted_budget_tells_the_user(self):
+        host = self.host(3_000_000)  # 12 chunks: the 300 s cap.
+
+        async def slow(index, offset, length):
+            if length:
+                await self.clock.advance(40)  # Under CHUNK_TIMEOUT: slow, not stalled.
+
+        host.behave = slow
+        start = self.clock.now
+        result = await host.gateway().collect_attachment(
+            Attachment("立绘.png", PATH, image=True), gateway.DownloadBudget(hold=self.held.append))
+        self.assertIsNone(result.data)
+        self.assertEqual(result.error, "附件拉取超时（文件约 3.0 MB，传输速度过慢），请在 Grok Bot 客户端查阅。")
+        self.assertEqual(self.held, [start + 30, start + 300])
+        self.assertEqual(len(host.calls), 1 + 8)  # The size, seven chunks, and the eighth cut off at 300 s.
+
+    async def test_budget_runs_out_before_the_size_is_known(self):
+        host = self.host(CHUNK)
+
+        async def slow_head(index, offset, length):
+            await self.clock.advance(gateway.ATTACHMENT_BASE_SECONDS + 5)
+
+        host.behave = slow_head
+        result = await host.gateway().collect_attachment(Attachment("立绘.png", PATH), gateway.DownloadBudget())
+        self.assertEqual(result.error, gateway.DOWNLOAD_TIMEOUT)
+
+    async def test_retry_backoff_does_not_use_up_the_budget(self):
+        host = self.host(1000)  # One chunk: a 55 s budget.
+
+        async def flaky(index, offset, length):
+            if length and index <= 1 + len(gateway.READ_RETRY_DELAYS):
+                raise httpx.ConnectError("tailnet down")  # Five refused reads, 31 s of backoff.
+            if length:
+                await self.clock.advance(40)
+
+        host.behave = flaky
+        start = self.clock.now
+        data, _ = await self.read(host)
+        self.assertEqual(data, host.data)
+        self.assertEqual(self.clock.slept, list(gateway.READ_RETRY_DELAYS))
+        # 31 s of backoff and a 40 s read pass 55 s, but backoff stops the budget clock.
+        self.assertEqual(self.held[-1], start + 55 + 31)
