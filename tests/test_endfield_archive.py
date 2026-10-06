@@ -16,8 +16,12 @@ from plugins.endfield.catalog.models import (
     ArchiveDiffView,
     ArchiveItemView,
     ArchiveSnapshotView,
+    MedalBaselineView,
+    MedalItemView,
+    MedalSnapshotView,
 )
 from plugins.endfield.catalog.service import EndfieldService
+from plugins.endfield.medals.store import MedalSnapshotStore
 from plugins.endfield.catalog.views.archives import (
     build_akedata_archive_snapshot,
     normalize_archive_snapshot,
@@ -227,41 +231,56 @@ class ArchiveStoreRoundTripTest(unittest.TestCase):
         self.assertEqual(snap.version, "")
 
 
-class ArchiveSnapshotStoreTest(unittest.IsolatedAsyncioTestCase):
+def _make_medal_snapshot(ids: list[str], *, version: str = "v") -> MedalSnapshotView:
+    medals = [MedalItemView(medal_id=i, name=i) for i in ids]
+    return MedalSnapshotView(medals=medals, version=version, total_count=len(medals))
+
+
+#: 档案与蚀刻章的快照存储是两份独立实现，契约相同：(名称, 存储类, 基线类, 造快照, 取 id 集合)。
+SNAPSHOT_STORES = (
+    ("archive", ArchiveSnapshotStore, ArchiveBaselineView, _make_snapshot,
+     lambda snap: {item.item_id for item in snap.items}),
+    ("medal", MedalSnapshotStore, MedalBaselineView, _make_medal_snapshot,
+     lambda snap: {medal.medal_id for medal in snap.medals}),
+)
+
+
+class SnapshotStoreTest(unittest.IsolatedAsyncioTestCase):
     async def test_current_and_baseline_stored_independently(self):
-        with tempfile.TemporaryDirectory() as d:
-            path = str(Path(d) / "snap.json")
-            store = ArchiveSnapshotStore(path)
-            self.assertIsNone(store.load_current_view())
-            self.assertIsNone(store.load_baseline_view())
+        for name, store_cls, baseline_cls, make_snapshot, ids_of in SNAPSHOT_STORES:
+            with self.subTest(store=name), tempfile.TemporaryDirectory() as d:
+                store = store_cls(str(Path(d) / "snap.json"))
+                self.assertIsNone(store.load_current_view())
+                self.assertIsNone(store.load_baseline_view())
 
-            await store.replace_current(_make_snapshot(["nar_a", "nar_b"], version="1.5"))
-            await store.replace_current(_make_snapshot(["nar_a", "nar_b", "nar_c"], version="1.5"))
-            cur = store.load_current_view()
-            self.assertEqual(cur.version, "1.5")
-            self.assertEqual({i.item_id for i in cur.items}, {"nar_a", "nar_b", "nar_c"})
+                # current 不再滚动 previous：两次 replace_current 只保留最后一次
+                await store.replace_current(make_snapshot(["nar_a", "nar_b"], version="1.5"))
+                await store.replace_current(make_snapshot(["nar_a", "nar_b", "nar_c"], version="1.5"))
+                cur = store.load_current_view()
+                self.assertEqual(cur.version, "1.5")
+                self.assertEqual(ids_of(cur), {"nar_a", "nar_b", "nar_c"})
 
-            await store.replace_baseline(ArchiveBaselineView(version="1.4", ids=["nar_a", "nar_b"]))
-            bl = store.load_baseline_view()
-            self.assertIsNotNone(bl)
-            self.assertEqual(bl.version, "1.4")
-            self.assertEqual(set(bl.ids), {"nar_a", "nar_b"})
-            self.assertEqual(cur.total_count, 3)
+                # baseline 独立存取，不影响 current
+                await store.replace_baseline(baseline_cls(version="1.4", ids=["nar_a", "nar_b"]))
+                bl = store.load_baseline_view()
+                self.assertEqual(bl.version, "1.4")
+                self.assertEqual(set(bl.ids), {"nar_a", "nar_b"})
+                self.assertEqual(store.load_current_view().total_count, 3)
 
-            await store.replace_baseline(None)
-            self.assertIsNone(store.load_baseline_view())
+                await store.replace_baseline(None)
+                self.assertIsNone(store.load_baseline_view())
 
     async def test_current_and_baseline_persisted_together(self):
-        with tempfile.TemporaryDirectory() as d:
-            path = str(Path(d) / "snap.json")
-            store = ArchiveSnapshotStore(path)
-            await store.replace_current_and_baseline(
-                _make_snapshot(["nar_new"], version="1.5"),
-                ArchiveBaselineView(version="1.4", ids=["nar_old"]),
-            )
-            reopened = ArchiveSnapshotStore(path)  # 模拟进程重启
-            self.assertEqual(reopened.load_current_view().version, "1.5")
-            self.assertEqual(reopened.load_baseline_view().version, "1.4")
+        for name, store_cls, baseline_cls, make_snapshot, _ in SNAPSHOT_STORES:
+            with self.subTest(store=name), tempfile.TemporaryDirectory() as d:
+                path = str(Path(d) / "snap.json")
+                await store_cls(path).replace_current_and_baseline(
+                    make_snapshot(["nar_new"], version="1.5"),
+                    baseline_cls(version="1.4", ids=["nar_old"]),
+                )
+                reopened = store_cls(path)  # 模拟进程重启
+                self.assertEqual(reopened.load_current_view().version, "1.5")
+                self.assertEqual(reopened.load_baseline_view().version, "1.4")
 
 
 class ArchiveServiceTest(unittest.IsolatedAsyncioTestCase):

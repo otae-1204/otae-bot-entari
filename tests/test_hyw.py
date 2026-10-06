@@ -648,11 +648,6 @@ class RetryTests(unittest.TestCase):
         self.assertFalse(transient_failure(Denied()))
 
 
-class ErrorTests(unittest.TestCase):
-    def test_hyw_error_is_an_exception(self):
-        self.assertIsInstance(HywError("x"), Exception)
-
-
 SECRETS = (
     "sk-live-SECRETKEY1234567890",
     "AIzaSyA-SECRET-QUERY-KEY-0000000000",

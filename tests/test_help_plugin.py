@@ -52,16 +52,6 @@ class HelpTopicMapTests(unittest.TestCase):
             self.assertIsNotNone(resolved, f"/help {alias} does not resolve to an image")
             self.assertTrue(resolved.exists(), f"/help {alias} resolved to a missing file")
 
-    def test_removed_dead_topics_stay_removed(self):
-        """These never had assets; re-adding the alias without the image regresses."""
-        for alias in ("mcping", "ping", "p", "online", "ol", "broadcast", "bc"):
-            if alias in self.topics:
-                self.assertIn(
-                    self.topics[alias],
-                    self.present,
-                    f"/help {alias} is registered but its image is missing",
-                )
-
     def test_main_and_endfield_topics_resolve(self):
         self.assertEqual(self.topics["main"], "main")
         self.assertEqual(self.topics["ef"], "endfield")

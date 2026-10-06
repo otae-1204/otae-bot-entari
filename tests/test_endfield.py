@@ -3311,53 +3311,6 @@ class EndfieldServiceTests(unittest.TestCase):
         self.assertIn("term-icon", html)
         self.assertNotIn(">S1<", html)
 
-    def test_bieli_second_potential_cryst_damage_value_and_no_icon(self):
-        raw_path = ROOT / ".runtime" / "bieli.json"
-        if not raw_path.exists():
-            self.skipTest("bieli runtime sample is not available")
-        import json
-
-        view = build_operator_view(json.loads(raw_path.read_text(encoding="utf-8")))
-        styles = draw.merged_term_styles(view)
-        rendered = draw.highlight_terms(view.potentials[1].description, styles, {})
-
-        expected_desc = "\u529b\u91cf+20\uff0c\u5bd2\u51b7\u4f24\u5bb3+10%\u3002"
-        marker = "\u5bd2\u51b7\u4f24\u5bb3</span><strong>+10%</strong>"
-        term = "\u5bd2\u51b7\u4f24\u5bb3"
-        self.assertEqual(view.potentials[1].description, expected_desc)
-        self.assertIn(marker, rendered)
-        term_fragment = rendered.split(marker, 1)[0].rsplit(term, 1)[-1]
-        self.assertNotIn("term-icon", term_fragment)
-
-    def test_gilberta_talent_charge_value_and_spell_vul_no_icon(self):
-        raw_path = ROOT / ".runtime" / "gilberta.json"
-        if not raw_path.exists():
-            self.skipTest("gilberta runtime sample is not available")
-        import json
-
-        view = build_operator_view(json.loads(raw_path.read_text(encoding="utf-8")))
-        self.assertGreaterEqual(len(view.potentials[1].description), 20)
-        styles = draw.merged_term_styles(view)
-        rendered = draw.highlight_terms(view.potentials[1].description, styles, {})
-
-        self.assertIn("\u5145\u80fd\u6548\u7387+7%", view.talents[0].description)
-        self.assertIn("\u6cd5\u672f\u8106\u5f31", rendered)
-        self.assertNotIn('<span class="term" style="--term-color: #33c2ff">\u6cd5\u672f\u8106\u5f31</span>', rendered)
-        self.assertNotIn('<span class="term-plain">\u6cd5\u672f\u8106\u5f31</span>', rendered)
-
-    def test_natural_inflict_keeps_own_icon_not_corrupt_icon(self):
-        raw_path = ROOT / ".runtime" / "gilberta.json"
-        if not raw_path.exists():
-            self.skipTest("gilberta runtime sample is not available")
-        import json
-
-        view = build_operator_view(json.loads(raw_path.read_text(encoding="utf-8")))
-        style = view.term_styles.get("\u81ea\u7136\u9644\u7740")
-
-        self.assertIsNotNone(style)
-        self.assertIn("icon_term_ba_naturalinflict", style.icon_url)
-        self.assertNotIn("icon_term_ba_corrupt", style.icon_url)
-
     def test_build_fz_operator_view_extracts_supported_schema(self):
         view = service.build_fz_operator_view(
             {

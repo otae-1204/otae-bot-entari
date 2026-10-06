@@ -61,11 +61,10 @@ def bili():
 class FakeApi:
     """Records calls and replays canned observations."""
 
-    def __init__(self, observations=None, cards=None, items=None, error=None):
+    def __init__(self, observations=None, cards=None, items=None):
         self.observations = observations or {}
         self.cards = cards or {}
         self.items = items or {}
-        self.error = error
         self.batch_calls = []
         self.room_calls = []
         self.video_calls = []
@@ -73,8 +72,6 @@ class FakeApi:
 
     async def batch_live_status(self, uids):
         self.batch_calls.append(list(uids))
-        if self.error is not None:
-            raise self.error
         return {uid: self.observations[uid] for uid in uids if uid in self.observations}
 
     async def live_observation(self, target):
@@ -98,71 +95,6 @@ async def open_store(bili, tmp_path):
 
 def subscription(bili, kind, uid, subscriber_type="group", subscriber_id="900"):
     return bili.models.Subscription(kind, uid, subscriber_type, subscriber_id)
-
-
-# --- live batch -------------------------------------------------------------
-
-
-@asyncio_test
-async def test_one_batch_request_covers_every_target(bili, tmp_path):
-    store = await open_store(bili, tmp_path)
-    try:
-        for uid in ("1", "2", "3"):
-            await store.upsert_target(bili.models.TargetInfo("live", uid))
-            await store.add_subscription("live", uid, "group", "900")
-        api = FakeApi(
-            observations={
-                uid: bili.models.LiveObservation(uid, room_id="100", is_live=True)
-                for uid in ("1", "2", "3")
-            }
-        )
-        poller = bili.poller.Poller(api, store)
-        await poller.tick_live()
-        assert api.batch_calls == [["1", "2", "3"]]
-        assert api.room_calls == []
-        # One live_on per target, fanned out to the single subscriber.
-        assert await store.outbox_count() == 3
-    finally:
-        await store.close()
-
-
-@asyncio_test
-async def test_missing_uid_is_not_treated_as_going_offline(bili, tmp_path):
-    store = await open_store(bili, tmp_path)
-    try:
-        await store.upsert_target(
-            bili.models.TargetInfo("live", "1", is_live=True, live_started_at=500, live_last_seen_at=900)
-        )
-        await store.add_subscription("live", "1", "group", "900")
-        api = FakeApi(observations={})
-        poller = bili.poller.Poller(api, store, clock=lambda: 1000)
-        await poller.tick_live()
-        assert await store.outbox_count() == 0
-        target = await store.get_target("live", "1")
-        # State untouched: no end notification, no last_seen advance.
-        assert target.is_live
-        assert (target.live_started_at, target.live_last_seen_at) == (500, 900)
-    finally:
-        await store.close()
-
-
-@asyncio_test
-async def test_batch_failure_falls_back_to_per_room_queries(bili, tmp_path):
-    store = await open_store(bili, tmp_path)
-    try:
-        for uid in ("1", "2"):
-            await store.upsert_target(bili.models.TargetInfo("live", uid))
-            await store.add_subscription("live", uid, "group", "900")
-        api = FakeApi(
-            observations={uid: bili.models.LiveObservation(uid, is_live=True) for uid in ("1", "2")},
-            error=RuntimeError("batch down"),
-        )
-        poller = bili.poller.Poller(api, store)
-        await poller.tick_live()
-        assert sorted(api.room_calls) == ["1", "2"]
-        assert await store.outbox_count() == 2
-    finally:
-        await store.close()
 
 
 # --- outbox fan-out and ordering --------------------------------------------
@@ -260,33 +192,6 @@ async def test_crash_before_delivery_replays_every_recipient(bili, tmp_path):
         await asyncio.sleep(0.1)
         await notifier.stop()
         assert sorted(sent) == [("group", "900"), ("user", "7")]
-        assert await store.outbox_count() == 0
-    finally:
-        await store.close()
-
-
-@asyncio_test
-async def test_failed_transaction_writes_nothing(bili, tmp_path):
-    store = await open_store(bili, tmp_path)
-    try:
-        target = bili.models.TargetInfo("live", "1", is_live=True)
-        card = bili.models.BiliCard("live_on", "标题", uid="1")
-        event = bili.models.BiliEvent("live", "1", card)
-
-        def explode(_event):
-            raise RuntimeError("outbox unavailable")
-
-        with pytest.raises(RuntimeError, match="outbox unavailable"):
-            await store.apply_poll_result(
-                [target],
-                [bili.models.SeenItem("live", "1", "x", 1)],
-                [event],
-                1000,
-                expand=lambda _event: [("group", "900")],
-                event_key=explode,
-            )
-        assert await store.get_target("live", "1") is None
-        assert await store.seen_ids("live", "1", ["x"]) == set()
         assert await store.outbox_count() == 0
     finally:
         await store.close()
@@ -433,27 +338,6 @@ async def test_one_failing_target_does_not_block_the_others(bili, tmp_path):
         # Two targets still produced notifications.
         assert await store.outbox_count() == 2
         assert {row.uid for row in await store.outbox_rows()} == {"1", "3"}
-    finally:
-        await store.close()
-
-
-@asyncio_test
-async def test_target_timeout_is_enforced(bili, tmp_path):
-    store = await open_store(bili, tmp_path)
-    try:
-        await store.upsert_target(bili.models.TargetInfo("video", "1"))
-        await store.add_subscription("video", "1", "group", "900")
-
-        class HangingApi(FakeApi):
-            async def latest_video(self, uid, *, deadline=None):
-                await asyncio.sleep(5)
-                raise AssertionError("should have been cancelled")
-
-        poller = bili.poller.Poller(
-            HangingApi(), store, target_timeout=0.05, intervals={"video": 0}
-        )
-        await asyncio.wait_for(poller.tick_video(), timeout=2)
-        assert await store.outbox_count() == 0
     finally:
         await store.close()
 

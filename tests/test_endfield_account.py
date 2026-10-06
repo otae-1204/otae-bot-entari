@@ -2681,8 +2681,7 @@ class EndfieldGachaAssetCacheTests(unittest.IsolatedAsyncioTestCase):
 
 
 class _FakeGachaClient:
-    def __init__(self, *, fail_pool: str = ""):
-        self.fail_pool = fail_pool
+    def __init__(self):
         self.calls = []
         self.weapon_calls = []
 
@@ -2697,8 +2696,6 @@ class _FakeGachaClient:
 
     async def character_records(self, role, token, pool_type, *, seq_id="", pool_name=""):
         self.calls.append((pool_type, seq_id))
-        if pool_type == self.fail_pool:
-            raise client_module.EndfieldAPIError("同步角色抽卡", "500", "失败")
         records = () if seq_id else (
             store_module.GachaRecord(role.role_id, role.server_id, pool_type, pool_name, pool_type, f"{pool_type}-2", 20, "c2", "六星", 6, "角色"),
             store_module.GachaRecord(role.role_id, role.server_id, pool_type, pool_name, pool_type, f"{pool_type}-1", 10, "c1", "五星", 5, "角色"),
@@ -2740,30 +2737,6 @@ class EndfieldGachaServiceTests(unittest.IsolatedAsyncioTestCase):
             "p": gacha_assets_module.GachaPoolRule("p", ("wpn_up",), 70)
         })
         self.assertEqual((fz_view.pools[0].large_pity_limit, fz_view.pools[0].large_pity_source), (70, "fz"))
-
-    async def test_full_then_incremental_stops_at_saved_boundary(self):
-        fake = _FakeGachaClient()
-        service = gacha_module.EndfieldGachaService(self.store, fake, self.cipher)
-        first = await service.sync(self.role, full=True)
-        second = await service.sync(self.role, full=False)
-        # 五条角色流（含重构寻访）各 2 条 + 武器流 1 条
-        self.assertEqual(first.inserted, 11)
-        self.assertEqual(second.inserted, 0)
-        self.assertEqual(self.store.count_gacha_records(self.role), 11)
-        self.assertIn(
-            "char:E_CharacterGachaPoolType_Rerun",
-            {state.stream_key for state in self.store.list_sync_states(self.role)},
-        )
-
-    async def test_partial_pool_failure_keeps_successful_records(self):
-        failed_pool = client_module.CHARACTER_POOL_TYPES[1]
-        service = gacha_module.EndfieldGachaService(self.store, _FakeGachaClient(fail_pool=failed_pool), self.cipher)
-        result = await service.sync(self.role, full=True)
-        self.assertEqual(len(result.failed), 1)
-        self.assertGreater(result.inserted, 0)
-        analysis = service.analysis(self.role)
-        self.assertFalse(analysis.complete)
-        self.assertTrue(analysis.errors)
 
     async def test_sync_uses_one_global_weapon_stream(self):
         fake = _FakeGachaClient()

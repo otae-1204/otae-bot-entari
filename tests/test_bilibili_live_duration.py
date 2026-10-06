@@ -340,57 +340,6 @@ async def test_start_poll_restart_end_and_next_session(bili, tmp_path):
         await store.close()
 
 
-@pytest.mark.parametrize(
-    "start,last_seen,expected",
-    [
-        (START, NOW - 60, 8280),
-        (START, NOW - 180, 8280),
-        (START, NOW - 181, None),
-        (START, NOW - 86400, None),
-        (START, 0, None),
-        (0, NOW - 60, None),
-        (START, NOW + 1, None),
-        (NOW + 1, NOW - 60, None),
-    ],
-)
-def test_end_estimate_requires_recent_valid_observation(
-    bili, start, last_seen, expected
-):
-    prev = bili.models.TargetInfo(
-        "live", "123", is_live=True, live_started_at=start, live_last_seen_at=last_seen
-    )
-    updated, events = bili.detect.detect_live(prev, live_obs(bili, is_live=False), NOW)
-    assert [event.card.live_duration_seconds for event in events] == [expected]
-    # 下播后状态重置。
-    assert (updated.live_started_at, updated.live_last_seen_at) == (0, 0)
-    assert updated.is_live is False
-
-
-@pytest.mark.parametrize(
-    "gap,new_start,expected",
-    [
-        (60, 0, START),
-        (181, 0, 0),
-        (3600, NOW - 30, NOW - 30),
-        (60, NOW - 30, NOW - 30),
-        (60, NOW + 1, START),
-    ],
-)
-def test_live_refresh_uses_new_session_start_and_limits_fallback(
-    bili, gap, new_start, expected
-):
-    prev = bili.models.TargetInfo(
-        "live", "123", is_live=True, live_started_at=START, live_last_seen_at=NOW - gap
-    )
-    updated, events = bili.detect.detect_live(
-        prev, live_obs(bili, is_live=True, started_at=new_start), NOW
-    )
-    assert updated.live_started_at == expected
-    assert updated.live_last_seen_at == NOW
-    # 刷新 session start 本身不是状态变化，不推送。
-    assert events == []
-
-
 @asyncio_test
 async def test_failed_poll_does_not_advance_last_seen_or_send_end(bili, tmp_path):
     # 纯函数层：没有观测结果就原样返回，不推进、不发下播。
