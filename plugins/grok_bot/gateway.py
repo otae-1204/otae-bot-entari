@@ -40,7 +40,11 @@ from .media import (
 
 PROTOCOL_ERROR = "网关响应数据结构异常，请管理员核实网关服务版本。"
 AWAITING_USER = "当前任务正等待人工介入确认，请管理员前往 Grok Bot 客户端处理后再发起提问。"
-CHUNK_BYTES = 1024 * 1024
+# About 350 KB of base64 JSON per response: some 15 s at the ~23 KB/s of a
+# relayed tailnet path, well inside CHUNK_TIMEOUT.
+CHUNK_BYTES = 256 * 1024
+# A chunk read still unfinished by then has stalled; it is retried on a new connection.
+CHUNK_TIMEOUT = 45
 # These POST RPCs only read state. Never retry a mutation on a lost response.
 READ_ONLY_COMMANDS = frozenset({
     "health", "listAgents", "getAsyncTasks", "getSubagents", "promptAcceptanceStatus",
@@ -186,7 +190,8 @@ class Gateway:
         self.connect = connect
         self.reconnect = False
 
-    async def request(self, command: str, body: dict | None = None, *, response_limit: int | None = None):
+    async def request(self, command: str, body: dict | None = None, *, response_limit: int | None = None,
+                      attempt_timeout: float | None = None):
         read_only = command in READ_ONLY_COMMANDS
         delays = (READ_RETRY_DELAYS if read_only
                   else UNANSWERED_RETRY_DELAYS if command in UNANSWERED_RETRY_COMMANDS else ())
@@ -202,11 +207,13 @@ class Gateway:
                 if fresh:
                     async with self.connect() as client:
                         data, received, answered_id = await self._request_once(
-                            command, payload, request_id, client, response_limit=response_limit)
+                            command, payload, request_id, client, response_limit=response_limit,
+                            attempt_timeout=attempt_timeout)
                     self.reconnect = False
                 else:
                     data, received, answered_id = await self._request_once(
-                        command, payload, request_id, self.client, response_limit=response_limit)
+                        command, payload, request_id, self.client, response_limit=response_limit,
+                        attempt_timeout=attempt_timeout)
             except GatewayError as error:
                 broken = isinstance(error.__cause__, httpx.TransportError)
                 if broken:
@@ -248,8 +255,12 @@ class Gateway:
         return text.replace(self.config.token, "<redacted>") if self.config.token else text
 
     async def _request_once(self, command: str, payload: bytes, request_id: str, client: httpx.AsyncClient, *,
-                            response_limit: int | None = None) -> tuple[object, int, str]:
-        """The decoded JSON, the received byte count and the response's x-sand-request-id."""
+                            response_limit: int | None = None, attempt_timeout: float | None = None) -> tuple[object, int, str]:
+        """The decoded JSON, the received byte count and the response's x-sand-request-id.
+
+        httpx's read timeout only bounds the gap between bytes, so a slow but
+        steady response never trips it; `attempt_timeout` bounds the whole attempt.
+        """
         health = command == "health"
         headers = {"x-sand-request-id": request_id, "x-sand-slim-avatars": "1"}
         if not health:
@@ -265,19 +276,27 @@ class Gateway:
                 kwargs["timeout"] = UPLOAD_TIMEOUT
             elif command in READ_TIMEOUTS:
                 kwargs["timeout"] = httpx.Timeout(20, connect=10, read=READ_TIMEOUTS[command])
-            if response_limit is None:
-                response = await client.request(*args, **kwargs)
-                answered_id = response.headers.get("x-sand-request-id", "")
-            else:
-                async with client.stream(*args, **kwargs) as streamed:
-                    responded = True
-                    answered_id = streamed.headers.get("x-sand-request-id", "")
-                    content = bytearray()
-                    async for chunk in streamed.aiter_bytes(chunk_size=65536):
-                        if len(content) + len(chunk) > response_limit:
-                            raise GrokError("附件接口下发数据量超出安全阈值，已中止数据接收。")
-                        content.extend(chunk)
-                    response = httpx.Response(streamed.status_code, content=bytes(content))
+            async with asyncio.timeout(attempt_timeout):
+                if response_limit is None:
+                    response = await client.request(*args, **kwargs)
+                    answered_id = response.headers.get("x-sand-request-id", "")
+                else:
+                    async with client.stream(*args, **kwargs) as streamed:
+                        responded = True
+                        answered_id = streamed.headers.get("x-sand-request-id", "")
+                        content = bytearray()
+                        async for chunk in streamed.aiter_bytes(chunk_size=65536):
+                            if len(content) + len(chunk) > response_limit:
+                                raise GrokError("附件接口下发数据量超出安全阈值，已中止数据接收。")
+                            content.extend(chunk)
+                        response = httpx.Response(streamed.status_code, content=bytes(content))
+        except TimeoutError:
+            # Only attempt_timeout raises the builtin TimeoutError here. Treated as a
+            # read timeout: retried by read-only commands, on a new connection.
+            raise GatewayError(
+                f"网关接口请求超时（{command} / ReadTimeout），已提交的任务可能仍在云端处理。",
+                retryable=True, responded=responded,
+            ) from httpx.ReadTimeout(f"no complete response within {attempt_timeout:g}s")
         except (httpx.ConnectTimeout, httpx.ConnectError, httpx.PoolTimeout) as error:
             raise GatewayError(
                 f"网关连接建立失败（{command} / {type(error).__name__}），提问尚未提交，请检查 Tailscale 网络及云端服务状态。",
@@ -345,7 +364,7 @@ class Gateway:
         async def chunk_at(offset: int, length: int):
             result = await self.request("readAttachmentChunk", {
                 "agentId": self.config.agent_id, "path": path, "offset": offset, "length": length,
-            }, response_limit=2 * CHUNK_BYTES)
+            }, response_limit=2 * CHUNK_BYTES, attempt_timeout=CHUNK_TIMEOUT)
             if not isinstance(result, dict) or type(result.get("totalSize")) is not int or result["totalSize"] < 0:
                 raise GrokError("云端附件数据不可用或协议不兼容，请在 Grok Bot 客户端查阅。")
             return result
