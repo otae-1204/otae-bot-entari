@@ -119,11 +119,15 @@ class DownloadBudget:
 
 
 class Transfer:
-    """One cloud attachment download and its deadline."""
+    """One cloud attachment download: its deadline and the fields of its log lines."""
 
     def __init__(self, path: str, hold: Callable[[float], None] | None = None):
         self.path, self.hold = path, hold
+        self.started = asyncio.get_running_loop().time()
         self.size: int | None = None
+        self.received = self.chunks = 0
+        self.budget, self.backoff = float(ATTACHMENT_BASE_SECONDS), 0.0
+        self.request_id = "-"
         self.deadline: asyncio.Timeout | None = None
 
     def extend(self, seconds: float) -> None:
@@ -134,7 +138,14 @@ class Transfer:
 
     def pause(self, seconds: float) -> None:
         """Retry backoff: waiting out a dropped link does not use up the budget."""
+        self.backoff += seconds
         self.extend(seconds)
+
+    def progress(self) -> str:
+        total = "?" if self.size is None else self.size
+        chunks = "?" if self.size is None else chunk_count(self.size)
+        elapsed = asyncio.get_running_loop().time() - self.started
+        return f"received={self.received}/{total}B chunks={self.chunks}/{chunks} elapsed={elapsed:.2f}s"
 
 
 def entries_from(payload: object) -> list[dict]:
@@ -236,6 +247,8 @@ class Gateway:
         broken = False
         for attempt in range(attempts):
             started, request_id = monotonic(), str(uuid4())
+            if transfer is not None:
+                transfer.request_id = request_id
             # Another request may already have cleared self.reconnect; this retry still avoids the pool.
             fresh = (broken or self.reconnect) and self.connect is not None
             try:
@@ -411,12 +424,20 @@ class Gateway:
                 transfer.extend(0)  # Tells `hold` the first deadline.
                 return await self._read_chunks(transfer, limit)
         except TimeoutError:
+            logger.warning("[grok_bot] attachment path={} budget exhausted {} budget={:.0f}s backoff={:.0f}s request_id={}",
+                           transfer.path, transfer.progress(), transfer.budget, transfer.backoff, transfer.request_id)
             if transfer.size is not None and transfer.size >= 1_000_000:
                 raise GrokError(f"附件拉取超时（文件约 {transfer.size / 1_000_000:.1f} MB，传输速度过慢），"
                                 "请在 Grok Bot 客户端查阅。") from None
             raise GrokError(DOWNLOAD_TIMEOUT) from None
+        except GrokError as error:
+            # GrokError text is generated locally; gateway failures were logged by request().
+            logger.warning("[grok_bot] attachment path={} failed {} error={}", transfer.path, transfer.progress(), error)
+            raise
 
     async def _read_chunks(self, transfer: Transfer, limit: int) -> tuple[bytes, str]:
+        loop = asyncio.get_running_loop()
+
         async def chunk_at(offset: int, length: int):
             result = await self.request("readAttachmentChunk", {
                 "agentId": self.config.agent_id, "path": transfer.path, "offset": offset, "length": length,
@@ -428,13 +449,17 @@ class Gateway:
         # A zero-length read gives the size before allocating/downloading bytes.
         head = await chunk_at(0, 0)
         size = transfer.size = head["totalSize"]
+        mime = mime_type(head.get("mime"))
+        transfer.budget = download_seconds(size)
+        logger.info("[grok_bot] attachment path={} size={}B mime={} chunks={} budget={:.0f}s",
+                    transfer.path, size, mime, chunk_count(size), transfer.budget)
         if size > limit:
             raise GrokError("附件体积超过单文件 20 MB 或总计 50 MB 上限，未执行下载。")
-        transfer.extend(download_seconds(size) - ATTACHMENT_BASE_SECONDS)
+        transfer.extend(transfer.budget - ATTACHMENT_BASE_SECONDS)
         data = bytearray()
-        mime = mime_type(head.get("mime"))
         while len(data) < size:
             length = min(CHUNK_BYTES, size - len(data))
+            started = loop.time()
             part = await chunk_at(len(data), length)
             encoded = part.get("bytesBase64")
             if part["totalSize"] != size or not isinstance(encoded, str) or len(encoded) > ((length + 2) // 3) * 4:
@@ -446,8 +471,14 @@ class Gateway:
             if not chunk or len(chunk) > length:
                 raise GrokError("云端附件未能完整获取，请在 Grok Bot 客户端查阅。")
             data.extend(chunk)
+            transfer.received, transfer.chunks = len(data), transfer.chunks + 1
+            logger.info("[grok_bot] attachment path={} chunk={}/{} offset={} bytes={} elapsed={:.2f}s request_id={}",
+                        transfer.path, transfer.chunks, chunk_count(size), len(data) - len(chunk), len(chunk),
+                        loop.time() - started, transfer.request_id)
             if mime == "application/octet-stream":
                 mime = mime_type(part.get("mime"))
+        logger.info("[grok_bot] attachment path={} done size={}B chunks={} elapsed={:.2f}s backoff={:.0f}s",
+                    transfer.path, size, transfer.chunks, loop.time() - transfer.started, transfer.backoff)
         return bytes(data), mime
 
     async def collect_attachment(self, item: Attachment, budget: DownloadBudget) -> Attachment:

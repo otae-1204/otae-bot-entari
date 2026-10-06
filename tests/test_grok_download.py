@@ -99,15 +99,30 @@ class AttachmentDownloadTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.read(host), (host.data, "image/png"))
         self.assertEqual(self.held, [start + 30, start + 130])
 
-    async def test_file_is_read_in_small_chunks(self):
+    async def test_file_is_read_in_small_chunks_and_each_is_logged(self):
         self.assertTrue(256 * 1024 <= CHUNK <= 512 * 1024)
         host = self.host(5 * CHUNK // 2)
-        data, _ = await self.read(host)
+
+        async def relay(index, offset, length):
+            await self.clock.advance(15 * length / CHUNK)  # ~15 s per chunk at 23 KB/s.
+
+        host.behave = relay
+        with logs() as sink:
+            data, _ = await self.read(host)
         self.assertEqual(data, host.data)
         self.assertEqual([call[1:3] for call in host.calls], [(0, 0), (0, CHUNK), (CHUNK, CHUNK), (2 * CHUNK, CHUNK // 2)])
         # A full chunk's JSON response stays inside the response limit.
         full = json.dumps({"totalSize": len(data), "mime": "image/png", "bytesBase64": base64.b64encode(data[:CHUNK]).decode()})
         self.assertLess(len(full), 2 * CHUNK)
+        lines = [line for line in sink.getvalue().splitlines() if line.startswith("INFO [grok_bot] attachment")]
+        ids = [call[3] for call in host.calls]
+        self.assertEqual(lines, [
+            f"INFO [grok_bot] attachment path={PATH} size={len(data)}B mime=image/png chunks=3 budget=105s",
+            f"INFO [grok_bot] attachment path={PATH} chunk=1/3 offset=0 bytes={CHUNK} elapsed=15.00s request_id={ids[1]}",
+            f"INFO [grok_bot] attachment path={PATH} chunk=2/3 offset={CHUNK} bytes={CHUNK} elapsed=15.00s request_id={ids[2]}",
+            f"INFO [grok_bot] attachment path={PATH} chunk=3/3 offset={2 * CHUNK} bytes={CHUNK // 2} elapsed=7.50s request_id={ids[3]}",
+            f"INFO [grok_bot] attachment path={PATH} done size={len(data)}B chunks=3 elapsed=37.50s backoff=0s",
+        ])
 
     async def test_stalled_chunk_is_retried_on_a_new_connection(self):
         host = self.host(2 * CHUNK)
@@ -132,10 +147,12 @@ class AttachmentDownloadTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("cause=httpx.ReadTimeout: no complete response within 45s", log)
         self.assertIn("INFO [grok_bot] gateway command=readAttachmentChunk attempt=2/6 ", log)
         self.assertIn(f"request_id={host.calls[3][3]} connection=new ok", log)
-        # The stalled 46 s count against the 80 s budget; the 1 s backoff moves its deadline.
+        # The stalled 46 s count against the budget; the 1 s backoff does not.
+        self.assertIn(f"chunk=2/2 offset={CHUNK} bytes={CHUNK} elapsed=47.00s", log)
+        self.assertIn(f"done size={len(data)}B chunks=2 elapsed=47.00s backoff=1s", log)
         self.assertEqual(self.held[-1] - self.held[0], 80 - 30 + 1)
 
-    async def test_exhausted_budget_tells_the_user(self):
+    async def test_exhausted_budget_logs_progress_and_tells_the_user(self):
         host = self.host(3_000_000)  # 12 chunks: the 300 s cap.
 
         async def slow(index, offset, length):
@@ -144,12 +161,18 @@ class AttachmentDownloadTests(unittest.IsolatedAsyncioTestCase):
 
         host.behave = slow
         start = self.clock.now
-        result = await host.gateway().collect_attachment(
-            Attachment("立绘.png", PATH, image=True), gateway.DownloadBudget(hold=self.held.append))
+        with logs() as sink:
+            result = await host.gateway().collect_attachment(
+                Attachment("立绘.png", PATH, image=True), gateway.DownloadBudget(hold=self.held.append))
         self.assertIsNone(result.data)
         self.assertEqual(result.error, "附件拉取超时（文件约 3.0 MB，传输速度过慢），请在 Grok Bot 客户端查阅。")
         self.assertEqual(self.held, [start + 30, start + 300])
         self.assertEqual(len(host.calls), 1 + 8)  # The size, seven chunks, and the eighth cut off at 300 s.
+        warnings = [line for line in sink.getvalue().splitlines() if line.startswith("WARNING [grok_bot]")]
+        self.assertEqual(warnings, [(
+            f"WARNING [grok_bot] attachment path={PATH} budget exhausted received={7 * CHUNK}/3000000B chunks=7/12 "
+            f"elapsed=320.00s budget=300s backoff=0s request_id={host.calls[-1][3]}"
+        )])
 
     async def test_budget_runs_out_before_the_size_is_known(self):
         host = self.host(CHUNK)
@@ -158,8 +181,11 @@ class AttachmentDownloadTests(unittest.IsolatedAsyncioTestCase):
             await self.clock.advance(gateway.ATTACHMENT_BASE_SECONDS + 5)
 
         host.behave = slow_head
-        result = await host.gateway().collect_attachment(Attachment("立绘.png", PATH), gateway.DownloadBudget())
+        with logs() as sink:
+            result = await host.gateway().collect_attachment(Attachment("立绘.png", PATH), gateway.DownloadBudget())
         self.assertEqual(result.error, gateway.DOWNLOAD_TIMEOUT)
+        self.assertIn(f"WARNING [grok_bot] attachment path={PATH} budget exhausted received=0/?B chunks=0/? "
+                      f"elapsed=35.00s budget=30s backoff=0s request_id={host.calls[0][3]}", sink.getvalue())
 
     async def test_retry_backoff_does_not_use_up_the_budget(self):
         host = self.host(1000)  # One chunk: a 55 s budget.
@@ -172,8 +198,30 @@ class AttachmentDownloadTests(unittest.IsolatedAsyncioTestCase):
 
         host.behave = flaky
         start = self.clock.now
-        data, _ = await self.read(host)
+        with logs() as sink:
+            data, _ = await self.read(host)
         self.assertEqual(data, host.data)
         self.assertEqual(self.clock.slept, list(gateway.READ_RETRY_DELAYS))
         # 31 s of backoff and a 40 s read pass 55 s, but backoff stops the budget clock.
         self.assertEqual(self.held[-1], start + 55 + 31)
+        self.assertIn("done size=1000B chunks=1 elapsed=71.00s backoff=31s", sink.getvalue())
+
+    async def test_logs_never_contain_the_token(self):
+        host = self.host(2 * CHUNK)
+
+        async def broken(index, offset, length):
+            if length:
+                raise httpx.ReadError(f"{CONFIG.token} upstream-body")
+
+        host.behave = broken
+        with logs() as sink:
+            result = await host.gateway().collect_attachment(Attachment("立绘.png", PATH), gateway.DownloadBudget())
+        log = sink.getvalue()
+        self.assertIn("readAttachmentChunk / ReadError", result.error)
+        self.assertIn("cause=httpx.ReadError: <redacted> upstream-body", log)
+        self.assertIn("Traceback", log)  # The final failure carries its call chain.
+        self.assertIn(f"WARNING [grok_bot] attachment path={PATH} failed received=0/{2 * CHUNK}B chunks=0/2 ", log)
+        self.assertEqual(len(host.calls), 1 + 1 + len(gateway.READ_RETRY_DELAYS))
+        for text in (log, result.error):
+            self.assertNotIn(CONFIG.token, text)
+            self.assertNotIn("Authorization", text)
