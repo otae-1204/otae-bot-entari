@@ -146,7 +146,7 @@ def make_store(bili, tmp_path):
 
 
 def make_service(bili, backend, store):
-    client = bili.client.BiliApi(transport=httpx.MockTransport(backend))
+    client = bili.client.BiliApi(transport=httpx.MockTransport(backend), min_interval=0)
     return bili.service.BiliService(store, client)
 
 
@@ -526,7 +526,7 @@ def test_refresh_live_with_plain_number_never_touches_the_room_owner(bili, tmp_p
 
 def test_live_link_preview_uses_the_room_owner(bili):
     backend = collision_backend()
-    client = bili.client.BiliApi(transport=httpx.MockTransport(backend))
+    client = bili.client.BiliApi(transport=httpx.MockTransport(backend), min_interval=0)
     parsed = asyncio.run(client.parse_link(f"https://live.bilibili.com/{UID}"))
     assert (parsed.kind, parsed.value) == ("live", UID)
     card = asyncio.run(client.card_for_link(parsed))
@@ -536,7 +536,7 @@ def test_live_link_preview_uses_the_room_owner(bili):
 
 def test_live_link_preview_never_resolves_the_room_number_as_a_uid(bili):
     backend = collision_backend()
-    client = bili.client.BiliApi(transport=httpx.MockTransport(backend))
+    client = bili.client.BiliApi(transport=httpx.MockTransport(backend), min_interval=0)
     asyncio.run(client.card_for_link(bili.client.ParsedLink("live", UID, "")))
     paths = [path for path, _ in backend.requests]
     assert "/live_user/v1/Master/info" in paths

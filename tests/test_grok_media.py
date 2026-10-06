@@ -143,11 +143,12 @@ class ImageTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(decoded.convert("RGBA").getpixel((10, 10))[3], 0)
             self.assertEqual(decoded.convert("RGBA").getpixel((1500, 10)), (255, 0, 0, 255))
         # Noisy transparency falls back to a palette, which keeps the alpha channel.
-        noisy = PILImage.merge("RGBA", [PILImage.effect_noise((1600, 1600), 100)] * 3 + [PILImage.linear_gradient("L").resize((1600, 1600))])
+        noisy = PILImage.merge("RGBA", [PILImage.effect_noise((400, 400), 100)] * 3 + [PILImage.linear_gradient("L").resize((400, 400))])
         with patch.object(media, "UPLOAD_IMAGE_BYTES", len(encode(noisy, "PNG")) - 1):
             data, kind = media.compress_image(encode(noisy, "PNG"))
         self.assertEqual(kind, "PNG")
         with PILImage.open(BytesIO(data)) as decoded:
+            self.assertEqual(decoded.mode, "P")
             self.assertLess(decoded.convert("RGBA").getchannel("A").getextrema()[0], 32)
         # An opaque alpha channel is not transparency.
         _, kind = media.compress_image(encode(PILImage.new("RGBA", (10, 10), (0, 0, 255, 255)), "PNG"))

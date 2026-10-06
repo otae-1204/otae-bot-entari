@@ -634,7 +634,10 @@ class EndfieldAccountDetailRoutingTests(unittest.IsolatedAsyncioTestCase):
         matcher = mock.AsyncMock()
         prompt = mock.AsyncMock(return_value=reply)
         with store_patch, group_patch, cipher_patch, detail_patch as detail, currency_patch as currency, draw_patch as draw, finish_patch:
-            with mock.patch.object(endfield, "prompt_silently", prompt):
+            # AKE 公开数据（名称表、冷启动提示）会真实联网，与路由无关。
+            with mock.patch.object(endfield, "prompt_silently", prompt), mock.patch.object(
+                endfield, "fetch_account_detail_name_map", mock.AsyncMock(return_value=None)
+            ), mock.patch.object(endfield, "notice_default_ake_public", mock.AsyncMock()):
                 await endfield._handle_accounts(
                     matcher, "qq", command, mock.Mock(), group=group
                 )
