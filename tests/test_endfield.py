@@ -671,7 +671,7 @@ class EndfieldCommandParserTests(unittest.TestCase):
         self.assertIn("武器：AkeData、FZ Wiki、Warfarin Wiki", text)
         self.assertIn("装备：AkeData、FZ Wiki", text)
 
-    def test_help_documents_source_loadout_and_calendar_options(self):
+    def test_help_documents_source_loadout_calendar_and_daily(self):
         text = commands.format_help()
 
         self.assertIn("--source <fz|akedata|warfarin>", text)
@@ -679,6 +679,7 @@ class EndfieldCommandParserTests(unittest.TestCase):
         self.assertIn("角色潜能2 武器潜能3", text)
         self.assertIn("武器技能1等级5", text)
         self.assertIn("/ef 版本日历", text)
+        self.assertIn("/ef 日常", text)
 
     def test_current_version_calendar_manifest_is_data_driven_and_complete(self):
         calendar_module = _load_endfield_module("version_calendar")

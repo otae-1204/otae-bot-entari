@@ -59,9 +59,6 @@ class DailyCommandParseTests(unittest.TestCase):
         parsed = commands_module.parse_command("daily UID1234")
         self.assertEqual((parsed.action, parsed.account_selector), ("daily", "UID1234"))
 
-    def test_daily_help_mentions_command(self):
-        self.assertIn("/ef 日常", commands_module.format_help())
-
 
 class EndfieldActionDispatchTests(unittest.TestCase):
     """Guard the dispatch gate in ``_handle_command`` against silent dead branches.
