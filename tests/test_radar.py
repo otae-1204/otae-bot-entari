@@ -24,6 +24,7 @@ import sys
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import httpx
 
@@ -496,9 +497,14 @@ class ProviderErrorTests(unittest.TestCase):
             with self.subTest(status=status):
                 http = FakeHTTP(errors={"/api/v1/leaderboard": error_response(status, API + "/leaderboard")})
                 client = make_client(http, leaderboard=0.0)
-                with self.assertRaises(kind) as ctx:
-                    run(client.leaderboard("deep-swe"))
+                with patch("plugins.radar.provider.asyncio.sleep", new=AsyncMock()) as sleep:
+                    with self.assertRaises(kind) as ctx:
+                        run(client.leaderboard("deep-swe"))
                 self.assertEqual(ctx.exception.code, code)
+                # 只有 429 退避重试；其他状态码立刻放弃。
+                retries = CFG.retry.rate_limit_retries if status == 429 else 0
+                self.assertEqual(sleep.await_count, retries)
+                self.assertEqual(http.count("/api/v1/leaderboard"), retries + 1)
 
     def test_timeout_maps_to_upstream_unavailable(self):
         http = FakeHTTP(errors={"/api/v1/leaderboard": httpx.ConnectTimeout("nope")})
@@ -536,8 +542,9 @@ class ProviderErrorTests(unittest.TestCase):
     def test_no_stale_cache_means_the_error_surfaces(self):
         http = FakeHTTP(errors={"/api/v1/leaderboard": error_response(503, API + "/leaderboard")})
         client = make_client(http, leaderboard=0.0)
-        with self.assertRaises(UpstreamUnavailable):
-            run(client.leaderboard("deep-swe"))
+        with patch("plugins.radar.provider.asyncio.sleep", new=AsyncMock()):
+            with self.assertRaises(UpstreamUnavailable):
+                run(client.leaderboard("deep-swe"))
 
     def test_cache_hit_does_not_refetch(self):
         http = FakeHTTP()
