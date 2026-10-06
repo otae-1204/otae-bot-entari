@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, patch
 
 import plugins.endfield.handlers as endfield
 from plugins.endfield.catalog import commands
-from plugins.endfield.providers.warfarin import WarfarinAPIError
 from plugins.endfield.stages import draw as stage_draw
 from plugins.endfield.stages.draw import (
     _stage_icon_urls,
@@ -50,7 +49,7 @@ from plugins.endfield.stages.service import (
     _match_item,
     select_variant,
 )
-from plugins.endfield.stages.fz import FZStageSource, _localized, parse_enemy_resistances, parse_fz_stage
+from plugins.endfield.stages.fz import _localized, parse_enemy_resistances, parse_fz_stage
 
 
 def _resistance_models() -> tuple[StageEnemyResistance, ...]:
@@ -562,8 +561,12 @@ class EndfieldStageCommandTests(unittest.TestCase):
 
     def test_help_and_source_list_stage(self):
         self.assertIn("/ef 副本 <关卡名> [变体名|总览]", commands.format_help())
-        self.assertIn("关卡：AkeData", commands.format_source())
-        self.assertIn("关卡数据仅使用 AkeData", commands.format_source())
+        source_text = commands.format_source()
+        stage_line = next(line for line in source_text.splitlines() if line.startswith("关卡："))
+        # 关卡只列 AkeData 一个来源，没有 FZ / Warfarin 回退。
+        self.assertIn("AkeData", stage_line)
+        self.assertNotIn("FZ", stage_line)
+        self.assertNotIn("Warfarin", stage_line)
         self.assertEqual(source_order("stage"), ("akedata",))
 
     def test_akedata_source_option_and_alias(self):
@@ -1567,69 +1570,9 @@ class EndfieldStageCatalogTests(unittest.IsolatedAsyncioTestCase):
 
         akedata_source.stage.assert_awaited_once_with("series:fixture")
         self.assertEqual(view.stage.source.source, "AkeData")
-        with self.assertRaisesRegex(Exception, "fz 暂不支持关卡资料"):
+        with self.assertRaisesRegex(endfield.StageDataIncomplete, "fz"):
             await service.get_stage_view("series:fixture", source="fz")
-
-    async def test_catalog_includes_registered_special_modes(self):
-        client = AsyncMock()
-        payloads = {
-            "危境再现": {
-                "articles": [
-                    {
-                        "title": "危境再现/罗丹",
-                        "categories": ["危境再现"],
-                        "currentRevisionId": "rodin-r1",
-                        "updatedAt": "2026-07-21T00:00:00Z",
-                    }
-                ]
-            },
-            "能量淤积点": {
-                "articles": [
-                    {
-                        "title": "能量淤积点·供能高地",
-                        "categories": ["能量淤积点"],
-                        "currentRevisionId": "energy-r1",
-                        "updatedAt": "2026-07-23T00:00:00Z",
-                    }
-                ]
-            },
-            "协议空间": {
-                "articles": [
-                    {
-                        "title": "协议空间·折金票",
-                        "categories": ["协议空间"],
-                        "currentRevisionId": "resource-r1",
-                        "updatedAt": "2026-07-20T00:00:00Z",
-                    }
-                ]
-            },
-            "危机合约": {
-                "articles": [
-                    {
-                        "title": "危机合约",
-                        "categories": ["危机合约"],
-                        "currentRevisionId": "contract-r1",
-                        "updatedAt": "2026-07-22T00:00:00Z",
-                    }
-                ]
-            },
-            "战争回响": {
-                "articles": [
-                    {
-                        "title": "活动/战争回响/谵妄赛季",
-                        "categories": ["战争回响"],
-                        "currentRevisionId": "war-r1",
-                        "updatedAt": "2026-07-24T00:00:00Z",
-                    }
-                ]
-            },
-        }
-        client.fz_articles.side_effect = lambda *, category, ns=0: payloads.get(category, {"articles": []})
-        client.fz_article_by_title.return_value = _war_echo_fixture()
-        catalog = await FZStageSource(client).catalog()
-        names = [item.name for group in catalog.groups for item in group.items]
-        self.assertEqual(names, ["罗丹", "供能高地", "折金票", "危机合约", "野性旧事"])
-        self.assertEqual((catalog.queryable_count, catalog.pending_count), (5, 0))
+        self.assertEqual(akedata_source.stage.await_count, 1)
 
     async def test_default_catalog_uses_only_akedata(self):
         version, tables = _akedata_fixture()
@@ -1657,9 +1600,11 @@ class EndfieldStageIntegrationTests(unittest.IsolatedAsyncioTestCase):
             "query", scope="stage", query="罗丹", source="warfarin"
         )
         await endfield._handle_command(matcher, None, command)
-        matcher.finish.assert_awaited_once_with(
-            "Warfarin Wiki 暂不支持关卡资料；关卡仅使用 AkeData。"
-        )
+        matcher.finish.assert_awaited_once()
+        message = matcher.finish.await_args.args[0]
+        self.assertIn("Warfarin Wiki", message)
+        self.assertIn("不支持", message)
+        self.assertIn("AkeData", message)
 
     async def test_explicit_fz_stage_query_reports_akedata_only(self):
         matcher = AsyncMock()
@@ -1669,9 +1614,11 @@ class EndfieldStageIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
         await endfield._handle_command(matcher, None, command)
 
-        matcher.finish.assert_awaited_once_with(
-            "FZ Wiki 暂不支持关卡资料；关卡仅使用 AkeData。"
-        )
+        matcher.finish.assert_awaited_once()
+        message = matcher.finish.await_args.args[0]
+        self.assertIn("FZ Wiki", message)
+        self.assertIn("不支持", message)
+        self.assertIn("AkeData", message)
 
     async def test_stage_card_cache_key_includes_revision(self):
         renderer = AsyncMock(side_effect=(b"revision-one", b"revision-two"))
@@ -1728,102 +1675,6 @@ class EndfieldStageIntegrationTests(unittest.IsolatedAsyncioTestCase):
         )
 
 
-class EndfieldStageResistanceSourceTests(unittest.IsolatedAsyncioTestCase):
-    async def test_wave_enemies_get_resistances_from_their_own_article(self):
-        client = AsyncMock()
-
-        async def fetch(title, **kwargs):
-            return _energy_fixture() if title.startswith("能量淤积点") else _enemy_article_fixture()
-
-        client.fz_article_by_title = AsyncMock(side_effect=fetch)
-        stage, unreachable = await FZStageSource(client).stage("能量淤积点·供能高地")
-        self.assertEqual(stage.variants[0].extension.waves[0].enemy.resistances[0].percent, 80.0)
-        self.assertEqual(stage.variants[0].enemies[0].resistances[0].percent, 80.0)
-        self.assertEqual(client.fz_article_by_title.await_count, 2)
-        self.assertEqual(unreachable, ())
-
-    async def test_enemy_article_failure_leaves_the_card_renderable(self):
-        client = AsyncMock()
-
-        async def fetch(title, **kwargs):
-            if title.startswith("能量淤积点"):
-                return _energy_fixture()
-            raise WarfarinAPIError("FZ Wiki 请求超时")
-
-        client.fz_article_by_title = AsyncMock(side_effect=fetch)
-        stage, unreachable = await FZStageSource(client).stage("能量淤积点·供能高地")
-        self.assertIsNone(stage.variants[0].extension.waves[0].enemy.resistances)
-        self.assertEqual(unreachable, ("敌人/碾骨先锋",))
-        html = render_stage_card_html(
-            StageCardView(stage, "detail", stage.variants[0], unreachable_enemies=unreachable)
-        )
-        # A failed fetch must not be reported as "the source does not publish this".
-        self.assertIn("本次未能取得，稍后重试", html)
-        self.assertNotIn("数据源暂未提供该项资料：敌人元素抗性", html)
-
-    async def test_explicitly_empty_enemy_article_is_not_reported_as_missing(self):
-        client = AsyncMock()
-        empty = _enemy_article_fixture()
-        for node in empty["revision"]["contentJson"]["content"]:
-            if node["type"] == "endfieldCardEnemyResistances":
-                node["attrs"]["rows"] = []
-
-        async def fetch(title, **kwargs):
-            return _energy_fixture() if title.startswith("能量淤积点") else empty
-
-        client.fz_article_by_title = AsyncMock(side_effect=fetch)
-        stage, unreachable = await FZStageSource(client).stage("能量淤积点·供能高地")
-        self.assertEqual(stage.variants[0].extension.waves[0].enemy.resistances, ())
-        self.assertEqual(unreachable, ())
-        html = render_stage_card_html(StageCardView(stage, "detail", stage.variants[0]))
-        self.assertIn("来源明确标注暂无元素抗性", html)
-        self.assertNotIn("数据源暂未提供该项资料：敌人元素抗性", html)
-
-    async def test_boss_reads_resistances_inline_and_fetches_only_for_knots(self):
-        """Resistances and poise values are embedded; only the knots require the enemy article."""
-        client = AsyncMock()
-
-        async def fetch(title, **kwargs):
-            return _shared_flavor_fixture() if title.startswith("危境再现") else _enemy_article_fixture()
-
-        client.fz_article_by_title = AsyncMock(side_effect=fetch)
-        stage, unreachable = await FZStageSource(client).stage("危境再现/三位一体")
-        boss = stage.variants[0].enemies[0]
-        self.assertEqual(boss.article_title, "敌人/三位一体")
-        self.assertEqual(boss.resistances[0].percent, 80.0)
-        self.assertEqual(boss.poise.max_value, 280.0)
-        self.assertEqual(boss.poise.knots, (0.25, 0.5, 0.75))
-        self.assertEqual(unreachable, ())
-        # one call for the stage, one for the single distinct enemy article
-        self.assertEqual(client.fz_article_by_title.await_count, 2)
-
-    async def test_boss_keeps_inline_values_when_the_enemy_article_is_unreachable(self):
-        client = AsyncMock()
-
-        async def fetch(title, **kwargs):
-            if title.startswith("危境再现"):
-                return _shared_flavor_fixture()
-            raise WarfarinAPIError("FZ Wiki 请求超时")
-
-        client.fz_article_by_title = AsyncMock(side_effect=fetch)
-        stage, unreachable = await FZStageSource(client).stage("危境再现/三位一体")
-        boss = stage.variants[0].enemies[0]
-        self.assertEqual(boss.resistances[0].percent, 80.0)
-        self.assertEqual(boss.poise.max_value, 280.0)
-        self.assertIsNone(boss.poise.knots)
-        self.assertEqual(unreachable, ("敌人/三位一体",))
-
-    async def test_enemy_article_with_no_knots_is_recorded_as_empty(self):
-        client = AsyncMock()
-
-        async def fetch(title, **kwargs):
-            return _energy_fixture() if title.startswith("能量淤积点") else _enemy_article_fixture(knots=[])
-
-        client.fz_article_by_title = AsyncMock(side_effect=fetch)
-        stage, _ = await FZStageSource(client).stage("能量淤积点·供能高地")
-        self.assertEqual(stage.variants[0].extension.waves[0].enemy.poise.knots, ())
-
-
 class EndfieldStageDrawTests(unittest.TestCase):
     def test_detail_html_marks_unknown_fields_without_fabricating_zero(self):
         stage = parse_fz_stage(_energy_fixture(include_tables=False))
@@ -1831,6 +1682,16 @@ class EndfieldStageDrawTests(unittest.TestCase):
         self.assertIn("数据源暂未提供该项资料", html)
         self.assertNotIn("理智消耗</span><b>0", html)
         self.assertIn("revision-1", html)
+
+    def test_unreachable_enemy_article_is_reported_as_retryable_not_missing(self):
+        stage = parse_fz_stage(_energy_fixture())
+        self.assertIsNone(stage.variants[0].extension.waves[0].enemy.resistances)
+        html = render_stage_card_html(
+            StageCardView(stage, "detail", stage.variants[0], unreachable_enemies=("敌人/碾骨先锋",))
+        )
+        # A failed fetch must not be reported as "the source does not publish this".
+        self.assertIn("本次未能取得，稍后重试", html)
+        self.assertNotIn("数据源暂未提供该项资料：敌人元素抗性", html)
 
     def test_detail_rail_lists_every_variant_and_marks_the_selected_one(self):
         stage = parse_fz_stage(_boss_fixture())

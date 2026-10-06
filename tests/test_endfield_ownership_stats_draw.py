@@ -328,10 +328,6 @@ class OwnershipStatsDrawTests(unittest.TestCase):
         for label in ("未持有", "0潜", "1潜", "5潜", "未知"):
             self.assertIn(label, html)
 
-    def test_draw_registers_renderer_without_recoupling_commands(self):
-        # 展示层通过 register_ownership_stats_renderer 接入,命令层只认 render_ownership_stats。
-        self.assertTrue(callable(ownership_stats_draw.draw_ownership_stats))
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -8,8 +8,6 @@ in `detect_live` end to end (refactor plan, sections 4.1, 4.5 and stage 3).
 
 from __future__ import annotations
 
-import asyncio
-import functools
 import json
 import sys
 import time
@@ -18,11 +16,11 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from tests.test_core_logic import (
+from tests.support.bilibili import asyncio_test
+from tests.support.loaders import (
     _bili_root_package,
     _load_bili_new_module,
     _load_bili_subpackage,
-    _load_module,
 )
 
 
@@ -37,14 +35,6 @@ NAV = {
 }
 
 
-def _load_in_package(package: str, name: str):
-    """Load one more module inside the synthetic package the loader created."""
-    key = f"{package}.{name}"
-    if key in sys.modules:
-        return sys.modules[key]
-    return _load_module(key, f"plugins/bilibilibot/{name}.py")
-
-
 @pytest.fixture
 def bili():
     poller = _load_bili_new_module("poller")
@@ -55,16 +45,6 @@ def bili():
         store=sys.modules[package + ".store"],
         models=sys.modules[package + ".models"],
     )
-
-
-def asyncio_test(fn):
-    """Run one coroutine test on a fresh loop (this repo has no asyncio plugin)."""
-
-    @functools.wraps(fn)
-    def wrapper(*args, **kwargs):
-        return asyncio.run(fn(*args, **kwargs))
-
-    return wrapper
 
 
 class Backend:

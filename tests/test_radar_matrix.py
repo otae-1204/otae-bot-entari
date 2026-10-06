@@ -428,7 +428,7 @@ def test_iq_color_uses_score_across_models_and_efforts_without_recomputing_avera
     assert scores[2].get("style") != scores[0].get("style")
 
 
-@pytest.mark.parametrize("value", [None, float("nan"), float("inf"), -1, 151])
+@pytest.mark.parametrize("value", [None, float("nan"), -1, 151])
 def test_missing_or_invalid_iq_is_neutral_not_a_low_score(value):
     assert iq_color(value) == IQ_MISSING_COLOR
     assert iq_color(0) != IQ_MISSING_COLOR

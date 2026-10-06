@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import os
 import tempfile
 from datetime import datetime, timezone
@@ -80,18 +79,6 @@ def _image_segment(png: bytes):
         handle.flush()
         schedule_temp_file_cleanup(handle.name, delay_seconds=60)
         return make_image(path=handle.name)
-
-
-def _subscription_image_segment(png: bytes):
-    """Build a scheduler-safe image segment without a cross-process file path.
-
-    Subscription delivery goes through the account protocol directly.  Some
-    Satori bridges cannot resolve the bot process's temporary ``file://``
-    paths, so inline the rendered PNG as a standard data URL instead.
-    """
-
-    encoded = base64.b64encode(png).decode("ascii")
-    return make_image(url=f"data:image/png;base64,{encoded}")
 
 
 def _post_links(posts: Iterable[TiboPost]) -> list[str]:

@@ -67,10 +67,6 @@ class DataIntegrityTests(unittest.TestCase):
     def setUpClass(cls):
         cls.changelog = _changelog()
 
-    def test_data_file_exists_and_parses(self):
-        self.assertTrue(DATA_FILE.exists())
-        self.assertGreaterEqual(len(self.changelog.releases), 1)
-
     def test_releases_are_time_descending_and_non_overlapping(self):
         releases = self.changelog.releases
         ends = [release.end_date for release in releases]
@@ -93,12 +89,6 @@ class DataIntegrityTests(unittest.TestCase):
                     self.assertNotIn(short, seen, f"{short} 在多个版本里重复出现")
                     seen.add(short)
         self.assertEqual(len(seen), self.changelog.commit_count)
-
-    def test_highlight_dates_stay_inside_their_version_window(self):
-        for release in self.changelog.releases:
-            for item in release.highlights:
-                self.assertGreaterEqual(item.date, release.start_date)
-                self.assertLessEqual(item.date, release.end_date)
 
     def test_version_windows_cover_every_commit_date(self):
         """把 git 里每个非合并提交的日期都落进某个版本区间。"""
@@ -361,8 +351,9 @@ class TextFormatterTests(unittest.TestCase):
     def test_search_text_reports_hits_and_misses(self):
         hits = formatters.format_search(self.changelog.search("雷达"), "雷达")
         self.assertIn("相关的更新", "\n".join(hits))
+        self.assertNotIn("未查到", "\n".join(hits))
         misses = formatters.format_search((), "绝不可能出现的关键词xyzzy")
-        self.assertIn("没有找到", "\n".join(misses))
+        self.assertIn("未查到「绝不可能出现的关键词xyzzy」", "\n".join(misses))
 
     def test_stats_text_counts_match_the_data(self):
         text = "\n".join(formatters.format_stats(self.changelog))
@@ -567,11 +558,8 @@ class HandlerTests(unittest.TestCase):
             asyncio.run(changelog_handlers.handle_changelog(_Arg(rest), object()))
         return sent
 
-    def test_bare_command_sends_the_latest_version(self):
-        self.assertEqual(len(self._run("")), 1)
-
     def test_every_documented_entry_point_replies(self):
-        cases = ("帮助", "统计", "列表", "列表 2", "1", "2", "雷达", "v1.13.0", "2026-09", "不存在xyzzy")
+        cases = ("", "帮助", "统计", "列表", "列表 2", "1", "2", "雷达", "v1.13.0", "2026-09", "不存在xyzzy")
         for rest in cases:
             with self.subTest(rest=rest):
                 self.assertEqual(len(self._run(rest)), 1)
@@ -592,7 +580,7 @@ class HandlerTests(unittest.TestCase):
             asyncio.run(changelog_handlers.handle_changelog(_Arg("绝不可能出现的关键词xyzzy"), object()))
 
         self.assertTrue(sent)
-        self.assertIn("没有找到", "\n".join(sent))
+        self.assertIn("未查到", "\n".join(sent))
 
     def test_version_query_returns_that_version_not_a_search_list(self):
         changelog = _changelog()

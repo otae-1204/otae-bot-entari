@@ -7,19 +7,7 @@ import time
 import httpx
 import pytest
 
-from tests.test_core_logic import (
-    _bili_root_package,
-    _load_bili_new_module,
-    _load_module,
-)
-
-
-def _load_in_package(package: str, name: str):
-    """Load one more module inside the synthetic package the loader created."""
-    key = f"{package}.{name}"
-    if key in sys.modules:
-        return sys.modules[key]
-    return _load_module(key, f"plugins/bilibilibot/{name}.py")
+from tests.support.loaders import _bili_root_package, _load_bili_new_module, _load_in_package
 
 
 @pytest.fixture(scope="module")

@@ -88,7 +88,8 @@ class BindingFlowTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_sms_binding_accepts_a_uid_and_logs_each_step_without_credentials(self):
         finished = await self.run_binding("1", "2", PHONE, CODE, "1095714689")
-        self.assertIn("国服绑定完成：新增 1 个账号", finished)
+        self.assertIn("国服", finished)
+        self.assertIn("新增 1 个账号", finished)
         self.assertIn("UID 1095714689", finished)
         self.store.bind_roles.assert_called_once()
         self.assertEqual(self.store.bind_roles.call_args.args[2], ROLES[:1])

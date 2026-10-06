@@ -534,6 +534,7 @@ class GachaPaginationTests(unittest.TestCase):
         measure = _fake_measure(columns, rows)
         units = [draw.column_units(column, {key: len(items) for key, items in rows.items()}) for column in columns]
         default_pages, _ = draw.paginate_gacha(columns, units, measure)
+        self.assertGreater(len(default_pages), 2)
         self._check_pages(rows, measure, default_pages, draw.GACHA_PAGE_MAX_HEIGHT)
         low_pages, info = draw.paginate_gacha(columns, units, measure, max_height=3000)
         self.assertGreater(len(low_pages), len(default_pages))
@@ -559,23 +560,6 @@ class GachaPaginationTests(unittest.TestCase):
         self.assertEqual(len(pages), 1)
         self.assertEqual(info["tries"], 0)
         self.assertFalse(any(unit.kind in ("hint", "done") for column in pages[0] for unit in column))
-
-    def test_every_row_appears_exactly_once_and_pages_respect_the_cap(self):
-        columns, rows, measure, pages, info = self._paginate(_heavy_view())
-        self.assertGreater(len(pages), 2)
-        seen = []
-        for page_index, page in enumerate(pages):
-            heights = []
-            for column_index, units in enumerate(page):
-                heights.append(draw.column_height(units, measure.heads[(column_index, page_index > 0)], measure))
-                for unit in units:
-                    if unit.kind == "card":
-                        seen.extend((unit.card.key, row) for row in range(unit.start, unit.end))
-            overhead = measure.overhead_cont if page_index else measure.overhead_first
-            self.assertLessEqual(overhead + max(heights), draw.GACHA_PAGE_MAX_HEIGHT - draw.GACHA_PAGE_SAFETY + 0.01)
-        expected = [(key, row) for key, items in rows.items() for row in range(len(items))]
-        self.assertEqual(sorted(seen), sorted(expected))
-        self.assertEqual(len(seen), len(set(seen)))
 
     def test_minimum_page_count_and_balanced_heights(self):
         columns, rows, measure, pages, info = self._paginate(_heavy_view())
@@ -643,11 +627,12 @@ class GachaPaginationTests(unittest.TestCase):
             [[[(u.kind, u.card.key if u.card else u.text, u.start, u.end) for u in col] for col in page] for page in first],
             [[[(u.kind, u.card.key if u.card else u.text, u.start, u.end) for u in col] for col in page] for page in second],
         )
+        rows = _layout(view)[1]
         for page in first:
             for units in page:
                 for unit in units:
-                    if unit.kind == "card" and unit.end - unit.start < len(_layout(view)[1][unit.card.key]):
-                        self.assertGreaterEqual(len(_layout(view)[1][unit.card.key]), draw.SPLIT_MIN_ROWS)
+                    if unit.kind == "card" and unit.end - unit.start < len(rows[unit.card.key]):
+                        self.assertGreaterEqual(len(rows[unit.card.key]), draw.SPLIT_MIN_ROWS)
 
 
 class GachaRenderTests(unittest.IsolatedAsyncioTestCase):
@@ -665,6 +650,8 @@ class GachaRenderTests(unittest.IsolatedAsyncioTestCase):
             mock.patch.object(draw, "_draw_gacha_shell", shell_mock),
             mock.patch.object(draw, "_write_temp_html", return_value=Path("/nonexistent/gacha-measure.html")),
             mock.patch.object(draw, "schedule_temp_file_cleanup"),
+            # 浏览器已打桩：不往每页 HTML 里塞约 33 MB 的 base64 字体（字体嵌入由 GachaTypographyTests 覆盖）。
+            mock.patch.object(draw, "gacha_font_face_css", return_value=""),
         ):
             pages = await draw.draw_gacha_analysis_cards(view, uid="****1234")
         return pages, documents, evaluate, shell_mock

@@ -9,8 +9,6 @@ holds what the previous run did not deliver.
 
 from __future__ import annotations
 
-import asyncio
-import functools
 import json
 import sqlite3
 import sys
@@ -18,7 +16,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from tests.test_core_logic import _load_bili_new_module
+from tests.support.bilibili import asyncio_test, open_store
+from tests.support.loaders import _load_bili_new_module
 
 
 NOW = 1000
@@ -32,12 +31,6 @@ def bili():
         store=sys.modules[package + ".store"],
         models=sys.modules[package + ".models"],
     )
-
-
-async def open_store(bili, tmp_path):
-    store = bili.store.BiliStore(tmp_path / "bilibili.db", tmp_path / "missing.db")
-    await store.open()
-    return store
 
 
 def make_event(bili, card_type="live_on", uid="1", key="live:1:live_on:100"):
@@ -56,16 +49,6 @@ async def apply(bili, store, events, *, now=NOW, targets=(), seen=()):
         expand=lambda event: [("group", "900"), ("user", "7")],
         event_key=lambda event: event.event_key,
     )
-
-
-def asyncio_test(fn):
-    """Run one coroutine test on a fresh loop (this repo has no asyncio plugin)."""
-
-    @functools.wraps(fn)
-    def wrapper(*args, **kwargs):
-        return asyncio.run(fn(*args, **kwargs))
-
-    return wrapper
 
 
 @asyncio_test

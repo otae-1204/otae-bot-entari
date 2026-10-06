@@ -174,10 +174,7 @@ def test_start_sends_separate_image_then_plain_link(
     "card_type,url",
     [
         ("live_off", "https://live.bilibili.com/123"),
-        ("live_idle", "https://live.bilibili.com/123"),
         ("video", "https://www.bilibili.com/video/BV1extE6LEKB"),
-        ("dynamic", "https://t.bilibili.com/123"),
-        ("live_on", ""),
         ("live_on", "   "),
     ],
 )

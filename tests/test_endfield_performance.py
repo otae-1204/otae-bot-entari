@@ -227,7 +227,17 @@ class EndfieldPerformanceBehaviorTests(unittest.IsolatedAsyncioTestCase):
                 for index in range(1, 6)
             ],
         )
-        with patch.object(draw, "fetch_many_resilient", AsyncMock(return_value={})):
+        real_screenshot = draw.screenshot_web_element
+
+        async def layout_only_screenshot(*args, **kwargs):
+            # Height and overflow checks run in CSS px, so 1x keeps them while skipping
+            # the 2x PNG encode (2x itself is pinned by test_endfield_screenshot_keeps_two_x...).
+            return await real_screenshot(*args, **{**kwargs, "device_scale_factor": 1.0})
+
+        with (
+            patch.object(draw, "fetch_many_resilient", AsyncMock(return_value={})),
+            patch.object(draw, "screenshot_web_element", layout_only_screenshot),
+        ):
             output = await draw.draw_operator_card(view)
 
         self.assertTrue(output.startswith(b"\x89PNG"))
@@ -257,7 +267,8 @@ class EndfieldPerformanceBehaviorTests(unittest.IsolatedAsyncioTestCase):
 
         command = ParsedEndfieldCommand("dev", dev_action="cache", args=("clear", "operator"))
         message = await endfield._handle_dev_command(command)
-        self.assertIn("已清理 operator 缓存", message)
+        self.assertIn("operator", message)
+        self.assertIn("缓存", message)
         self.assertEqual((await endfield._CARD_CACHE.stats()).entries, 0)
 
     async def test_requested_source_skips_other_candidate_resolvers(self):
@@ -320,7 +331,7 @@ class EndfieldPerformanceBehaviorTests(unittest.IsolatedAsyncioTestCase):
 
 class BilibiliSharedAssetTests(unittest.IsolatedAsyncioTestCase):
     async def test_cover_and_avatar_fetch_concurrently_and_tolerate_one_failure(self):
-        from tests.test_core_logic import _load_bili_new_module
+        from tests.support.loaders import _load_bili_new_module
 
         bili_draw = _load_bili_new_module("draw")
         bili_models = __import__(bili_draw.__package__ + ".models", fromlist=["BiliCard"])

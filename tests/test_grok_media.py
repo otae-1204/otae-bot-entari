@@ -70,7 +70,7 @@ class ReplyTests(unittest.TestCase):
                          [("plot.png", "file:///output/plot.png", True), ("report.pdf", "/output/report.pdf", False)])
         self.assertIsNone(gateway.reply_from(entries, "[different]"))
         entries.append({"role": "user", "content": "someone else"})
-        with self.assertRaisesRegex(GrokError, "另一条输入"):
+        with self.assertRaisesRegex(GrokError, "插入了其他提问"):
             gateway.reply_from(entries, "[current]")
 
     def test_attachment_only_answer_is_complete_and_deduplicated(self):
@@ -87,7 +87,7 @@ class ReplyTests(unittest.TestCase):
                        for index in range(media.MAX_REPLY_FILES + 1))
         reply = gateway.reply_from(entries, "marker")
         self.assertEqual(len(reply.attachments), media.MAX_REPLY_FILES)
-        self.assertIn("其余附件", reply.text)
+        self.assertIn(f"{media.MAX_REPLY_FILES} 个上限", reply.text)
 
 
 class ImageTests(unittest.IsolatedAsyncioTestCase):
@@ -143,11 +143,12 @@ class ImageTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(decoded.convert("RGBA").getpixel((10, 10))[3], 0)
             self.assertEqual(decoded.convert("RGBA").getpixel((1500, 10)), (255, 0, 0, 255))
         # Noisy transparency falls back to a palette, which keeps the alpha channel.
-        noisy = PILImage.merge("RGBA", [PILImage.effect_noise((1600, 1600), 100)] * 3 + [PILImage.linear_gradient("L").resize((1600, 1600))])
+        noisy = PILImage.merge("RGBA", [PILImage.effect_noise((400, 400), 100)] * 3 + [PILImage.linear_gradient("L").resize((400, 400))])
         with patch.object(media, "UPLOAD_IMAGE_BYTES", len(encode(noisy, "PNG")) - 1):
             data, kind = media.compress_image(encode(noisy, "PNG"))
         self.assertEqual(kind, "PNG")
         with PILImage.open(BytesIO(data)) as decoded:
+            self.assertEqual(decoded.mode, "P")
             self.assertLess(decoded.convert("RGBA").getchannel("A").getextrema()[0], 32)
         # An opaque alpha channel is not transparency.
         _, kind = media.compress_image(encode(PILImage.new("RGBA", (10, 10), (0, 0, 255, 255)), "PNG"))
@@ -226,7 +227,7 @@ class ImageTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(media.httpx, "AsyncClient", side_effect=lambda **kwargs: real_client(transport=httpx.MockTransport(response), **kwargs)):
             data, _ = await media.download_url("internal:image", limit=10000, account=account)
             self.assertEqual(data, png())
-            with self.assertRaisesRegex(GrokError, "大小"):
+            with self.assertRaisesRegex(GrokError, "体积"):
                 await media.download_url("internal:image", limit=1, account=account)
         self.assertEqual(calls[0].url.path, "/v1/proxy/internal:image")
         self.assertNotIn("authorization", calls[0].headers)
@@ -489,8 +490,8 @@ class GatewayMediaTests(unittest.IsolatedAsyncioTestCase):
             await relay.publish(Reply("x" * 20001 + "追加正文", attachments))
             await relay.finish()
         texts = [call.args[0].text for call in deliver.await_args_list if call.args[0].text]
-        self.assertEqual(sum("回答过长" in text for text in texts), 1)
-        self.assertEqual(sum("附件超过" in text for text in texts), 1)
+        self.assertEqual(sum("篇幅已超限" in text for text in texts), 1)
+        self.assertEqual(sum(f"{media.MAX_REPLY_FILES} 个上限" in text for text in texts), 1)
         self.assertNotIn("追加正文", "".join(texts))
         self.assertEqual(read.await_count, 1)
         self.assertEqual(len([call for call in deliver.await_args_list if call.args[0].attachments]), media.MAX_REPLY_FILES)
@@ -506,7 +507,7 @@ class GatewayMediaTests(unittest.IsolatedAsyncioTestCase):
             await relay.finish()
         read.assert_awaited_once()
         self.assertEqual(deliver.await_count, 2)  # One text and one picture.
-        with self.assertRaisesRegex(GrokError, "发生变化"):
+        with self.assertRaisesRegex(GrokError, "出现变更"):
             await relay.publish(Reply("被改写的旧正文"))
         self.assertEqual(deliver.await_count, 2)
 
@@ -557,7 +558,7 @@ class GatewayMediaTests(unittest.IsolatedAsyncioTestCase):
 
         with tempfile.TemporaryDirectory() as directory, patch.object(conversations, "make_client", side_effect=host.client), \
              patch.object(conversations, "session_store", SessionStore(Path(directory) / "sessions.json")), \
-             patch.object(gateway.Gateway, "ask", ask), self.assertRaisesRegex(GrokError, "已转发当前回复"):
+             patch.object(gateway.Gateway, "ask", ask), self.assertRaisesRegex(GrokError, "已转交部分回复"):
             await conversations.ask(replace(CONFIG, timeout=.03), "问题", SCOPE, on_reply=deliver)
         deliver.assert_awaited_once_with(Reply("已完成正文"))
 
@@ -627,7 +628,7 @@ class GatewayMediaTests(unittest.IsolatedAsyncioTestCase):
             limit = 1 + 1 + len(gateway.UNANSWERED_RETRY_DELAYS)
             with self.assertRaises(GrokError) as caught:
                 await conversations.ask(CONFIG, "解释", SCOPE, images=(data_url(png()),))
-        self.assertEqual(str(caught.exception), "图片上传失败，问题尚未发送，请重发。")
+        self.assertEqual(str(caught.exception), gateway.UPLOAD_FAILED)
         self.assertEqual(len(drops), limit)
         self.assertFalse(any(command == "sendPrompt" for command, _ in host.calls))
 
@@ -647,7 +648,7 @@ class GatewayMediaTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(data, b"report bytes")
             self.assertEqual([(body["offset"], body["length"]) for command, body in host.calls], [(0, 0), (0, 5), (5, 5), (10, 2)])
             host.calls.clear()
-            with self.assertRaisesRegex(GrokError, "限制"):
+            with self.assertRaisesRegex(GrokError, "体积超过"):
                 await api.read_attachment(Attachment("out.txt", "/out/report.txt"), 2)
             self.assertEqual(len(host.calls), 1)
 
@@ -694,5 +695,5 @@ class GatewayMediaTests(unittest.IsolatedAsyncioTestCase):
                 media.remote_path(path)
         async with httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(200, content=b"x" * 1000))) as client:
             api = gateway.Gateway(CONFIG, client)
-            with self.assertRaisesRegex(GrokError, "响应过大"):
+            with self.assertRaisesRegex(GrokError, "超出安全阈值"):
                 await api.request("readAttachmentChunk", {}, response_limit=100)

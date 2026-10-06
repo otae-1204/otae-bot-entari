@@ -1,4 +1,4 @@
-"""Render previews of every tibo_radar reply card in the X design (draw_x).
+"""Render previews of every tibo_radar reply card (draw_scope + draw_xfeed).
 
 Usage: python scripts/preview_tibo_x_all.py
 Output:
@@ -16,7 +16,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from plugins.tibo_radar.draw_x import AMBER, CYAN, GREEN, RED, CardSection, event_sections, render_card, render_xfeed
+from plugins.tibo_radar.draw_scope import AMBER, CYAN, GREEN, RED, CardSection, event_sections, render_card
+from plugins.tibo_radar.draw_xfeed import render_xfeed
 from plugins.tibo_radar.models import EVENT_CONFIRMED, EVENT_EXPECTED_WINDOW, EVENT_REJECTED, ResetEvent
 
 from scripts.preview_tibo_xfeed import _sample_posts

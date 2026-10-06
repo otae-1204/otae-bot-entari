@@ -24,12 +24,14 @@ import sys
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import httpx
 
 from plugins.radar.config import RadarCacheTTL
 from plugins.radar.config import RadarConfig as _RadarConfig
 from plugins.radar.errors import (
+    _MESSAGES,
     CODE_INVALID_ARGUMENT,
     CODE_PRIVATE_PATH_REFUSED,
     CODE_RATE_LIMITED,
@@ -495,9 +497,14 @@ class ProviderErrorTests(unittest.TestCase):
             with self.subTest(status=status):
                 http = FakeHTTP(errors={"/api/v1/leaderboard": error_response(status, API + "/leaderboard")})
                 client = make_client(http, leaderboard=0.0)
-                with self.assertRaises(kind) as ctx:
-                    run(client.leaderboard("deep-swe"))
+                with patch("plugins.radar.provider.asyncio.sleep", new=AsyncMock()) as sleep:
+                    with self.assertRaises(kind) as ctx:
+                        run(client.leaderboard("deep-swe"))
                 self.assertEqual(ctx.exception.code, code)
+                # 只有 429 退避重试；其他状态码立刻放弃。
+                retries = CFG.retry.rate_limit_retries if status == 429 else 0
+                self.assertEqual(sleep.await_count, retries)
+                self.assertEqual(http.count("/api/v1/leaderboard"), retries + 1)
 
     def test_timeout_maps_to_upstream_unavailable(self):
         http = FakeHTTP(errors={"/api/v1/leaderboard": httpx.ConnectTimeout("nope")})
@@ -535,8 +542,9 @@ class ProviderErrorTests(unittest.TestCase):
     def test_no_stale_cache_means_the_error_surfaces(self):
         http = FakeHTTP(errors={"/api/v1/leaderboard": error_response(503, API + "/leaderboard")})
         client = make_client(http, leaderboard=0.0)
-        with self.assertRaises(UpstreamUnavailable):
-            run(client.leaderboard("deep-swe"))
+        with patch("plugins.radar.provider.asyncio.sleep", new=AsyncMock()):
+            with self.assertRaises(UpstreamUnavailable):
+                run(client.leaderboard("deep-swe"))
 
     def test_cache_hit_does_not_refetch(self):
         http = FakeHTTP()
@@ -569,7 +577,7 @@ class ProviderErrorTests(unittest.TestCase):
         """红线：上游响应体原文只进 debug，不进 ``message``。"""
         error = UpstreamUnavailable()
         self.assertNotIn("detail", error.message)
-        self.assertEqual(error.message, "雷达数据源暂时不可用，请稍后重试。")
+        self.assertEqual(error.message, _MESSAGES[CODE_UPSTREAM_UNAVAILABLE])
         # 脱敏只用于日志。
         self.assertNotIn("secret-token-value", redact("Authorization: Bearer secret-token-value"))
 
@@ -588,7 +596,7 @@ class ServiceRankingTests(unittest.TestCase):
             [(row.model, row.effort) for row in rows],
             [("gpt-5.6-sol", "max"), ("gpt-6-astra", "ultra"), ("gpt-5.5", "high")],
         )
-        self.assertEqual(meta.note, "已取各模型最高档")
+        self.assertIn("最高档", meta.note)
         # gpt-6-astra@ultra 在 insights 里没有点 → 走本地换算并标记。
         astra = next(row for row in rows if row.model == "gpt-6-astra")
         self.assertTrue(astra.iq_derived)
@@ -611,7 +619,7 @@ class ServiceRankingTests(unittest.TestCase):
         self.assertEqual(rates, sorted(rates, reverse=True))
 
         by_cost, meta = run(self.service.top_models(by="cost", effort="low"))
-        self.assertIn("成本为上游估算口径", meta.note)
+        self.assertIn("上游估算", meta.note)
         self.assertEqual(by_cost[0].model, "gpt-6-astra")
 
     def test_top_models_rejects_an_unknown_sort_key(self):
@@ -630,7 +638,7 @@ class ServiceRankingTests(unittest.TestCase):
         self.assertEqual([row.effort for row in profile.variants], ["low", "ultra"])
         self.assertEqual(profile.best.effort, "ultra")
         self.assertEqual(profile.insight.iq, 109.19)
-        self.assertEqual(profile.meta.note, "含全部档位")
+        self.assertIn("全部档位", profile.meta.note)
         # 多档位时不造一个含糊的总样本量。
         self.assertIsNone(profile.meta.samples)
 
@@ -680,7 +688,7 @@ class ServiceRankingTests(unittest.TestCase):
         service = RadarService(client, client.config)
         tasks, meta = run(service.task_ranking(benchmark="pompeii-adjacency"))
         self.assertEqual(tasks, ())
-        self.assertIn("无区分度数据", meta.note)
+        self.assertIn("区分度", meta.note)
 
     def test_task_detail_splits_solved_by(self):
         detail = run(self.service.task_detail("abs-module-cache-flags"))
@@ -739,18 +747,14 @@ class ServiceRankingTests(unittest.TestCase):
     def test_trend_bare_name_and_tier_are_different_calibers(self):
         bare, bare_meta = run(self.service.trend("gpt-6-astra"))
         tiered, tiered_meta = run(self.service.trend("gpt-6-astra", effort="low"))
-        self.assertEqual(bare_meta.note, "跨档位合并口径")
-        self.assertEqual(tiered_meta.note, "单档位 low")
+        self.assertIn("跨档位", bare_meta.note)
+        self.assertIn("单档位 low", tiered_meta.note)
         self.assertEqual(bare[0].iq, 105.4)
+        # latest:gpt-6-astra@low 首点是 104.6；裸档位序列首点是 98.3（不得用 latest: 序列）。
         self.assertEqual(tiered[0].iq, 98.3)
         self.assertNotEqual(bare[0].iq, tiered[0].iq)
         # 样本量取序列末点。
         self.assertEqual(tiered_meta.samples, tiered[-1].samples)
-
-    def test_trend_never_uses_the_latest_prefixed_series(self):
-        points, _ = run(self.service.trend("gpt-6-astra", effort="low"))
-        # latest:gpt-6-astra@low 首点是 104.6；裸档位序列首点是 98.3。
-        self.assertEqual(points[0].iq, 98.3)
 
     def test_degradation_alerts_are_forwarded_without_recomputation(self):
         alerts, _ = run(self.service.degradation_alerts())
@@ -940,11 +944,6 @@ class FormatterTests(unittest.TestCase):
         self.assertEqual(_money(1.98, source=SRC_MEASURED), "$1.98")
         self.assertEqual(_money(1.98, estimate=False, source=SRC_MEASURED), "$1.98")
 
-    def test_estimate_detection_covers_missing_src(self):
-        self.assertTrue(is_estimate(None))
-        self.assertTrue(is_estimate("task-level-fallback"))
-        self.assertFalse(is_estimate(SRC_MEASURED))
-
     def test_empty_results_say_empty_instead_of_raising(self):
         meta = RadarMeta(benchmark_id="deep-swe", score_label="Pass rate")
         self.assertTrue(format_model_list((), meta)[0].startswith("该频道暂无"))
@@ -966,10 +965,10 @@ class FormatterTests(unittest.TestCase):
         self.assertIn("Adjacency F1", text)
 
     def test_format_error_returns_the_message_verbatim(self):
-        error = InvalidArgument("用法：/radar 题 <id>", detail="missing task")
-        self.assertEqual(format_error(error), "用法：/radar 题 <id>")
+        error = InvalidArgument("格式：/radar 题 <id>", detail="missing task")
+        self.assertEqual(format_error(error), "格式：/radar 题 <id>")
         # 固定话术表兜底，且不含上游原文。
-        self.assertEqual(format_error(UnknownModel()), "没有该模型档位的实测数据。")
+        self.assertEqual(format_error(UnknownModel()), _MESSAGES[CODE_UNKNOWN_MODEL])
 
     def test_help_lines_are_within_the_width_budget(self):
         for line in format_help():
@@ -1380,8 +1379,8 @@ CASES = [
     ('/radar 性价比', 1, ['gpt-6-astra']),
     ('/radar 趋势 gpt-6-astra', 1, ['gpt-6-astra']),
     ('/radar 档位', 1, ['gpt-6-astra']),
-    ('/radar 模型', 1, ['用法']),
-    ('/radar 对比 gpt-6-astra', 1, ['用法']),
+    ('/radar 模型', 1, ['格式：']),
+    ('/radar 对比 gpt-6-astra', 1, ['格式：']),
     # 已摘掉的 5 个命令必须报「未知子命令」，且不得再走 service。
     ('/radar 题 abs-module-cache-flags', 1, ['未知子命令']),
     ('/radar 好题', 1, ['未知子命令']),

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import functools
 import json
+import pickle
 import tempfile
 import unittest
 from pathlib import Path
@@ -26,12 +28,18 @@ from otae_bot.infrastructure.http.disk import PublicImageDiskCache, public_table
 FIXTURE = Path(__file__).parent / "fixtures/endfield_akedata_1_5_3.json"
 
 
+@functools.lru_cache(maxsize=1)
+def _fixture_pickle() -> bytes:
+    """1.8 MB 夹具每个进程只解析一次；每个测试用 pickle 复制出一份独立、可改的表。"""
+    return pickle.dumps(json.loads(FIXTURE.read_bytes()), protocol=pickle.HIGHEST_PROTOCOL)
+
+
 class NativeAkeTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.data = AkeSnapshot(
             "1.5.3@9885010-4", "public/1.5.3/9885010-4/TableCfg", "fixture"
         )
-        self.data._tables = json.loads(FIXTURE.read_bytes())
+        self.data._tables = pickle.loads(_fixture_pickle())
         self.catalog = AkeCatalog(self.data)
         self.network = patch.object(
             repository, "_get", side_effect=AssertionError("Unexpected network request")
@@ -497,7 +505,7 @@ class NativeAkeTests(unittest.IsolatedAsyncioTestCase):
             ),
             patch.object(source, "_load_tables", AsyncMock()) as tables,
         ):
-            with self.assertRaisesRegex(calendar.VersionCalendarError, "完整事件覆盖"):
+            with self.assertRaisesRegex(calendar.VersionCalendarError, "未覆盖"):
                 await source.current_ake_primary()
             tables.assert_not_awaited()
 
