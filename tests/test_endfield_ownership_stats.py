@@ -47,6 +47,36 @@ def _catalog() -> tuple[OperatorCatalogEntry, ...]:
     )
 
 
+def _roster(potential: int = 1) -> dict:
+    """card_detail 的最小完整花名册：只有干员 op-a。"""
+    return {
+        "base": {"charNum": 1, "saveTime": NOW},
+        "chars": [{"charData": {"id": "op-a"}, "potentialLevel": potential}],
+    }
+
+
+class _RosterClient:
+    """按调用顺序记录 token 与角色；``raise_for(token, call)`` 返回异常就抛出，否则回 op-a 花名册。"""
+
+    def __init__(self, *, raise_for=None, potential: int = 1):
+        self.raise_for = raise_for
+        self.potential = potential
+        self.tokens: list[str] = []
+        self.roles: list[str] = []
+
+    @property
+    def calls(self) -> int:
+        return len(self.tokens)
+
+    async def card_detail(self, token, role):
+        self.tokens.append(token)
+        self.roles.append(role.role_id)
+        error = self.raise_for(token, self.calls) if self.raise_for else None
+        if error is not None:
+            raise error
+        return _roster(self.potential)
+
+
 class OwnershipCommandParserTests(unittest.TestCase):
     def test_aliases_defaults_and_swappable_refresh_scope(self):
         for alias in ("持有率", "干员占比", "干员统计"):
@@ -505,20 +535,10 @@ class OwnershipRefreshAndGroupTests(unittest.TestCase):
             self.cipher,
         )
 
-        class Client:
-            def __init__(self):
-                self.tokens = []
-
-            async def card_detail(self, token, _role):
-                self.tokens.append(token)
-                if token == "bad-token":
-                    raise EndfieldAPIError("账号授权", "401")
-                return {
-                    "base": {"charNum": 1, "saveTime": NOW},
-                    "chars": [{"charData": {"id": "op-a"}, "potentialLevel": 2}],
-                }
-
-        client = Client()
+        client = _RosterClient(
+            potential=2,
+            raise_for=lambda token, _call: EndfieldAPIError("账号授权", "401") if token == "bad-token" else None,
+        )
         service = OwnershipStatsService(self.store, client)
         with mock.patch.object(service, "refresh_catalog", mock.AsyncMock(return_value=False)):
             result = asyncio.run(
@@ -543,15 +563,7 @@ class OwnershipRefreshAndGroupTests(unittest.TestCase):
             self.cipher,
         )
 
-        class Client:
-            def __init__(self):
-                self.tokens = []
-
-            async def card_detail(self, token, _role):
-                self.tokens.append(token)
-                raise EndfieldAPIError("获取社区凭据", "405", "官方服务暂时不可用")
-
-        client = Client()
+        client = _RosterClient(raise_for=lambda *_: EndfieldAPIError("获取社区凭据", "405", "官方服务暂时不可用"))
         service = OwnershipStatsService(
             self.store,
             client,
@@ -593,18 +605,7 @@ class OwnershipRefreshAndGroupTests(unittest.TestCase):
             fetched_at=NOW - 25 * 60 * 60,
         )
 
-        class Client:
-            def __init__(self):
-                self.roles = []
-
-            async def card_detail(self, _token, role):
-                self.roles.append(role.role_id)
-                return {
-                    "base": {"charNum": 1, "saveTime": NOW},
-                    "chars": [{"charData": {"id": "op-a"}, "potentialLevel": 1}],
-                }
-
-        client = Client()
+        client = _RosterClient()
         service = OwnershipStatsService(self.store, client)
         with mock.patch.object(service, "refresh_catalog", mock.AsyncMock(return_value=False)):
             result = asyncio.run(
@@ -635,14 +636,7 @@ class OwnershipRefreshAndGroupTests(unittest.TestCase):
             retry_after_seconds=10,
         )
 
-        class Client:
-            async def card_detail(self, _token, _role):
-                return {
-                    "base": {"charNum": 1, "saveTime": NOW},
-                    "chars": [{"charData": {"id": "op-a"}, "potentialLevel": 1}],
-                }
-
-        service = OwnershipStatsService(self.store, Client())
+        service = OwnershipStatsService(self.store, _RosterClient())
         with mock.patch.object(service, "refresh_catalog", mock.AsyncMock(return_value=False)):
             result = asyncio.run(service.refresh_due(self.cipher, now=NOW))
 
@@ -787,18 +781,7 @@ class OwnershipRefreshAndGroupTests(unittest.TestCase):
             retry_after_seconds=900,
         )
 
-        class Client:
-            def __init__(self):
-                self.roles = []
-
-            async def card_detail(self, _token, role):
-                self.roles.append(role.role_id)
-                return {
-                    "base": {"charNum": 1, "saveTime": NOW},
-                    "chars": [{"charData": {"id": "op-a"}, "potentialLevel": 1}],
-                }
-
-        client = Client()
+        client = _RosterClient()
         service = OwnershipStatsService(self.store, client, batch_size=2)
         with mock.patch.object(service, "refresh_catalog", mock.AsyncMock(return_value=False)):
             result = asyncio.run(service.refresh_due(self.cipher, now=NOW))
@@ -868,15 +851,7 @@ class OwnershipRefreshAndGroupTests(unittest.TestCase):
                 self.cipher,
             )
 
-        class Client:
-            def __init__(self):
-                self.calls = 0
-
-            async def card_detail(self, _token, _role):
-                self.calls += 1
-                raise EndfieldAPIError("获取社区凭据", "405", "官方服务暂时不可用")
-
-        client = Client()
+        client = _RosterClient(raise_for=lambda *_: EndfieldAPIError("获取社区凭据", "405", "官方服务暂时不可用"))
         service = OwnershipStatsService(
             self.store,
             client,
@@ -906,20 +881,11 @@ class OwnershipRefreshAndGroupTests(unittest.TestCase):
                 self.cipher,
             )
 
-        class Client:
-            def __init__(self):
-                self.calls = 0
-
-            async def card_detail(self, _token, _role):
-                self.calls += 1
-                if self.calls in {1, 3, 5}:
-                    raise EndfieldAPIError("获取社区凭据", "405", "unavailable")
-                return {
-                    "base": {"charNum": 1, "saveTime": NOW},
-                    "chars": [{"charData": {"id": "op-a"}, "potentialLevel": 1}],
-                }
-
-        client = Client()
+        client = _RosterClient(
+            raise_for=lambda _token, call: (
+                EndfieldAPIError("获取社区凭据", "405", "unavailable") if call in {1, 3, 5} else None
+            ),
+        )
         service = OwnershipStatsService(
             self.store,
             client,
@@ -945,14 +911,7 @@ class OwnershipRefreshAndGroupTests(unittest.TestCase):
                 self.cipher,
             )
 
-        class Client:
-            async def card_detail(self, _token, _role):
-                return {
-                    "base": {"charNum": 1, "saveTime": NOW},
-                    "chars": [{"charData": {"id": "op-a"}, "potentialLevel": 1}],
-                }
-
-        service = OwnershipStatsService(self.store, Client(), concurrency=1)
+        service = OwnershipStatsService(self.store, _RosterClient(), concurrency=1)
         with (
             mock.patch.object(service, "refresh_catalog", mock.AsyncMock(return_value=False)),
             mock.patch(
@@ -1039,6 +998,10 @@ class OwnershipRefreshAndGroupTests(unittest.TestCase):
         self.assertIn("cache_hits=1", batch_log)
         self.assertIn("exchange_attempts=1", batch_log)
         self.assertIn("issues=none", batch_log)
+
+
+class OwnershipGroupAndCommandTests(unittest.TestCase):
+    """群成员、渲染钩子与命令层：都不读写数据库，因此不在 setUp 里建 EndfieldStore。"""
 
     def test_group_member_pagination_failure_and_admin_detection(self):
         class Bot:
@@ -1156,6 +1119,7 @@ class OwnershipRefreshAndGroupTests(unittest.TestCase):
 
         event = SimpleNamespace(user=SimpleNamespace(id="superuser"))
         roles = [SimpleNamespace(role_id="role", server_id="1")]
+        cipher = CredentialCipher(b"z" * 32)
         refresh = OwnershipRefreshResult(
             attempted=2,
             succeeded=1,
@@ -1176,7 +1140,7 @@ class OwnershipRefreshAndGroupTests(unittest.TestCase):
                 "list_all_roles",
                 return_value=roles,
             ),
-            mock.patch.object(endfield_plugin.CredentialCipher, "from_env", return_value=self.cipher),
+            mock.patch.object(endfield_plugin.CredentialCipher, "from_env", return_value=cipher),
             mock.patch.object(
                 endfield_plugin.ownership_stats_service,
                 "refresh_roles",
@@ -1211,7 +1175,7 @@ class OwnershipRefreshAndGroupTests(unittest.TestCase):
         self.assertIn("/ef 绑定", result)
         refresh_roles.assert_awaited_once_with(
             roles,
-            self.cipher,
+            cipher,
             force=True,
             trigger="manual-global",
         )
