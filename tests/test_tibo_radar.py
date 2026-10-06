@@ -185,8 +185,6 @@ class TiboRadarTests(unittest.TestCase):
 
     def test_subscription_manager_accepts_superuser(self):
         configured = GlobalConfig.SUPERUSERS
-        if not configured:
-            self.skipTest("no SUPERUSERS configured")
         superuser_id = str(configured[0] if isinstance(configured, (list, tuple)) else configured)
         event = SimpleNamespace(
             guild=SimpleNamespace(id="group-1"),

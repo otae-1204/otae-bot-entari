@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -15,15 +14,6 @@ from tests.test_core_logic import _load_bili_new_module
 
 CLOCK_START = 1_800_000_000
 HOUR = 3600
-
-OUTBOX_METHODS = (
-    "due_outbox",
-    "outbox_done",
-    "outbox_retry",
-    "outbox_drop",
-    "outbox_expire",
-    "outbox_count",
-)
 
 
 @dataclass(slots=True)
@@ -736,21 +726,8 @@ def test_records_left_behind_are_resent_once_per_recipient_after_a_restart():
 
 
 # ---------------------------------------------------------------------------
-# integration with the real store (once the store side of phase 4 has landed)
+# integration with the real store
 # ---------------------------------------------------------------------------
-
-
-def _load_real_store():
-    """The real BiliStore, or None while its outbox API is still landing."""
-    module = _load_bili_new_module("store")
-    if not all(hasattr(module.BiliStore, name) for name in OUTBOX_METHODS):
-        return None
-    return module
-
-
-async def _maybe_await(value: Any) -> Any:
-    """Phase 4 keeps the store synchronous, phase 5 makes it async."""
-    return await value if inspect.isawaitable(value) else value
 
 
 async def _commit_event(
@@ -768,10 +745,7 @@ async def _commit_event(
 
 
 def test_outbox_left_in_a_real_database_is_delivered_after_a_restart(tmp_path: Path):
-    module = _load_real_store()
-    if module is None:  # pragma: no cover - the store side lands in parallel
-        pytest.skip("BiliStore has no outbox API yet")
-
+    module = _load_bili_new_module("store")
     db_path = tmp_path / "bilibili.db"
     legacy_path = tmp_path / "legacy.db"
     models = _models()
@@ -814,10 +788,7 @@ def test_outbox_left_in_a_real_database_is_delivered_after_a_restart(tmp_path: P
 
 
 def test_real_store_expiry_drops_a_stale_live_notification(tmp_path: Path):
-    module = _load_real_store()
-    if module is None:  # pragma: no cover - the store side lands in parallel
-        pytest.skip("BiliStore has no outbox API yet")
-
+    module = _load_bili_new_module("store")
     db_path = tmp_path / "bilibili.db"
     legacy_path = tmp_path / "legacy.db"
     models = _models()

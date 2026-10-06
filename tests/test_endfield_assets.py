@@ -250,10 +250,7 @@ class EndfieldAssetFetchTests(unittest.TestCase):
         self.assertIn("fetch_many_resilient", gacha)
 
     def test_resolve_asset_groups_falls_back_after_primary_miss(self):
-        try:
-            draw = _load_draw()
-        except ModuleNotFoundError as exc:
-            self.skipTest(f"draw 依赖缺失: {exc}")
+        draw = _load_draw()
         from otae_bot.infrastructure.http.client import HttpResource
 
         async def fake_fetch(urls, **_kwargs):
@@ -281,10 +278,7 @@ class EndfieldAssetFetchTests(unittest.TestCase):
         self.assertTrue(mapped["icon"].startswith("data:image/png;base64,"))
 
     def test_nested_weapon_info_tags_render_inner_key(self):
-        try:
-            draw = _load_draw()
-        except ModuleNotFoundError as exc:
-            self.skipTest(f"draw 依赖缺失: {exc}")
+        draw = _load_draw()
         view = models.WeaponView(
             name="寒夜幽影",
             slug="umbra-of-frigid-eventide",
@@ -302,10 +296,7 @@ class EndfieldAssetFetchTests(unittest.TestCase):
         self.assertIn("身形如风", html)
 
     def test_ultimate_meta_uses_cooldown_field(self):
-        try:
-            draw = _load_draw()
-        except ModuleNotFoundError as exc:
-            self.skipTest(f"draw 依赖缺失: {exc}")
+        draw = _load_draw()
         skill = SkillView(
             "ult",
             "冰山呼告",

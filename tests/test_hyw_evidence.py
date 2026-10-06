@@ -58,36 +58,6 @@ def _bootstrap_under_venv() -> None:
     raise SystemExit(completed.returncode)
 
 
-def host_socketpair_failure() -> str | None:
-    """Report a host-level socketpair defect, or None when it works.
-
-    Windows asyncio builds its self-pipe from socket.socketpair(). When a
-    transparent connection proxy (e.g. Proxifier) re-originates loopback
-    connections, the source port the client reports differs from the one the
-    server sees, CPython's peer-authentication check in _fallback_socketpair
-    raises ConnectionError, and *every* asyncio program on the machine fails --
-    including `import arclet.entari`. That is an environment fault rather than a
-    defect in this repository, so the checks below skip instead of failing.
-    """
-    import socket
-
-    try:
-        first, second = socket.socketpair()
-    except Exception as error:
-        return f"{type(error).__name__}: {error}"
-    first.close()
-    second.close()
-    return None
-
-
-_HOST_SOCKETPAIR_FAILURE = host_socketpair_failure()
-_HOST_SKIP_REASON = (
-    f"本机 socket.socketpair 不可用（{_HOST_SOCKETPAIR_FAILURE}），"
-    "新建事件循环会失败，属主机环境故障（连接改写类代理重新发起回环连接导致端口 +1），"
-    "与本次改动无关；停止该类代理后本项即可运行。"
-)
-
-
 os.chdir(REPO_ROOT)
 _bootstrap_under_venv()
 os.environ["HYW_RENDER"] = "false"
@@ -127,9 +97,6 @@ class SuiteEvidenceTests(unittest.TestCase):
 class LiveServiceAccountTests(unittest.TestCase):
     def test_live_text_and_image_round_trip(self):
         from types import SimpleNamespace
-
-        if _HOST_SOCKETPAIR_FAILURE:
-            self.skipTest(_HOST_SKIP_REASON)
 
         from arclet.entari import Image, Text
 
