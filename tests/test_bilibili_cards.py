@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock
 import pytest
 from PIL import Image, ImageChops, ImageDraw, ImageOps
 
-from tests.test_core_logic import _bili_root_package, _load_bili_new_module
+from tests.support.loaders import _bili_root_package, _load_bili_new_module
 
 ROOT = Path(__file__).resolve().parents[1]
 

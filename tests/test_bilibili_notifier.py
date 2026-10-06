@@ -9,7 +9,7 @@ from typing import Any, Callable
 import pytest
 from loguru import logger
 
-from tests.test_core_logic import _load_bili_new_module
+from tests.support.loaders import _load_bili_new_module
 
 
 CLOCK_START = 1_800_000_000

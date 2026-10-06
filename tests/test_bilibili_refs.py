@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from tests.test_core_logic import _bili_root_package, _load_bili_new_module
+from tests.support.loaders import _bili_root_package, _load_bili_new_module
 
 
 UID = "12345"  # doubles as a live room number: the collision this module guards against

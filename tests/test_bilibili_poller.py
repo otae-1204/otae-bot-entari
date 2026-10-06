@@ -7,7 +7,6 @@ transaction, outbox fan-out, crash replay and backlog back-pressure.
 from __future__ import annotations
 
 import asyncio
-import functools
 import sys
 import threading
 from time import perf_counter
@@ -19,29 +18,8 @@ from loguru import logger
 
 from otae_bot.infrastructure import loop_watchdog
 
-from tests.test_core_logic import (
-    _load_bili_new_module,
-    _load_bili_subpackage,
-    _load_module,
-)
-
-
-def _load_in_package(package: str, name: str):
-    """Load one more module inside the synthetic package the loader created."""
-    key = f"{package}.{name}"
-    if key in sys.modules:
-        return sys.modules[key]
-    return _load_module(key, f"plugins/bilibilibot/{name}.py")
-
-
-def asyncio_test(fn):
-    """Run one coroutine test on a fresh loop (this repo has no asyncio plugin)."""
-
-    @functools.wraps(fn)
-    def wrapper(*args, **kwargs):
-        return asyncio.run(fn(*args, **kwargs))
-
-    return wrapper
+from tests.support.bilibili import asyncio_test, open_store
+from tests.support.loaders import _load_bili_new_module, _load_bili_subpackage, _load_in_package
 
 
 @pytest.fixture
@@ -85,12 +63,6 @@ class FakeApi:
     async def dynamic_items(self, uid, *, deadline=None):
         self.dynamic_calls.append(uid)
         return self.items.get(uid, [])
-
-
-async def open_store(bili, tmp_path):
-    store = bili.store.BiliStore(tmp_path / "bilibili.db", tmp_path / "missing.db")
-    await store.open()
-    return store
 
 
 def subscription(bili, kind, uid, subscriber_type="group", subscriber_id="900"):

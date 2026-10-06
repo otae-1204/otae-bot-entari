@@ -7,7 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from tests.test_core_logic import _load_bili_new_module
+from tests.support.bilibili import live_obs
+from tests.support.loaders import _load_bili_new_module
 
 START = 1790059295  # 2026-09-22 14:41:35, UTC+8.
 NOW = START + 2 * 3600 + 18 * 60
@@ -20,12 +21,6 @@ def bili():
         detect=detect,
         models=sys.modules[detect.__package__ + ".models"],
     )
-
-
-def live_obs(bili, **kwargs):
-    kwargs.setdefault("uid", "123")
-    kwargs.setdefault("room_id", "456")
-    return bili.models.LiveObservation(**kwargs)
 
 
 # --- detect_live ------------------------------------------------------------

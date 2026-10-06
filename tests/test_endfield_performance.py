@@ -331,7 +331,7 @@ class EndfieldPerformanceBehaviorTests(unittest.IsolatedAsyncioTestCase):
 
 class BilibiliSharedAssetTests(unittest.IsolatedAsyncioTestCase):
     async def test_cover_and_avatar_fetch_concurrently_and_tolerate_one_failure(self):
-        from tests.test_core_logic import _load_bili_new_module
+        from tests.support.loaders import _load_bili_new_module
 
         bili_draw = _load_bili_new_module("draw")
         bili_models = __import__(bili_draw.__package__ + ".models", fromlist=["BiliCard"])

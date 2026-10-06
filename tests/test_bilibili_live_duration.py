@@ -17,7 +17,6 @@ assertion of the old suite:
 from __future__ import annotations
 
 import asyncio
-import functools
 import sqlite3
 import sys
 import time
@@ -26,24 +25,11 @@ from types import SimpleNamespace
 import pytest
 from PIL import ImageDraw
 
-from tests.test_core_logic import (
-    _load_bili_new_module,
-    _load_bili_subpackage,
-    _load_module,
-)
+from tests.support.bilibili import asyncio_test, live_obs, open_store
+from tests.support.loaders import _load_bili_new_module, _load_bili_subpackage, _load_module
 
 START = 1790059295  # 2026-09-22 14:41:35, UTC+8.
 NOW = START + 2 * 3600 + 18 * 60
-
-
-def asyncio_test(fn):
-    """Run one coroutine test on a fresh loop (this repo has no asyncio plugin)."""
-
-    @functools.wraps(fn)
-    def wrapper(*args, **kwargs):
-        return asyncio.run(fn(*args, **kwargs))
-
-    return wrapper
 
 
 @pytest.fixture(scope="module")
@@ -77,12 +63,6 @@ def bili():
     )
 
 
-def live_obs(bili, **kwargs):
-    kwargs.setdefault("uid", "123")
-    kwargs.setdefault("room_id", "456")
-    return bili.models.LiveObservation(**kwargs)
-
-
 class FakeLiveApi:
     """The live half of the transport: one canned observation per round."""
 
@@ -105,12 +85,6 @@ class FakeLiveApi:
         if self.error is not None:
             raise self.error
         return self.observation
-
-
-async def open_store(bili, tmp_path):
-    store = bili.store.BiliStore(tmp_path / "bilibili.db", tmp_path / "missing.db")
-    await store.open()
-    return store
 
 
 async def drain_outbox(bili, store, sent, clock):
