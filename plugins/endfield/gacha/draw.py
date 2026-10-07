@@ -840,7 +840,7 @@ def _column_html(
 def _expectation_values(
     before: float, after: float | None, combined_before: float | None, combined_after: float | None,
     actual: float | None, *, known: bool = True,
-) -> list[tuple[str, str]]:
+) -> list[tuple[str, str, str]]:
     theory = f"{before:.1f}" if after is None else f"{before:.1f} → {after:.1f}"
     if combined_before is None:
         expectation = theory
@@ -849,16 +849,17 @@ def _expectation_values(
     else:
         expectation = f"{combined_before:.1f} → {combined_after:.1f}"
     return [
-        ("综合期望", expectation if known else "待确认"),
-        ("账号当前", f"{actual:.1f}" if actual is not None else "暂无"),
+        ("综合期望", expectation if known else "待确认", "抽"),
+        ("账号当前", f"{actual:.1f}" if actual is not None else "暂无", "抽"),
     ]
 
 
-def _expectation_row(label: str, scope: str, values: Sequence[tuple[str, str]]) -> str:
+def _expectation_row(label: str, scope: str, values: Sequence[tuple[str, str, str]]) -> str:
+    """总览格里的分项块：左侧标签 + 范围说明，右侧两行「名称 数值 单位」；待确认 / 暂无灰显、不带单位。"""
     spans = "".join(
         f'<span>{_esc(name)} <b class="pending">{_esc(value)}</b></span>' if value in ("待确认", "暂无")
-        else f'<span>{_esc(name)} <b>{_esc(value)}</b> 抽</span>'
-        for name, value in values
+        else f'<span>{_esc(name)} <b>{_esc(value)}</b> {_esc(unit)}</span>'
+        for name, value, unit in values
     )
     return (f'<div class="expectation-row"><div class="expectation-label"><strong>{_esc(label)}</strong>'
             f'<small>{_esc(scope)}</small></div><div class="expectation-values">{spans}</div></div>')
@@ -884,7 +885,8 @@ def _expectation(view: GachaAnalysis, group: str) -> SixStarExpectation:
 
 
 def _summary_html(view: GachaAnalysis, columns: Sequence[GachaColumn]) -> str:
-    """总数格 + 每栏一格，顺序与下方栏一致；两栏（无重构）时不出重构寻访格。"""
+    """总数格 + 每栏一格，顺序与下方栏一致；两栏（无重构）时不出重构寻访格。
+    总数格与池格同构：标题行右侧放总数，下面一行付费 / 免费，再下面是角色 / 武器两个分项块（累计抽数 + 六星数）。"""
     pools = [(pool, pool_kind(pool)) for pool in view.pools]
     special = [pool for pool, kind in pools if kind.key == "special"]
     rerun = [pool for pool, kind in pools if kind.key == "rerun"]
@@ -899,22 +901,29 @@ def _summary_html(view: GachaAnalysis, columns: Sequence[GachaColumn]) -> str:
     if not xhh_imported_at and not recorded_total:
         recorded_total = view.total
     history_missing_count = getattr(view, "history_missing_count", 0)
-    six_star_total = sum(count for rarity, count in view.rarity_counts.items() if rarity >= 6)
     detail = (
         (f"逐抽明细 {recorded_total}", f"统计补齐 {history_missing_count}") if history_missing_count
         else (f"付费 {paid_total}", f"免费 {free_pull_count}")
-    ) + (f"六星记录 {six_star_total}",)
-    type_totals = (
-        f"角色寻访 {sum(pool.total for pool in character)}", f"武器申领 {sum(pool.total for pool in weapon)}",
+    )
+    # 小字只放两段：小黑盒补齐时再加一段会折成两行，分项块就和相邻池格错开。
+    # 六星数按角色 / 武器拆进分项块（口径同栏头 _stat_lines），两项之和即六星总数。
+    type_rows = "".join(
+        _expectation_row(label, scope, (
+            ("累计", str(sum(pool.total for pool in group)), "抽"),
+            ("六星", str(sum(_six_star_count(pool) for pool in group)), "个"),
+        ))
+        for label, scope, group in (("角色寻访", "全部角色池", character), ("武器申领", "全部武器池", weapon))
     )
 
     def heading(kicker: str, title: str) -> str:
         return f'<div class="metric-title"><small>{_esc(kicker)}</small><span>{_esc(title)}</span></div>'
 
+    def tile(css: str, kicker: str, title: str, total: int, caption: Sequence[str], rows: str) -> str:
+        return (f'<div class="{css}"><div class="{css}-head">{heading(kicker, title)}<strong>{total}</strong></div>'
+                f'<small>{_meta(caption)}</small><div class="expectation-summary">{rows}</div></div>')
+
     def metric(title: str, kicker: str, group: list[PoolAnalysis], caption: Sequence[str], rows: str) -> str:
-        return (f'<div class="metric"><div class="metric-head">{heading(kicker, title)}'
-                f'<strong>{sum(pool.total for pool in group)}</strong></div><small>{_meta(caption)}</small>'
-                f'<div class="expectation-summary">{rows}</div></div>')
+        return tile("metric", kicker, title, sum(pool.total for pool in group), caption, rows)
 
     def paid(group: list[PoolAnalysis]) -> int:
         return sum(_pool_paid_total(pool) for pool in group)
@@ -935,8 +944,7 @@ def _summary_html(view: GachaAnalysis, columns: Sequence[GachaColumn]) -> str:
     }
     return (
         f'<section class="summary" style="grid-template-columns:minmax(0,.8fr) repeat({len(columns)},minmax(0,1fr))">'
-        f'<div class="total"><div class="total-head">{heading("全部卡池 · 累计抽数", "卡池总数")}</div>'
-        f'<strong>{view.total}</strong><small>{_meta(detail)}</small><small>{_meta(type_totals)}</small></div>'
+        + tile("total", "全部卡池 · 累计抽数", "卡池总数", view.total, detail, type_rows)
         + "".join(tiles[column.spec.key]() for column in columns)
         + "</section>"
     )
@@ -1240,7 +1248,8 @@ def _cached_icon_data_url(path: str, _mtime_ns: int, _size: int) -> str:
 # 字体：内置 HarmonyOS Sans SC（GACHA_FONT_FAMILY）排第一，后面是原系统字体栈；字重只用字体实际有的
 # 400 / 500 / 700，并关掉 font-synthesis，避免 800–950 在不同机器上被映射成不同的粗体或合成加粗。
 # 总览格四格共用标题块：12px 灰色分类 kicker + 21px 深色 700 标题，底部 2px 墨线；格内总数与标题底边对齐
-# （行高 1 / 1.15 下基线差 <1px），总数格的数字与小字沉底。总数格边框 3px，内边距相应少 2px，四格标题同一水平线。
+# （行高 1 / 1.15 下基线差 <1px）。四格同构：标题行右侧总数 → 一行小字 → 分项块，总数格的分项是角色 / 武器拆分，
+# 分项块与相邻池格逐行对齐。总数格边框 3px，内边距相应少 2px，四格标题同一水平线。
 # 总览格小字：标签 16 / 范围说明 12 / 数值行 14 / 加粗数字 17 / 副标题 13（px），数字等宽。
 GACHA_CSS = """
 :root{--card-header-rule:5px solid rgba(223,236,50,.5)}
@@ -1256,14 +1265,13 @@ header p{margin:8px 0 0;color:#d0d0d0;font-size:16px;overflow-wrap:anywhere}.syn
 
 .summary{display:grid;grid-template-columns:minmax(0,.8fr) repeat(3,minmax(0,1fr));gap:10px;margin-bottom:16px}
 .total,.metric{min-width:0;min-height:172px;padding:15px 16px;border:1px solid #999;background:#fff}
-.total{display:flex;flex-direction:column;padding:13px 14px;border:3px solid #222}
+.total{padding:13px 14px;border:3px solid #222}
 .total-head,.metric-head{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;padding-bottom:10px;border-bottom:2px solid #222}
 .metric-title{min-width:0}.metric-title small,.metric-title span{display:block}
 .metric-title small{color:#777;font-size:12px;font-weight:500;line-height:1.3;letter-spacing:.04em;overflow-wrap:anywhere}
 .metric-title span{margin-top:3px;color:#181818;font-size:21px;font-weight:700;line-height:1.15;white-space:nowrap}
-.metric-head strong{flex:none;font-size:31px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
-.total>strong{margin-top:auto;padding-top:14px;font-size:48px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
-.total>small,.metric>small{display:block;margin-top:10px;color:#666;font-size:13px;font-weight:500;line-height:1.5;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}.total>small+small{margin-top:4px}
+.total-head strong,.metric-head strong{flex:none;font-size:31px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
+.total>small,.metric>small{display:block;margin-top:10px;color:#666;font-size:13px;font-weight:500;line-height:1.5;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 .total .mp,.metric>small .mp{white-space:nowrap}
 .expectation-summary{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;margin-top:14px}
 .expectation-row{display:grid;grid-template-columns:96px minmax(0,1fr);align-items:center;gap:12px;padding:10px 12px;border-left:4px solid #333;background:#ededed;color:#555;font-size:14px;font-weight:500;line-height:1.5;font-variant-numeric:tabular-nums}
