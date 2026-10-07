@@ -1,13 +1,13 @@
 {
   "schema": 2,
-  "head": "3e82745a8f04d2bd98de5108ce175ac7a2ceed48",
+  "head": "f6716b71b1e88ea770b929b12e3d86ebe656f534",
   "generated_from": {
     "first_commit": "8e1b455",
     "first_date": "2026-06-17",
     "last_date": "2026-10-06",
-    "commit_count": 304,
-    "merge_commit_count": 22,
-    "version_count": 28
+    "commit_count": 305,
+    "merge_commit_count": 25,
+    "version_count": 29
   },
   "releases": [
     {
@@ -404,6 +404,27 @@
             "77a0ff0",
             "ea8a951",
             "6e236a3"
+          ]
+        }
+      ]
+    },
+    {
+      "version": "v1.21.1",
+      "date": "2026-10-02",
+      "from": "2026-10-02",
+      "to": "2026-10-02",
+      "title": "提弗洛斯新增「呼呼呼」别名",
+      "summary": "干员提弗洛斯新增别名「呼呼呼」，查询时可直接使用。",
+      "tags": [
+        "终末地"
+      ],
+      "highlights": [
+        {
+          "date": "2026-10-02",
+          "kind": "feat",
+          "text": "干员提弗洛斯新增别名「呼呼呼」，查询干员时可直接使用。",
+          "commits": [
+            "fde4a29"
           ]
         }
       ]
