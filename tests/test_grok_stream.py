@@ -5,6 +5,7 @@ import base64
 import json
 import tempfile
 import unittest
+from contextlib import nullcontext
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -19,8 +20,9 @@ from plugins.grok_bot import conversations, gateway, handlers, stream
 from plugins.grok_bot.config import GrokConfig, GrokError
 from plugins.grok_bot.conversations import ConversationScope, SessionStore
 from plugins.grok_bot.media import Attachment, Reply
+from tests.support.clock import FakeClock
 
-SCOPE = ConversationScope("qq", "bot", "group", "100", "100")
+SCOPE =ConversationScope("qq", "bot", "group", "100", "100")
 CONFIG = GrokConfig(base_url="http://grok.test:1340", token="secret-token", poll_interval=.001)
 
 
@@ -496,6 +498,34 @@ class StreamTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.received), 2)
         self.assertIn("响应等待已达", self.received[-1][1].text)  # Not the queue-slot ("排队等待") timeout.
         self.assertEqual(len(self.host.prompts()), 1)
+
+    async def test_started_attachment_download_outlasts_the_receiver_timeout(self):
+        clock = FakeClock(self)
+        data = b"z" * (2 * gateway.CHUNK_BYTES)
+        self.host.files["/out/big.png"] = (data, "image/png")
+
+        async def relayed(body):
+            # Two chunks: 60 s, past the 50 s timeout but inside their 80 s budget.
+            for _ in range(30 if body["length"] else 0):
+                await clock.advance(1)
+
+        self.host.hooks["readAttachmentChunk"] = relayed
+        for held, peer in ((False, "201"), (True, "202")):
+            scope = replace(SCOPE, peer_id=peer, channel_id=peer)
+            self.switches.set_enabled(scope.feature_scope, "grok_bot", True)
+            self.received.clear()
+            unheld = patch.object(stream.LiveConversation, "hold", lambda *_: None)
+            with self.subTest(held=held), nullcontext() if held else unheld:
+                start = clock.now
+                await self.hub.run(replace(CONFIG, timeout=50), "first", AsyncMock(), scope, on_reply=self.deliver("A"))
+                live = self.hub.slots[scope.key]
+                self.host.publish(self.host.prompts()[-1]["agentId"], path="/out/big.png")
+                self.host.busy.clear()
+                await live.task
+                files = [item.data for _, reply, _ in self.received for item in reply.attachments]
+                timed_out = any("响应等待已达" in reply.text for _, reply, _ in self.received)
+                self.assertEqual((files, timed_out), ([data], False) if held else ([], True))
+                self.assertGreater(clock.now - start, 50)
 
     async def test_qq_upload_checks_interruption_before_image_send(self):
         uploading, release = asyncio.Event(), asyncio.Event()
