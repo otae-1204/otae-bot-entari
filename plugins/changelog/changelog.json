@@ -1,10 +1,10 @@
 {
   "schema": 2,
-  "head": "f6716b71b1e88ea770b929b12e3d86ebe656f534",
+  "head": "4eb86348485e8c621966710b67581bd085f796ae",
   "generated_from": {
     "first_commit": "8e1b455",
     "first_date": "2026-06-17",
-    "last_date": "2026-10-06",
+    "last_date": "2026-10-07",
     "commit_count": 305,
     "merge_commit_count": 25,
     "version_count": 29
@@ -12,9 +12,9 @@
   "releases": [
     {
       "version": "v1.24.2",
-      "date": "2026-10-06",
+      "date": "2026-10-07",
       "from": "2026-10-06",
-      "to": "2026-10-06",
+      "to": "2026-10-07",
       "title": "Grok 大图附件不再一分钟就拉取超时",
       "summary": "Grok 回复的图片和文件改为按大小计算下载时限，分块缩小，卡住的分块换新连接重试，慢速中继上几 MB 的立绘也能送达；下载全程记录日志，便于排查。",
       "tags": [
