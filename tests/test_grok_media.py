@@ -436,12 +436,12 @@ class GatewayMediaTests(unittest.IsolatedAsyncioTestCase):
         host.respond = respond
         original_read = gateway.Gateway.read_attachment
 
-        async def read(api, item, limit):
+        async def read(api, item, limit, **kwargs):
             self.assertTrue(text_sent.is_set())
             if item.name == "report.txt":
                 second_started.set()
                 await release_second.wait()
-            return await original_read(api, item, limit)
+            return await original_read(api, item, limit, **kwargs)
 
         async def deliver(reply):
             delivered.append(reply)
@@ -528,7 +528,7 @@ class GatewayMediaTests(unittest.IsolatedAsyncioTestCase):
         host = MediaHost()
         started, stopped = asyncio.Event(), asyncio.Event()
 
-        async def read(*_):
+        async def read(*_, **__):
             started.set()
             try:
                 await asyncio.Event().wait()
@@ -671,7 +671,7 @@ class GatewayMediaTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(completed.attachments[1].data, b"123")
         self.assertIn("50 MB", completed.attachments[2].error)
         self.assertEqual(read.await_count, 2)
-        with patch.object(api, "read_attachment", AsyncMock(side_effect=asyncio.TimeoutError)):
+        with patch.object(api, "read_attachment", AsyncMock(side_effect=GrokError(gateway.DOWNLOAD_TIMEOUT))):
             completed = await api.collect_reply(reply)
         self.assertEqual(completed.text, "已完成正文")
         self.assertTrue(all(item.data is None and "超时" in item.error for item in completed.attachments))

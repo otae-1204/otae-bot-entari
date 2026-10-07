@@ -33,7 +33,6 @@ UPLOAD_FORMATS = {"JPEG": ("jpg", "image/jpeg"), "PNG": ("png", "image/png"),
 MAX_FILE_BYTES = 20_000_000
 MAX_REPLY_BYTES = 50_000_000
 MAX_REPLY_FILES = 10
-REPLY_DOWNLOAD_TIMEOUT = 60
 
 
 def remote_path(source: str) -> str:
