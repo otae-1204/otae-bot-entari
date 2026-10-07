@@ -1,12 +1,12 @@
 {
   "schema": 2,
-  "head": "d54a9d9b16c217355117a15747435c2cc0b004b3",
+  "head": "02165c0d829affaa13ebd89cd964c8e8d22b1516",
   "generated_from": {
     "first_commit": "8e1b455",
     "first_date": "2026-06-17",
     "last_date": "2026-10-07",
     "commit_count": 306,
-    "merge_commit_count": 26,
+    "merge_commit_count": 27,
     "version_count": 30
   },
   "releases": [
