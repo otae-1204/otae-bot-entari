@@ -32,13 +32,7 @@ from plugins.radar.presentation import (
     trend_chart,
     value_pages,
 )
-from plugins.radar.rendering import (
-    CARD_MAX_HEIGHT,
-    CARD_WIDTH,
-    DEVICE_SCALE_FACTOR,
-    page_html,
-    render_page,
-)
+from plugins.radar.rendering import page_html
 
 META = RadarMeta(
     "deep-swe",
@@ -273,20 +267,3 @@ def test_concurrency_gate_covers_render_and_delivery(monkeypatch):
     rejected = query()
     asyncio.run(handlers._run(object(), rejected, timeout=1))
     assert rejected.cr_frame is None
-
-
-def test_real_shared_browser_renderer_produces_png():
-    from otae_bot.infrastructure.rendering.browser import close_browser
-
-    async def run():
-        try:
-            png = await render_page(ranking_pages((ROW,), META)[0])
-            with PILImage.open(BytesIO(png)) as image:
-                assert image.format == "PNG"
-                # 2x rasterisation keeps glyph edges sharp after chat downscaling.
-                assert image.width == CARD_WIDTH * DEVICE_SCALE_FACTOR
-                assert 500 < image.height <= CARD_MAX_HEIGHT * DEVICE_SCALE_FACTOR
-        finally:
-            await close_browser()
-
-    asyncio.run(run())

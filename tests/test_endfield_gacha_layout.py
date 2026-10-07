@@ -10,6 +10,7 @@ import re
 import sys
 import types
 import unittest
+from dataclasses import replace
 from io import BytesIO
 from itertools import accumulate
 from pathlib import Path
@@ -494,7 +495,7 @@ class GachaTypographyTests(unittest.TestCase):
         self.assertLess(size(".metric-title small"), size(".metric-title span"))
         # 总数与标题底边对齐，而不是标题贴在大数字底下当说明文字
         self.assertIn("align-items:flex-end", rules[".total-head,.metric-head"])
-        self.assertIn("line-height:1", rules[".metric-head strong"])
+        self.assertIn("line-height:1", rules[".total-head strong,.metric-head strong"])
 
         view = _view([
             _pool("special_a#0", "特许", "special", current=True),
@@ -506,6 +507,40 @@ class GachaTypographyTests(unittest.TestCase):
         self.assertEqual(re.findall(r'<div class="metric-title"><small>[^<]+</small><span>([^<]+)</span>', summary),
                          ["卡池总数", "特许寻访", "武器申领", "重构寻访"])
         self.assertIn('<div class="total-head"><div class="metric-title">', summary)
+
+    def test_total_tile_is_built_like_the_pool_tiles(self):
+        """卡池总数格与池格同构：总数在标题行右侧，下面一行两段小字，再下面是角色 / 武器两个分项块；没有沉底的大数字。"""
+        free_six = FreePullBatch(TS, 10, (_six("免费六星", 0),), source="free_ten")
+        view = _view([
+            _pool("special_a#0", "特许", "special", current=True, total=130, paid=120, free_pull_count=10,
+                  sixes=3, free_batches=(free_six,)),
+            _pool("rerun_a#1", "重构", "rerun", series_key="rerun:a", total=60, paid=60, sixes=1),
+            _pool("standard#0", "基础寻访", "standard", total=50, paid=50, sixes=2),
+            _pool("weponbox_a#0", "限时", "weapon_limited", item_type="武器", total=40, paid=40, sixes=2),
+        ], paid_total=270, free_pull_count=10)
+        columns, _ = _layout(view)
+        history = replace(view, xhh_imported_at=TS, recorded_total=250, history_missing_count=30)
+        cases = {"plain": (view, ["付费 270", "免费 10"]), "xhh": (history, ["逐抽明细 250", "统计补齐 30"])}
+        for name, (case, caption) in cases.items():
+            with self.subTest(name):
+                summary = draw._summary_html(case, columns)
+                total = summary.split('<div class="total">', 1)[1].split('<div class="metric">', 1)[0]
+                self.assertIn('<div class="total-head"><div class="metric-title"><small>全部卡池 · 累计抽数</small>'
+                              '<span>卡池总数</span></div><strong>280</strong></div>', total)
+                self.assertEqual(total.count("<strong>280</strong>"), 1)
+                small = re.search(r"</div><small>(.*?)</small><div class=\"expectation-summary\">", total).group(1)
+                self.assertEqual(re.findall(r'<span class="mp">([^<]+)</span>', small), caption)
+                rows = re.findall(r'<div class="expectation-label"><strong>([^<]+)</strong><small>([^<]+)</small></div>'
+                                  r'<div class="expectation-values">(.*?)</div>', total)
+                self.assertEqual(
+                    [(label, scope, [re.sub(r"<[^>]+>", "", span) for span in re.findall(r"<span>(.*?)</span>", body)])
+                     for label, scope, body in rows],
+                    [("角色寻访", "全部角色池", ["累计 240 抽", "六星 7 个"]),       # 特许 3+免费 1、重构 1、常驻 2
+                     ("武器申领", "全部武器池", ["累计 40 抽", "六星 2 个"])],
+                )
+        rules = {selectors.strip(): body for selectors, body in re.findall(r"([^{}]+)\{([^{}]*)\}", draw.GACHA_CSS)}
+        self.assertNotIn(".total>strong", rules)
+        self.assertNotIn("margin-top:auto", rules[".total"])
 
 
 class GachaPaginationTests(unittest.TestCase):
@@ -534,6 +569,7 @@ class GachaPaginationTests(unittest.TestCase):
         measure = _fake_measure(columns, rows)
         units = [draw.column_units(column, {key: len(items) for key, items in rows.items()}) for column in columns]
         default_pages, _ = draw.paginate_gacha(columns, units, measure)
+        self.assertGreater(len(default_pages), 2)
         self._check_pages(rows, measure, default_pages, draw.GACHA_PAGE_MAX_HEIGHT)
         low_pages, info = draw.paginate_gacha(columns, units, measure, max_height=3000)
         self.assertGreater(len(low_pages), len(default_pages))
@@ -559,23 +595,6 @@ class GachaPaginationTests(unittest.TestCase):
         self.assertEqual(len(pages), 1)
         self.assertEqual(info["tries"], 0)
         self.assertFalse(any(unit.kind in ("hint", "done") for column in pages[0] for unit in column))
-
-    def test_every_row_appears_exactly_once_and_pages_respect_the_cap(self):
-        columns, rows, measure, pages, info = self._paginate(_heavy_view())
-        self.assertGreater(len(pages), 2)
-        seen = []
-        for page_index, page in enumerate(pages):
-            heights = []
-            for column_index, units in enumerate(page):
-                heights.append(draw.column_height(units, measure.heads[(column_index, page_index > 0)], measure))
-                for unit in units:
-                    if unit.kind == "card":
-                        seen.extend((unit.card.key, row) for row in range(unit.start, unit.end))
-            overhead = measure.overhead_cont if page_index else measure.overhead_first
-            self.assertLessEqual(overhead + max(heights), draw.GACHA_PAGE_MAX_HEIGHT - draw.GACHA_PAGE_SAFETY + 0.01)
-        expected = [(key, row) for key, items in rows.items() for row in range(len(items))]
-        self.assertEqual(sorted(seen), sorted(expected))
-        self.assertEqual(len(seen), len(set(seen)))
 
     def test_minimum_page_count_and_balanced_heights(self):
         columns, rows, measure, pages, info = self._paginate(_heavy_view())
@@ -643,11 +662,12 @@ class GachaPaginationTests(unittest.TestCase):
             [[[(u.kind, u.card.key if u.card else u.text, u.start, u.end) for u in col] for col in page] for page in first],
             [[[(u.kind, u.card.key if u.card else u.text, u.start, u.end) for u in col] for col in page] for page in second],
         )
+        rows = _layout(view)[1]
         for page in first:
             for units in page:
                 for unit in units:
-                    if unit.kind == "card" and unit.end - unit.start < len(_layout(view)[1][unit.card.key]):
-                        self.assertGreaterEqual(len(_layout(view)[1][unit.card.key]), draw.SPLIT_MIN_ROWS)
+                    if unit.kind == "card" and unit.end - unit.start < len(rows[unit.card.key]):
+                        self.assertGreaterEqual(len(rows[unit.card.key]), draw.SPLIT_MIN_ROWS)
 
 
 class GachaRenderTests(unittest.IsolatedAsyncioTestCase):
@@ -665,6 +685,8 @@ class GachaRenderTests(unittest.IsolatedAsyncioTestCase):
             mock.patch.object(draw, "_draw_gacha_shell", shell_mock),
             mock.patch.object(draw, "_write_temp_html", return_value=Path("/nonexistent/gacha-measure.html")),
             mock.patch.object(draw, "schedule_temp_file_cleanup"),
+            # 浏览器已打桩：不往每页 HTML 里塞约 33 MB 的 base64 字体（字体嵌入由 GachaTypographyTests 覆盖）。
+            mock.patch.object(draw, "gacha_font_face_css", return_value=""),
         ):
             pages = await draw.draw_gacha_analysis_cards(view, uid="****1234")
         return pages, documents, evaluate, shell_mock

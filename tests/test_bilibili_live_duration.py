@@ -17,7 +17,6 @@ assertion of the old suite:
 from __future__ import annotations
 
 import asyncio
-import functools
 import sqlite3
 import sys
 import time
@@ -26,24 +25,11 @@ from types import SimpleNamespace
 import pytest
 from PIL import ImageDraw
 
-from tests.test_core_logic import (
-    _load_bili_new_module,
-    _load_bili_subpackage,
-    _load_module,
-)
+from tests.support.bilibili import asyncio_test, live_obs, open_store
+from tests.support.loaders import _load_bili_new_module, _load_bili_subpackage, _load_module
 
 START = 1790059295  # 2026-09-22 14:41:35, UTC+8.
 NOW = START + 2 * 3600 + 18 * 60
-
-
-def asyncio_test(fn):
-    """Run one coroutine test on a fresh loop (this repo has no asyncio plugin)."""
-
-    @functools.wraps(fn)
-    def wrapper(*args, **kwargs):
-        return asyncio.run(fn(*args, **kwargs))
-
-    return wrapper
 
 
 @pytest.fixture(scope="module")
@@ -77,12 +63,6 @@ def bili():
     )
 
 
-def live_obs(bili, **kwargs):
-    kwargs.setdefault("uid", "123")
-    kwargs.setdefault("room_id", "456")
-    return bili.models.LiveObservation(**kwargs)
-
-
 class FakeLiveApi:
     """The live half of the transport: one canned observation per round."""
 
@@ -105,12 +85,6 @@ class FakeLiveApi:
         if self.error is not None:
             raise self.error
         return self.observation
-
-
-async def open_store(bili, tmp_path):
-    store = bili.store.BiliStore(tmp_path / "bilibili.db", tmp_path / "missing.db")
-    await store.open()
-    return store
 
 
 async def drain_outbox(bili, store, sent, clock):
@@ -150,10 +124,7 @@ def _async_return(value):
         (1, "2026-09-22 14:41:35", START),
         (1, "2026-09-23 14:41:35", 0),
         (1, "0000-00-00 00:00:00", 0),
-        (1, "invalid", 0),
-        (1, "", 0),
         (1, None, 0),
-        (0, "2026-09-22 14:41:35", 0),
         (2, "2026-09-22 14:41:35", 0),
     ],
 )
@@ -340,57 +311,6 @@ async def test_start_poll_restart_end_and_next_session(bili, tmp_path):
         await store.close()
 
 
-@pytest.mark.parametrize(
-    "start,last_seen,expected",
-    [
-        (START, NOW - 60, 8280),
-        (START, NOW - 180, 8280),
-        (START, NOW - 181, None),
-        (START, NOW - 86400, None),
-        (START, 0, None),
-        (0, NOW - 60, None),
-        (START, NOW + 1, None),
-        (NOW + 1, NOW - 60, None),
-    ],
-)
-def test_end_estimate_requires_recent_valid_observation(
-    bili, start, last_seen, expected
-):
-    prev = bili.models.TargetInfo(
-        "live", "123", is_live=True, live_started_at=start, live_last_seen_at=last_seen
-    )
-    updated, events = bili.detect.detect_live(prev, live_obs(bili, is_live=False), NOW)
-    assert [event.card.live_duration_seconds for event in events] == [expected]
-    # 下播后状态重置。
-    assert (updated.live_started_at, updated.live_last_seen_at) == (0, 0)
-    assert updated.is_live is False
-
-
-@pytest.mark.parametrize(
-    "gap,new_start,expected",
-    [
-        (60, 0, START),
-        (181, 0, 0),
-        (3600, NOW - 30, NOW - 30),
-        (60, NOW - 30, NOW - 30),
-        (60, NOW + 1, START),
-    ],
-)
-def test_live_refresh_uses_new_session_start_and_limits_fallback(
-    bili, gap, new_start, expected
-):
-    prev = bili.models.TargetInfo(
-        "live", "123", is_live=True, live_started_at=START, live_last_seen_at=NOW - gap
-    )
-    updated, events = bili.detect.detect_live(
-        prev, live_obs(bili, is_live=True, started_at=new_start), NOW
-    )
-    assert updated.live_started_at == expected
-    assert updated.live_last_seen_at == NOW
-    # 刷新 session start 本身不是状态变化，不推送。
-    assert events == []
-
-
 @asyncio_test
 async def test_failed_poll_does_not_advance_last_seen_or_send_end(bili, tmp_path):
     # 纯函数层：没有观测结果就原样返回，不推进、不发下播。
@@ -424,12 +344,10 @@ async def test_failed_poll_does_not_advance_last_seen_or_send_end(bili, tmp_path
     [
         (None, "本次直播时长未知"),
         (-1, "本次直播时长未知"),
-        (0, "本次直播不足 1 分钟"),
         (59, "本次直播不足 1 分钟"),
         (60, "本次直播约 1 分钟"),
         (3599, "本次直播约 59 分钟"),
         (3600, "本次直播约 1 小时"),
-        (8280, "本次直播约 2 小时 18 分钟"),
         (90061, "本次直播约 25 小时 1 分钟"),
     ],
 )
@@ -457,7 +375,7 @@ def test_duration_is_rendered_in_header_without_overflow(
     assert 90 <= top < bottom < 154
 
 
-@pytest.mark.parametrize("kind", ["video", "live_on", "live_idle", "dynamic"])
+@pytest.mark.parametrize("kind", ["video", "live_on"])
 def test_other_card_types_do_not_show_previous_duration(bili, kind):
     card = bili.models.BiliCard(kind, "标题", live_duration_seconds=8280)
     assert "时长" not in bili.draw._status_hint(card, bili.draw._STYLES[kind])

@@ -346,8 +346,8 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         self.clock.now = self.host.down_until
         async with httpx.AsyncClient(transport=httpx.MockTransport(self.host.respond)) as client:
             gw = Gateway(self.config, client)
-            self.assertIn("已核验", await repair_binding(gw, SCOPE, self.store))
-            self.assertIn("已核验", await repair_binding(gw, SCOPE, self.store))
+            self.assertIn("核验无误", await repair_binding(gw, SCOPE, self.store))
+            self.assertIn("核验无误", await repair_binding(gw, SCOPE, self.store))
         self.assertEqual(self.store.snapshot()["bindings"][SCOPE.key]["agent_id"], self.host.agents[-1]["id"])
         self.assertEqual(sum(name == "createAgent" for name, _ in self.host.calls), 1)
 
@@ -495,7 +495,7 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(conversations, "make_client", side_effect=lambda: httpx.AsyncClient(transport=httpx.MockTransport(self.host.respond))), \
              patch.object(conversations, "session_store", self.store), patch.object(Gateway, "ask", side_effect=wait_for_reply), \
-             self.assertRaisesRegex(GrokError, "仍在云端处理"):
+             self.assertRaisesRegex(GrokError, "仍在云端处理"):  # Not the "已转交部分回复" (relay delivered) variant.
             await conversations.ask(replace(self.config, timeout=.03), "问题", SCOPE)
         self.assertEqual(self.store.snapshot()["bindings"][SCOPE.key]["agent_id"], self.host.agents[-1]["id"])
         self.assertFalse(any(name in {"deleteAgent", "interruptAgentRun"} for name, _ in self.host.calls))

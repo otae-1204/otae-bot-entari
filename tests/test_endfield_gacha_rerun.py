@@ -664,6 +664,10 @@ class SyncTests(unittest.IsolatedAsyncioTestCase):
         rerun = [item for item in self.store.list_gacha_records(self.role, limit=100) if item.pool_type == RERUN]
         self.assertEqual({item.pool_version for item in rerun}, {2})
         self.assertEqual(result.streams[0].label, "Special")
+        # 增量同步停在已保存的边界，不重复入库。
+        again = await service.sync(self.role, full=False)
+        self.assertEqual(again.inserted, 0)
+        self.assertEqual(self.store.count_gacha_records(self.role), 11)
 
     async def test_sync_adds_api_enum_and_ignores_non_enum_keys(self):
         fake = _FakeClient(names={"E_CharacterGachaPoolType_Foo": "新池", "Bogus": "x"})
@@ -693,10 +697,11 @@ class SyncTests(unittest.IsolatedAsyncioTestCase):
         service = gacha_module.EndfieldGachaService(self.store, failing, self.cipher)
         result = await service.sync(global_role, full=True)
         self.assertEqual([item.stream_key for item in result.failed], ["char:E_CharacterGachaPoolType_Special"])
-
-    def test_default_pool_types_are_shared_with_client(self):
-        self.assertEqual(client_module.CHARACTER_POOL_TYPES, pools_module.DEFAULT_CHARACTER_POOL_TYPES)
-        self.assertEqual(client_module.CHARACTER_POOL_TYPES[-1], RERUN)
+        # 必选池失败：其他池的记录照常保留，但分析标记为不完整。
+        self.assertGreater(result.inserted, 0)
+        analysis = service.analysis(global_role)
+        self.assertFalse(analysis.complete)
+        self.assertTrue(analysis.errors)
 
 
 class StoreMigrationTests(unittest.TestCase):
@@ -757,6 +762,10 @@ class StoreMigrationTests(unittest.TestCase):
 
 
 class PoolRuleTests(unittest.TestCase):
+    def test_default_pool_types_are_shared_with_client(self):
+        self.assertEqual(client_module.CHARACTER_POOL_TYPES, pools_module.DEFAULT_CHARACTER_POOL_TYPES)
+        self.assertEqual(client_module.CHARACTER_POOL_TYPES[-1], RERUN)
+
     def test_classify_pool_rule_caches_kind_and_series(self):
         rule = GachaPoolRule(
             "rerun_chr_yvonne", ("chr_0017_yvonne",), 0, "绚丽异彩", "char",

@@ -229,7 +229,8 @@ class HelpArtworkRatioTests(unittest.TestCase):
         """The floor is a guard, not a hard filter: an extreme page must still send art."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            Image.new("RGB", (1325, 6000)).save(root / "demo.png")
+            # page_height() reads only the height, so a 1 px wide stand-in keeps the write cheap.
+            Image.new("RGB", (1, 6000)).save(root / "demo.png")
             page = help_cards.parse_page(_page())
             with patch.object(help_cards, "HELP_IMAGE_DIR", root):
                 candidates = help_cards.ratio_candidates(page, self.gallery)

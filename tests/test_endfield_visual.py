@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import io
 import json
@@ -295,17 +296,23 @@ def _normalized_pixel_error(first: str, second: str) -> float:
 
 
 class EndfieldVisualRegressionTests(unittest.IsolatedAsyncioTestCase):
+    @classmethod
+    def tearDownClass(cls):
+        # One Chromium launch for the whole class; relaunching per test only adds startup time.
+        from otae_bot.infrastructure.rendering.browser import close_browser
+
+        asyncio.run(close_browser())
+        super().tearDownClass()
+
     async def asyncSetUp(self):
         self.remote_assets = patch.object(draw, "fetch_many_resilient", AsyncMock(return_value=({}, {})))
         self.remote_assets.start()
 
     async def asyncTearDown(self):
         from otae_bot.infrastructure.http.client import close_http_client
-        from otae_bot.infrastructure.rendering.browser import close_browser
         from otae_bot.infrastructure.rendering.executor import close_image_executor
 
         self.remote_assets.stop()
-        await close_browser()
         await close_image_executor()
         await close_http_client()
 
@@ -356,11 +363,11 @@ class EndfieldVisualRegressionTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_every_paginated_catalog_page_renders_inside_the_ceiling(self):
         base = _stage_catalog_sample()
-        # Well past the ~450 entries that still fit a single 12000px image.
+        # 810 entries: well past the ~650 that still fit a single 12000px image.
         huge = replace(
             base,
             groups=tuple(
-                replace(group, items=group.items * 60) for group in base.groups
+                replace(group, items=group.items * 45) for group in base.groups
             ),
         )
 

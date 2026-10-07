@@ -66,32 +66,7 @@ class MedalStoreRoundTripTest(unittest.TestCase):
 
 
 class MedalSnapshotStoreTest(unittest.IsolatedAsyncioTestCase):
-    async def test_current_and_baseline_stored_independently(self):
-        with tempfile.TemporaryDirectory() as d:
-            path = str(Path(d) / "snap.json")
-            store = MedalSnapshotStore(path)
-            self.assertIsNone(store.load_current_view())
-            self.assertIsNone(store.load_baseline_view())
-
-            # current 不再滚动 previous：两次 replace_current 只保留最后一次
-            await store.replace_current(_make_snapshot(["a", "b"], version="1.4"))
-            await store.replace_current(_make_snapshot(["a", "b", "c"], version="1.4"))
-            cur = store.load_current_view()
-            self.assertEqual(cur.version, "1.4")
-            self.assertEqual({m.medal_id for m in cur.medals}, {"a", "b", "c"})
-
-            # baseline 独立存取（akedata 上一版本 achv_id 集合），不影响 current
-            await store.replace_baseline(MedalBaselineView(version="1.3", ids=["a", "b"]))
-            bl = store.load_baseline_view()
-            self.assertIsNotNone(bl)
-            self.assertEqual(bl.version, "1.3")
-            self.assertEqual(set(bl.ids), {"a", "b"})
-            self.assertEqual(cur.total_count, 3)
-
-            # baseline 可清空
-            await store.replace_baseline(None)
-            self.assertIsNone(store.load_baseline_view())
-
+    # current/baseline 的存取契约与档案共用 test_endfield_archive.SnapshotStoreTest。
     async def test_persists_across_restart(self):
         with tempfile.TemporaryDirectory() as d:
             path = str(Path(d) / "snap.json")
@@ -105,17 +80,6 @@ class MedalSnapshotStoreTest(unittest.IsolatedAsyncioTestCase):
             bl = reopened.load_baseline_view()
             self.assertEqual(bl.version, "1.3")
             self.assertEqual(set(bl.ids), {"x"})
-
-    async def test_current_and_baseline_can_be_persisted_together(self):
-        with tempfile.TemporaryDirectory() as d:
-            store = MedalSnapshotStore(str(Path(d) / "snap.json"))
-            await store.replace_current_and_baseline(
-                _make_snapshot(["new"], version="1.4"),
-                MedalBaselineView(version="1.3", ids=["old"]),
-            )
-            reopened = MedalSnapshotStore(str(Path(d) / "snap.json"))
-            self.assertEqual(reopened.load_current_view().version, "1.4")
-            self.assertEqual(reopened.load_baseline_view().version, "1.3")
 
 
 class MedalDiffTest(unittest.TestCase):

@@ -413,7 +413,8 @@ class EndfieldChallengeTests(unittest.TestCase):
                     bot=SimpleNamespace(self_id="10000"),
                 )
             list_roles.assert_called_once_with("1231")
-            matcher.finish.assert_awaited_once_with("所选群友暂未绑定终末地账号。")
+            matcher.finish.assert_awaited_once()
+            self.assertIn("未绑定", matcher.finish.await_args.args[0])
 
         asyncio.run(run())
 
@@ -532,9 +533,12 @@ class EndfieldChallengeTests(unittest.TestCase):
                         bot=SimpleNamespace(self_id="10000"),
                     )
             cipher.from_env.assert_called_once_with()
-            matcher.finish.assert_awaited_once_with(
-                "匹配到多个“野性旧”相关结果：野性旧事·改、野性旧事\n参考格式：/ef 回响 谵妄赛季 谵妄轮换Ⅱ 野性旧事·改 残酷"
-            )
+            matcher.finish.assert_awaited_once()
+            message = matcher.finish.await_args.args[0]
+            self.assertIn("“野性旧”", message)
+            self.assertIn("野性旧事·改、野性旧事", message)
+            # 给出的示例命令必须能直接解析到首候选（赛季+轮换+名称+难度）。
+            self.assertIn("/ef 回响 谵妄赛季 谵妄轮换Ⅱ 野性旧事·改 残酷", message)
 
         asyncio.run(run())
 
@@ -805,7 +809,7 @@ class EndfieldChallengeTests(unittest.TestCase):
             max_active = max(max_active, active)
             pages.append(page)
             documents.append(document)
-            await asyncio.sleep(0.01)
+            await asyncio.sleep(0)  # 让出事件循环：若被并发调度，另一页会在此期间开始渲染
             active -= 1
             return f"png-{page}".encode()
 
@@ -1037,7 +1041,8 @@ class EndfieldGachaDeliveryTests(unittest.TestCase):
         finish_pngs.assert_not_awaited()
         self.assertEqual(matcher.send.await_count, 2)
         first, second = (call.args[0] for call in matcher.send.await_args_list)
-        self.assertIn("抽卡分析长图共 4 页，当前环境无法合并转发，已分 2 条消息发送。", str(first))
+        self.assertIn("共 4 页", str(first))
+        self.assertIn("分 2 条", str(first))
         self.assertEqual([getattr(item, "src", "") for item in first][1:],
                          ["file:///tmp/p1.png", "file:///tmp/p2.png", "file:///tmp/p3.png"])
         self.assertEqual([item.src for item in second], ["file:///tmp/p4.png"])
@@ -1072,7 +1077,8 @@ class EndfieldGachaDeliveryTests(unittest.TestCase):
         )
         self.assertEqual(matcher.send.await_count, 1)
         sent = matcher.send.await_args.args[0]
-        self.assertIn("第 3–5 页转发异常", str(sent))
+        self.assertIn("第 3–5 页", str(sent))
+        self.assertIn("分 1 条", str(sent))
         self.assertEqual([getattr(item, "src", "") for item in sent][1:],
                          ["file:///tmp/p3.png", "file:///tmp/p4.png", "file:///tmp/p5.png"])
 
@@ -1107,7 +1113,9 @@ class EndfieldGachaDeliveryTests(unittest.TestCase):
         self.assertEqual(satori.await_args.kwargs["name"], "Endfield")
         self.assertEqual(onebot.await_args.args[2], (b"1", b"2", b"3"))
         self.assertEqual(onebot.await_args.kwargs, {})
-        self.assertIn("当前环境暂不支持合并转发", matcher.finish.await_args.args[0])
+        notice = matcher.finish.await_args.args[0]
+        self.assertIn("合并转发", notice)
+        self.assertIn("/ef 影拓 历史 第N页", notice)
 
     def test_onebot_nodes_use_file_uri_when_given_and_keep_defaults_otherwise(self):
         from otae_bot.adapters import onebot as onebot_module

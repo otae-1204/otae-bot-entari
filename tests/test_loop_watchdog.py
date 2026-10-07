@@ -27,20 +27,25 @@ class LoopWatchdogTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(logger.remove, sink_id)
         return records
 
-    async def run_watchdog(self, records: list[tuple[str, str]], **options) -> None:
-        """Block the loop for 0.3 s while a watchdog with the given options runs."""
+    async def run_watchdog(self, records: list[tuple[str, str]], block_seconds: float, **options) -> None:
+        """Block the loop for ``block_seconds`` while a watchdog with the given options runs.
+
+        The measured lag lies between ``block_seconds - interval_seconds`` and
+        ``block_seconds``, so the thresholds below are chosen against that window.
+        """
         task = asyncio.create_task(loop_watchdog.watch_loop(**options))
         try:
-            await asyncio.sleep(0.12)  # let the watchdog enter its sleep
-            time.sleep(0.3)  # a blocking call on the event loop thread
-            await asyncio.sleep(0.12)  # let it measure the overrun and log
+            await asyncio.sleep(0.03)  # let the watchdog enter its sleep
+            time.sleep(block_seconds)  # a blocking call on the event loop thread
+            await asyncio.sleep(0.03)  # let it measure the overrun and log
         finally:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
 
     async def test_blocking_call_is_reported_as_a_warning_with_the_time(self):
         records = self.capture()
-        await self.run_watchdog(records, interval_seconds=0.05)
+        # Lag 0.08-0.1 s: past warn (0.05 s), far below the default error threshold (1 s).
+        await self.run_watchdog(records, 0.1, interval_seconds=0.02, warn_seconds=0.05)
 
         # The sink sees the whole shared logger, and asyncio's own slow-callback
         # warning ("Executing <Task ...> took ...") lands first whenever debug
@@ -55,13 +60,14 @@ class LoopWatchdogTests(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertTrue(warnings, records)
         self.assertRegex(warnings[0], TIMESTAMP)
-        # 0.3 s 只到 warning 档，不应升级为 error。
+        # 只到 warning 档，不应升级为 error。
         self.assertNotIn("ERROR", [level for level, _ in records])
 
     async def test_longer_stall_escalates_to_error(self):
         records = self.capture()
+        # Lag 0.1-0.12 s: past the 0.08 s error threshold.
         await self.run_watchdog(
-            records, interval_seconds=0.05, warn_seconds=0.05, error_seconds=0.2
+            records, 0.12, interval_seconds=0.02, warn_seconds=0.03, error_seconds=0.08
         )
 
         errors = [

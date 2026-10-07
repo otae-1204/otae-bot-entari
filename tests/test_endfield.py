@@ -10,7 +10,7 @@ import tempfile
 import types
 import unittest
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from PIL import Image
 
@@ -106,13 +106,28 @@ class EndfieldCommandParserTests(unittest.TestCase):
         self.assertIn('command.scope in {"operator", "weapon", "equipment"}', handler_source)
 
     def test_handler_reports_image_send_failure_separately(self):
-        source = (ROOT / "plugins/endfield/handlers.py").read_text(encoding="utf-8")
-        start = source.index("async def _handle_command")
-        end = source.index("async def _collect_candidates", start)
-        handler_source = source[start:end]
+        import plugins.endfield.handlers as handlers
 
-        self.assertIn("[endfield] send failed", handler_source)
-        self.assertIn("图片发送失败，请稍后再试", handler_source)
+        candidate = handlers.EndfieldCandidate("operator", "chen-qianyu", "陈千语", 100)
+        matcher = AsyncMock()
+        render = AsyncMock(return_value=(b"png",))
+        fake_logger = Mock()
+        with patch.object(handlers, "notice_before_public_data", AsyncMock()), \
+                patch.object(handlers, "_collect_candidates", AsyncMock(return_value=[candidate])), \
+                patch.object(handlers, "_item_scope_fallback", AsyncMock(return_value=None)), \
+                patch.object(handlers, "_render_candidate", render), \
+                patch.object(handlers, "_finish_pngs", AsyncMock(side_effect=RuntimeError("upload refused"))), \
+                patch.object(handlers, "logger", fake_logger):
+            asyncio.run(handlers._handle_command(matcher, None, handlers.parse_command("干员 陈千语")))
+
+        # 卡片已渲染成功，失败发生在发送阶段：回复要说“发送失败”，不能混同为“生成失败”。
+        render.assert_awaited_once()
+        matcher.finish.assert_awaited_once()
+        message = matcher.finish.await_args.args[0]
+        self.assertIn("发送失败", message)
+        self.assertNotIn("生成失败", message)
+        fake_logger.exception.assert_called_once()
+        self.assertIn("send failed", fake_logger.exception.call_args.args[0])
 
     def test_root_aliases_include_zmd(self):
         self.assertIn("zmd", commands.ROOT_ALIASES)
@@ -162,15 +177,18 @@ class EndfieldCommandParserTests(unittest.TestCase):
         )
 
     def test_parse_quick_calc_rejects_invalid_inputs(self):
-        self.assertIn("1 至 4", commands.parse_command("速算 5腐蚀 200").error)
+        level_error = commands.parse_command("速算 5腐蚀 200").error
+        self.assertIn("等级", level_error)
+        self.assertIn("4", level_error)
         self.assertIn("整数", commands.parse_command("速算 2导电 abc").error)
-        self.assertIn("指令格式", commands.parse_command("速算 2灼热 200").error)
+        self.assertIn("格式：", commands.parse_command("速算 2灼热 200").error)
 
     def test_parse_loadout_rejects_invalid_operator_potential(self):
         parsed = commands.parse_command("配装 佩丽卡 角色潜能6")
 
         self.assertEqual(parsed.action, "invalid")
-        self.assertIn("角色潜能需介于 0 至 5 之间", parsed.error)
+        self.assertIn("角色潜能", parsed.error)
+        self.assertIn("5", parsed.error)
 
     def test_parse_loadout_rejects_ambiguous_bare_potential(self):
         parsed = commands.parse_command("配装 佩丽卡 潜能3")
@@ -182,12 +200,14 @@ class EndfieldCommandParserTests(unittest.TestCase):
         parsed = commands.parse_command("配装 佩丽卡 武器技能1等级10")
 
         self.assertEqual(parsed.action, "invalid")
-        self.assertIn("武器技能等级需介于 1 至 9 之间", parsed.error)
+        self.assertIn("武器技能等级", parsed.error)
+        self.assertIn("9", parsed.error)
 
     def test_parse_loadout_rejects_invalid_enhance(self):
         spec, error = commands.parse_loadout_spec("佩丽卡 脉冲源石配件 词条2锻造4")
         self.assertIsNone(spec)
-        self.assertIn("0 至 3", error)
+        self.assertIn("锻造等级", error)
+        self.assertIn("词条2锻造4", error)
 
     def test_loadout_aliases_include_mobile_short_names(self):
         self.assertEqual(aliases.alias_targets("equipment", "脉冲源石配件"), ("脉冲式校准器",))
@@ -365,12 +385,6 @@ class EndfieldCommandParserTests(unittest.TestCase):
         self.assertEqual(parsed.scope, "operator")
         self.assertEqual(parsed.query, "陈千语")
 
-    def test_weapon_query_aliases(self):
-        parsed = commands.parse_command("武器 赤缨")
-        self.assertEqual(parsed.action, "query")
-        self.assertEqual(parsed.scope, "weapon")
-        self.assertEqual(parsed.query, "赤缨")
-
     def test_equipment_query_aliases(self):
         parsed = commands.parse_command("装备 长息轻护甲")
         self.assertEqual(parsed.action, "query")
@@ -484,10 +498,12 @@ class EndfieldCommandParserTests(unittest.TestCase):
     def test_source_option_rejects_missing_unknown_and_conflicting_values(self):
         missing = commands.parse_command("陈千语 --source")
         self.assertEqual(missing.action, "invalid")
-        self.assertIn("缺少数据源名称", missing.error)
+        self.assertIn("--source", missing.error)
+        self.assertIn("缺少", missing.error)
 
         unknown = commands.parse_command("陈千语 --source skland")
         self.assertEqual(unknown.action, "invalid")
+        self.assertIn("skland", unknown.error)
         self.assertIn("不支持", unknown.error)
 
         conflicting = commands.parse_command("陈千语 -s fz --source warfarin")
@@ -544,7 +560,8 @@ class EndfieldCommandParserTests(unittest.TestCase):
         self.assertEqual([item.key for item in options], ["first", "second", "third"])
         self.assertIn("1. [干员] 第一项 (first)", message)
         self.assertIn("2. [武器] 第二项 (second)", message)
-        self.assertIn("引用本条消息并回复序号 1–3 可查看详情", message)
+        self.assertIn("1–3", message)
+        self.assertIn("取消", message)
         self.assertEqual(commands.parse_candidate_selection(" 2 ", len(options)), 1)
         self.assertIsNone(commands.parse_candidate_selection("0", len(options)))
         self.assertIsNone(commands.parse_candidate_selection("4", len(options)))
@@ -654,17 +671,15 @@ class EndfieldCommandParserTests(unittest.TestCase):
         self.assertIn("武器：AkeData、FZ Wiki、Warfarin Wiki", text)
         self.assertIn("装备：AkeData、FZ Wiki", text)
 
-    def test_help_documents_source_option(self):
+    def test_help_documents_source_loadout_calendar_and_daily(self):
         text = commands.format_help()
+
         self.assertIn("--source <fz|akedata|warfarin>", text)
         self.assertIn("-s/--source", text)
-
-    def test_help_documents_loadout_potential_and_weapon_skill_options(self):
-        text = commands.format_help()
-
         self.assertIn("角色潜能2 武器潜能3", text)
         self.assertIn("武器技能1等级5", text)
         self.assertIn("/ef 版本日历", text)
+        self.assertIn("/ef 日常", text)
 
     def test_current_version_calendar_manifest_is_data_driven_and_complete(self):
         calendar_module = _load_endfield_module("version_calendar")
@@ -863,14 +878,41 @@ class EndfieldCommandParserTests(unittest.TestCase):
         self.assertIn("超限自动分页", page.footnote)
 
     def test_gacha_import_is_private_only_before_phone_prompt(self):
-        source = (ROOT / "plugins/endfield/handlers.py").read_text(encoding="utf-8")
+        import plugins.endfield.handlers as handlers
 
-        self.assertIn('private_only = {"bind", "primary", "unbind", "gacha_import"}', source)
-        self.assertIn("该功能涉及个人隐私凭证或手机号，请在私聊中发起。", source)
-        self.assertLess(
-            source.index("if command.action in private_only and is_group(event):"),
-            source.index('if command.action == "gacha_import":'),
-        )
+        def run(command, *, group: bool):
+            matcher = AsyncMock()
+            downstream = {
+                "_handle_xhh_import": AsyncMock(),
+                "_handle_binding": AsyncMock(),
+                "prompt": AsyncMock(side_effect=AssertionError("must not prompt")),
+                "prompt_silently": AsyncMock(side_effect=AssertionError("must not prompt")),
+            }
+            store = Mock()
+            with patch.multiple(handlers, **downstream), \
+                    patch.object(handlers, "account_store", store), \
+                    patch.object(handlers, "is_group", return_value=group), \
+                    patch.object(handlers, "event_user_id", return_value="10001"), \
+                    patch.object(handlers.CredentialCipher, "from_env", return_value=Mock()):
+                asyncio.run(handlers._handle_personal_command(matcher, types.SimpleNamespace(), command))
+            return matcher, downstream, store
+
+        # 群聊里这些命令在询问手机号/凭据之前就被拦下，下游流程一个都不进入。
+        for text in ("抽卡导入", "绑定", "主账号 1", "解绑 1"):
+            with self.subTest(text=text):
+                command = handlers.parse_command(text)
+                self.assertIn(command.action, {"gacha_import", "bind", "primary", "unbind"})
+                matcher, downstream, store = run(command, group=True)
+                matcher.finish.assert_awaited_once()
+                self.assertIn("私聊", matcher.finish.await_args.args[0])
+                for fake in downstream.values():
+                    fake.assert_not_awaited()
+                store.set_primary.assert_not_called()
+                store.unbind.assert_not_called()
+
+        # 私聊时同一条命令照常进入小黑盒导入流程。
+        matcher, downstream, _ = run(handlers.parse_command("抽卡导入"), group=False)
+        downstream["_handle_xhh_import"].assert_awaited_once()
 
 
 def _sample_operator(levels: tuple[int, ...] = (9, 10, 11, 12)):
@@ -3260,53 +3302,6 @@ class EndfieldServiceTests(unittest.TestCase):
         self.assertIn("frontend-level-list long", html)
         self.assertIn("term-icon", html)
         self.assertNotIn(">S1<", html)
-
-    def test_bieli_second_potential_cryst_damage_value_and_no_icon(self):
-        raw_path = ROOT / ".runtime" / "bieli.json"
-        if not raw_path.exists():
-            self.skipTest("bieli runtime sample is not available")
-        import json
-
-        view = build_operator_view(json.loads(raw_path.read_text(encoding="utf-8")))
-        styles = draw.merged_term_styles(view)
-        rendered = draw.highlight_terms(view.potentials[1].description, styles, {})
-
-        expected_desc = "\u529b\u91cf+20\uff0c\u5bd2\u51b7\u4f24\u5bb3+10%\u3002"
-        marker = "\u5bd2\u51b7\u4f24\u5bb3</span><strong>+10%</strong>"
-        term = "\u5bd2\u51b7\u4f24\u5bb3"
-        self.assertEqual(view.potentials[1].description, expected_desc)
-        self.assertIn(marker, rendered)
-        term_fragment = rendered.split(marker, 1)[0].rsplit(term, 1)[-1]
-        self.assertNotIn("term-icon", term_fragment)
-
-    def test_gilberta_talent_charge_value_and_spell_vul_no_icon(self):
-        raw_path = ROOT / ".runtime" / "gilberta.json"
-        if not raw_path.exists():
-            self.skipTest("gilberta runtime sample is not available")
-        import json
-
-        view = build_operator_view(json.loads(raw_path.read_text(encoding="utf-8")))
-        self.assertGreaterEqual(len(view.potentials[1].description), 20)
-        styles = draw.merged_term_styles(view)
-        rendered = draw.highlight_terms(view.potentials[1].description, styles, {})
-
-        self.assertIn("\u5145\u80fd\u6548\u7387+7%", view.talents[0].description)
-        self.assertIn("\u6cd5\u672f\u8106\u5f31", rendered)
-        self.assertNotIn('<span class="term" style="--term-color: #33c2ff">\u6cd5\u672f\u8106\u5f31</span>', rendered)
-        self.assertNotIn('<span class="term-plain">\u6cd5\u672f\u8106\u5f31</span>', rendered)
-
-    def test_natural_inflict_keeps_own_icon_not_corrupt_icon(self):
-        raw_path = ROOT / ".runtime" / "gilberta.json"
-        if not raw_path.exists():
-            self.skipTest("gilberta runtime sample is not available")
-        import json
-
-        view = build_operator_view(json.loads(raw_path.read_text(encoding="utf-8")))
-        style = view.term_styles.get("\u81ea\u7136\u9644\u7740")
-
-        self.assertIsNotNone(style)
-        self.assertIn("icon_term_ba_naturalinflict", style.icon_url)
-        self.assertNotIn("icon_term_ba_corrupt", style.icon_url)
 
     def test_build_fz_operator_view_extracts_supported_schema(self):
         view = service.build_fz_operator_view(

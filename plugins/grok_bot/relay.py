@@ -9,9 +9,13 @@ from .config import GrokError
 from .gateway import DownloadBudget, Gateway
 from .media import MAX_REPLY_FILES, Attachment, Reply
 
+# File delivery can upload and send, each with its own 60s bound.
+EMIT_TIMEOUT = 130
+
 
 class ReplyRelay:
-    def __init__(self, gateway: Gateway, deliver: Callable[[Reply], Awaitable[None]]):
+    def __init__(self, gateway: Gateway, deliver: Callable[[Reply], Awaitable[None]], *,
+                 hold: Callable[[float], None] | None = None):
         self.gateway, self.deliver = gateway, deliver
         self.text = ""
         self.text_limit_reported = False
@@ -19,14 +23,14 @@ class ReplyRelay:
         self.seen: set[tuple[str, str]] = set()
         self.files: asyncio.Queue[Attachment | None] = asyncio.Queue()
         self.worker: asyncio.Task | None = None
-        self.budget = DownloadBudget()
+        # `hold` is told each attachment download deadline.
+        self.budget = DownloadBudget(hold=hold)
         self.delivered = False
         self.pending_files = 0
 
     async def emit(self, reply: Reply) -> None:
         try:
-            # File delivery can upload and send, each with its own 60s bound.
-            await asyncio.wait_for(self.deliver(reply), 130)
+            await asyncio.wait_for(self.deliver(reply), EMIT_TIMEOUT)
             self.delivered = True
         except asyncio.TimeoutError:
             raise GrokError("消息发送状态未确认，请检查当前会话接收情况；为避免刷屏本次未重复推送。") from None

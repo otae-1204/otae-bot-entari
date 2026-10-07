@@ -159,16 +159,25 @@ class ManagedSchedulerTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.wait_for(fast_finished.wait(), timeout=0.05)
 
     async def test_synchronous_job_runs_off_event_loop(self):
-        heartbeat = asyncio.Event()
+        started = threading.Event()
+        release = threading.Event()
+        job_threads = []
 
         def sync_job():
-            time.sleep(0.05)
+            job_threads.append(threading.get_ident())
+            started.set()
+            release.wait(timeout=2)
 
         tick = self.scheduler.add_job(sync_job, "interval", seconds=1, id="sync")
-        await tick()
-        await asyncio.sleep(0.005)
-        heartbeat.set()
-        await asyncio.wait_for(heartbeat.wait(), timeout=0.02)
+        try:
+            await tick()
+            self.assertTrue(await asyncio.to_thread(started.wait, 1))
+            # The job is still blocked in a worker thread while the loop keeps running.
+            await asyncio.sleep(0.01)
+            self.assertEqual(len(job_threads), 1)
+            self.assertNotEqual(job_threads[0], threading.get_ident())
+        finally:
+            release.set()
 
     async def test_failed_job_is_released_for_next_tick(self):
         calls = 0

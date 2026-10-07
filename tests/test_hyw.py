@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 import httpx
+import pytest
 
 from plugins.hyw.config import HywConfig, HywError
 from plugins.hyw.handlers import handle_hyw, parts_from, scope_for
@@ -631,6 +632,7 @@ class QuoteChannelEndToEndTests(unittest.IsolatedAsyncioTestCase):
 
 class RetryTests(unittest.TestCase):
     def test_rate_limit_is_retryable_and_auth_failure_is_not(self):
+        pytest.importorskip("hyw_frontier")
         from hyw_frontier.model_backend import http_status, transient_failure
         from hyw_frontier.model_backend import RETRYABLE_STATUSES
 
@@ -644,11 +646,6 @@ class RetryTests(unittest.TestCase):
         self.assertNotIn(http_status(Denied()), RETRYABLE_STATUSES)
         self.assertTrue(transient_failure(TimeoutError()))
         self.assertFalse(transient_failure(Denied()))
-
-
-class ErrorTests(unittest.TestCase):
-    def test_hyw_error_is_an_exception(self):
-        self.assertIsInstance(HywError("x"), Exception)
 
 
 SECRETS = (

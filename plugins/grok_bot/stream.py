@@ -16,7 +16,7 @@ from .config import GatewayError, GrokConfig, GrokError
 from .conversations import ConversationScope
 from .gateway import Gateway, reply_from
 from .media import Reply, input_images
-from .relay import ReplyRelay
+from .relay import EMIT_TIMEOUT, ReplyRelay
 
 
 @dataclass
@@ -52,6 +52,7 @@ class LiveConversation:
         self.task: asyncio.Task | None = None
         self.relay: ReplyRelay | None = None
         self.gateway: Gateway | None = None
+        self.deadline: asyncio.Timeout | None = None
 
     def enqueue(self, item: Input) -> None:
         self.inputs.put_nowait(item)
@@ -65,6 +66,12 @@ class LiveConversation:
         # Evaluate the policy at actual QQ send time, including after an upload.
         await owner.deliver(reply, reply_to=self.can_quote)
 
+    def hold(self, until: float) -> None:
+        """A started attachment download gets until its own deadline, plus delivery, past GROKBOT_TIMEOUT."""
+        until += EMIT_TIMEOUT
+        if self.deadline is not None and not self.deadline.expired() and until > self.deadline.when():
+            self.deadline.reschedule(until)
+
     async def run(self) -> None:
         acquired = False
         try:
@@ -76,7 +83,8 @@ class LiveConversation:
                     acquired = True
 
             await asyncio.wait_for(acquire(), self.config.timeout)
-            await asyncio.wait_for(self.work(), self.config.timeout)
+            async with asyncio.timeout(self.config.timeout) as self.deadline:
+                await self.work()
         except asyncio.CancelledError:
             raise
         except Exception as error:  # noqa: BLE001 - Background errors must be delivered and redacted.
@@ -91,13 +99,14 @@ class LiveConversation:
                 message = "会话消息接收中断，请管理员查看运行日志；已提交的任务可能仍在云端处理中。"
             if self.submissions:
                 try:
-                    await asyncio.wait_for(self.emit(Reply(message)), 130)
+                    await asyncio.wait_for(self.emit(Reply(message)), EMIT_TIMEOUT)
                 except Exception as delivery_error:  # noqa: BLE001 - Do not retry an ambiguous QQ send.
                     logger.warning("[grok_bot] receiver diagnostic delivery failed: {}", type(delivery_error).__name__)
             else:
                 self.fail_waiting(message)
         finally:
             self.closing = True
+            self.deadline = None
             self.fail_waiting("当前接收流程已终止，本次提问尚未提交成功，请重新发送。")
             if acquired:
                 async with self.hub.capacity:
@@ -157,7 +166,7 @@ class LiveConversation:
             _, busy = await gateway.state()
             self.external_input = busy  # Pre-existing cloud work has no reliable QQ owner.
             self.gateway = gateway
-            self.relay = ReplyRelay(gateway, self.emit)
+            self.relay = ReplyRelay(gateway, self.emit, hold=self.hold)
         gateway = self.gateway
         if item.done.cancelled():
             return

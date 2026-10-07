@@ -235,7 +235,8 @@ class HandlerTests(unittest.IsolatedAsyncioTestCase):
         scope = scope_from_event(root.account, root.event)
         for role in ("admin", "owner"):
             for action in ("开启 grok", "enable grokbot", "打开 grok_bot"):
-                self.assertIn("仅 SuperUser", await self.run_command(session(roles=[Role(role)]), action))
+                # Grok-specific restriction, not the generic "权限不足" refusal: admins may manage.
+                self.assertIn("仅 SuperUser 可开启", await self.run_command(session(roles=[Role(role)]), action))
                 self.assertFalse(self.store.is_enabled(scope, "grok_bot"))
         self.assertFalse(self.store.path.exists())
         self.assertIn("已成功开启", await self.run_command(root, "开启 grok"))
@@ -245,7 +246,7 @@ class HandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.store.is_enabled(scope, "grok_bot"))
 
     async def test_private_superuser_and_ordinary_members_cannot_manage(self):
-        self.assertIn("目标群聊内", await self.run_command(session(user="root", private=True), "关闭 hyw"))
+        self.assertIn("群聊内", await self.run_command(session(user="root", private=True), "关闭 hyw"))
         for text in ("关闭 hyw", "开启 hyw", "列表"):
             self.assertIn("权限不足", await self.run_command(session(), text))
         self.assertFalse(self.store.path.exists())
@@ -261,6 +262,7 @@ class HandlerTests(unittest.IsolatedAsyncioTestCase):
         with patch("otae_bot.group_features.os.replace", side_effect=OSError("disk full")):
             reply = await self.run_command(current, "关闭 hyw")
         self.assertIn("保存失败", reply)
+        self.assertNotIn("已成功", reply)
         self.assertTrue(self.store.is_enabled(scope_from_event(current.account, current.event), "hyw"))
 
 

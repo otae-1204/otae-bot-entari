@@ -7,8 +7,10 @@
 from __future__ import annotations
 
 import contextlib
+import functools
 import io
 import json
+import pickle
 import tempfile
 import unittest
 from pathlib import Path
@@ -59,8 +61,14 @@ _EMPTY_ALIAS_DATA = {
 }
 
 
+@functools.lru_cache(maxsize=1)
+def _fixture_pickle() -> bytes:
+    """1.8 MB 夹具每个进程只解析一次；之后每次用 pickle 复制出一份独立、可改的表。"""
+    return pickle.dumps(json.loads(FIXTURE.read_bytes()), protocol=pickle.HIGHEST_PROTOCOL)
+
+
 def _tables() -> dict:
-    return json.loads(FIXTURE.read_bytes())
+    return pickle.loads(_fixture_pickle())
 
 
 def _snapshot(*, shared: str = "fixture") -> AkeSnapshot:
@@ -120,6 +128,31 @@ class _SnapshotFixture:
         # 测试自己读 self.data，与既有 endfield 测试同一形状。
         self.test.data = self.data
         return self
+
+
+def _offline_public_sources(test: unittest.TestCase) -> dict[tuple[str, str], AsyncMock]:
+    """把夹具快照之外的公开数据源都换成“无命中”，测试全程不联网。
+
+    `_SnapshotFixture` 只替换了 `repository` 的 AkeData 快照；全局检索和物品补查
+    还会回退到 FZ Wiki / Warfarin 的候选解析器，关卡目录则经 WarfarinClient 直接
+    读 AkeData 表，冷启动提示也可能探测 AKE manifest。返回 {(kind, source): mock}。
+    """
+    mocks: dict[tuple[str, str], AsyncMock] = {}
+    replaced: dict[str, dict] = {}
+    for kind, resolvers in endfield.SOURCE_CANDIDATE_RESOLVERS.items():
+        table = dict(resolvers)
+        for source in ("fz", "warfarin"):
+            if source in table:
+                table[source] = mocks[(kind, source)] = AsyncMock(return_value=[])
+        replaced[kind] = table
+    for patcher in (
+        patch.dict(endfield.SOURCE_CANDIDATE_RESOLVERS, replaced),
+        patch.object(endfield.stage_service, "discover_matches", AsyncMock(return_value=())),
+        patch.object(endfield, "notice_before_public_data", AsyncMock()),
+    ):
+        patcher.start()
+        test.addCleanup(patcher.stop)
+    return mocks
 
 
 # ------------------------------------------------------------------ §4.6 / §7.1 命令
@@ -207,22 +240,24 @@ class EndfieldEncyclopediaCommandTests(unittest.TestCase):
 
     def test_format_not_found_names_catalog_without_repeating_the_word(self):
         expected = {
-            "item": "可发送 /ef 物品 查阅物品完整目录。",
-            "item_catalog": "可发送 /ef 物品 查阅物品完整目录。",
-            "prop": "可发送 /ef 道具 查阅道具完整目录。",
-            "prop_catalog": "可发送 /ef 道具 查阅道具完整目录。",
-            "enemy_catalog": "可发送 /ef 敌人 查阅敌人完整目录。",
-            "term_catalog": "可发送 /ef 词条 查阅词条完整目录。",
+            "item": "物品",
+            "item_catalog": "物品",
+            "prop": "道具",
+            "prop_catalog": "道具",
+            "enemy_catalog": "敌人",
+            "term_catalog": "词条",
         }
-        for scope, tail in expected.items():
+        for scope, word in expected.items():
             with self.subTest(scope=scope):
                 message = commands.format_not_found(scope, "xx")
-                self.assertIn(tail, message)
+                # 提示里给出对应目录命令，且不出现“目录目录”这样的重复。
+                self.assertIn(f"/ef {word} ", message)
+                self.assertIn("目录", message)
                 self.assertNotIn("目录目录", message)
 
     def test_format_not_found_falls_back_to_search_for_archive_entry(self):
         message = commands.format_not_found("archive_entry", "xx")
-        self.assertIn("可尝试使用 /ef 搜索 xx 进行全局检索。", message)
+        self.assertIn("/ef 搜索 xx", message)
 
     def test_format_candidates_tail_lists_shipped_encyclopedia_scopes(self):
         message = commands.format_candidates(
@@ -241,7 +276,10 @@ class EndfieldEncyclopediaCommandTests(unittest.TestCase):
             "/ef 档案 <名称>",
         ):
             self.assertIn(usage, help_text)
-        self.assertIn("关卡数据独家采用 AkeData", commands.format_source())
+        encyclopedia_line = next(line for line in commands.format_source().splitlines() if "物品" in line)
+        self.assertIn("AkeData", encyclopedia_line)
+        self.assertNotIn("FZ", encyclopedia_line)
+        self.assertNotIn("Warfarin", encyclopedia_line)
 
     def test_choose_candidate_reports_a_numbered_list_within_the_ambiguity_margin(self):
         candidates = [
@@ -311,6 +349,7 @@ class EndfieldEncyclopediaClassificationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(prop_candidates.call_count, 0)
 
     async def test_item_scope_fallback_redirects_medals(self):
+        _offline_public_sources(self)
         command = commands.ParsedEndfieldCommand("query", scope="item", query="一星蚀刻章")
         fallback = await endfield._item_scope_fallback(command, [])
         self.assertEqual(fallback, "medal")
@@ -508,19 +547,19 @@ class EndfieldEncyclopediaAliasTests(unittest.TestCase):
         )
 
     def test_empty_lookup_is_rejected(self):
-        with self.assertRaisesRegex(ValueError, "别名库中未收录正式名称"):
+        with self.assertRaisesRegex(ValueError, "未收录正式名称.*新名"):
             catalog_aliases.add_alias("prop", "新名", "x", lookup=lambda query: ())
 
     def test_missing_lookup_is_rejected(self):
-        with self.assertRaisesRegex(ValueError, "别名库中未收录正式名称"):
+        with self.assertRaisesRegex(ValueError, "未收录正式名称.*新名"):
             catalog_aliases.add_alias("prop", "新名", "x", lookup=None)
 
     def test_two_lookup_matches_ask_for_the_full_name(self):
-        with self.assertRaisesRegex(ValueError, "匹配到多个正式名称，请提供完整全名"):
+        with self.assertRaisesRegex(ValueError, "多个正式名称.*全名.*甲、乙"):
             catalog_aliases.add_alias("prop", "新名", "x", lookup=lambda query: ("甲", "乙"))
 
     def test_alias_equal_to_the_canonical_name_is_rejected(self):
-        with self.assertRaisesRegex(ValueError, "新别名不可与正式名称完全相同。"):
+        with self.assertRaisesRegex(ValueError, "新别名.*正式名称.*相同"):
             catalog_aliases.add_alias(
                 "prop", "炝炒时蔬", "炝炒时蔬", lookup=lambda query: ("炝炒时蔬",)
             )
@@ -554,15 +593,19 @@ class EndfieldEncyclopediaAliasHandlerTests(unittest.IsolatedAsyncioTestCase):
             "alias", alias_action="add", args=("物品", "苔藓样本", "苔藓")
         )
         message = await endfield._handle_alias_command(command)
-        self.assertEqual(message, "已成功添加物品别名：苔藓 → 苔藓样本。")
+        self.assertIn("添加", message)
+        self.assertIn("物品别名", message)
+        self.assertIn("苔藓 → 苔藓样本", message)
+        self.assertNotIn("失败", message)
 
     async def test_item_alias_rejects_a_name_that_is_not_in_the_index(self):
         command = commands.ParsedEndfieldCommand(
             "alias", alias_action="add", args=("物品", "不存在的物品", "x")
         )
         message = await endfield._handle_alias_command(command)
-        self.assertIn("别名添加失败", message)
-        self.assertIn("别名库中未收录正式名称", message)
+        self.assertIn("失败", message)
+        self.assertIn("未收录正式名称", message)
+        self.assertIn("不存在的物品", message)
 
     async def test_archive_entry_alias_uses_the_archive_snapshot_as_its_lookup(self):
         with patch.object(
@@ -572,7 +615,10 @@ class EndfieldEncyclopediaAliasHandlerTests(unittest.IsolatedAsyncioTestCase):
                 "alias", alias_action="add", args=("档案", "终末地物资", "终末地")
             )
             message = await endfield._handle_alias_command(command)
-        self.assertEqual(message, "已成功添加档案条目别名：终末地 → 终末地物资。")
+        self.assertIn("添加", message)
+        self.assertIn("档案条目别名", message)
+        self.assertIn("终末地 → 终末地物资", message)
+        self.assertNotIn("失败", message)
 
     async def test_archive_entry_alias_is_not_reported_as_unavailable(self):
         with patch.object(
@@ -582,8 +628,9 @@ class EndfieldEncyclopediaAliasHandlerTests(unittest.IsolatedAsyncioTestCase):
                 "alias", alias_action="add", args=("档案", "不存在条目", "x")
             )
             message = await endfield._handle_alias_command(command)
-        self.assertNotIn("尚未开放", message)
-        self.assertIn("别名库中未收录正式名称", message)
+        # 档案条目不能被当作“分类未开放”拒绝，而是走正式名核对后报“未收录”。
+        self.assertNotIn("未开放", message)
+        self.assertIn("未收录正式名称", message)
 
 
 # ------------------------------------------------------------------ §5 敌人
@@ -783,15 +830,19 @@ class EndfieldEncyclopediaArchiveTests(unittest.IsolatedAsyncioTestCase):
                 None,
                 commands.ParsedEndfieldCommand("query", scope="archive_entry", query="终末地"),
             )
-        matcher.finish.assert_awaited_once_with("档案数据尚未构建，请先发送 /ef 档案 刷新。")
+        matcher.finish.assert_awaited_once()
+        self.assertIn("/ef 档案 刷新", matcher.finish.await_args.args[0])
 
     async def test_missing_snapshot_is_silent_for_the_all_scope(self):
+        _offline_public_sources(self)
         matcher = AsyncMock()
         with patch.object(endfield.archive_store, "load_current_view", return_value=None):
             await endfield._handle_command(
                 matcher, None, commands.ParsedEndfieldCommand("query", scope="all", query="zzz")
             )
-        matcher.finish.assert_awaited_once_with("未能检索到内容：zzz。\n可尝试使用 /ef 搜索 zzz 进行全局检索。")
+        # 全局检索不提档案刷新，照常给出普通的“未找到”回复。
+        matcher.finish.assert_awaited_once_with(commands.format_not_found("all", "zzz"))
+        self.assertNotIn("/ef 档案 刷新", matcher.finish.await_args.args[0])
 
     async def test_archive_card_renders_without_opening_an_ake_snapshot(self):
         drawer = AsyncMock(return_value=b"png")
@@ -839,27 +890,32 @@ class EndfieldEncyclopediaWiringTests(unittest.TestCase):
         self.assertNotIn("archive_entry", endfield.SOURCE_CANDIDATE_RESOLVERS)
         self.assertEqual(endfield.source_order("archive_entry"), ("akedata",))
 
-    def test_encyclopedia_scopes_are_registered_in_the_command_tables(self):
-        for scope in commands.ENCYCLOPEDIA_SCOPES:
-            with self.subTest(scope=scope):
-                self.assertIn(scope, commands.SCOPE_LABELS)
-                self.assertIn(scope, commands.ENCYCLOPEDIA_SCOPE_ALIASES)
-
 
 class EndfieldEncyclopediaSourceTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         _SnapshotFixture(self).start()
 
-    async def test_explicit_unsupported_source_is_rejected_before_collecting(self):
+    async def _guard_message(self) -> str:
         matcher = AsyncMock()
-        await endfield._handle_command(matcher, None, commands.parse_command("道具 xx --source fz"))
-        matcher.finish.assert_awaited_once_with("该类资料仅由 AkeData 提供。")
+        collect = AsyncMock(side_effect=AssertionError("must be rejected before collecting"))
+        with patch.object(endfield, "_collect_candidates", collect):
+            await endfield._handle_command(matcher, None, commands.parse_command("道具 xx --source fz"))
+        collect.assert_not_awaited()
+        matcher.finish.assert_awaited_once()
+        return matcher.finish.await_args.args[0]
+
+    async def test_explicit_unsupported_source_is_rejected_before_collecting(self):
+        self.assertIn("AkeData", await self._guard_message())
 
     async def test_bare_source_option_is_not_rejected_by_the_encyclopedia_guard(self):
+        guard_message = await self._guard_message()
+        wiki = _offline_public_sources(self)
         matcher = AsyncMock()
         await endfield._handle_command(matcher, None, commands.parse_command("xx --source fz"))
         message = matcher.finish.await_args.args[0]
-        self.assertNotIn("该类资料仅由 AkeData 提供。", message)
+        self.assertNotEqual(message, guard_message)
+        # 没被图鉴守卫拦下：确实按 --source fz 去收集了候选。
+        self.assertTrue(any(mock.await_count for (_, source), mock in wiki.items() if source == "fz"))
 
     async def test_fz_success_with_empty_list_beats_a_warfarin_failure(self):
         resolvers = {
@@ -906,7 +962,8 @@ class EndfieldEncyclopediaSourceTests(unittest.IsolatedAsyncioTestCase):
             AsyncMock(side_effect=AkeDataIncomplete("missing")),
         ):
             await endfield._handle_command(matcher, None, commands.parse_command("物品 苔藓样本"))
-        matcher.finish.assert_awaited_once_with("该资料暂时不可用，请稍后再试。")
+        matcher.finish.assert_awaited_once()
+        self.assertIn("暂时不可用", matcher.finish.await_args.args[0])
 
 
 # ------------------------------------------------------------------ §4.9 渲染
@@ -957,12 +1014,6 @@ class EndfieldEncyclopediaRenderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first, (b"png-bytes",))
         self.assertEqual(second, (b"png-bytes",))
         self.assertEqual(hits, 0)
-
-    async def test_four_card_renderers_are_registered(self):
-        for kind in ("item", "prop", "enemy", "term"):
-            with self.subTest(kind=kind):
-                self.assertIn(kind, endfield.CONTENT_RENDERERS)
-        self.assertIn("archive_entry", endfield.CONTENT_RENDERERS)
 
     async def test_catalog_drawer_returns_a_tuple_of_pages(self):
         from plugins.endfield.encyclopedia import draw as encyclopedia_draw

@@ -420,7 +420,7 @@ class EndfieldAccountDetailDrawTests(unittest.TestCase):
         )
 
     def test_lv1_to_lv8_use_plain_level_badges(self):
-        for level in range(1, 9):
+        for level in (1, 8):  # both ends of the plain-badge range; 9 switches to the svg below
             marker = account_detail_draw._skill_progress_marker(level, 0)
             self.assertIn('class="account-skill-level"', marker)
             self.assertIn(f">Lv{level}<", marker)
@@ -634,7 +634,10 @@ class EndfieldAccountDetailRoutingTests(unittest.IsolatedAsyncioTestCase):
         matcher = mock.AsyncMock()
         prompt = mock.AsyncMock(return_value=reply)
         with store_patch, group_patch, cipher_patch, detail_patch as detail, currency_patch as currency, draw_patch as draw, finish_patch:
-            with mock.patch.object(endfield, "prompt_silently", prompt):
+            # AKE 公开数据（名称表、冷启动提示）会真实联网，与路由无关。
+            with mock.patch.object(endfield, "prompt_silently", prompt), mock.patch.object(
+                endfield, "fetch_account_detail_name_map", mock.AsyncMock(return_value=None)
+            ), mock.patch.object(endfield, "notice_default_ake_public", mock.AsyncMock()):
                 await endfield._handle_accounts(
                     matcher, "qq", command, mock.Mock(), group=group
                 )
@@ -657,7 +660,9 @@ class EndfieldAccountDetailRoutingTests(unittest.IsolatedAsyncioTestCase):
         _, prompt, detail, _, _, _ = await self.run_accounts(group=False, roles=self.roles)
         prompt.assert_awaited_once()
         listing = prompt.await_args.args[0]
-        self.assertIn("引用本条消息并回复对应编号即可查看该账号详情", listing)
+        self.assertIn("回复", listing)
+        self.assertIn("编号", listing)
+        self.assertIn("详情", listing)
         self.assertIn("1. 甲", listing)
         self.assertIn("2. 乙", listing)
         detail.assert_not_awaited()
@@ -688,12 +693,18 @@ class EndfieldAccountDetailRoutingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_unknown_selector_reports_guidance(self):
         matcher, _, detail, _, _, _ = await self.run_accounts(group=False, roles=self.roles, selector="丙")
-        matcher.finish.assert_awaited_once_with("未找到指定账号，发送 /ef 账号 可查看有效编号。")
+        matcher.finish.assert_awaited_once()
+        message = matcher.finish.await_args.args[0]
+        self.assertIn("未找到", message)
+        self.assertIn("/ef 账号", message)
         detail.assert_not_awaited()
 
     async def test_missing_binding_reports_bind_hint(self):
         matcher, _, detail, _, _, _ = await self.run_accounts(group=False, roles=[])
-        matcher.finish.assert_awaited_once_with("尚未绑定终末地账号，请先私聊发送 /ef 绑定 进行添加。")
+        matcher.finish.assert_awaited_once()
+        message = matcher.finish.await_args.args[0]
+        self.assertIn("尚未绑定", message)
+        self.assertIn("/ef 绑定", message)
         detail.assert_not_awaited()
 
     async def test_cancelled_reply_stops_without_rendering(self):

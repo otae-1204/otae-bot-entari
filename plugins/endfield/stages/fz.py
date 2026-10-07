@@ -1,16 +1,11 @@
 from __future__ import annotations
 
-import asyncio
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
-from hashlib import sha1
 from typing import Any
 
-from loguru import logger
-
 from ..account.i18n import localized_text
-from ..providers.warfarin import WarfarinClient
 from .models import (
     BossRushStageDetails,
     CrisisContractMetric,
@@ -21,9 +16,6 @@ from .models import (
     Stage,
     StageBlock,
     StageBlockEntry,
-    StageCatalogGroup,
-    StageCatalogItem,
-    StageCatalogView,
     StageEnemy,
     StageEnemyPoise,
     StageEnemyResistance,
@@ -36,11 +28,9 @@ from .models import (
     StageWave,
     WarEchoCycle,
     WarEchoStageDetails,
-    split_stage_key,
 )
 
 
-STAGE_DIRECTORY_RULE_VERSION = "stage-directory-v2"
 ENEMY_ARTICLE_PREFIX = "敌人/"
 GENERIC_FAMILY_KEY = "other"
 
@@ -68,279 +58,13 @@ STAGE_FAMILIES: tuple[StageFamily, ...] = (
     StageFamily("challenge_activity", "挑战活动", category="挑战活动"),
     StageFamily(GENERIC_FAMILY_KEY, "其他玩法", category="副本"),
 )
-FAMILY_ORDER = tuple(family.key for family in STAGE_FAMILIES)
 FAMILY_NAMES = {family.key: family.name for family in STAGE_FAMILIES}
-_FAMILY_BY_KEY = {family.key: family for family in STAGE_FAMILIES}
 
-# Hub articles describe a gameplay rather than a stage; they carry no template to parse.
-HUB_TITLES = frozenset({"副本/资源", "副本/干员养成", "副本/武器养成", "危境再现", "活动/战争回响"})
 ENERGY_HEAVY_PREFIX = "重度"
-
-
-class FZStageSource:
-    def __init__(self, client: WarfarinClient):
-        self.client = client
-
-    async def catalog(self) -> StageCatalogView:
-        items = await self._expand(_merge_energy_intensities(await self._discover()))
-        groups = tuple(
-            StageCatalogGroup(
-                key=family_key,
-                name=FAMILY_NAMES[family_key],
-                items=tuple(
-                    sorted(
-                        (item for item in items if item.family_key == family_key),
-                        key=lambda item: item.name,
-                    )
-                ),
-            )
-            for family_key in FAMILY_ORDER
-            if any(item.family_key == family_key for item in items)
-        )
-        digest_input = "|".join(
-            f"{item.stage_key}:{item.revision}:{item.updated_at}"
-            for group in groups
-            for item in group.items
-        )
-        revision = sha1(f"{STAGE_DIRECTORY_RULE_VERSION}|{digest_input}".encode("utf-8")).hexdigest()[:16]
-        updated_at = max((item.updated_at for item in items), default="")
-        return StageCatalogView(groups, "FZ Wiki", revision, updated_at)
-
-    async def _discover(self) -> tuple[StageCatalogItem, ...]:
-        """One catalog request per registered gameplay; the first family to claim a title wins."""
-        payloads = await asyncio.gather(
-            *(self.client.fz_articles(category=family.category) for family in STAGE_FAMILIES),
-            return_exceptions=True,
-        )
-        items: dict[str, StageCatalogItem] = {}
-        for family, payload in zip(STAGE_FAMILIES, payloads):
-            if isinstance(payload, BaseException):
-                logger.warning(
-                    f"[endfield] stage catalog family={family.key} error={type(payload).__name__}"
-                )
-                continue
-            for raw in _articles(payload):
-                item = _catalog_item(raw, family)
-                if item is not None and item.title not in items:
-                    items[item.title] = item
-        return tuple(items.values())
-
-    async def _expand(self, items: tuple[StageCatalogItem, ...]) -> tuple[StageCatalogItem, ...]:
-        """Open the articles that publish several stages so each one is separately queryable."""
-        targets = [item for item in items if _FAMILY_BY_KEY[item.family_key].expand]
-        if not targets:
-            return items
-        payloads = await asyncio.gather(
-            *(self.client.fz_article_by_title(item.title) for item in targets),
-            return_exceptions=True,
-        )
-        expanded: dict[str, list[StageCatalogItem]] = {}
-        for item, payload in zip(targets, payloads):
-            if isinstance(payload, BaseException):
-                logger.warning(
-                    f"[endfield] stage expand title={item.title} error={type(payload).__name__}"
-                )
-                continue
-            entries = _expand_entries(payload, item)
-            if entries:
-                expanded[item.title] = entries
-        if not expanded:
-            return items
-        result: list[StageCatalogItem] = []
-        for item in items:
-            result.extend(expanded.get(item.title, [item]))
-        return _dedupe_entries(tuple(result))
-
-    async def stage(self, key: str) -> tuple[Stage, tuple[str, ...]]:
-        """Returns the stage plus the enemy articles this call could not reach."""
-        title, entry_key = split_stage_key(key)
-        if title in HUB_TITLES:
-            raise StageDataIncomplete(f"“{title}”属于玩法机制说明，无独立关卡数据可供查询。")
-        item = await self._catalog_item_for(title, entry_key)
-        titles = (title, *(item.extra_titles if item is not None else ()))
-        payloads = await asyncio.gather(*(self.client.fz_article_by_title(one) for one in titles))
-        stage = parse_fz_stage(payloads[0], entry_key=entry_key, family_key=_family_key_of(item))
-        if len(payloads) > 1:
-            stage = _merge_sibling_variants(stage, payloads[1:])
-        return await self.attach_enemy_resistances(stage)
-
-    async def _catalog_item_for(self, title: str, entry_key: str) -> StageCatalogItem | None:
-        """The catalog knows the family and the sibling articles a single title cannot carry."""
-        try:
-            catalog = await self.catalog()
-        except Exception as exc:  # noqa: BLE001 - a stage query must survive a catalog hiccup
-            logger.warning(f"[endfield] stage catalog lookup error={type(exc).__name__}")
-            return None
-        for group in catalog.groups:
-            for item in group.items:
-                if item.title == title and item.entry_key == entry_key:
-                    return item
-        return None
-
-    async def attach_enemy_resistances(self, stage: Stage) -> tuple[Stage, tuple[str, ...]]:
-        """Enemy articles hold the resistances and poise knots the stage rows do not carry."""
-        titles = sorted(
-            {
-                enemy.article_title
-                for variant in stage.variants
-                for enemy in _variant_enemies(variant)
-                if enemy.article_title and _needs_enemy_article(enemy)
-            }
-        )
-        if not titles:
-            return stage, ()
-        lookup, unreachable = await self._fetch_enemy_details(titles)
-        return (_with_enemy_details(stage, lookup) if lookup else stage), unreachable
-
-    async def _fetch_enemy_details(
-        self, titles: list[str]
-    ) -> tuple[dict[str, _EnemyDetails], tuple[str, ...]]:
-        async def one(title: str) -> tuple[str, _EnemyDetails | None, bool]:
-            try:
-                data = await self.client.fz_article_by_title(title)
-            except Exception as exc:  # noqa: BLE001 - a missing enemy article must not fail the card
-                logger.warning(f"[endfield] stage enemy detail source=fz error={type(exc).__name__}")
-                return title, None, True
-            return title, _EnemyDetails(parse_enemy_resistances(data), parse_enemy_poise(data)), False
-
-        results = await asyncio.gather(*(one(title) for title in titles))
-        # A present-but-empty payload must stay distinct from "we never got an answer".
-        lookup = {title: detail for title, detail, _ in results if detail is not None}
-        return lookup, tuple(title for title, _, failed in results if failed)
 
 
 class StageDataIncomplete(ValueError):
     pass
-
-
-def _articles(data: dict[str, Any]) -> tuple[dict[str, Any], ...]:
-    if not isinstance(data, dict):
-        return ()
-    return tuple(item for item in data.get("articles") or () if isinstance(item, dict))
-
-
-def _catalog_item(raw: dict[str, Any], family: StageFamily) -> StageCatalogItem | None:
-    title = _text(raw.get("title"))
-    if not title or title in HUB_TITLES:
-        return None
-    if family.key == GENERIC_FAMILY_KEY and _claimed_by_named_family(raw):
-        return None
-    description = _text(raw.get("description"))
-    recommended_level, region = _catalog_hints(description)
-    return StageCatalogItem(
-        title=title,
-        name=_catalog_name(title, family),
-        family_key=family.key,
-        family_name=family.name,
-        revision=_text(raw.get("currentRevisionId")),
-        updated_at=_text(raw.get("updatedAt")),
-        description=description,
-        recommended_level=recommended_level,
-        region=region,
-        source="fz",
-    )
-
-
-def _claimed_by_named_family(raw: dict[str, Any]) -> bool:
-    """Keep the catch-all family for titles no registered gameplay recognises."""
-    categories = {_text(item) for item in raw.get("categories") or ()}
-    return any(
-        family.category in categories
-        for family in STAGE_FAMILIES
-        if family.key != GENERIC_FAMILY_KEY
-    )
-
-
-def _catalog_name(title: str, family: StageFamily) -> str:
-    """The name a player types: the last path segment, without the gameplay prefix."""
-    name = title.rsplit("/", 1)[-1]
-    for prefix in (f"{family.name}·", "协议空间·"):
-        if name.startswith(prefix):
-            return name[len(prefix) :]
-    if family.key == "energy_deposit":
-        return name.split("·", 1)[-1]
-    return name
-
-
-def _catalog_hints(description: str) -> tuple[int | None, str]:
-    """Pull the level and region the catalog summary already carries."""
-    return _integer(_capture(description, r"推荐等级：\s*(\d+)")), _capture(description, r"地区：\s*([^\s·]+)")
-
-
-def _merge_energy_intensities(items: tuple[StageCatalogItem, ...]) -> tuple[StageCatalogItem, ...]:
-    """`重度能量淤积点·X` is the same location at a higher intensity, so it is a variant of X."""
-    by_name: dict[str, StageCatalogItem] = {}
-    heavy: dict[str, list[StageCatalogItem]] = {}
-    passthrough: list[StageCatalogItem] = []
-    for item in items:
-        if item.family_key != "energy_deposit":
-            passthrough.append(item)
-        elif item.title.startswith(ENERGY_HEAVY_PREFIX):
-            heavy.setdefault(item.name, []).append(item)
-        else:
-            by_name[item.name] = item
-    merged: list[StageCatalogItem] = []
-    for name, item in by_name.items():
-        siblings = heavy.pop(name, [])
-        merged.append(
-            replace(item, extra_titles=tuple(sibling.title for sibling in siblings))
-            if siblings
-            else item
-        )
-    # A heavy variant whose base article is missing still deserves its own entry.
-    for siblings in heavy.values():
-        merged.extend(siblings)
-    return tuple((*passthrough, *merged))
-
-
-def _expand_entries(data: dict[str, Any], item: StageCatalogItem) -> list[StageCatalogItem]:
-    """Turn one multi-stage article into one catalog entry per stage it publishes."""
-    attrs = _template_attrs(data)
-    themes = _dicts(_dig(attrs, "stages", "themes"))
-    if not themes:
-        return []
-    season = _localized(_dig(attrs, "overview", "name")) or item.name
-    entries = []
-    for theme in themes:
-        name = _localized(theme.get("name"))
-        group_id = _text(theme.get("groupId"))
-        if not name or not group_id:
-            continue
-        levels = [
-            _integer(one.get("recommendLv"))
-            for one in _dicts(theme.get("difficulties"))
-            if _integer(one.get("recommendLv")) is not None
-        ]
-        entries.append(
-            replace(
-                item,
-                name=name,
-                entry_key=group_id,
-                description=season,
-                region=season,
-                recommended_level=max(levels) if levels else None,
-            )
-        )
-    return entries
-
-
-def _dedupe_entries(items: tuple[StageCatalogItem, ...]) -> tuple[StageCatalogItem, ...]:
-    """Seasons reuse themes; keep the newest article for each so the catalog lists it once."""
-    best: dict[tuple[str, str], StageCatalogItem] = {}
-    order: list[tuple[str, str]] = []
-    for item in items:
-        identity = (item.family_key, item.entry_key or item.title)
-        current = best.get(identity)
-        if current is None:
-            order.append(identity)
-            best[identity] = item
-        elif item.updated_at > current.updated_at:
-            best[identity] = item
-    return tuple(best[identity] for identity in order)
-
-
-def _family_key_of(item: StageCatalogItem | None) -> str:
-    return item.family_key if item is not None else ""
 
 
 def parse_fz_stage(
@@ -498,92 +222,6 @@ def parse_enemy_resistances(data: dict[str, Any]) -> tuple[StageEnemyResistance,
     return _resistances(attrs.get("rows"))
 
 
-def parse_enemy_poise(data: dict[str, Any]) -> StageEnemyPoise | None:
-    """Poise knots live only on the enemy article, never on the embedded stage rows."""
-    revision = data.get("revision") if isinstance(data.get("revision"), dict) else {}
-    attrs = _first_node_attrs(revision.get("contentJson"), "endfieldCardEnemyStats")
-    return _poise_from_groups(attrs.get("groups"), attrs.get("poiseKnots"))
-
-
-def _merge_poise(inline: StageEnemyPoise | None, fetched: StageEnemyPoise | None) -> StageEnemyPoise | None:
-    """The stage row wins on values it already has; the article supplies whatever is still missing."""
-    if inline is None:
-        return fetched
-    if fetched is None:
-        return inline
-    return StageEnemyPoise(
-        max_value=inline.max_value if inline.max_value is not None else fetched.max_value,
-        damage_scalar=inline.damage_scalar if inline.damage_scalar is not None else fetched.damage_scalar,
-        recover_seconds=(
-            inline.recover_seconds if inline.recover_seconds is not None else fetched.recover_seconds
-        ),
-        recover_scalar=(
-            inline.recover_scalar if inline.recover_scalar is not None else fetched.recover_scalar
-        ),
-        knots=inline.knots if inline.knots is not None else fetched.knots,
-    )
-
-
-@dataclass(frozen=True, slots=True)
-class _EnemyDetails:
-    resistances: tuple[StageEnemyResistance, ...] | None
-    poise: StageEnemyPoise | None
-
-
-def _needs_enemy_article(enemy: StageEnemy) -> bool:
-    return enemy.resistances is None or enemy.poise is None or enemy.poise.knots is None
-
-
-def _variant_enemies(variant: StageVariant) -> tuple[StageEnemy, ...]:
-    enemies = list(variant.enemies or ())
-    extension = variant.extension
-    if isinstance(extension, EnergyDepositStageDetails):
-        enemies.extend(wave.enemy for wave in extension.waves or ())
-    return tuple(enemies)
-
-
-def _with_enemy_details(stage: Stage, lookup: dict[str, _EnemyDetails]) -> Stage:
-    variants = tuple(_variant_with_details(variant, lookup) for variant in stage.variants)
-    extension = stage.extension
-    if isinstance(extension, EnergyDepositStageDetails):
-        extension = _extension_with_details(extension, lookup)
-    return replace(stage, variants=variants, extension=extension)
-
-
-def _variant_with_details(variant: StageVariant, lookup: dict[str, _EnemyDetails]) -> StageVariant:
-    enemies = (
-        None
-        if variant.enemies is None
-        else tuple(_enemy_with_details(enemy, lookup) for enemy in variant.enemies)
-    )
-    extension = variant.extension
-    if isinstance(extension, EnergyDepositStageDetails):
-        extension = _extension_with_details(extension, lookup)
-    return replace(variant, enemies=enemies, extension=extension)
-
-
-def _extension_with_details(
-    extension: EnergyDepositStageDetails, lookup: dict[str, _EnemyDetails]
-) -> EnergyDepositStageDetails:
-    if extension.waves is None:
-        return extension
-    waves = tuple(
-        replace(wave, enemy=_enemy_with_details(wave.enemy, lookup)) for wave in extension.waves
-    )
-    return replace(extension, waves=waves)
-
-
-def _enemy_with_details(enemy: StageEnemy, lookup: dict[str, _EnemyDetails]) -> StageEnemy:
-    detail = lookup.get(enemy.article_title) if enemy.article_title else None
-    if detail is None:
-        return enemy
-    resistances = enemy.resistances if enemy.resistances is not None else detail.resistances
-    poise = _merge_poise(enemy.poise, detail.poise)
-    if resistances is enemy.resistances and poise is enemy.poise:
-        return enemy
-    return replace(enemy, resistances=resistances, poise=poise)
-
-
 def _parse_energy_stage(article: dict[str, Any], revision: dict[str, Any]) -> Stage:
     content = _content_nodes(revision.get("contentJson"))
     paragraphs = [_node_text(node) for node in content if node.get("type") == "paragraph"]
@@ -663,28 +301,6 @@ def _energy_wave(raw: dict[str, Any]) -> StageWave:
         condition=_text(raw.get("cond")),
         time=_number(raw.get("time")),
         enemy=enemy,
-    )
-
-
-def _merge_sibling_variants(stage: Stage, payloads: list[dict[str, Any]]) -> Stage:
-    """Fold sibling articles of the same stage in as extra variants, ordered by level."""
-    variants = list(stage.variants)
-    for payload in payloads:
-        try:
-            sibling = parse_fz_stage(payload)
-        except StageDataIncomplete as exc:
-            logger.warning(f"[endfield] stage sibling skipped reason={exc}")
-            continue
-        variants.extend(sibling.variants)
-    ordered = sorted(
-        variants,
-        key=lambda variant: (variant.recommended_level or 0, variant.sort_order),
-    )
-    return replace(
-        stage,
-        variants=tuple(
-            replace(variant, sort_order=index) for index, variant in enumerate(ordered, 1)
-        ),
     )
 
 
