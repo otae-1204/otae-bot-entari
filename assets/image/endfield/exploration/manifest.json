@@ -1,0 +1,222 @@
+{
+  "source": "https://assets.skland.com/_static_assets/game-tools/RegionExploreTable-D36RE3Dz.js",
+  "source_sha256": "e736b00d3b12031fece3515b6ade41423297762a437d0b6c70947a3bc665cb3f",
+  "retrieved_at": "2026-10-07",
+  "collections": {
+    "trchestCount": "collections/trchestCount.png",
+    "puzzleCount": "collections/puzzleCount.png",
+    "blackboxCount": "collections/blackboxCount.png",
+    "pieceCount": "collections/pieceCount.png",
+    "equipTrchestCount": "collections/equipTrchestCount.png",
+    "trstarCount": "collections/trstarCount.png"
+  },
+  "maps": [
+    {
+      "id": "map01",
+      "name": "四号谷地",
+      "levels": [
+        {
+          "id": "map01_lv001",
+          "name": "枢纽区",
+          "image": "regions/map01_lv001.png"
+        },
+        {
+          "id": "map01_lv002",
+          "name": "谷地通道",
+          "image": "regions/map01_lv002.png"
+        },
+        {
+          "id": "map01_lv003",
+          "name": "阿伯莉采石场",
+          "image": "regions/map01_lv003.png"
+        },
+        {
+          "id": "map01_lv005",
+          "name": "源石研究园",
+          "image": "regions/map01_lv005.png"
+        },
+        {
+          "id": "map01_lv006",
+          "name": "矿脉源区",
+          "image": "regions/map01_lv006.png"
+        },
+        {
+          "id": "map01_lv007",
+          "name": "供能高地",
+          "image": "regions/map01_lv007.png"
+        }
+      ]
+    },
+    {
+      "id": "map02",
+      "name": "武陵",
+      "levels": [
+        {
+          "id": "map02_lv001",
+          "name": "景玉谷",
+          "image": "regions/map02_lv001.png"
+        },
+        {
+          "id": "map02_lv002",
+          "name": "武陵城",
+          "image": "regions/map02_lv002.png"
+        },
+        {
+          "id": "map02_lv003",
+          "name": "清波寨",
+          "image": "regions/map02_lv003.png"
+        },
+        {
+          "id": "map02_lv004",
+          "name": "首墩",
+          "image": "regions/map02_lv004.png"
+        },
+        {
+          "id": "indie_dg007",
+          "name": "首墩内部",
+          "image": "regions/map02_lv004.png"
+        },
+        {
+          "id": "map02_lv005",
+          "name": "试验园区",
+          "image": "regions/map02_lv005.png"
+        },
+        {
+          "id": "map02_lv006",
+          "name": "藏剑谷",
+          "image": "regions/map02_lv006.png"
+        },
+        {
+          "id": "map02_lv007",
+          "name": "应龙关",
+          "image": "regions/map02_lv007.png"
+        },
+        {
+          "id": "map02_lv008",
+          "name": "北部禁区",
+          "image": "regions/map02_lv008.png"
+        },
+        {
+          "id": "map02_lv009",
+          "name": "雪松林",
+          "image": "regions/map02_lv009.png"
+        },
+        {
+          "id": "indie_dg016",
+          "name": "遂明",
+          "image": "regions/indie_dg016.png"
+        }
+      ]
+    }
+  ],
+  "files": {
+    "collections/trchestCount.png": {
+      "source": "https://assets.skland.com/_static_assets/game-tools/RegionExploreTable-D36RE3Dz.js",
+      "sha256": "b7b3aee5ca8682f717af6e81a80cccd9349548514037a485fa4738474fcae7eb",
+      "embedded_image_index": 4
+    },
+    "collections/puzzleCount.png": {
+      "source": "https://assets.skland.com/_static_assets/game-tools/RegionExploreTable-D36RE3Dz.js",
+      "sha256": "46028be6849780c0cdb7adb27c7e1686128d8e4997b032d8c13c809678336d81",
+      "embedded_image_index": 3
+    },
+    "collections/blackboxCount.png": {
+      "source": "https://assets.skland.com/_static_assets/game-tools/RegionExploreTable-D36RE3Dz.js",
+      "sha256": "a8a0acc7e3400d12822dff2e8c56649a308715f3ea90061dd5e19c15ce6b05d5",
+      "embedded_image_index": 0
+    },
+    "collections/pieceCount.png": {
+      "source": "https://assets.skland.com/_static_assets/game-tools/RegionExploreTable-D36RE3Dz.js",
+      "sha256": "da7d457182a9632475a9fe2dd0bb09c2742c583d0abbf1835ab9699edd3ffe4c",
+      "embedded_image_index": 2
+    },
+    "collections/equipTrchestCount.png": {
+      "source": "https://assets.skland.com/_static_assets/game-tools/RegionExploreTable-D36RE3Dz.js",
+      "sha256": "bc62f38b6d827d737b32e0462ada5733a6cafe62cb570671737e43a8fcf1bc9b",
+      "embedded_image_index": 1
+    },
+    "collections/trstarCount.png": {
+      "source": "https://assets.skland.com/_static_assets/game-tools/RegionExploreTable-D36RE3Dz.js",
+      "sha256": "369bb048f81127c87ff02e59fa4c566653c810c5ccbf003ccc71a78d809f01b8",
+      "embedded_image_index": 5
+    },
+    "regions/map01_lv001.png": {
+      "source": "https://assets.skland.com/_static_assets/game-tools/RegionExploreTable-D36RE3Dz.js",
+      "sha256": "14439582f725efc56fcea55bfa6cecad0ceeecab62faf2a72900b32cd6c8919b",
+      "embedded_image_index": 7
+    },
+    "regions/map01_lv002.png": {
+      "source": "https://assets.skland.com/_static_assets/game-tools/RegionExploreTable-D36RE3Dz.js",
+      "sha256": "59f8deb08dad5495af453f9840d1960f9b7e09a2127ba82770e88665294c43b8",
+      "embedded_image_index": 8
+    },
+    "regions/map01_lv003.png": {
+      "source": "https://assets.skland.com/_static_assets/game-tools/RegionExploreTable-D36RE3Dz.js",
+      "sha256": "5c74b0d9f4323886c9eae134685544353baa679f61e38f7f1d80fe74cd957718",
+      "embedded_image_index": 9
+    },
+    "regions/map01_lv005.png": {
+      "source": "https://assets.skland.com/_static_assets/game-tools/RegionExploreTable-D36RE3Dz.js",
+      "sha256": "b7236315e3b5369c08045e984f3bbbe44e8fdc74cc281c8495b42b1daf7a3ee2",
+      "embedded_image_index": 10
+    },
+    "regions/map01_lv006.png": {
+      "source": "https://assets.skland.com/_static_assets/game-tools/RegionExploreTable-D36RE3Dz.js",
+      "sha256": "f46b39a31fbdc36fc47e1612611eaf2527269bbffabaa663c83e89ce133d1c40",
+      "embedded_image_index": 11
+    },
+    "regions/map01_lv007.png": {
+      "source": "https://assets.skland.com/_static_assets/game-tools/RegionExploreTable-D36RE3Dz.js",
+      "sha256": "cf565212b30d59767efdcbc8633fa4f6c5db121ee23154df1803e69826108247",
+      "embedded_image_index": 12
+    },
+    "regions/map02_lv001.png": {
+      "source": "https://assets.skland.com/_static_assets/game-tools/RegionExploreTable-D36RE3Dz.js",
+      "sha256": "2b95773a8b995e41a0c42d77d4cd94f06fab8c3b9424d703688b38bc3cad3a74",
+      "embedded_image_index": 13
+    },
+    "regions/map02_lv002.png": {
+      "source": "https://assets.skland.com/_static_assets/game-tools/RegionExploreTable-D36RE3Dz.js",
+      "sha256": "23b9dc618389253e52ae6078d5d51e73ea8591126c702e22d09b27a36b16338a",
+      "embedded_image_index": 14
+    },
+    "regions/map02_lv003.png": {
+      "source": "https://assets.skland.com/_static_assets/game-tools/RegionExploreTable-D36RE3Dz.js",
+      "sha256": "269194ddbef789af5704f77f9803eee8aa6cd2bba7b4f1a527f79141d1977c28",
+      "embedded_image_index": 15
+    },
+    "regions/map02_lv004.png": {
+      "source": "https://assets.skland.com/_static_assets/game-tools/RegionExploreTable-D36RE3Dz.js",
+      "sha256": "bdd77602ffb40fb0a777ed1d48ae54c79f392c5ce77444a1fa3bcd6216bc1fc4",
+      "embedded_image_index": 16
+    },
+    "regions/map02_lv005.png": {
+      "source": "https://assets.skland.com/_static_assets/game-tools/RegionExploreTable-D36RE3Dz.js",
+      "sha256": "a35f760cf28131a507df017d432b89a059111b4cf15fa78898645a57bfb269b7",
+      "embedded_image_index": 17
+    },
+    "regions/map02_lv006.png": {
+      "source": "https://assets.skland.com/_static_assets/game-tools/RegionExploreTable-D36RE3Dz.js",
+      "sha256": "5f10411d0bb0c180f49b435501ec746f783e9459c38bec695d287a6e58bb755c",
+      "embedded_image_index": 18
+    },
+    "regions/map02_lv007.png": {
+      "source": "https://assets.skland.com/_static_assets/game-tools/RegionExploreTable-D36RE3Dz.js",
+      "sha256": "2b4e6843bd6af7e98be65128abbe546bebe6dcf16b386053e1962afe77b2bb9e",
+      "embedded_image_index": 19
+    },
+    "regions/map02_lv008.png": {
+      "source": "https://assets.skland.com/_static_assets/game-tools/RegionExploreTable-D36RE3Dz.js",
+      "sha256": "f3734db5617c64e254ea1b548a5208733c67c0b214c0518ac12908971bd9bf97",
+      "embedded_image_index": 20
+    },
+    "regions/map02_lv009.png": {
+      "source": "https://assets.skland.com/_static_assets/game-tools/map02_lv009-B3rAi7DN.png",
+      "sha256": "3a106872992c5cace4979a5f060466de4551679747de2d8a9681835d9a051f4c"
+    },
+    "regions/indie_dg016.png": {
+      "source": "https://assets.skland.com/_static_assets/game-tools/indie_dg016-D6fVQI6a.png",
+      "sha256": "4997807cb5bec565d33f3687b97bd3f69d09ef3fc9accf56c39c3a2698b46452"
+    }
+  }
+}
