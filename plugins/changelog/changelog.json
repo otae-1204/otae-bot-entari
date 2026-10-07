@@ -1,15 +1,36 @@
 {
   "schema": 2,
-  "head": "eb867e521a246879e467dc396bfadaf371952357",
+  "head": "54bbe7dd1a6d22015e707bd7d1c82e38399647cd",
   "generated_from": {
     "first_commit": "8e1b455",
     "first_date": "2026-06-17",
     "last_date": "2026-10-07",
-    "commit_count": 308,
-    "merge_commit_count": 27,
-    "version_count": 31
+    "commit_count": 309,
+    "merge_commit_count": 29,
+    "version_count": 32
   },
   "releases": [
+    {
+      "version": "v1.26.0",
+      "date": "2026-10-07",
+      "from": "2026-10-07",
+      "to": "2026-10-07",
+      "title": "随机浏览公开 Wiki 资料",
+      "summary": "发送 /zmd 随机或 /ef random，无需绑定账号即可随机查看一条公开资料，复用现有资料卡，不读取个人账号数据。",
+      "tags": [
+        "终末地"
+      ],
+      "highlights": [
+        {
+          "date": "2026-10-07",
+          "kind": "feat",
+          "text": "新增随机 Wiki 查询，覆盖干员、武器、装备、敌人、关卡、物品、道具、词条及已收录的公开档案。先随机类别再选择条目，排除账号、资源流水、养成统计、抽卡记录和挑战记录等个人数据；资料缺失时有限重试，成功后只回复所选条目，公开档案刷新后重新出图。同步帮助、文档及本地预览工具，并验证命令别名、群功能开关、异常处理与数据隔离。",
+          "commits": [
+            "54bbe7d"
+          ]
+        }
+      ]
+    },
     {
       "version": "v1.25.0",
       "date": "2026-10-07",
