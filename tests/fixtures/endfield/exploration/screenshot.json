@@ -1,0 +1,390 @@
+{
+  "_meta": {
+    "source": "用户于 2026-10-07 提供的森空岛截图；只录入截图可见的 13 个区域，非完整账号响应。",
+    "labels": "六列名称与顺序由用户指定；横杠转换为明确的 0/0。",
+    "ids": "所有地区与区域 ID 均为测试占位，不是游戏 ID。"
+  },
+  "detail": {
+    "base": {
+      "name": "截图示例（非实时查询）"
+    },
+    "domain": [
+      {
+        "domainId": "sample-wuling",
+        "name": "武陵",
+        "levels": [
+          {
+            "levelId": "sample-1-1",
+            "name": "遂明",
+            "trchestCount": {
+              "count": 28,
+              "total": 28
+            },
+            "puzzleCount": {
+              "count": 0,
+              "total": 0
+            },
+            "blackboxCount": {
+              "count": 0,
+              "total": 0
+            },
+            "pieceCount": {
+              "count": 0,
+              "total": 0
+            },
+            "equipTrchestCount": {
+              "count": 0,
+              "total": 0
+            },
+            "trstarCount": {
+              "count": 7,
+              "total": 7
+            }
+          },
+          {
+            "levelId": "sample-1-2",
+            "name": "雪松林",
+            "trchestCount": {
+              "count": 39,
+              "total": 39
+            },
+            "puzzleCount": {
+              "count": 13,
+              "total": 13
+            },
+            "blackboxCount": {
+              "count": 0,
+              "total": 0
+            },
+            "pieceCount": {
+              "count": 0,
+              "total": 0
+            },
+            "equipTrchestCount": {
+              "count": 2,
+              "total": 2
+            },
+            "trstarCount": {
+              "count": 8,
+              "total": 8
+            }
+          },
+          {
+            "levelId": "sample-1-3",
+            "name": "北部禁区",
+            "trchestCount": {
+              "count": 85,
+              "total": 85
+            },
+            "puzzleCount": {
+              "count": 28,
+              "total": 28
+            },
+            "blackboxCount": {
+              "count": 4,
+              "total": 4
+            },
+            "pieceCount": {
+              "count": 0,
+              "total": 0
+            },
+            "equipTrchestCount": {
+              "count": 0,
+              "total": 0
+            },
+            "trstarCount": {
+              "count": 39,
+              "total": 39
+            }
+          },
+          {
+            "levelId": "sample-1-4",
+            "name": "应龙关",
+            "trchestCount": {
+              "count": 26,
+              "total": 26
+            },
+            "puzzleCount": {
+              "count": 16,
+              "total": 16
+            },
+            "blackboxCount": {
+              "count": 4,
+              "total": 4
+            },
+            "pieceCount": {
+              "count": 0,
+              "total": 0
+            },
+            "equipTrchestCount": {
+              "count": 2,
+              "total": 2
+            },
+            "trstarCount": {
+              "count": 8,
+              "total": 8
+            }
+          },
+          {
+            "levelId": "sample-1-5",
+            "name": "藏剑谷",
+            "trchestCount": {
+              "count": 40,
+              "total": 40
+            },
+            "puzzleCount": {
+              "count": 15,
+              "total": 15
+            },
+            "blackboxCount": {
+              "count": 0,
+              "total": 0
+            },
+            "pieceCount": {
+              "count": 0,
+              "total": 0
+            },
+            "equipTrchestCount": {
+              "count": 2,
+              "total": 2
+            },
+            "trstarCount": {
+              "count": 0,
+              "total": 0
+            }
+          },
+          {
+            "levelId": "sample-1-6",
+            "name": "试验园区",
+            "trchestCount": {
+              "count": 32,
+              "total": 32
+            },
+            "puzzleCount": {
+              "count": 17,
+              "total": 17
+            },
+            "blackboxCount": {
+              "count": 2,
+              "total": 2
+            },
+            "pieceCount": {
+              "count": 1,
+              "total": 1
+            },
+            "equipTrchestCount": {
+              "count": 0,
+              "total": 0
+            },
+            "trstarCount": {
+              "count": 0,
+              "total": 0
+            }
+          },
+          {
+            "levelId": "sample-1-7",
+            "name": "首墩",
+            "trchestCount": {
+              "count": 48,
+              "total": 48
+            },
+            "puzzleCount": {
+              "count": 26,
+              "total": 26
+            },
+            "blackboxCount": {
+              "count": 4,
+              "total": 4
+            },
+            "pieceCount": {
+              "count": 0,
+              "total": 0
+            },
+            "equipTrchestCount": {
+              "count": 3,
+              "total": 3
+            },
+            "trstarCount": {
+              "count": 0,
+              "total": 0
+            }
+          },
+          {
+            "levelId": "sample-1-8",
+            "name": "首墩内部",
+            "trchestCount": {
+              "count": 5,
+              "total": 5
+            },
+            "puzzleCount": {
+              "count": 2,
+              "total": 2
+            },
+            "blackboxCount": {
+              "count": 0,
+              "total": 0
+            },
+            "pieceCount": {
+              "count": 0,
+              "total": 0
+            },
+            "equipTrchestCount": {
+              "count": 1,
+              "total": 1
+            },
+            "trstarCount": {
+              "count": 0,
+              "total": 0
+            }
+          },
+          {
+            "levelId": "sample-1-9",
+            "name": "清波寨",
+            "trchestCount": {
+              "count": 36,
+              "total": 36
+            },
+            "puzzleCount": {
+              "count": 14,
+              "total": 14
+            },
+            "blackboxCount": {
+              "count": 5,
+              "total": 5
+            },
+            "pieceCount": {
+              "count": 0,
+              "total": 0
+            },
+            "equipTrchestCount": {
+              "count": 3,
+              "total": 3
+            },
+            "trstarCount": {
+              "count": 0,
+              "total": 0
+            }
+          },
+          {
+            "levelId": "sample-1-10",
+            "name": "景玉谷",
+            "trchestCount": {
+              "count": 44,
+              "total": 44
+            },
+            "puzzleCount": {
+              "count": 20,
+              "total": 20
+            },
+            "blackboxCount": {
+              "count": 6,
+              "total": 6
+            },
+            "pieceCount": {
+              "count": 1,
+              "total": 1
+            },
+            "equipTrchestCount": {
+              "count": 4,
+              "total": 4
+            },
+            "trstarCount": {
+              "count": 0,
+              "total": 0
+            }
+          },
+          {
+            "levelId": "sample-1-11",
+            "name": "武陵城",
+            "trchestCount": {
+              "count": 198,
+              "total": 198
+            },
+            "puzzleCount": {
+              "count": 61,
+              "total": 61
+            },
+            "blackboxCount": {
+              "count": 8,
+              "total": 8
+            },
+            "pieceCount": {
+              "count": 1,
+              "total": 1
+            },
+            "equipTrchestCount": {
+              "count": 8,
+              "total": 8
+            },
+            "trstarCount": {
+              "count": 0,
+              "total": 0
+            }
+          }
+        ]
+      },
+      {
+        "domainId": "sample-valley",
+        "name": "四号谷地",
+        "levels": [
+          {
+            "levelId": "sample-2-1",
+            "name": "供能高地",
+            "trchestCount": {
+              "count": 36,
+              "total": 36
+            },
+            "puzzleCount": {
+              "count": 23,
+              "total": 23
+            },
+            "blackboxCount": {
+              "count": 0,
+              "total": 0
+            },
+            "pieceCount": {
+              "count": 0,
+              "total": 0
+            },
+            "equipTrchestCount": {
+              "count": 0,
+              "total": 0
+            },
+            "trstarCount": {
+              "count": 0,
+              "total": 0
+            }
+          },
+          {
+            "levelId": "sample-2-2",
+            "name": "矿脉源区",
+            "trchestCount": {
+              "count": 65,
+              "total": 65
+            },
+            "puzzleCount": {
+              "count": 39,
+              "total": 39
+            },
+            "blackboxCount": {
+              "count": 3,
+              "total": 3
+            },
+            "pieceCount": {
+              "count": 2,
+              "total": 2
+            },
+            "equipTrchestCount": {
+              "count": 0,
+              "total": 0
+            },
+            "trstarCount": {
+              "count": 0,
+              "total": 0
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
