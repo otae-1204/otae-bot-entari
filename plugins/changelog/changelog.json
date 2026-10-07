@@ -1,15 +1,38 @@
 {
   "schema": 2,
-  "head": "5b3eb425da5281f0a33e196284c89bd4c1fdd5c3",
+  "head": "8cc16be785dd93074ce437aa259c55094cda3cdb",
   "generated_from": {
     "first_commit": "8e1b455",
     "first_date": "2026-06-17",
-    "last_date": "2026-10-06",
-    "commit_count": 300,
-    "merge_commit_count": 22,
-    "version_count": 27
+    "last_date": "2026-10-07",
+    "commit_count": 301,
+    "merge_commit_count": 23,
+    "version_count": 28
   },
   "releases": [
+    {
+      "version": "v1.25.0",
+      "date": "2026-10-07",
+      "from": "2026-10-07",
+      "to": "2026-10-07",
+      "title": "终末地地区探索收集进度",
+      "summary": "已绑定账号可用 /zmd 探索 或 /ef 探索，查看全部地区的六类收集进度。卡片使用森空岛立体地图与收集物图标，名称下方标注所属大地区，并显示游戏版本和档案更新时间。",
+      "tags": [
+        "终末地",
+        "账号",
+        "探索"
+      ],
+      "highlights": [
+        {
+          "date": "2026-10-07",
+          "kind": "feat",
+          "text": "新增地区探索查询：按地区列出储藏箱、醚质、工业点数、维修灵感点、装备模板箱与塔晶的已收集数和总量。默认查询自己的主账号，也可按编号、昵称或 UID 后四位选择；群聊隐藏完整 UID。卡片采用透明表格、横向分隔线和十字网格背景，地区较多时自动分页；缺失数据、无此类收集物和异常数量分别标注。帮助图片、使用说明与样例预览一并补齐。",
+          "commits": [
+            "8cc16be"
+          ]
+        }
+      ]
+    },
     {
       "version": "v1.24.1",
       "date": "2026-10-06",
