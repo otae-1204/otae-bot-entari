@@ -10,6 +10,7 @@ import re
 import sys
 import types
 import unittest
+from dataclasses import replace
 from io import BytesIO
 from itertools import accumulate
 from pathlib import Path
@@ -494,7 +495,7 @@ class GachaTypographyTests(unittest.TestCase):
         self.assertLess(size(".metric-title small"), size(".metric-title span"))
         # 总数与标题底边对齐，而不是标题贴在大数字底下当说明文字
         self.assertIn("align-items:flex-end", rules[".total-head,.metric-head"])
-        self.assertIn("line-height:1", rules[".metric-head strong"])
+        self.assertIn("line-height:1", rules[".total-head strong,.metric-head strong"])
 
         view = _view([
             _pool("special_a#0", "特许", "special", current=True),
@@ -506,6 +507,40 @@ class GachaTypographyTests(unittest.TestCase):
         self.assertEqual(re.findall(r'<div class="metric-title"><small>[^<]+</small><span>([^<]+)</span>', summary),
                          ["卡池总数", "特许寻访", "武器申领", "重构寻访"])
         self.assertIn('<div class="total-head"><div class="metric-title">', summary)
+
+    def test_total_tile_is_built_like_the_pool_tiles(self):
+        """卡池总数格与池格同构：总数在标题行右侧，下面一行两段小字，再下面是角色 / 武器两个分项块；没有沉底的大数字。"""
+        free_six = FreePullBatch(TS, 10, (_six("免费六星", 0),), source="free_ten")
+        view = _view([
+            _pool("special_a#0", "特许", "special", current=True, total=130, paid=120, free_pull_count=10,
+                  sixes=3, free_batches=(free_six,)),
+            _pool("rerun_a#1", "重构", "rerun", series_key="rerun:a", total=60, paid=60, sixes=1),
+            _pool("standard#0", "基础寻访", "standard", total=50, paid=50, sixes=2),
+            _pool("weponbox_a#0", "限时", "weapon_limited", item_type="武器", total=40, paid=40, sixes=2),
+        ], paid_total=270, free_pull_count=10)
+        columns, _ = _layout(view)
+        history = replace(view, xhh_imported_at=TS, recorded_total=250, history_missing_count=30)
+        cases = {"plain": (view, ["付费 270", "免费 10"]), "xhh": (history, ["逐抽明细 250", "统计补齐 30"])}
+        for name, (case, caption) in cases.items():
+            with self.subTest(name):
+                summary = draw._summary_html(case, columns)
+                total = summary.split('<div class="total">', 1)[1].split('<div class="metric">', 1)[0]
+                self.assertIn('<div class="total-head"><div class="metric-title"><small>全部卡池 · 累计抽数</small>'
+                              '<span>卡池总数</span></div><strong>280</strong></div>', total)
+                self.assertEqual(total.count("<strong>280</strong>"), 1)
+                small = re.search(r"</div><small>(.*?)</small><div class=\"expectation-summary\">", total).group(1)
+                self.assertEqual(re.findall(r'<span class="mp">([^<]+)</span>', small), caption)
+                rows = re.findall(r'<div class="expectation-label"><strong>([^<]+)</strong><small>([^<]+)</small></div>'
+                                  r'<div class="expectation-values">(.*?)</div>', total)
+                self.assertEqual(
+                    [(label, scope, [re.sub(r"<[^>]+>", "", span) for span in re.findall(r"<span>(.*?)</span>", body)])
+                     for label, scope, body in rows],
+                    [("角色寻访", "全部角色池", ["累计 240 抽", "六星 7 个"]),       # 特许 3+免费 1、重构 1、常驻 2
+                     ("武器申领", "全部武器池", ["累计 40 抽", "六星 2 个"])],
+                )
+        rules = {selectors.strip(): body for selectors, body in re.findall(r"([^{}]+)\{([^{}]*)\}", draw.GACHA_CSS)}
+        self.assertNotIn(".total>strong", rules)
+        self.assertNotIn("margin-top:auto", rules[".total"])
 
 
 class GachaPaginationTests(unittest.TestCase):
