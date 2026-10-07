@@ -1,5 +1,8 @@
 # 代码结构
 
+用户提供的 Entari 框架参考保存在 [框架参考资料](references/README.md)，
+其中示例版本与本项目固定的 Entari 0.17.4 有差异，使用前需核对。
+
 本轮以 `5704fd6` 为基线调整职责边界。聊天命令、权限判断、API 请求、
 缓存参数、数据库结构和配置项保持原有语义。
 
@@ -26,6 +29,7 @@ plugins/
     providers/                 Warfarin、AkeData、数据源规则、素材 URL
     catalog/                   查询命令、别名、公开资料模型和获取协调
       views/                   干员、武器、装备、配装、奖章的纯数据转换
+      random_wiki.py           从公开资料目录随机选择条目，不依赖账号数据
     account/                   账号 API、加密、持久化、账号卡片
       detail/                  档案详情
       base/                    帝江号、基建
