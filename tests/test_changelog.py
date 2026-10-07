@@ -280,9 +280,18 @@ class QueryTests(unittest.TestCase):
         self.assertIsNone(self.changelog.by_version("v99.9.9"))
 
     def test_version_lookup_matches_major_minor_prefix(self):
-        target = self.changelog.releases[3]
-        parts = target.version.lstrip("v").split(".")
-        self.assertEqual(self.changelog.by_version(".".join(parts[:2])), target)
+        """``1.24`` 这类前缀定位到该系列补丁号最大的版本，不依赖它在列表里的位置。"""
+        series: dict[str, list] = {}
+        for release in self.changelog.releases:
+            parts = release.version.lstrip("v").split(".")
+            series.setdefault(".".join(parts[:2]), []).append(release)
+        self.assertTrue(any(len(members) > 1 for members in series.values()))
+        for prefix, members in series.items():
+            newest = max(
+                members, key=lambda r: tuple(int(n) for n in r.version.lstrip("v").split("."))
+            )
+            with self.subTest(prefix=prefix):
+                self.assertEqual(self.changelog.by_version(prefix), newest)
 
     def test_digit_query_is_an_index_not_a_version(self):
         self.assertEqual(self.changelog.search("1"), (self.changelog.latest,))
