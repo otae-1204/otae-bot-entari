@@ -22,6 +22,7 @@ LOADOUT_ALIASES = {"配装", "配装模拟器", "loadout", "build"}
 QUICK_CALC_ALIASES = {"速算", "quickcalc", "calc"}
 SEARCH_ALIASES = {"搜索", "search", "s"}
 HELP_ALIASES = {"帮助", "help", "h", "?"}
+RANDOM_WIKI_ALIASES = {"随机", "随机wiki", "随机百科", "random", "rand"}
 SOURCE_ALIASES = {"数据源", "source", "sources"}
 CALENDAR_ALIASES = {"版本日历", "日历", "calendar", "schedule"}
 DEV_ALIASES = {"dev"}
@@ -291,6 +292,11 @@ def parse_command(rest: str) -> ParsedEndfieldCommand:
     parts = _split(rest)
     if not parts:
         return ParsedEndfieldCommand("help")
+
+    if parts[0].lower() in RANDOM_WIKI_ALIASES:
+        if len(parts) != 1:
+            return ParsedEndfieldCommand("invalid", error="用法：/zmd 随机（随机一条公开 Wiki 资料，无需附加参数）。")
+        return ParsedEndfieldCommand("random_wiki")
 
     personal = _parse_personal_command(parts)
     if personal is not None:
@@ -962,6 +968,7 @@ def format_help() -> str:
     return "\n".join(
         [
             "终末地功能指令一览：",
+            "  /zmd 随机 | /ef random —— 随机一条公开 Wiki 资料，无需绑定，不含个人数据",
             "  /ef 绑定 | /ef 添加账号 —— 绑定游戏账号（限私聊；国服支持 Token 与短信验证，二维码暂未开放；亚服支持 Token；可添加多个账号）",
             "  /ef 账号 [编号] —— 生成账号概览图（干员阵容、武器装备、技能与潜能阶数）",
             "  /ef 养成统计 [编号] —— 统计当前档案内角色养成消耗与材料总览（别名：/ef 资源消耗）",

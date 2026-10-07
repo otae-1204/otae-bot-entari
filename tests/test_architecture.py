@@ -240,6 +240,33 @@ async def run_command(session, text):
     await post(CommandExecute(_remove_config_prefix(MessageChain(text)), session),
                inherit_ctx={ITEM_ACCOUNT: session.account})
 
+async def check_random_wiki_dispatch():
+    endfield = plugin_service.plugins['plugins.endfield.handlers'].module
+    current = group_session(user='unbound-user')
+    scope = scope_from_event(current.account, current.event)
+    commands = ('/zmd 随机', '/ef random', '/终末地 随机百科', '/endfield RAND')
+    with patch.object(endfield, '_handle_random_wiki', AsyncMock()) as random_wiki:
+        for text in commands:
+            random_wiki.reset_mock()
+            await run_command(current, text)
+            random_wiki.assert_awaited_once()
+        feature_store.set_enabled(scope, 'endfield', False)
+        try:
+            for text in commands:
+                random_wiki.reset_mock()
+                await run_command(current, text)
+                random_wiki.assert_not_awaited()
+                current.send.assert_not_awaited()
+            # Disabling this group does not disable another group or private chat.
+            for other in (group_session(group='101'), group_session(private=True)):
+                random_wiki.reset_mock()
+                await run_command(other, '/zmd 随机')
+                random_wiki.assert_awaited_once()
+        finally:
+            feature_store.set_enabled(scope, 'endfield', True)
+
+asyncio.get_event_loop().run_until_complete(check_random_wiki_dispatch())
+
 async def check_group_switches():
     current = group_session()
     scope = scope_from_event(current.account, current.event)

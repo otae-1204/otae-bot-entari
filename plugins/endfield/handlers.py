@@ -193,6 +193,7 @@ from .catalog.service import (
     build_fz_weapon_catalog_view,
     format_status_quick_calc,
 )
+from .catalog.random_wiki import RandomWikiService, is_public_wiki_candidate
 from .medals.store import MedalSnapshotStore
 from .archives.store import ArchiveSnapshotStore
 from .ownership.service import (
@@ -236,6 +237,7 @@ official_calendar_source = OfficialVersionCalendarSource()
 medal_store = MedalSnapshotStore()
 _MEDAL_LOCK = asyncio.Lock()
 archive_store = ArchiveSnapshotStore()
+random_wiki_service = RandomWikiService(service, stage_service, lambda: archive_store.load_current_view())
 _ARCHIVE_LOCK = asyncio.Lock()
 _FORWARD_SENDER_NAME = "Endfield"
 # 抽卡分析：超过 N 张图改为一条合并转发（每节点 1 张）；ENDFIELD_GACHA_FORWARD_ABOVE=0 关闭转发。
@@ -449,6 +451,8 @@ async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand,
         return await _finish_endfield_help(matcher)
     if command.action == "source":
         return await matcher.finish(format_source())
+    if command.action == "random_wiki":
+        return await _handle_random_wiki(matcher)
     if command.action == "calendar":
         with cold_start_command(matcher):
             await notice_default_ake_public()
@@ -3208,6 +3212,35 @@ async def _resolve_equipment_candidates_fz(
                 )
             )
     return candidates
+
+
+async def _handle_random_wiki(matcher) -> None:
+    with cold_start_command(matcher):
+        await notice_default_ake_public()
+        async for candidate in random_wiki_service.candidates():
+            # Keep the boundary even if the service or renderer registry changes.
+            if not is_public_wiki_candidate(candidate):
+                continue
+            try:
+                pngs = await _render_candidate(candidate)
+            except _ExitException:
+                raise
+            except Exception as exc:  # noqa: BLE001 - Try another entry after any renderer failure.
+                logger.warning(
+                    "[endfield] random Wiki render failed kind={} error={}",
+                    candidate.kind, type(exc).__name__,
+                )
+                continue
+            if not pngs:
+                continue
+            try:
+                return await _finish_pngs(matcher, pngs)
+            except _ExitException:
+                raise
+            except Exception:  # noqa: BLE001 - Transport failure must stop random selection.
+                logger.exception("[endfield] random Wiki send failed")
+                return await matcher.finish("图片发送失败，请稍后再试。")
+    return await matcher.finish("公开 Wiki 资料暂时不可用，请稍后再试。")
 
 
 async def _render_candidate(

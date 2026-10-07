@@ -8,6 +8,9 @@
 End 插件的公共资料默认优先 AKEData；账号接口仍用官方，缺失资料保留兼容回退。
 覆盖范围、缓存变化与实测见 [AKE 迁移记录](docs/endfield_ake_migration_execution.md)。
 
+`/zmd 随机`（或 `/ef random`）随机返回一条公开 Wiki 资料，无需绑定账号。
+内容范围与处理规则见 [随机 Wiki](docs/endfield_random_wiki.md)。
+
 HYW 搜索问答插件已接入：`/q 问题`、图片解释和引用追问。
 配置模型后使用，详见 [HYW 配置与用法](docs/hyw_plugin.md)。
 
