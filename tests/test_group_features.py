@@ -221,13 +221,13 @@ class HandlerTests(unittest.IsolatedAsyncioTestCase):
     async def test_switch_changes_only_current_account_and_group(self):
         current = session(roles=[Role("admin")])
         reply = await self.run_command(current, "关闭 HYW")
-        self.assertIn("已关闭", reply)
+        self.assertIn("已成功关闭", reply)
         scope = scope_from_event(current.account, current.event)
         self.assertFalse(self.store.is_enabled(scope, "hyw"))
         for other in (session(group="101"), session(bot="301"), session(private=True)):
             self.assertTrue(self.store.is_enabled(scope_from_event(other.account, other.event), "hyw"))
         self.assertIn("[关闭] hyw", await self.run_command(current, "列表"))
-        self.assertIn("已开启", await self.run_command(current, "开启 q"))
+        self.assertIn("已成功开启", await self.run_command(current, "开启 q"))
         self.assertTrue(self.store.is_enabled(scope, "hyw"))
 
     async def test_only_superuser_enables_grok_but_group_admin_can_disable(self):
@@ -238,16 +238,16 @@ class HandlerTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("仅 SuperUser", await self.run_command(session(roles=[Role(role)]), action))
                 self.assertFalse(self.store.is_enabled(scope, "grok_bot"))
         self.assertFalse(self.store.path.exists())
-        self.assertIn("已开启", await self.run_command(root, "开启 grok"))
+        self.assertIn("已成功开启", await self.run_command(root, "开启 grok"))
         self.assertTrue(self.store.is_enabled(scope, "grok_bot"))
         self.assertIn("仅 SuperUser 可开启", await self.run_command(root, "列表"))
-        self.assertIn("已关闭", await self.run_command(session(roles=[Role("admin")]), "关闭 grok"))
+        self.assertIn("已成功关闭", await self.run_command(session(roles=[Role("admin")]), "关闭 grok"))
         self.assertFalse(self.store.is_enabled(scope, "grok_bot"))
 
     async def test_private_superuser_and_ordinary_members_cannot_manage(self):
-        self.assertIn("群内", await self.run_command(session(user="root", private=True), "关闭 hyw"))
+        self.assertIn("目标群聊内", await self.run_command(session(user="root", private=True), "关闭 hyw"))
         for text in ("关闭 hyw", "开启 hyw", "列表"):
-            self.assertIn("管理权限", await self.run_command(session(), text))
+            self.assertIn("权限不足", await self.run_command(session(), text))
         self.assertFalse(self.store.path.exists())
 
     async def test_rejects_target_group_unknown_plugin_and_disabling_management(self):
@@ -260,7 +260,7 @@ class HandlerTests(unittest.IsolatedAsyncioTestCase):
         current = session(user="root")
         with patch("otae_bot.group_features.os.replace", side_effect=OSError("disk full")):
             reply = await self.run_command(current, "关闭 hyw")
-        self.assertIn("读写失败", reply)
+        self.assertIn("保存失败", reply)
         self.assertTrue(self.store.is_enabled(scope_from_event(current.account, current.event), "hyw"))
 
 

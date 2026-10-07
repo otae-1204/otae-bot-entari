@@ -257,7 +257,7 @@ class EndfieldPerformanceBehaviorTests(unittest.IsolatedAsyncioTestCase):
 
         command = ParsedEndfieldCommand("dev", dev_action="cache", args=("clear", "operator"))
         message = await endfield._handle_dev_command(command)
-        self.assertIn("已清理 operator 缓存", message)
+        self.assertIn("已清空 operator 缓存", message)
         self.assertEqual((await endfield._CARD_CACHE.stats()).entries, 0)
 
     async def test_requested_source_skips_other_candidate_resolvers(self):

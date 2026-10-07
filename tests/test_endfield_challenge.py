@@ -413,7 +413,7 @@ class EndfieldChallengeTests(unittest.TestCase):
                     bot=SimpleNamespace(self_id="10000"),
                 )
             list_roles.assert_called_once_with("1231")
-            matcher.finish.assert_awaited_once_with("被 @ 的用户尚未绑定终末地账号。")
+            matcher.finish.assert_awaited_once_with("所选群友暂未绑定终末地账号。")
 
         asyncio.run(run())
 
@@ -533,7 +533,7 @@ class EndfieldChallengeTests(unittest.TestCase):
                     )
             cipher.from_env.assert_called_once_with()
             matcher.finish.assert_awaited_once_with(
-                "“野性旧”有多个可能：野性旧事·改、野性旧事\n示例：/ef 回响 谵妄赛季 谵妄轮换Ⅱ 野性旧事·改 残酷"
+                "匹配到多个“野性旧”相关结果：野性旧事·改、野性旧事\n参考格式：/ef 回响 谵妄赛季 谵妄轮换Ⅱ 野性旧事·改 残酷"
             )
 
         asyncio.run(run())
@@ -1037,7 +1037,7 @@ class EndfieldGachaDeliveryTests(unittest.TestCase):
         finish_pngs.assert_not_awaited()
         self.assertEqual(matcher.send.await_count, 2)
         first, second = (call.args[0] for call in matcher.send.await_args_list)
-        self.assertIn("抽卡分析共 4 页，合并转发不可用，分 2 条发送。", str(first))
+        self.assertIn("抽卡分析长图共 4 页，当前环境无法合并转发，已分 2 条消息发送。", str(first))
         self.assertEqual([getattr(item, "src", "") for item in first][1:],
                          ["file:///tmp/p1.png", "file:///tmp/p2.png", "file:///tmp/p3.png"])
         self.assertEqual([item.src for item in second], ["file:///tmp/p4.png"])
@@ -1072,7 +1072,7 @@ class EndfieldGachaDeliveryTests(unittest.TestCase):
         )
         self.assertEqual(matcher.send.await_count, 1)
         sent = matcher.send.await_args.args[0]
-        self.assertIn("第 3–5 页合并转发失败", str(sent))
+        self.assertIn("第 3–5 页转发异常", str(sent))
         self.assertEqual([getattr(item, "src", "") for item in sent][1:],
                          ["file:///tmp/p3.png", "file:///tmp/p4.png", "file:///tmp/p5.png"])
 
@@ -1107,7 +1107,7 @@ class EndfieldGachaDeliveryTests(unittest.TestCase):
         self.assertEqual(satori.await_args.kwargs["name"], "Endfield")
         self.assertEqual(onebot.await_args.args[2], (b"1", b"2", b"3"))
         self.assertEqual(onebot.await_args.kwargs, {})
-        self.assertIn("当前连接不支持合并转发", matcher.finish.await_args.args[0])
+        self.assertIn("当前环境暂不支持合并转发", matcher.finish.await_args.args[0])
 
     def test_onebot_nodes_use_file_uri_when_given_and_keep_defaults_otherwise(self):
         from otae_bot.adapters import onebot as onebot_module

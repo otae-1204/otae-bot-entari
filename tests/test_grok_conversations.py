@@ -331,7 +331,7 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(SessionStore(self.path).snapshot(), before)
             self.clock.now += CREATE_SETTLE
             reply = await repair_binding(Gateway(self.config, client), SCOPE, self.store)
-        self.assertIn("已清除", reply)
+        self.assertIn("已重置", reply)
         after = SessionStore(self.path).snapshot()
         del before["bindings"][SCOPE.key]
         self.assertEqual(before, after)
@@ -346,8 +346,8 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         self.clock.now = self.host.down_until
         async with httpx.AsyncClient(transport=httpx.MockTransport(self.host.respond)) as client:
             gw = Gateway(self.config, client)
-            self.assertIn("已确认", await repair_binding(gw, SCOPE, self.store))
-            self.assertIn("已确认", await repair_binding(gw, SCOPE, self.store))
+            self.assertIn("已核验", await repair_binding(gw, SCOPE, self.store))
+            self.assertIn("已核验", await repair_binding(gw, SCOPE, self.store))
         self.assertEqual(self.store.snapshot()["bindings"][SCOPE.key]["agent_id"], self.host.agents[-1]["id"])
         self.assertEqual(sum(name == "createAgent" for name, _ in self.host.calls), 1)
 
@@ -448,7 +448,7 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
                     return actual(*args)
             return actual(*args)
 
-        with patch.object(self.store, "put", side_effect=fail_binding), self.assertRaisesRegex(GrokError, "保存失败"):
+        with patch.object(self.store, "put", side_effect=fail_binding), self.assertRaisesRegex(GrokError, "持久化失败"):
             await self.resolve()
         self.assertIsNone(self.store.snapshot()["bindings"][SCOPE.key]["agent_id"])
         self.assertEqual(await self.resolve(store=SessionStore(self.path)), self.host.agents[-1]["id"])
@@ -495,7 +495,7 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(conversations, "make_client", side_effect=lambda: httpx.AsyncClient(transport=httpx.MockTransport(self.host.respond))), \
              patch.object(conversations, "session_store", self.store), patch.object(Gateway, "ask", side_effect=wait_for_reply), \
-             self.assertRaisesRegex(GrokError, "仍在云端运行"):
+             self.assertRaisesRegex(GrokError, "仍在云端处理"):
             await conversations.ask(replace(self.config, timeout=.03), "问题", SCOPE)
         self.assertEqual(self.store.snapshot()["bindings"][SCOPE.key]["agent_id"], self.host.agents[-1]["id"])
         self.assertFalse(any(name in {"deleteAgent", "interruptAgentRun"} for name, _ in self.host.calls))

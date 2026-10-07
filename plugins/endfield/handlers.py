@@ -549,7 +549,9 @@ async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand,
                     f"[endfield] perf action=search scope={command.scope} "
                     f"candidate={candidate_seconds:.3f}s total={perf_counter() - started:.3f}s"
                 )
-                return await matcher.finish(format_candidates(candidates, title=title))
+                return await matcher.finish(
+                    format_candidates(candidates, title=title, scope=command.scope, query=command.query)
+                )
 
             selected, ambiguous = choose_candidate(candidates)
             if ambiguous:

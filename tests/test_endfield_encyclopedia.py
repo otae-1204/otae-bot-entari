@@ -207,12 +207,12 @@ class EndfieldEncyclopediaCommandTests(unittest.TestCase):
 
     def test_format_not_found_names_catalog_without_repeating_the_word(self):
         expected = {
-            "item": "可以发送 /ef 物品 浏览物品目录",
-            "item_catalog": "可以发送 /ef 物品 浏览物品目录",
-            "prop": "可以发送 /ef 道具 浏览道具目录",
-            "prop_catalog": "可以发送 /ef 道具 浏览道具目录",
-            "enemy_catalog": "可以发送 /ef 敌人 浏览敌人目录",
-            "term_catalog": "可以发送 /ef 词条 浏览词条目录",
+            "item": "可发送 /ef 物品 查阅物品完整目录。",
+            "item_catalog": "可发送 /ef 物品 查阅物品完整目录。",
+            "prop": "可发送 /ef 道具 查阅道具完整目录。",
+            "prop_catalog": "可发送 /ef 道具 查阅道具完整目录。",
+            "enemy_catalog": "可发送 /ef 敌人 查阅敌人完整目录。",
+            "term_catalog": "可发送 /ef 词条 查阅词条完整目录。",
         }
         for scope, tail in expected.items():
             with self.subTest(scope=scope):
@@ -222,7 +222,7 @@ class EndfieldEncyclopediaCommandTests(unittest.TestCase):
 
     def test_format_not_found_falls_back_to_search_for_archive_entry(self):
         message = commands.format_not_found("archive_entry", "xx")
-        self.assertIn("可以尝试 /ef 搜索 xx", message)
+        self.assertIn("可尝试使用 /ef 搜索 xx 进行全局检索。", message)
 
     def test_format_candidates_tail_lists_shipped_encyclopedia_scopes(self):
         message = commands.format_candidates(
@@ -241,7 +241,7 @@ class EndfieldEncyclopediaCommandTests(unittest.TestCase):
             "/ef 档案 <名称>",
         ):
             self.assertIn(usage, help_text)
-        self.assertIn("只使用 AkeData", commands.format_source())
+        self.assertIn("关卡数据独家采用 AkeData", commands.format_source())
 
     def test_choose_candidate_reports_a_numbered_list_within_the_ambiguity_margin(self):
         candidates = [
@@ -508,19 +508,19 @@ class EndfieldEncyclopediaAliasTests(unittest.TestCase):
         )
 
     def test_empty_lookup_is_rejected(self):
-        with self.assertRaisesRegex(ValueError, "别名库中不存在正式名称"):
+        with self.assertRaisesRegex(ValueError, "别名库中未收录正式名称"):
             catalog_aliases.add_alias("prop", "新名", "x", lookup=lambda query: ())
 
     def test_missing_lookup_is_rejected(self):
-        with self.assertRaisesRegex(ValueError, "别名库中不存在正式名称"):
+        with self.assertRaisesRegex(ValueError, "别名库中未收录正式名称"):
             catalog_aliases.add_alias("prop", "新名", "x", lookup=None)
 
     def test_two_lookup_matches_ask_for_the_full_name(self):
-        with self.assertRaisesRegex(ValueError, "正式名称不唯一"):
+        with self.assertRaisesRegex(ValueError, "匹配到多个正式名称，请提供完整全名"):
             catalog_aliases.add_alias("prop", "新名", "x", lookup=lambda query: ("甲", "乙"))
 
     def test_alias_equal_to_the_canonical_name_is_rejected(self):
-        with self.assertRaisesRegex(ValueError, "新别名不能与正式名称相同"):
+        with self.assertRaisesRegex(ValueError, "新别名不可与正式名称完全相同。"):
             catalog_aliases.add_alias(
                 "prop", "炝炒时蔬", "炝炒时蔬", lookup=lambda query: ("炝炒时蔬",)
             )
@@ -554,15 +554,15 @@ class EndfieldEncyclopediaAliasHandlerTests(unittest.IsolatedAsyncioTestCase):
             "alias", alias_action="add", args=("物品", "苔藓样本", "苔藓")
         )
         message = await endfield._handle_alias_command(command)
-        self.assertEqual(message, "已添加物品别名：苔藓 → 苔藓样本")
+        self.assertEqual(message, "已成功添加物品别名：苔藓 → 苔藓样本。")
 
     async def test_item_alias_rejects_a_name_that_is_not_in_the_index(self):
         command = commands.ParsedEndfieldCommand(
             "alias", alias_action="add", args=("物品", "不存在的物品", "x")
         )
         message = await endfield._handle_alias_command(command)
-        self.assertIn("添加别名失败", message)
-        self.assertIn("别名库中不存在正式名称", message)
+        self.assertIn("别名添加失败", message)
+        self.assertIn("别名库中未收录正式名称", message)
 
     async def test_archive_entry_alias_uses_the_archive_snapshot_as_its_lookup(self):
         with patch.object(
@@ -572,7 +572,7 @@ class EndfieldEncyclopediaAliasHandlerTests(unittest.IsolatedAsyncioTestCase):
                 "alias", alias_action="add", args=("档案", "终末地物资", "终末地")
             )
             message = await endfield._handle_alias_command(command)
-        self.assertEqual(message, "已添加档案条目别名：终末地 → 终末地物资")
+        self.assertEqual(message, "已成功添加档案条目别名：终末地 → 终末地物资。")
 
     async def test_archive_entry_alias_is_not_reported_as_unavailable(self):
         with patch.object(
@@ -583,7 +583,7 @@ class EndfieldEncyclopediaAliasHandlerTests(unittest.IsolatedAsyncioTestCase):
             )
             message = await endfield._handle_alias_command(command)
         self.assertNotIn("尚未开放", message)
-        self.assertIn("别名库中不存在正式名称", message)
+        self.assertIn("别名库中未收录正式名称", message)
 
 
 # ------------------------------------------------------------------ §5 敌人
@@ -783,7 +783,7 @@ class EndfieldEncyclopediaArchiveTests(unittest.IsolatedAsyncioTestCase):
                 None,
                 commands.ParsedEndfieldCommand("query", scope="archive_entry", query="终末地"),
             )
-        matcher.finish.assert_awaited_once_with("档案资料尚未就绪，先发送 /ef 档案 刷新")
+        matcher.finish.assert_awaited_once_with("档案数据尚未构建，请先发送 /ef 档案 刷新。")
 
     async def test_missing_snapshot_is_silent_for_the_all_scope(self):
         matcher = AsyncMock()
@@ -791,7 +791,7 @@ class EndfieldEncyclopediaArchiveTests(unittest.IsolatedAsyncioTestCase):
             await endfield._handle_command(
                 matcher, None, commands.ParsedEndfieldCommand("query", scope="all", query="zzz")
             )
-        matcher.finish.assert_awaited_once_with("未找到内容：zzz\n可以尝试 /ef 搜索 zzz")
+        matcher.finish.assert_awaited_once_with("未能检索到内容：zzz。\n可尝试使用 /ef 搜索 zzz 进行全局检索。")
 
     async def test_archive_card_renders_without_opening_an_ake_snapshot(self):
         drawer = AsyncMock(return_value=b"png")
@@ -853,13 +853,13 @@ class EndfieldEncyclopediaSourceTests(unittest.IsolatedAsyncioTestCase):
     async def test_explicit_unsupported_source_is_rejected_before_collecting(self):
         matcher = AsyncMock()
         await endfield._handle_command(matcher, None, commands.parse_command("道具 xx --source fz"))
-        matcher.finish.assert_awaited_once_with("该类资料只提供 AkeData")
+        matcher.finish.assert_awaited_once_with("该类资料仅由 AkeData 提供。")
 
     async def test_bare_source_option_is_not_rejected_by_the_encyclopedia_guard(self):
         matcher = AsyncMock()
         await endfield._handle_command(matcher, None, commands.parse_command("xx --source fz"))
         message = matcher.finish.await_args.args[0]
-        self.assertNotIn("该类资料只提供 AkeData", message)
+        self.assertNotIn("该类资料仅由 AkeData 提供。", message)
 
     async def test_fz_success_with_empty_list_beats_a_warfarin_failure(self):
         resolvers = {
@@ -906,7 +906,7 @@ class EndfieldEncyclopediaSourceTests(unittest.IsolatedAsyncioTestCase):
             AsyncMock(side_effect=AkeDataIncomplete("missing")),
         ):
             await endfield._handle_command(matcher, None, commands.parse_command("物品 苔藓样本"))
-        matcher.finish.assert_awaited_once_with("资料暂时不可用")
+        matcher.finish.assert_awaited_once_with("该资料暂时不可用，请稍后再试。")
 
 
 # ------------------------------------------------------------------ §4.9 渲染

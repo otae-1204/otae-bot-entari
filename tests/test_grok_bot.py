@@ -229,7 +229,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
             {"role": "user", "content": host.prompt}, {"role": "user", "content": "另一个用户的输入"},
             {"role": "assistant", "content": "另一个用户的答案"}]}
         async with host.client() as client:
-            with self.assertRaisesRegex(GrokError, "另一条输入"):
+            with self.assertRaisesRegex(GrokError, "会话中插入了其他提问"):
                 await gateway.Gateway(CONFIG, client).ask("问题")
 
     async def test_auth_errors_redirects_invalid_json_and_transport_never_expose_secrets(self):
@@ -302,7 +302,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
     async def test_readonly_diagnostic_authenticates_without_sending_prompt(self):
         host = Host()
         with patch.object(gateway, "make_client", side_effect=host.client):
-            self.assertIn("检查通过", await gateway.check(CONFIG))
+            self.assertIn("校验通过", await gateway.check(CONFIG))
         self.assertFalse(any(name == "sendPrompt" for name, _, _ in host.calls))
         health = host.calls[0][2]
         self.assertEqual(health.method, "GET")
@@ -311,13 +311,13 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
     async def test_diagnostic_without_reference_agent_only_reads_health_and_roster(self):
         host = Host()
         with patch.object(gateway, "make_client", side_effect=host.client):
-            self.assertIn("未创建 Bot", await gateway.check(replace(CONFIG, agent_id="")))
+            self.assertIn("未创建新实例", await gateway.check(replace(CONFIG, agent_id="")))
         self.assertEqual([name for name, _, _ in host.calls], ["health", "listAgents"])
 
     async def test_timeout_is_bounded_and_does_not_interrupt_shared_bot(self):
         host = Host()
         host.override["listAgents"] = lambda _: [{**host.agent(), "isRunning": True}]
-        with patch.object(gateway, "make_client", side_effect=host.client), self.assertRaisesRegex(GrokError, "仍在云端运行"):
+        with patch.object(gateway, "make_client", side_effect=host.client), self.assertRaisesRegex(GrokError, "仍在云端处理"):
             await gateway.ask(replace(CONFIG, timeout=.01), "问题")
         self.assertFalse(any(name in {"sendPrompt", "interruptAgentRun", "deleteAgent"} for name, _, _ in host.calls))
 
@@ -346,8 +346,8 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                 except GatewayError as caught:  # Not assertRaises: it clears frame locals.
                     error = caught
         self.assertIsInstance(error, GatewayError)
-        self.assertEqual(str(error), "Grok Bot 网关通信失败（sendPrompt / RemoteProtocolError），请检查两端 Tailscale、"
-                                     "网关及云端后台服务；已提交的任务可能仍在云端运行。")
+        self.assertEqual(str(error), "网关数据传输异常（sendPrompt / RemoteProtocolError），请排查 Tailscale 连通性、"
+                                     "网关与后台服务；已提交任务可能仍在云端处理。")
         self.assertIsInstance(error.__cause__, httpx.RemoteProtocolError)
         self.assertEqual(str(error.__cause__), "Server disconnected without sending a response.")
         logged = warning.call_args.args[0].format(*warning.call_args.args[1:])
@@ -691,7 +691,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
 
         host.override["getAgentTranscriptTail"] = broken_tail
         # The default 31 s backoff must not outlive GROKBOT_TIMEOUT.
-        with patch.object(gateway, "make_client", side_effect=host.client), self.assertRaisesRegex(GrokError, "仍在云端运行"):
+        with patch.object(gateway, "make_client", side_effect=host.client), self.assertRaisesRegex(GrokError, "仍在云端处理"):
             await asyncio.wait_for(gateway.ask(replace(CONFIG, timeout=.05), "问题"), 2)
         self.assertEqual(sum(name == "getAgentTranscriptTail" for name, _, _ in host.calls), 1)
         self.assertEqual(sum(name == "sendPrompt" for name, _, _ in host.calls), 1)
@@ -713,7 +713,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                 stopped.set()
 
         async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
-            with self.assertRaisesRegex(GrokError, "认证失败"):
+            with self.assertRaisesRegex(GrokError, "鉴权未通过"):
                 await asyncio.wait_for(gateway.Gateway(CONFIG, client).state(), 1)
             self.assertTrue(stopped.is_set())
 

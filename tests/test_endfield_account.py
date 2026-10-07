@@ -182,7 +182,7 @@ class EndfieldPersonalCommandTests(unittest.TestCase):
         self.assertIn("/ef 账号 [编号]", help_text)
         self.assertIn("/ef 账号 基建 [账号]", help_text)
         self.assertIn("/ef 添加账号", help_text)
-        self.assertIn("可重复追加多个账号", help_text)
+        self.assertIn("可添加多个账号", help_text)
 
 
 def account_detail_fixture() -> dict:

@@ -1915,7 +1915,7 @@ class CoreLogicTests(unittest.TestCase):
         with self.assertRaises(mcsm_client.MCSMAPIError) as ctx:
             asyncio.run(FakeClient("panel.example", "key").get_daemon_instances("daemon-1"))
 
-        self.assertIn("获取节点实例失败", str(ctx.exception))
+        self.assertIn("拉取节点实例列表失败", str(ctx.exception))
         self.assertIn("TypeError: missing status", str(ctx.exception))
 
     def test_mcsm_client_find_instance_daemon_uses_list_snapshots(self):
@@ -1986,7 +1986,7 @@ class CoreLogicTests(unittest.TestCase):
 
         self.assertNotIn("dm_key_handler.send(", handler_source)
         self.assertNotIn("dm_key_handler.finish(", handler_source)
-        self.assertIn('await ChainMsg.text("正在验证 API Key...").send()', handler_source)
+        self.assertIn('await ChainMsg.text("正在核对 API Key...").send()', handler_source)
         self.assertIn("stop_session()", handler_source)
         for text in (
             "API Key too short",
@@ -2004,7 +2004,7 @@ class CoreLogicTests(unittest.TestCase):
         self.assertIn("_pending_bind_sessions", source)
         self.assertIn("dm_bind_handler = listen_message", source)
         self.assertIn("await message.send(target, bot)", source)
-        self.assertIn("MCSM 批量绑定选择", source)
+        self.assertIn("MCSM 实例批量绑定向导", source)
         self.assertIn("async def _is_group_manager", source)
         self.assertIn("guild_member_get", source)
         self.assertIn("/mcsm admin add @某人", source)
@@ -2027,8 +2027,8 @@ class CoreLogicTests(unittest.TestCase):
 
         self.assertNotIn("get_all_instances", list_source)
         self.assertIn("get_daemon_instances", list_source)
-        self.assertIn("暂无本群实例", list_source)
-        self.assertIn("面板已绑定；使用 /mcsm bind <节点ID>", source)
+        self.assertIn("当前暂无实例", list_source)
+        self.assertIn("管理员可使用 /mcsm bind <节点ID> 在私聊向导中挑选实例添加。", source)
         self.assertNotIn("现在可在群内使用 /mcsm list 查看实例列表", source)
         self.assertIn("status = _mcsm_status_code(", list_source)
         self.assertIn("status_text = _mcsm_status_text(", list_source)
@@ -2553,10 +2553,10 @@ remotePort = {{ $v.Second }}
         self.assertIn("JDK/JRE:", daemon_source)
         self.assertNotIn("image_display_name(image) for image in images[:3]", daemon_source)
         self.assertEqual(deploy_source.count("await mcsm.send("), 4)
-        self.assertIn("开始部署：解析下载链接、检测节点与镜像。", deploy_source)
-        self.assertIn("正在创建实例并安装压缩包。", deploy_source)
-        self.assertIn("远程安装失败，切换 Bot 中转上传并解压。", deploy_source)
-        self.assertIn("正在识别启动命令并启动实例。", deploy_source)
+        self.assertIn("开始部署流程：正在解析资源链接并检测节点与环境...", deploy_source)
+        self.assertIn("正在创建容器实例并部署文件包...", deploy_source)
+        self.assertIn("远程拉取失败，正在切换至机器人中转上传模式...", deploy_source)
+        self.assertIn("正在匹配启动命令并尝试启动服务...", deploy_source)
         self.assertIn("if not options.port:", deploy_source)
         self.assertIn("allocated_port, port_source = await _auto_deploy_port(client, did)", deploy_source)
         self.assertIn("options.port = allocated_port", deploy_source)
@@ -2827,7 +2827,7 @@ remotePort = {{ $v.Second }}
 
         with self.assertRaises(qflash.QFlashError) as ctx:
             asyncio.run(FakeResolver().resolve_archives("https://qfile.qq.com/q/XJz5hqnGuc"))
-        self.assertIn("没有可部署的压缩包", str(ctx.exception))
+        self.assertIn("未包含可用于部署的压缩包文件", str(ctx.exception))
 
     def test_mcsm_client_docker_deploy_payloads(self):
         mcsm_client = _load_module("mcsm_client_deploy_for_test", "plugins/mcsm/client.py")
@@ -3622,13 +3622,13 @@ remotePort = {{ $v.Second }}
             timestamp=220,
         )
         self.assertEqual(messages, [
-            "[MC_Server] survival-server: Herobrine \u52a0\u5165\u4e86\u670d\u52a1\u5668",
-            "[MC_Server] survival-server: Steve(2\u5206\u949f) \u79bb\u5f00\u4e86\u670d\u52a1\u5668",
+            "[MC_Server] survival-server：Herobrine 加入了服务器。",
+            "[MC_Server] survival-server：Steve（2分钟） 离开了服务器。",
         ])
         self.assertEqual(deltas, {"Steve": 120})
 
         messages, deltas = utils.build_player_change_messages("survival-server", None, ["Steve", "Alex"], timestamp=1)
-        self.assertEqual(messages, ["[MC_Server] \u670d\u52a1\u5668 survival-server \u5df2\u542f\u52a8\uff0c\u5f53\u524d\u5728\u7ebf: Alex\u3001Steve"])
+        self.assertEqual(messages, ["[MC_Server] 服务器 survival-server 已开启，当前在线：Alex、Steve"])
         self.assertEqual(deltas, {})
 
         last_sent = {}

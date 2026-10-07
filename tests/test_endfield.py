@@ -112,7 +112,7 @@ class EndfieldCommandParserTests(unittest.TestCase):
         handler_source = source[start:end]
 
         self.assertIn("[endfield] send failed", handler_source)
-        self.assertIn("图片发送失败，请稍后重试", handler_source)
+        self.assertIn("图片发送失败，请稍后再试", handler_source)
 
     def test_root_aliases_include_zmd(self):
         self.assertIn("zmd", commands.ROOT_ALIASES)
@@ -162,15 +162,15 @@ class EndfieldCommandParserTests(unittest.TestCase):
         )
 
     def test_parse_quick_calc_rejects_invalid_inputs(self):
-        self.assertIn("1–4", commands.parse_command("速算 5腐蚀 200").error)
+        self.assertIn("1 至 4", commands.parse_command("速算 5腐蚀 200").error)
         self.assertIn("整数", commands.parse_command("速算 2导电 abc").error)
-        self.assertIn("用法", commands.parse_command("速算 2灼热 200").error)
+        self.assertIn("指令格式", commands.parse_command("速算 2灼热 200").error)
 
     def test_parse_loadout_rejects_invalid_operator_potential(self):
         parsed = commands.parse_command("配装 佩丽卡 角色潜能6")
 
         self.assertEqual(parsed.action, "invalid")
-        self.assertIn("角色潜能必须在 0–5", parsed.error)
+        self.assertIn("角色潜能需介于 0 至 5 之间", parsed.error)
 
     def test_parse_loadout_rejects_ambiguous_bare_potential(self):
         parsed = commands.parse_command("配装 佩丽卡 潜能3")
@@ -182,12 +182,12 @@ class EndfieldCommandParserTests(unittest.TestCase):
         parsed = commands.parse_command("配装 佩丽卡 武器技能1等级10")
 
         self.assertEqual(parsed.action, "invalid")
-        self.assertIn("武器技能等级必须在 1–9", parsed.error)
+        self.assertIn("武器技能等级需介于 1 至 9 之间", parsed.error)
 
     def test_parse_loadout_rejects_invalid_enhance(self):
         spec, error = commands.parse_loadout_spec("佩丽卡 脉冲源石配件 词条2锻造4")
         self.assertIsNone(spec)
-        self.assertIn("0–3", error)
+        self.assertIn("0 至 3", error)
 
     def test_loadout_aliases_include_mobile_short_names(self):
         self.assertEqual(aliases.alias_targets("equipment", "脉冲源石配件"), ("脉冲式校准器",))
@@ -484,15 +484,15 @@ class EndfieldCommandParserTests(unittest.TestCase):
     def test_source_option_rejects_missing_unknown_and_conflicting_values(self):
         missing = commands.parse_command("陈千语 --source")
         self.assertEqual(missing.action, "invalid")
-        self.assertIn("需要数据源名称", missing.error)
+        self.assertIn("缺少数据源名称", missing.error)
 
         unknown = commands.parse_command("陈千语 --source skland")
         self.assertEqual(unknown.action, "invalid")
-        self.assertIn("不支持的数据源", unknown.error)
+        self.assertIn("不支持", unknown.error)
 
         conflicting = commands.parse_command("陈千语 -s fz --source warfarin")
         self.assertEqual(conflicting.action, "invalid")
-        self.assertIn("只能指定一个数据源", conflicting.error)
+        self.assertIn("仅可指定一项", conflicting.error)
 
     def test_shortcuts_map_to_internal_commands(self):
         parsed = commands.parse_shortcut_command("efop", "陈千语")
@@ -544,7 +544,7 @@ class EndfieldCommandParserTests(unittest.TestCase):
         self.assertEqual([item.key for item in options], ["first", "second", "third"])
         self.assertIn("1. [干员] 第一项 (first)", message)
         self.assertIn("2. [武器] 第二项 (second)", message)
-        self.assertIn("可引用本消息并回复 1-3 查询对应内容，也可不回复并忽略本消息", message)
+        self.assertIn("引用本条消息并回复序号 1–3 可查看详情", message)
         self.assertEqual(commands.parse_candidate_selection(" 2 ", len(options)), 1)
         self.assertIsNone(commands.parse_candidate_selection("0", len(options)))
         self.assertIsNone(commands.parse_candidate_selection("4", len(options)))
@@ -866,7 +866,7 @@ class EndfieldCommandParserTests(unittest.TestCase):
         source = (ROOT / "plugins/endfield/handlers.py").read_text(encoding="utf-8")
 
         self.assertIn('private_only = {"bind", "primary", "unbind", "gacha_import"}', source)
-        self.assertIn("该命令涉及账号凭据或手机号，仅支持私聊使用。", source)
+        self.assertIn("该功能涉及个人隐私凭证或手机号，请在私聊中发起。", source)
         self.assertLess(
             source.index("if command.action in private_only and is_group(event):"),
             source.index('if command.action == "gacha_import":'),

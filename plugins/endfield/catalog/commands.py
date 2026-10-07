@@ -62,6 +62,71 @@ OWNERSHIP_ALIASES = {"持有率", "干员占比", "干员统计", "ownership", "
 OWNERSHIP_GROUP_ALIASES = {"群内", "本群", "当前群", "group", "guild"}
 OWNERSHIP_GLOBAL_ALIASES = {"全局", "全部", "global", "all"}
 
+# 子指令规格列表（单一事实来源）：从已有别名集推导出「子指令别名 → (父命令, 规范写法, 说明)」
+SUBCOMMAND_SPECS: tuple[tuple[Iterable[str], str, str, str], ...] = (
+    (
+        MEDAL_MISSING_ALIASES,
+        "奖章",
+        "/ef 奖章 缺章",
+        "检查当前账号未解锁、未升满或未镀层的奖章",
+    ),
+    (
+        MEDAL_REFRESH_ALIASES,
+        "奖章",
+        "/ef 奖章 刷新",
+        "同步 AKEData 最新奖章数据并更新版本对比基准（亦可用于 /ef 档案 刷新）",
+    ),
+    (
+        ARCHIVE_PROGRESS_ALIASES,
+        "档案",
+        "/ef 档案 收集",
+        "统计当前账号已解锁档案与全库收录进度",
+    ),
+    (
+        CHALLENGE_HISTORY_ALIASES,
+        "影拓",
+        "/ef 影拓 历史",
+        "浏览往期主题通关总览（或 /ef 回响 历史）",
+    ),
+    (
+        GACHA_SYNC_ALIASES,
+        "抽卡",
+        "/ef 抽卡同步",
+        "统计抽卡记录与欧气分析（或 /ef 抽卡同步 [账号] [--full]）",
+    ),
+    (
+        GACHA_HISTORY_ALIASES,
+        "抽卡",
+        "/ef 抽卡记录",
+        "分页检视抽卡历史明细",
+    ),
+    (
+        GACHA_IMPORT_ALIASES,
+        "抽卡",
+        "/ef 抽卡导入",
+        "通过手机验证码导入小黑盒历史抽卡统计（限私聊）",
+    ),
+    (
+        ALIAS_ADD_ALIASES,
+        "别名",
+        "/ef 别名 添加",
+        "新增别名映射",
+    ),
+    (
+        ACCOUNT_BASE_ALIASES,
+        "账号",
+        "/ef 账号 基建",
+        "查看集成工业据点产出效率、票据库存与干员心情",
+    ),
+)
+
+SUBCOMMAND_GUIDANCE: dict[str, tuple[str, str, str]] = {}
+for _aliases, _parent_name, _cmd_str, _desc in SUBCOMMAND_SPECS:
+    for _alias in sorted(_aliases, key=len, reverse=True):
+        _lowered = _alias.casefold()
+        if _lowered not in SUBCOMMAND_GUIDANCE:
+            SUBCOMMAND_GUIDANCE[_lowered] = (_parent_name, _cmd_str, _desc)
+
 ITEM_ALIASES = {"物品", "材料", "item", "items"}
 PROP_ALIASES = {"道具", "食物", "料理", "药剂", "prop", "props", "food"}
 ENEMY_ALIASES = {"敌人", "怪物", "enemy", "enemies"}
@@ -998,8 +1063,21 @@ def _encyclopedia_catalog_scope(scope: str) -> str:
     return base
 
 
-def format_not_found(scope: str, query: str) -> str:
+def format_subcommand_guidance(query: str) -> str:
+    cleaned = str(query or "").strip().casefold()
+    hit = SUBCOMMAND_GUIDANCE.get(cleaned)
+    if not hit:
+        return ""
+    parent_name, cmd_str, desc = hit
+    display_alias = str(query).strip()
+    return f"「{display_alias}」是「/ef {parent_name}」的子指令，正确写法：{cmd_str} —— {desc}。"
+
+
+def format_not_found(scope: str, query: str, *, action: str = "query") -> str:
     label = SCOPE_LABELS.get(scope, "内容")
+    sub_guide = format_subcommand_guidance(query)
+    if sub_guide:
+        return f"未能检索到{label}：{query}。\n{sub_guide}"
     if scope in {"stage", "stage_catalog"}:
         return f"未能检索到{label}：{query}。\n可发送 /ef 副本 翻阅关卡资料总览。"
     if scope == "equipment_attribute":
@@ -1012,6 +1090,10 @@ def format_not_found(scope: str, query: str) -> str:
         word = ENCYCLOPEDIA_SCOPE_WORDS[catalog_scope]
         # 用范围词拼目录名：label 对 *_catalog 已经是「物品目录」，再补一次会写成「物品目录目录」。
         return f"未能检索到{label}：{query}。\n可发送 /ef {word} 查阅{word}完整目录。"
+    if action == "search":
+        words = ["干员", "武器", "装备"]
+        words.extend(ENCYCLOPEDIA_SCOPE_WORDS[s] for s in ENCYCLOPEDIA_SCOPES)
+        return f"未能检索到{label}：{query}。\n可使用的查询入口：" + "、".join(f"/ef {w}" for w in words) + "。"
     return f"未能检索到{label}：{query}。\n可尝试使用 /ef 搜索 {query} 进行全局检索。"
 
 
@@ -1061,9 +1143,29 @@ def format_candidates(
     *,
     title: str = "存在多个匹配结果",
     interactive: bool = False,
+    scope: str = "all",
+    query: str = "",
 ) -> str:
     if not candidates:
-        return "未匹配到相关条目。"
+        sub_guide = format_subcommand_guidance(query)
+        lines = [f"{title}：{query}。" if query else f"{title}。"]
+        if sub_guide:
+            lines.append(sub_guide)
+        if scope != "all" and scope in SCOPE_LABELS:
+            label = SCOPE_LABELS[scope]
+            catalog_scope = _encyclopedia_catalog_scope(scope)
+            if catalog_scope:
+                word = ENCYCLOPEDIA_SCOPE_WORDS[catalog_scope]
+                lines.append(f"可发送 /ef {word} 查阅{word}完整目录。")
+            elif scope in {"stage", "stage_catalog"}:
+                lines.append("可发送 /ef 副本 翻阅关卡资料总览。")
+            else:
+                lines.append(f"可发送 /ef {label} 查阅相关条目。")
+        else:
+            words = ["干员", "武器", "装备"]
+            words.extend(ENCYCLOPEDIA_SCOPE_WORDS[s] for s in ENCYCLOPEDIA_SCOPES)
+            lines.append("可使用的查询入口：" + "、".join(f"/ef {w}" for w in words) + "。")
+        return "\n".join(lines)
     options = candidate_options(candidates)
     lines = [f"{title}："]
     for index, item in enumerate(options, 1):

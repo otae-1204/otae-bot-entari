@@ -569,7 +569,7 @@ class ProviderErrorTests(unittest.TestCase):
         """红线：上游响应体原文只进 debug，不进 ``message``。"""
         error = UpstreamUnavailable()
         self.assertNotIn("detail", error.message)
-        self.assertEqual(error.message, "雷达数据源暂时不可用，请稍后重试。")
+        self.assertEqual(error.message, "雷达数据源暂不可用，请稍后重试。")
         # 脱敏只用于日志。
         self.assertNotIn("secret-token-value", redact("Authorization: Bearer secret-token-value"))
 
@@ -588,7 +588,7 @@ class ServiceRankingTests(unittest.TestCase):
             [(row.model, row.effort) for row in rows],
             [("gpt-5.6-sol", "max"), ("gpt-6-astra", "ultra"), ("gpt-5.5", "high")],
         )
-        self.assertEqual(meta.note, "已取各模型最高档")
+        self.assertEqual(meta.note, "已筛选各模型最高档位")
         # gpt-6-astra@ultra 在 insights 里没有点 → 走本地换算并标记。
         astra = next(row for row in rows if row.model == "gpt-6-astra")
         self.assertTrue(astra.iq_derived)
@@ -611,7 +611,7 @@ class ServiceRankingTests(unittest.TestCase):
         self.assertEqual(rates, sorted(rates, reverse=True))
 
         by_cost, meta = run(self.service.top_models(by="cost", effort="low"))
-        self.assertIn("成本为上游估算口径", meta.note)
+        self.assertIn("成本采用上游估算口径", meta.note)
         self.assertEqual(by_cost[0].model, "gpt-6-astra")
 
     def test_top_models_rejects_an_unknown_sort_key(self):
@@ -630,7 +630,7 @@ class ServiceRankingTests(unittest.TestCase):
         self.assertEqual([row.effort for row in profile.variants], ["low", "ultra"])
         self.assertEqual(profile.best.effort, "ultra")
         self.assertEqual(profile.insight.iq, 109.19)
-        self.assertEqual(profile.meta.note, "含全部档位")
+        self.assertEqual(profile.meta.note, "已包含全部档位")
         # 多档位时不造一个含糊的总样本量。
         self.assertIsNone(profile.meta.samples)
 
@@ -680,7 +680,7 @@ class ServiceRankingTests(unittest.TestCase):
         service = RadarService(client, client.config)
         tasks, meta = run(service.task_ranking(benchmark="pompeii-adjacency"))
         self.assertEqual(tasks, ())
-        self.assertIn("无区分度数据", meta.note)
+        self.assertIn("缺少区分度数据", meta.note)
 
     def test_task_detail_splits_solved_by(self):
         detail = run(self.service.task_detail("abs-module-cache-flags"))
@@ -739,8 +739,8 @@ class ServiceRankingTests(unittest.TestCase):
     def test_trend_bare_name_and_tier_are_different_calibers(self):
         bare, bare_meta = run(self.service.trend("gpt-6-astra"))
         tiered, tiered_meta = run(self.service.trend("gpt-6-astra", effort="low"))
-        self.assertEqual(bare_meta.note, "跨档位合并口径")
-        self.assertEqual(tiered_meta.note, "单档位 low")
+        self.assertEqual(bare_meta.note, "跨档位综合口径")
+        self.assertEqual(tiered_meta.note, "单档位 low 口径")
         self.assertEqual(bare[0].iq, 105.4)
         self.assertEqual(tiered[0].iq, 98.3)
         self.assertNotEqual(bare[0].iq, tiered[0].iq)
@@ -969,7 +969,7 @@ class FormatterTests(unittest.TestCase):
         error = InvalidArgument("用法：/radar 题 <id>", detail="missing task")
         self.assertEqual(format_error(error), "用法：/radar 题 <id>")
         # 固定话术表兜底，且不含上游原文。
-        self.assertEqual(format_error(UnknownModel()), "没有该模型档位的实测数据。")
+        self.assertEqual(format_error(UnknownModel()), "未查询到该模型档位的实测记录。")
 
     def test_help_lines_are_within_the_width_budget(self):
         for line in format_help():
@@ -1380,8 +1380,8 @@ CASES = [
     ('/radar 性价比', 1, ['gpt-6-astra']),
     ('/radar 趋势 gpt-6-astra', 1, ['gpt-6-astra']),
     ('/radar 档位', 1, ['gpt-6-astra']),
-    ('/radar 模型', 1, ['用法']),
-    ('/radar 对比 gpt-6-astra', 1, ['用法']),
+    ('/radar 模型', 1, ['格式']),
+    ('/radar 对比 gpt-6-astra', 1, ['格式']),
     # 已摘掉的 5 个命令必须报「未知子命令」，且不得再走 service。
     ('/radar 题 abs-module-cache-flags', 1, ['未知子命令']),
     ('/radar 好题', 1, ['未知子命令']),

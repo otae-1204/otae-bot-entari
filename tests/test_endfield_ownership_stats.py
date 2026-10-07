@@ -1128,7 +1128,7 @@ class OwnershipRefreshAndGroupTests(unittest.TestCase):
                     bot=object(),
                 )
             )
-        self.assertIn("SUPERUSER", denied)
+        self.assertIn("机器人管理员", denied)
 
         group_event = SimpleNamespace(
             user=SimpleNamespace(id="member"),
@@ -1198,12 +1198,12 @@ class OwnershipRefreshAndGroupTests(unittest.TestCase):
                 )
             )
 
-        self.assertIn("全局持有率刷新完成", result)
-        self.assertIn("候选 2，入队 2，角色请求 2", result)
-        self.assertIn("成功 1，失败 1，跳过 0，延后 0", result)
-        self.assertIn("目录无变化", result)
+        self.assertIn("全局干员持有率刷新完毕", result)
+        self.assertIn("符合条件 2 个，加入队列 2 个，发起查询 2 个", result)
+        self.assertIn("成功 1 个，失败 1 个，跳过 0 个，延后 0 个", result)
+        self.assertIn("干员目录无变动", result)
         self.assertIn("账号授权（401） × 1", result)
-        self.assertIn("耗时 11 秒", result)
+        self.assertIn("总计耗时 11 秒", result)
         self.assertIn("/ef 绑定", result)
         refresh_roles.assert_awaited_once_with(
             roles,
@@ -1229,9 +1229,9 @@ class OwnershipRefreshAndGroupTests(unittest.TestCase):
 
         result = endfield_plugin._format_ownership_refresh_result("global", refresh)
 
-        self.assertIn("失败 3，跳过 202", result)
+        self.assertIn("失败 3 个，跳过 202 个", result)
         self.assertIn("保护性停止", result)
-        self.assertIn("旧快照仍按 48 小时有效期参与统计", result)
+        self.assertIn("历史快照在 48 小时有效期内仍将继续生效", result)
         self.assertNotIn("/ef 绑定更新凭证", result)
 
     def test_refresh_text_distinguishes_catalog_failure_from_unchanged(self):
@@ -1249,8 +1249,8 @@ class OwnershipRefreshAndGroupTests(unittest.TestCase):
 
         result = endfield_plugin._format_ownership_refresh_result("global", refresh)
 
-        self.assertIn("目录检查失败（RuntimeError: 目录检查失败）", result)
-        self.assertNotIn("目录无变化", result)
+        self.assertIn("干员目录核对失败（RuntimeError: 目录检查失败）", result)
+        self.assertNotIn("干员目录无变动", result)
 
     def test_group_view_uses_live_member_filter_and_never_global_roles(self):
         class Matcher:

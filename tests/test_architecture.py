@@ -249,7 +249,7 @@ async def check_group_switches():
             assert any(isinstance(gate, GroupFeatureGate) for gate in plugin._scope.propagators), plugin.path
     await run_command(current, '/功能 关闭 hyw')
     assert current.send.await_count == 1, current.send.await_args_list
-    assert '已关闭' in str(current.send.await_args.args[0]), current.send.await_args_list
+    assert '已成功关闭' in str(current.send.await_args.args[0]), current.send.await_args_list
     assert not feature_store.is_enabled(scope, 'hyw')
     for alias in ('q', 'hyw', '何意味'):
         await run_command(current, '/' + alias + ' 帮助')
@@ -439,14 +439,14 @@ async def check_grok_quoted_dispatch():
         await publish(event, scope='.commands')
         run.assert_awaited_once()
         assert run.await_args.kwargs['images'] == ('https://cdn.example/only.png',)
-        assert '请描述并分析这些图片' in run.await_args.args[1]
+        assert '请针对提供的图片进行识别与分析说明' in run.await_args.args[1]
         run.reset_mock()
         event = quote_event([Quote('quoted-id'), At('quoted-user'), Text(' /grok')])
         event.account.protocol.message_get.return_value = MessageObject('quoted-id', '<img src="https://cdn.example/quoted-only.png"/>', user=User('quoted-user'))
         await publish(event, scope='.commands')
         run.assert_awaited_once()
         assert run.await_args.kwargs['images'] == ('https://cdn.example/quoted-only.png',)
-        assert '请描述并分析这些图片' in run.await_args.args[1]
+        assert '请针对提供的图片进行识别与分析说明' in run.await_args.args[1]
 
     async def interrupted_run(*args, on_reply, **kwargs):
         await on_reply(grok.Reply('插入后的回答'), reply_to=False)

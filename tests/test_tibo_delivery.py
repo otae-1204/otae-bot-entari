@@ -102,7 +102,7 @@ def test_image_failure_delivers_text_then_advances_cursor(radar, monkeypatch, fa
     assert saved.last_notified_post_id == post(1).post_id
     assert saved.last_delivery_mode == "text"
     sent = str(bot.protocol.send_message.await_args.args[1])
-    assert "中文样例" in sent and post(1).url in sent and "图片暂不可用" in sent
+    assert "中文样例" in sent and post(1).url in sent and "图片渲染降级，已切换为纯文本模式" in sent
     count = bot.protocol.send_message.await_count
     notify(bot)
     assert bot.protocol.send_message.await_count == count
