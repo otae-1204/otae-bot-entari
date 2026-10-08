@@ -162,7 +162,7 @@ from otae_bot.adapters.entari import timer
 from arclet.entari.plugin.service import plugin_service
 from arclet.alconna import command_manager
 
-create_app()
+app = create_app()
 expected = set(discover_plugins())
 missing = sorted(expected - plugin_service.plugins.keys())
 assert not missing, missing
@@ -329,6 +329,48 @@ async def check_group_switches():
         parse_link.assert_awaited_once()
 
 asyncio.get_event_loop().run_until_complete(check_group_switches())
+
+async def check_signin_dispatch():
+    # The unified /签到 entry is registered by its own plugin, answers an
+    # unbound user with one binding prompt, and still obeys its group switch.
+    session = group_session(user='test-root')
+    await run_command(session, '/签到')
+    assert session.send.await_count == 1, session.send.await_args_list
+    assert '尚未绑定任何签到账号' in str(session.send.await_args.args[0]), session.send.await_args_list
+    session = group_session(user='test-root')
+    await run_command(session, '/签到 全部')
+    assert session.send.await_count == 1, session.send.await_args_list
+    assert '用法：/签到' in str(session.send.await_args.args[0]), session.send.await_args_list
+    probe = group_session(user='test-root')
+    scope = scope_from_event(probe.account, probe.event)
+    feature_store.set_enabled(scope, 'signin', False)
+    session = group_session(user='test-root')
+    await run_command(session, '/签到')
+    session.send.assert_not_awaited()
+    feature_store.set_enabled(scope, 'signin', True)
+    # Both games must have registered their attendance capability while loading.
+    from otae_bot.attendance_registry import registry
+    assert registry.games() == ('endfield', 'arknights'), registry.games()
+
+asyncio.get_event_loop().run_until_complete(check_signin_dispatch())
+
+# A direct call to the cleanup function misses Entari's parameter injection.
+async def check_signin_real_unload_reload():
+    from arclet.entari import Entari, load_plugin
+    from arclet.entari.plugin import unload_plugin_async
+    from otae_bot.attendance_registry import registry
+    old = registry.get('arknights')
+    with patch.object(Entari, 'current', return_value=app):
+        assert await unload_plugin_async('plugins.arknights')
+        await asyncio.sleep(.05)
+    assert registry.get('arknights') is None, registry.games()
+    assert registry.get('endfield') is not None
+    assert load_plugin('plugins.arknights')
+    await asyncio.sleep(.05)
+    assert registry.get('arknights').module is not old.module
+    assert len(registry) == 2
+
+asyncio.get_event_loop().run_until_complete(check_signin_real_unload_reload())
 
 # Exercise the actual incoming-event path, including quote lookup and the
 # prefix filter. CommandExecute alone skips the prefix filter that caused this bug.

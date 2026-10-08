@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from arclet.entari import WS, Cleanup, Entari, Startup, listen, load_plugin
-from arclet.entari.event.plugin import PluginLoadedSuccess
+from arclet.entari.event.plugin import PluginLoadedSuccess, PluginUnloaded
 
 from otae_bot.adapters.command_input import install_quoted_command_mentions
 from otae_bot.adapters.exception_hooks import install_exception_hooks, reassert_exception_hooks
 from otae_bot.adapters.feature_gate import install_group_feature_gates, on_plugin_loaded
 from otae_bot.adapters.message_log import install_message_log_redaction
 from otae_bot.adapters.quote_fallback import install_quote_fetch_fallback
+from otae_bot.attendance_registry import on_plugin_unloaded
 from otae_bot.config.settings import SATORI_CLIENTS
 from otae_bot.infrastructure.http.tls import prewarm_shared_ssl_context
 from otae_bot.infrastructure.loop_watchdog import (
@@ -48,6 +49,9 @@ def create_app() -> Entari:
     listen(Cleanup)(close_loop_watchdog)
     listen(Cleanup)(close_shared_resources)
     listen(PluginLoadedSuccess)(on_plugin_loaded)
+    # A game plugin that is unloaded for good must stop advertising its
+    # attendance capability to the unified /签到 entry point.
+    listen(PluginUnloaded)(on_plugin_unloaded)
     for name in discover_plugins():
         load_plugin(name)
     install_group_feature_gates()

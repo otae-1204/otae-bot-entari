@@ -18,6 +18,7 @@ SUPERUSER_ENABLE_PLUGINS = {"grok_bot"}
 PLUGIN_NAMES = {
     "McModQuery": ("MC 百科", "mod", "模组", "mcmod"),
     "McWikiQuery": ("MC Wiki", "wiki"),
+    "arknights": ("明日方舟", "ak", "arknights", "森空岛"),
     "bilibilibot": ("B站", "bili", "bilibili"),
     "changelog": ("更新日志", "changelog", "版本"),
     "endfield": ("终末地", "ef", "zmd"),
@@ -29,6 +30,7 @@ PLUGIN_NAMES = {
     "minecraft_plugin": ("Minecraft", "mc", "我的世界"),
     "peek": ("窥视",),
     "radar": ("AI 智商雷达", "radar", "智商雷达"),
+    "signin": ("统一签到", "签到", "checkin"),
     "steamInfo": ("Steam", "steam"),
     "tibo_radar": ("Tibo 雷达", "tibo", "雷达"),
 }

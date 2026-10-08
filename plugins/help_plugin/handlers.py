@@ -17,6 +17,10 @@ GROUP_FEATURE_HELP = "本群插件开关：\n/功能 列表 —— 查看本群�
 TEXT_TOPICS.update({name: GROUP_FEATURE_HELP for name in ("功能", "插件", "plugin")})
 CHANGELOG_HELP = "更新日志查询：\n/更新日志 —— 查看最新版本更新说明\n/更新日志 列表 —— 查看版本目录列表（每页 12 项）\n/更新日志 <版本号/序号/关键词> —— 查询指定版本的更新条目（如 /更新日志 v1.14.0、/更新日志 2）\n/更新日志 统计 —— 查看版本与提交汇总数据\n别名：/更新、/changelog、/版本；版本按阶段划分，每项条目均对应仓库真实提交。"
 TEXT_TOPICS.update({name: CHANGELOG_HELP for name in ("更新", "更新日志", "changelog", "版本")})
+ARKNIGHTS_HELP = "明日方舟森空岛签到：/ak 帮助 查看全部子命令，别名 /明日方舟、/arknights。\n/ak 绑定（私聊，Token 或手机号验证码）、/ak 账号、/ak 主账号 <选择器>、/ak 解绑 <选择器>（私聊）。\n/ak 签到 [全部|编号|昵称|UID后四位] 默认签到全部角色；账号按 QQ 隔离，登录凭据加密保存。\n绑定和解绑请私聊操作；请勿公开 Token 或验证码。"
+TEXT_TOPICS.update({name: ARKNIGHTS_HELP for name in ("ak", "明日方舟", "arknights", "森空岛")})
+SIGNIN_HELP = "统一签到：/签到 依次执行终末地与明日方舟的全部已绑定角色，合成一张结果图发送。\n只绑定一个游戏时只执行该游戏；两个游戏都未绑定会提示私聊使用 /zmd 绑定 或 /ak 绑定。\n单个角色失败或登录过期只影响它自己，另一个游戏照常签到；本群被关闭的游戏会提示已跳过。\n统一入口不接受参数；单独签到某个游戏仍可用 /ef 签到、/ak 签到。"
+TEXT_TOPICS.update({name: SIGNIN_HELP for name in ("签到", "checkin", "qiandao")})
 
 # 子指令 → 图片文件名（不含扩展名）映射
 # 每个目标都必须有对应的 assets/image/help/<name>.png，否则该主题无法解析；

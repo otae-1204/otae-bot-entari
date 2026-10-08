@@ -1,0 +1,116 @@
+{
+  "approved_at": "2026-10-08",
+  "source": "Skland official game assets",
+  "name_source": "https://zonai.skland.com/api/v1/game/attendance",
+  "icon_rule_source": "https://assets.skland.com/_static_assets/game-tools/vendor_hg-DSnB5Jb_.js",
+  "items": [
+    {
+      "resource_id": "4001",
+      "name": "龙门币",
+      "file": "4001.png",
+      "source_url": "https://web.hycdn.cn/arknights/game/assets/item/4001.png",
+      "original_sha256": "cd8d6317ef9c28f5acbcad24ac55a354cec475028fbaf37f53624374b3709b08",
+      "sha256": "b2ae3c32cbc7a2f2f040d2d3347be2a861892bc6a06a3077745e388ec06bb02e",
+      "processing": "仅裁去全透明外边，原像素居中，补 5% 透明留白；不重绘、不改色"
+    },
+    {
+      "resource_id": "4003",
+      "name": "合成玉",
+      "file": "4003.png",
+      "source_url": "https://web.hycdn.cn/arknights/game/assets/item/4003.png",
+      "original_sha256": "702d4dcf159275ce0af100d77ec38dae130ebbf2add8d48971812d1d895ca9c2",
+      "sha256": "98b4f46aa2db4e342dbc0b705c451b0516e1c41bb326ebab0d6a3dbe44a50685",
+      "processing": "仅裁去全透明外边，原像素居中，补 5% 透明留白；不重绘、不改色"
+    },
+    {
+      "resource_id": "2002",
+      "name": "初级作战记录",
+      "file": "2002.png",
+      "source_url": "https://web.hycdn.cn/arknights/game/assets/item/2002.png",
+      "original_sha256": "e9e588b9a07ea819d23f87ea008daefc2729af424a9ecc77a7498068941f9e0c",
+      "sha256": "8d841d39f06dbacc879c56cf143e6f298285504030d5807d7d3a762c77d3feca",
+      "processing": "仅裁去全透明外边，原像素居中，补 5% 透明留白；不重绘、不改色"
+    },
+    {
+      "resource_id": "2003",
+      "name": "中级作战记录",
+      "file": "2003.png",
+      "source_url": "https://web.hycdn.cn/arknights/game/assets/item/2003.png",
+      "original_sha256": "99c571aa72197799eff64f9784b4952168f5cb8155b72614f52afcde81ef4f1c",
+      "sha256": "16fd333a77bfab5b243f627ed0df6e91a9c7360d76ffe3d01d5889f14b6d2adc",
+      "processing": "仅裁去全透明外边，原像素居中，补 5% 透明留白；不重绘、不改色"
+    },
+    {
+      "resource_id": "2004",
+      "name": "高级作战记录",
+      "file": "2004.png",
+      "source_url": "https://web.hycdn.cn/arknights/game/assets/item/2004.png",
+      "original_sha256": "5cb63170ec9ed1f7f8ea2bce11e64ddd87220ba07b25248b2af0ec7e9166422e",
+      "sha256": "667fdb1bd96991413d739a89e24d237aa5a1cb67d4fa91b4e5b684ab4524a2fa",
+      "processing": "仅裁去全透明外边，原像素居中，补 5% 透明留白；不重绘、不改色"
+    },
+    {
+      "resource_id": "3302",
+      "name": "技巧概要·卷2",
+      "file": "3302.png",
+      "source_url": "https://web.hycdn.cn/arknights/game/assets/item/3302.png",
+      "original_sha256": "acc6e1b0193b46a464804f4daf5a628868d739213d1ff7ad5232a5a07f0c0f8c",
+      "sha256": "8f09f4aa58f5cbf774e6c81d7cf2c84c7ead3127ec4ab375bb821276de6a5864",
+      "processing": "仅裁去全透明外边，原像素居中，补 5% 透明留白；不重绘、不改色"
+    },
+    {
+      "resource_id": "3303",
+      "name": "技巧概要·卷3",
+      "file": "3303.png",
+      "source_url": "https://web.hycdn.cn/arknights/game/assets/item/3303.png",
+      "original_sha256": "a425566999d45709003fd478f55b4fc7470d06d4e8041e5a4a940a5940cdd03a",
+      "sha256": "e0346a2ead84df8e11203063fd4778f89e8f3438a560e28b3875fefbb1fb5776",
+      "processing": "仅裁去全透明外边，原像素居中，补 5% 透明留白；不重绘、不改色"
+    },
+    {
+      "resource_id": "30013",
+      "name": "固源岩组",
+      "file": "30013.png",
+      "source_url": "https://web.hycdn.cn/arknights/game/assets/item/30013.png",
+      "original_sha256": "0c12337cc9f8f1205581112c48956f342dae8e367176f7d971b7c551f352c00c",
+      "sha256": "f08047cbcbd84310204e12e5ca29bd90eaf0f475cdbad35bf028962852c50430",
+      "processing": "仅裁去全透明外边，原像素居中，补 5% 透明留白；不重绘、不改色"
+    },
+    {
+      "resource_id": "31063",
+      "name": "转质盐组",
+      "file": "31063.png",
+      "source_url": "https://web.hycdn.cn/arknights/game/assets/item/31063.png",
+      "original_sha256": "24ae6a439b5c9c411aadfe748616f11df7e8e69848357954fd760e2f492bb50f",
+      "sha256": "c51c7dcd4ee9598702cf8aed7b17522ae20e75fcba9c023b2a9faf8083baebf7",
+      "processing": "仅裁去全透明外边，原像素居中，补 5% 透明留白；不重绘、不改色"
+    },
+    {
+      "resource_id": "31073",
+      "name": "褐素纤维",
+      "file": "31073.png",
+      "source_url": "https://web.hycdn.cn/arknights/game/assets/item/31073.png",
+      "original_sha256": "b72f515f4a209c886dd37b0d57776f74bf402733053596d12b41875cec449fdc",
+      "sha256": "29339febbb4193715f68ed5d805ecb75274b1cf838721ca6102a469291cb89a5",
+      "processing": "仅裁去全透明外边，原像素居中，补 5% 透明留白；不重绘、不改色"
+    },
+    {
+      "resource_id": "31083",
+      "name": "环烃聚质",
+      "file": "31083.png",
+      "source_url": "https://web.hycdn.cn/arknights/game/assets/item/31083.png",
+      "original_sha256": "918bd8c4f67398d796fa269781822d95091e20a3106f989361ffffad5abac536",
+      "sha256": "9023cfb1f569d07bb878d41bdd67a4c7cf3f35d8682979b4ef42500dfaa1cbb9",
+      "processing": "仅裁去全透明外边，原像素居中，补 5% 透明留白；不重绘、不改色"
+    },
+    {
+      "resource_id": "3261",
+      "name": "医疗芯片",
+      "file": "3261.png",
+      "source_url": "https://web.hycdn.cn/arknights/game/assets/item/3261.png",
+      "original_sha256": "98eea693fdb7b9bfe35b546cbc9e647093491bde57010fbf66aea6f42f34dbb8",
+      "sha256": "82ac42a1334a99aa90312879014bcc209baeb7329abff04afe33c81004296c27",
+      "processing": "仅裁去全透明外边，原像素居中，补 5% 透明留白；不重绘、不改色"
+    }
+  ]
+}
