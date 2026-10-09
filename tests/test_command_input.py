@@ -9,6 +9,7 @@ from arclet.entari import MessageChain
 from arclet.entari.config import EntariConfig
 from arclet.entari.const import ITEM_MESSAGE_CONTENT, ITEM_MESSAGE_REPLY
 from arclet.entari.message import Reply
+from arclet.letoderea import Subscriber
 from satori import At, Author, ChannelType, Image, MessageObject, Quote, Text, User
 
 from otae_bot.adapters import command_input
@@ -66,6 +67,56 @@ class QuotedCommandInputTests(unittest.TestCase):
         result = strip_reply_mentions(message, quoted(), "bot")
         self.assertIsInstance(result[0], At)
         self.assertEqual(result[0].id, "someone")
+
+
+class CommandSpaceTests(unittest.TestCase):
+    def test_nbsp_and_ideographic_spaces_become_ascii_spaces(self):
+        image = Image(src="https://example.com/current.png")
+        for text in ("/zmd 回响 错视赛季", "/ef　回响　错视赛季", "/zmd 回响 错视赛季"):
+            with self.subTest(text=text):
+                message = MessageChain([Text(text), image])
+                updates = command_input.normalize_command_spaces(message)
+                normalized = updates[ITEM_MESSAGE_CONTENT]
+                self.assertEqual(normalized[0].text, text.replace(" ", " ").replace("　", " "))
+                self.assertIs(normalized[1], image)
+                # The event content and other subscribers keep the original text.
+                self.assertEqual(message[0].text, text)
+
+    def test_only_text_elements_are_rewritten(self):
+        mention, image = At("other"), Image(src="https://example.com/current.png")
+        message = MessageChain([mention, Text("　/q 解释"), image, Text(" 第二段　")])
+        normalized = command_input.normalize_command_spaces(message)[ITEM_MESSAGE_CONTENT]
+        self.assertIs(normalized[0], mention)
+        self.assertIs(normalized[2], image)
+        self.assertEqual([normalized[1].text, normalized[3].text], [" /q 解释", " 第二段 "])
+
+    def test_ascii_messages_are_left_alone(self):
+        for message in (MessageChain("/zmd 回响 错视赛季"), MessageChain([At("other"), Image(src="https://example.com/a.png")]),
+                        MessageChain([Text("/q 解释 说明")])):
+            with self.subTest(message=message):
+                self.assertIsNone(command_input.normalize_command_spaces(message))
+
+    def test_installs_each_normalizer_once_on_a_loaded_command_dispatcher(self):
+        async def other_handler():
+            return None
+
+        dispatcher = Subscriber(command_input._commands.execute)
+        other = Subscriber(other_handler)
+        registered = []
+        with (patch.object(command_input, "global_propagators", registered),
+              patch.object(command_input, "get_all_subscribers", return_value=[dispatcher, other])):
+            command_input.install_command_input_normalizers()
+            command_input.install_command_input_normalizers()
+        kinds = (command_input.QuotedCommandMentions, command_input.CommandSpaces)
+        self.assertEqual(tuple(type(item) for item in registered), kinds)
+        for kind, normalizer in zip(kinds, registered):
+            self.assertIs(dispatcher.get_propagator(kind), normalizer)
+            with self.assertRaises(ValueError):
+                other.get_propagator(kind)
+        steps = [(sub.callable_target, sub.priority) for sub in dispatcher._propagates]
+        self.assertEqual(sorted(steps, key=lambda step: step[1]), [
+            (command_input.normalize_quoted_command, 50), (command_input.normalize_command_spaces, 55),
+        ])
 
 
 class InlineQuoteAuthorTests(unittest.IsolatedAsyncioTestCase):

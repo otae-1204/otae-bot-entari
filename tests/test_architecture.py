@@ -507,6 +507,29 @@ async def check_grok_quoted_dispatch():
         assert send.await_args.kwargs['reply_to'] is False
 
 asyncio.get_event_loop().run_until_complete(check_grok_quoted_dispatch())
+
+async def check_command_space_dispatch():
+    # Alconna only splits on ASCII spaces: NBSP / U+3000 used to leave
+    # "/zmd\\u00a0回响" as one head that no command matched.
+    endfield = sys.modules['plugins.endfield.handlers']
+    recorded = AsyncMock()
+    with patch.object(endfield, '_handle_command', recorded):
+        await publish(quote_event([Text('/zmd 回响 错视赛季')]), scope='.commands')
+        recorded.assert_awaited_once()
+        expected = recorded.await_args.args[2]
+        assert (expected.action, expected.challenge_kind, expected.challenge_terms) == ('challenge', 'war_echo', ('错视赛季',)), expected
+        for elements in ([Text('/zmd\\u00a0回响\\u00a0错视赛季')], [Text('/ef\\u3000回响\\u3000错视赛季')],
+                         [Text('\\u00a0/zmd 回响\\u3000\\u00a0错视赛季')],
+                         [Quote('quoted-id'), At('quoted-user'), Text('\\u00a0/ef\\u00a0回响\\u00a0错视赛季')]):
+            recorded.reset_mock()
+            event = quote_event(elements)
+            await publish(event, scope='.commands')
+            recorded.assert_awaited_once()
+            assert recorded.await_args.args[2] == expected, (elements, recorded.await_args)
+            # Only the command dispatcher sees the rewritten spaces.
+            assert '\\u00a0' in str(event.content) or '\\u3000' in str(event.content)
+
+asyncio.get_event_loop().run_until_complete(check_command_space_dispatch())
 print('CONTRACT ' + json.dumps({'plugins': sorted(expected), 'jobs': jobs}, ensure_ascii=False))
 """
         with tempfile.TemporaryDirectory() as directory:

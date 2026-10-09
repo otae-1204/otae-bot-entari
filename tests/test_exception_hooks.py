@@ -123,7 +123,7 @@ class ExceptionHookTests(unittest.TestCase):
                 mock.patch.object(application, "Entari"),
                 mock.patch.object(application, "build_networks", return_value=[]),
                 mock.patch.object(application, "install_quote_fetch_fallback"),
-                mock.patch.object(application, "install_quoted_command_mentions"),
+                mock.patch.object(application, "install_command_input_normalizers"),
                 mock.patch.object(application, "listen", listen),
                 mock.patch.object(application, "discover_plugins", return_value=[]),
                 mock.patch.object(application, "install_group_feature_gates"),

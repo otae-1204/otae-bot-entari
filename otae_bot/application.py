@@ -5,7 +5,7 @@ from __future__ import annotations
 from arclet.entari import WS, Cleanup, Entari, Startup, listen, load_plugin
 from arclet.entari.event.plugin import PluginLoadedSuccess, PluginUnloaded
 
-from otae_bot.adapters.command_input import install_quoted_command_mentions
+from otae_bot.adapters.command_input import install_command_input_normalizers
 from otae_bot.adapters.exception_hooks import install_exception_hooks, reassert_exception_hooks
 from otae_bot.adapters.feature_gate import install_group_feature_gates, on_plugin_loaded
 from otae_bot.adapters.message_log import install_message_log_redaction
@@ -43,7 +43,7 @@ def create_app() -> Entari:
     install_exception_hooks()
     install_message_log_redaction()
     install_quote_fetch_fallback()
-    install_quoted_command_mentions()
+    install_command_input_normalizers()
     listen(Startup)(reassert_exception_hooks)
     listen(Startup)(start_loop_watchdog)
     listen(Cleanup)(close_loop_watchdog)
