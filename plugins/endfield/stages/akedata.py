@@ -94,6 +94,20 @@ _FORMULA_MODIFIER_TYPES = {
     "BaseFinalAddition": 7,
     "BaseFinalMultiplier": 8,
 }
+# OverrideRawAttributeAction replaces an attribute's raw value before every formula stage.
+_RAW_OVERRIDE_MODIFIER_TYPE = 9
+_RAW_OVERRIDE_ACTION = "OverrideRawAttributeAction"
+# (element, label, raw resistance points on the attribute template, BuffData name, colour).
+_RESISTANCES = (
+    ("Physical", "物理", "physicalResistance", "PhysicalResistance", "888888"),
+    ("Fire", "灼热", "fireResistance", "FireResistance", "FF623D"),
+    ("Pulse", "电磁", "pulseResistance", "PulseResistance", "FFC000"),
+    ("Cryst", "寒冷", "crystResistance", "CrystResistance", "21C6D0"),
+    ("Natural", "自然", "naturalResistance", "NaturalResistance", "9EDC23"),
+)
+# Only raw overrides (buff_common_BalanceResistance) reach the resistance panel; formula
+# modifiers on these names stay ignored, so they are kept out of _ATTRIBUTE_TYPES.
+_RESISTANCE_ATTRIBUTE_TYPES = frozenset(row[3] for row in _RESISTANCES)
 _MODIFIER_STAGES = (
     (5, "add", False),
     (6, "multiply", True),
@@ -765,7 +779,7 @@ def _enemies(
                 hp=hp,
                 attack=attack,
                 defense=defense,
-                resistances=_enemy_resistances(attributes),
+                resistances=_enemy_resistances(attributes, modifiers),
                 poise=_enemy_poise(attributes, modifiers),
             )
         )
@@ -1058,18 +1072,62 @@ def _buff_modifiers(
             continue
         attr_type = _ATTRIBUTE_TYPES.get(str(row.get("attributeType") or ""))
         modifier_type = _FORMULA_MODIFIER_TYPES.get(str(row.get("formulaItem") or ""))
-        param = row.get("param")
-        param = param if isinstance(param, dict) else {}
-        value = param.get("value")
-        if param.get("useBlackboardKey") and param.get("blackboardKey"):
-            value = blackboard.get(str(param.get("blackboardKey")), value)
-        attr_value = _optional_number(value)
+        attr_value = _blackboard_param(row.get("param"), blackboard)
         if attr_type is None or modifier_type is None or attr_value is None:
             continue
         modifiers.append(
             {"attrType": attr_type, "modifierType": modifier_type, "attrValue": attr_value}
         )
+    # Buffs such as buff_common_BalanceResistance carry no attributeModifiers at all and
+    # only overwrite raw attributes from their buffEventAction.
+    for row in _raw_attribute_overrides(buff):
+        name = str(row.get("attributeType") or "")
+        attr_type = _ATTRIBUTE_TYPES.get(name)
+        if attr_type is None and name in _RESISTANCE_ATTRIBUTE_TYPES:
+            attr_type = name
+        override = row.get("overrideValue")
+        attr_value = _blackboard_param(
+            override if isinstance(override, dict) else row.get("param"), blackboard
+        )
+        if attr_type is None or attr_value is None:
+            continue
+        modifiers.append(
+            {
+                "attrType": attr_type,
+                "modifierType": _RAW_OVERRIDE_MODIFIER_TYPE,
+                "attrValue": attr_value,
+            }
+        )
     return tuple(modifiers)
+
+
+def _raw_attribute_overrides(buff: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+    """``attributeOverrides`` of every ``OverrideRawAttributeAction`` a buff runs, in order."""
+    rows: list[dict[str, Any]] = []
+    for event in buff.get("buffEventAction") or ():
+        if not isinstance(event, dict):
+            continue
+        for action in event.get("actions") or ():
+            if not isinstance(action, dict):
+                continue
+            for data in action.get("actionData") or ():
+                if not isinstance(data, dict):
+                    continue
+                if _RAW_OVERRIDE_ACTION not in str(data.get("$type") or ""):
+                    continue
+                rows.extend(
+                    row for row in data.get("attributeOverrides") or () if isinstance(row, dict)
+                )
+    return tuple(rows)
+
+
+def _blackboard_param(param: Any, blackboard: dict[str, int | float]) -> int | float | None:
+    """A buff parameter, read from the blackboard key when set, else its literal value."""
+    param = param if isinstance(param, dict) else {}
+    value = param.get("value")
+    if param.get("useBlackboardKey") and param.get("blackboardKey"):
+        value = blackboard.get(str(param.get("blackboardKey")), value)
+    return _optional_number(value)
 
 
 def _blackboard_values(rows: Any) -> dict[str, int | float]:
@@ -1095,12 +1153,16 @@ def _apply_modifiers(
     modifiers: tuple[dict[str, int | float | str], ...],
     attr_type: int | str,
 ) -> int | float | None:
-    if base_value is None:
-        return None
     relevant = tuple(row for row in modifiers if row.get("attrType") == attr_type)
+    value = None if base_value is None else float(base_value)
+    # Raw overrides replace the template value before any formula stage; the last wins.
+    for row in relevant:
+        if row.get("modifierType") == _RAW_OVERRIDE_MODIFIER_TYPE:
+            value = float(row["attrValue"])
+    if value is None:
+        return None
     if not relevant:
         return base_value
-    value = float(base_value)
     for modifier_type, operation, one_plus in _MODIFIER_STAGES:
         for row in relevant:
             if row.get("modifierType") != modifier_type:
@@ -1116,19 +1178,15 @@ def _apply_modifiers(
 
 def _enemy_resistances(
     attributes: dict[str, Any],
+    modifiers: tuple[dict[str, int | float | str], ...] = (),
 ) -> tuple[StageEnemyResistance, ...] | None:
     if not attributes:
         return None
-    definitions = (
-        ("Physical", "物理", "physicalResistance", "888888"),
-        ("Fire", "灼热", "fireResistance", "FF623D"),
-        ("Pulse", "电磁", "pulseResistance", "FFC000"),
-        ("Cryst", "寒冷", "crystResistance", "21C6D0"),
-        ("Natural", "自然", "naturalResistance", "9EDC23"),
-    )
     rows: list[StageEnemyResistance] = []
-    for element, label, field, color in definitions:
-        resistance = _optional_float(attributes.get(field))
+    for element, label, field, attr_type, color in _RESISTANCES:
+        resistance = _optional_float(
+            _apply_modifiers(_optional_number(attributes.get(field)), modifiers, attr_type)
+        )
         if resistance is None:
             continue
         percent = 100.0 - resistance

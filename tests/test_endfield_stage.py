@@ -30,9 +30,11 @@ from plugins.endfield.stages.akedata import (
     AkeDataStageSource,
     AkeDataVersion,
     _applicable_spawner_configs,
+    _buff_modifiers,
     _enemy_metrics,
     _enemy_modifiers,
     _enemy_poise,
+    _enemy_resistances,
     _enemy_instance_config,
     _enemy_template_id,
     _matching_script_buffs,
@@ -266,6 +268,51 @@ def _akedata_fixture() -> tuple[AkeDataVersion, tuple[dict, ...]]:
         }
     }
     return version, (series, dungeons, texts, rewards, items, enemies, displays, attributes)
+
+
+_BALANCE_RESISTANCE_BUFF_ID = "buff_common_BalanceResistance"
+
+
+def _balance_resistance_buff() -> dict:
+    """Shaped like BuffData/buff_common_BalanceResistance.json: no attributeModifiers, only a
+    DuringBuffEnable OverrideRawAttributeAction setting five raw resistances to ``ratio``."""
+    return {
+        "buffId": _BALANCE_RESISTANCE_BUFF_ID,
+        "blackboard": [{"key": "ratio", "valueFloat": 11.0}],
+        "attributeModifier": {"attributeModifiers": []},
+        "buffEventAction": [
+            {
+                "eventType": "DuringBuffEnable",
+                "actions": [
+                    {
+                        "actionData": [
+                            {
+                                "$type": "Beyond.Gameplay.Actions"
+                                ".OverrideRawAttributeAction, Gameplay.Beyond",
+                                "attributeOverrides": [
+                                    {
+                                        "attributeType": name,
+                                        "overrideValue": {
+                                            "useBlackboardKey": True,
+                                            "blackboardKey": "ratio",
+                                            "value": 0.0,
+                                        },
+                                    }
+                                    for name in (
+                                        "PhysicalResistance",
+                                        "FireResistance",
+                                        "CrystResistance",
+                                        "NaturalResistance",
+                                        "PulseResistance",
+                                    )
+                                ],
+                            }
+                        ]
+                    }
+                ],
+            }
+        ],
+    }
 
 
 def _shared_flavor_fixture() -> dict:
@@ -994,6 +1041,222 @@ class EndfieldAkeDataStageSourceTests(unittest.TestCase):
 
         self.assertEqual(_enemy_metrics(attributes, 90, modifiers), (2950974, 3097, 100))
         self.assertEqual(_enemy_poise(attributes, modifiers).recover_seconds, 4.0)
+
+    @staticmethod
+    def _balance_stage(*, born_buffs=(), spawner_buffs=(), script_buffs=()) -> Stage:
+        """The monument fixture with raw resistances 0/20/40/60/80; only 苦难 has a scene."""
+        version, tables = _akedata_fixture()
+        series, dungeons, texts, rewards, items, enemies, displays, attributes = tables
+        hard = {**dungeons["indie_hard022_s"], "sceneId": "indie_hdg011"}
+        dungeons = {**dungeons, hard["dungeonId"]: hard}
+        enemies = {
+            "eny_monument_fixture": {
+                **enemies["eny_monument_fixture"],
+                "bornBuffs": list(born_buffs),
+            }
+        }
+        attributes = {
+            "eny_monument_fixture": {
+                **attributes["eny_monument_fixture"],
+                "physicalResistance": 0,
+                "fireResistance": 20,
+                "pulseResistance": 40,
+                "crystResistance": 60,
+                "naturalResistance": 80,
+            }
+        }
+        spawners = {
+            "indie_hdg011": (
+                {
+                    "configId": "sc_indie_hdg011_fixture",
+                    "enemyLibrary": [
+                        {
+                            "key": "FIXTURE90",
+                            "enemyId": "eny_monument_fixture",
+                            "enemyLevel": 90,
+                            "bornBuffList": list(spawner_buffs),
+                        }
+                    ],
+                    "waveMap": {
+                        "1": {
+                            "groupMap": {
+                                "1": {
+                                    "actionMap": {
+                                        "1": {
+                                            "$type": "Beyond.Gameplay.SpawnerActions"
+                                            "+SpawnMonsterFromTemplateV2, Gameplay.Beyond",
+                                            "libraryKey": "FIXTURE90",
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                },
+            )
+        }
+        scripts = {
+            "indie_hdg011": (
+                _enemy_instance_config(
+                    {
+                        "scriptId": 47400010001,
+                        "enemies": {
+                            "30001": {
+                                "entityDataIdKey": "eny_monument_fixture",
+                                "level": 90,
+                                "buffs": list(script_buffs),
+                            }
+                        },
+                    }
+                ),
+            )
+        }
+        return parse_akedata_stage(
+            version,
+            "indie_hard022",
+            series,
+            dungeons,
+            texts,
+            rewards,
+            items,
+            enemies,
+            displays,
+            attributes,
+            spawners_by_scene=spawners,
+            scripts_by_scene=scripts,
+            buff_table={_BALANCE_RESISTANCE_BUFF_ID: _balance_resistance_buff()},
+        )
+
+    @staticmethod
+    def _percents(variant: StageVariant) -> list[float]:
+        return [row.percent for row in variant.enemies[0].resistances]
+
+    def test_resistances_without_balance_buff_keep_the_template_points(self):
+        stage = self._balance_stage()
+        for variant in stage.variants:
+            self.assertEqual(self._percents(variant), [100.0, 80.0, 60.0, 40.0, 20.0])
+
+    def test_balance_resistance_born_buff_overrides_every_raw_resistance(self):
+        stage = self._balance_stage(born_buffs=[_BALANCE_RESISTANCE_BUFF_ID])
+        for variant in stage.variants:
+            rows = variant.enemies[0].resistances
+            self.assertEqual(
+                [(row.label, row.percent, row.scalar) for row in rows],
+                [(label, 89.0, 0.89) for label in ("物理", "灼热", "电磁", "寒冷", "自然")],
+            )
+        # Resistance points are overridden; HP/ATK/DEF still come from the template.
+        self.assertEqual(
+            [(v.enemies[0].hp, v.enemies[0].attack) for v in stage.variants],
+            [(358880, 1916), (1329887, 3304)],
+        )
+
+    def test_born_buff_list_blackboard_overrides_the_balance_ratio(self):
+        cases = {
+            "spawner": {"key": "ratio", "valueDouble": 25.0},
+            "script": {"key": "ratio", "valueFloat": 25.0},
+        }
+        for layer, blackboard in cases.items():
+            with self.subTest(layer=layer):
+                buffs = [{"buffId": _BALANCE_RESISTANCE_BUFF_ID, "blackboard": [blackboard]}]
+                normal, hard = self._balance_stage(**{f"{layer}_buffs": buffs}).variants
+                self.assertEqual(self._percents(hard), [75.0] * 5)
+                self.assertEqual(self._percents(normal), [100.0, 80.0, 60.0, 40.0, 20.0])
+                # A later library override wins over the EnemyTable.bornBuffs default.
+                normal, hard = self._balance_stage(
+                    born_buffs=[_BALANCE_RESISTANCE_BUFF_ID], **{f"{layer}_buffs": buffs}
+                ).variants
+                self.assertEqual(self._percents(hard), [75.0] * 5)
+                self.assertEqual(self._percents(normal), [89.0] * 5)
+
+    def test_balance_resistance_applies_without_attribute_modifiers(self):
+        """The AkeData site dropped buffs whose attributeModifiers were empty."""
+        expected = [
+            {"attrType": name, "modifierType": 9, "attrValue": 11}
+            for name in (
+                "PhysicalResistance",
+                "FireResistance",
+                "CrystResistance",
+                "NaturalResistance",
+                "PulseResistance",
+            )
+        ]
+        buff = _balance_resistance_buff()
+        self.assertEqual(buff["attributeModifier"]["attributeModifiers"], [])
+        self.assertEqual(list(_buff_modifiers(buff)), expected)
+        del buff["attributeModifier"]
+        self.assertEqual(list(_buff_modifiers(buff)), expected)
+
+    def test_overridden_resistance_is_listed_even_when_the_template_lacks_it(self):
+        attributes = {"physicalResistance": 0, "fireResistance": 20}
+        self.assertEqual(
+            [row.element for row in _enemy_resistances(attributes)], ["Physical", "Fire"]
+        )
+        modifiers = _buff_modifiers(_balance_resistance_buff())
+        self.assertEqual(
+            [(row.element, row.percent) for row in _enemy_resistances(attributes, modifiers)],
+            [(element, 89.0) for element in ("Physical", "Fire", "Pulse", "Cryst", "Natural")],
+        )
+
+    def test_raw_overrides_precede_formula_stages_and_the_last_one_wins(self):
+        enemy = {
+            "attrModifiers": [{"attrType": 1, "modifierType": 9, "attrValue": 1000}],
+            "bornBuffs": ["buff_override_hp_fixture"],
+        }
+        buff_table = {
+            "buff_override_hp_fixture": {
+                "attributeModifier": {
+                    "attributeModifiers": [
+                        {
+                            "attributeType": "MaxHp",
+                            "formulaItem": "Multiplier",
+                            "param": {"useBlackboardKey": False, "value": 0.5},
+                        }
+                    ]
+                },
+                "buffEventAction": [
+                    {
+                        "actions": [
+                            {
+                                "actionData": [
+                                    {
+                                        "$type": "Beyond.Gameplay.Actions"
+                                        ".OverrideRawAttributeAction, Gameplay.Beyond",
+                                        "attributeOverrides": [
+                                            {
+                                                "attributeType": "MaxHp",
+                                                "overrideValue": {
+                                                    "useBlackboardKey": True,
+                                                    "blackboardKey": "hp",
+                                                    "value": 2000,
+                                                },
+                                            }
+                                        ],
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ],
+            }
+        }
+        attributes = {
+            "levelDependentAttributes": [
+                {
+                    "attrs": [
+                        {"attrType": 0, "attrValue": 90},
+                        {"attrType": 1, "attrValue": 504440},
+                        {"attrType": 2, "attrValue": 3097},
+                        {"attrType": 3, "attrValue": 100},
+                    ]
+                }
+            ]
+        }
+
+        modifiers = _enemy_modifiers(enemy, (), buff_table)
+
+        # The buff has no "hp" blackboard entry, so its override falls back to 2000 and
+        # replaces the inline 1000; only then does the +50% multiplier apply.
+        self.assertEqual(_enemy_metrics(attributes, 90, modifiers), (3000, 3097, 100))
 
 
 class EndfieldAkeDataSpawnerSemanticsTests(unittest.TestCase):
