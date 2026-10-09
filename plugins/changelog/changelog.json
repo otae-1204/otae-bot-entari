@@ -1,15 +1,36 @@
 {
   "schema": 2,
-  "head": "18dd9486fe51b054c99aaaf8b8f3989f3aabc025",
+  "head": "f9f2f5dbc6bd1fe1bbcc45c80d81440386fdf9fa",
   "generated_from": {
     "first_commit": "8e1b455",
     "first_date": "2026-06-17",
     "last_date": "2026-10-09",
-    "commit_count": 311,
-    "merge_commit_count": 29,
-    "version_count": 32
+    "commit_count": 312,
+    "merge_commit_count": 30,
+    "version_count": 33
   },
   "releases": [
+    {
+      "version": "v1.26.1",
+      "date": "2026-10-09",
+      "from": "2026-10-09",
+      "to": "2026-10-09",
+      "title": "战争回响只写赛季或轮换时打开赛季卡",
+      "summary": "/ef 回响 错视轮换、/ef 回响 错视赛季 这类只点到赛季或轮换的查询，改为打开该赛季的总览，不再误进当前轮换第一关的关卡卡。",
+      "tags": [
+        "终末地"
+      ],
+      "highlights": [
+        {
+          "date": "2026-10-09",
+          "kind": "fix",
+          "text": "/ef 回响（/zmd 回响 同）只写赛季或轮换、没写关卡时，不再被补成当前轮换的第一关（例如「错视轮换」打开了「死兽鸣吼」）：当期赛季与正在进行的轮换显示总览（星数、轮换进度与个人成绩），往期赛季或已结束的轮换翻到该赛季的历史页。「错视赛季」「错视轮换」「错视」都认作同一赛季，轮换编号写 Ⅲ、III 或 3 都可以；带上关卡名仍然打开关卡详情，和赛季名撞了几个字的关卡名也不会再被当成赛季。",
+          "commits": [
+            "f9f2f5d"
+          ]
+        }
+      ]
+    },
     {
       "version": "v1.26.0",
       "date": "2026-10-09",
