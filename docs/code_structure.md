@@ -31,6 +31,7 @@ plugins/
     account/                   账号 API、加密、持久化、账号卡片
       detail/                  档案详情
       base/                    帝江号、基建
+      exploration/             地区探索统计、森空岛图标和分页图片
       investment/              当前档案可见养成投入
       currency/                资源流水
       challenge/               挑战记录模型、解析、绘图、翻译

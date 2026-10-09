@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from ..regions import region_theme_color
 from .models import (
     AccountBaseView,
     MoodOperatorView,
@@ -19,14 +20,6 @@ from ...rendering.cards import (
 
 
 ACCOUNT_BASE_CARD_WIDTH = 1550
-_REGION_THEME_COLORS = {
-    "domain_1": "#c1ff55",
-    "domain_2": "#6bffff",
-}
-_REGION_NAME_THEME_COLORS = {
-    "四号谷地": "#c1ff55",
-    "武陵": "#6bffff",
-}
 _OVERFLOW_SELECTORS = (
     ".base-header",
     ".base-section",
@@ -120,10 +113,7 @@ def _render_account_base_html(view: AccountBaseView, assets: dict[str, str]) -> 
 
 def _region_html(region: SettlementRegionView, assets: dict[str, str]) -> str:
     cards = "".join(_settlement_html(item, assets) for item in region.settlements)
-    theme_color = _REGION_THEME_COLORS.get(
-        region.region_id,
-        _REGION_NAME_THEME_COLORS.get(region.name, "#ffd000"),
-    )
+    theme_color = region_theme_color(region.region_id, region.name)
     return f"""<div class="region-block" style="--region-color:{esc_attr(theme_color)}">
       <div class="region-title"><span></span><h3>{esc(region.name)}</h3></div>
       <div class="settlement-grid">{cards}</div>

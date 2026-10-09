@@ -38,6 +38,7 @@ PRIMARY_ALIASES = {"主账号", "主账户", "primary"}
 UNBIND_ALIASES = {"解绑", "unbind"}
 ATTENDANCE_ALIASES = {"签到", "checkin", "attendance"}
 DASHBOARD_ALIASES = {"日常", "每日", "仪表盘", "实时数据", "dashboard", "daily"}
+EXPLORATION_ALIASES = {"探索", "地区探索", "探索统计", "exploration", "explore"}
 GACHA_ALIASES = {"抽卡", "gacha"}
 GACHA_HISTORY_ALIASES = {"抽卡记录", "历史抽卡", "gacha-history", "history"}
 GACHA_SYNC_ALIASES = {"抽卡同步", "同步抽卡", "gacha-sync", "sync"}
@@ -404,6 +405,8 @@ def _parse_personal_command(parts: list[str]) -> ParsedEndfieldCommand | None:
     if head in BIND_ALIASES:
         return ParsedEndfieldCommand("bind")
     if head in ACCOUNT_ALIASES:
+        if len(parts) > 1 and parts[1].lower() in EXPLORATION_ALIASES:
+            return ParsedEndfieldCommand("exploration", account_selector=" ".join(parts[2:]).strip())
         if len(parts) > 1 and parts[1].lower() in ACCOUNT_BASE_ALIASES:
             return ParsedEndfieldCommand(
                 "account_base",
@@ -424,6 +427,8 @@ def _parse_personal_command(parts: list[str]) -> ParsedEndfieldCommand | None:
         return ParsedEndfieldCommand("attendance", account_selector=" ".join(parts[1:]).strip() or "全部")
     if head in DASHBOARD_ALIASES:
         return ParsedEndfieldCommand("daily", account_selector=" ".join(parts[1:]).strip() or "全部")
+    if head in EXPLORATION_ALIASES:
+        return ParsedEndfieldCommand("exploration", account_selector=" ".join(parts[1:]).strip())
     if head in GACHA_SYNC_ALIASES:
         remaining, full, error = _parse_full_option(parts[1:])
         return ParsedEndfieldCommand(
@@ -978,6 +983,7 @@ def format_help() -> str:
             "  /ef 主账号 <编号> | /ef 解绑 <编号> —— 设定默认主账号或解除绑定（限私聊）",
             "  /ef 签到 [全部|编号|昵称|UID后四位] —— 执行森空岛每日签到并获取奖励；若还绑定了明日方舟，会顺带签到其全部角色并合成一张图",
             "  /ef 日常 [全部|编号|昵称|UID后四位] —— 展示理智回复、日常活跃、每周事务及通行证进度看板",
+            "  /zmd 探索 [编号|昵称|UID后四位] —— 全部地区六类收集进度，默认主账号；/ef 探索 同效",
             "  /ef 抽卡 [账号] | /ef 抽卡同步 [账号] [--full] —— 统计抽卡记录与欧气分析（超 3 张图合并转发）",
             "  /ef 抽卡导入 [账号] —— 通过手机验证码导入小黑盒历史抽卡统计（限私聊）",
             "  /ef 抽卡记录 [账号] [页码] [--池 <名称>] —— 分页检视抽卡历史明细",

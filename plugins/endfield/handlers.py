@@ -144,6 +144,9 @@ from .account.detail.service import build_account_detail_view, build_daily_accou
 from .account.detail.names import fetch_account_detail_name_map
 from .account.base.draw import draw_account_base_card
 from .account.base.service import build_account_base_view
+from .account.exploration.draw import draw_exploration_cards
+from .account.exploration.service import build_exploration_view
+from .account.exploration.version import fetch_exploration_version
 from .account.investment.draw import draw_account_investment_cards
 from .account.investment.service import (
     InvestmentDataUnavailable,
@@ -258,7 +261,7 @@ FORWARD_MAX_NODES = 50                  # 单条合并转发的节点上限，�
 _GACHA_FORWARD_SENDER_NAME = "终末地抽卡分析"
 CARD_CACHE_TTL_SECONDS = 600.0
 CARD_CACHE_MAX_BYTES = 48 * 1024 * 1024
-CARD_RENDER_VERSION = "endfield-card-v50"
+CARD_RENDER_VERSION = "endfield-card-v55"
 CardCacheKey = tuple[str, str, str, str, str, str, str]
 _CARD_CACHE: AsyncTTLCache[CardCacheKey, tuple[bytes, ...]] = AsyncTTLCache(
     ttl_seconds=CARD_CACHE_TTL_SECONDS,
@@ -492,7 +495,7 @@ async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand,
         return await _handle_archive(matcher, command)
     if command.action in {"ownership_stats", "ownership_refresh"}:
         return await _handle_ownership_stats(matcher, event, command, bot=bot)
-    if command.action in {"bind", "accounts", "account_base", "account_investment", "currency_log", "primary", "unbind", "attendance", "daily", "gacha", "gacha_history", "gacha_sync", "gacha_import", "medal_missing", "archive_progress", "challenge"}:
+    if command.action in {"bind", "accounts", "account_base", "account_investment", "currency_log", "primary", "unbind", "attendance", "daily", "exploration", "gacha", "gacha_history", "gacha_sync", "gacha_import", "medal_missing", "archive_progress", "challenge"}:
         return await _handle_personal_command(matcher, event, command, bot=bot)
     if command.action == "loadout":
         return await _handle_loadout(matcher, command)
@@ -953,6 +956,9 @@ async def _handle_personal_command(matcher, event: Event, command: ParsedEndfiel
         if command.action == "daily":
             cipher = CredentialCipher.from_env()
             return await _handle_daily(matcher, qq_user_id, command, cipher, group=is_group(event))
+        if command.action == "exploration":
+            cipher = CredentialCipher.from_env()
+            return await _handle_exploration(matcher, qq_user_id, command, cipher, group=is_group(event))
         if command.action == "medal_missing":
             cipher = CredentialCipher.from_env()
             return await _handle_medal_missing(matcher, qq_user_id, command, cipher, group=is_group(event))
@@ -2045,6 +2051,34 @@ async def _render_account_base(
             return (await draw_account_base_card(view),)
 
         return await _finish_pngs(matcher, await _render_account_pages("base", role, group, view, render))
+
+
+async def _handle_exploration(
+    matcher, qq_user_id: str, command: ParsedEndfieldCommand, cipher: CredentialCipher, *, group: bool
+) -> None:
+    # Resolve only the caller's roles. An empty selector uses their primary account.
+    role = account_store.resolve_role(qq_user_id, command.account_selector)
+    if role is None:
+        if command.account_selector:
+            return await matcher.finish("未找到对应账号，请发送 /ef 账号 查看编号，再使用 /zmd 探索 <编号>。")
+        return await matcher.finish("尚未绑定终末地账号，请先私聊发送 /ef 绑定。")
+    with cold_start_command(matcher):
+        token = account_store.decrypt_token(role, cipher)
+        detail = await _card_detail_with_snapshot(token, role)
+        view = build_exploration_view(
+            detail,
+            uid=role.masked_uid if group else role.role_id,
+            nickname=role.nickname,
+            server_name=role.server_name or role.server_id,
+            version=await fetch_exploration_version(),
+        )
+
+        async def render():
+            return await draw_exploration_cards(view)
+
+        return await _finish_pngs(
+            matcher, await _render_account_pages("exploration", role, group, view, render)
+        )
 
 
 class _IncompletePages(Exception):
