@@ -1233,7 +1233,8 @@ async def _render_challenge_cards(
     payload = parse_war_echoes(raw, locale)
     if command.challenge_view == "detail":
         # 只点到赛季/轮换（「错视赛季」「错视轮换」）就看赛季卡，不进关卡卡：
-        # 当期正在显示的轮换落回总览，其它赛季或轮换翻到它的历史页。
+        # 赛季名要整个赛季，翻到列出全部轮换的历史页（当期赛季也一样）；
+        # 当期正在显示的轮换落回总览，其它轮换翻到所在赛季的历史页。
         season_page = resolve_war_season_page(payload, command.challenge_terms)
         if season_page == 0:
             command = replace(command, challenge_view="overview")

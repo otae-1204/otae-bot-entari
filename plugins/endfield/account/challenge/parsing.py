@@ -203,7 +203,7 @@ def resolve_war_detail(
     season, week, rest = _war_scope(payload, terms)
     if season is not None:
         if week is None:
-            week = season.current_week() or (season.weeks[-1] if season.weeks else None)
+            week = _war_shown_week(season)
         if week is None:
             raise ChallengeResolutionError(f"赛季“{season.name}”下暂无轮换记录。")
         if not rest:
@@ -250,17 +250,16 @@ def resolve_war_season_page(payload: WarEchoPayload, terms: Sequence[str]) -> in
     """Route terms that stop at a season or rotation to that season's card.
 
     ``None`` means a stage was named and the caller should resolve the detail.
-    ``0`` is the running overview (what ``/ef 回响`` shows); any other value is
-    the 1-based ``/ef 回响 历史`` page holding that season, whose card lists
-    every rotation.
+    ``0`` is the running overview (what ``/ef 回响`` shows), only for the
+    rotation it shows; any other value is the 1-based ``/ef 回响 历史`` page
+    holding that season, whose card lists every rotation.  A bare season name
+    asks for the whole season, so it gets that page even while it is running.
     """
     season, week, rest = _war_scope(payload, terms)
     if season is None or rest:
         return None
-    if season is payload.current():
-        shown = season.current_week() or (season.weeks[-1] if season.weeks else None)
-        if week is None or week is shown:
-            return 0
+    if week is not None and season is payload.current() and week is _war_shown_week(season):
+        return 0
     return next(index for index, item in enumerate(payload.seasons, 1) if item is season)
 
 
@@ -452,7 +451,7 @@ def _war_period_rank(item):
 
 
 # 赛季与轮换共用一个词干：「错视赛季」「错视轮换Ⅲ」都是「错视」。不带编号的
-# 「错视轮换」因此是赛季的别称而不是关卡名；轮换编号的 Ⅲ / III / 3 视为同一个。
+# 「错视轮换」因此是赛季眼下那一轮的别称而不是关卡名；轮换编号的 Ⅲ / III / 3 视为同一个。
 _WAR_ROTATION_NUMBER = re.compile(r"[ⅰ-ⅻ]|[ivx]+|\d+")
 _WAR_SCOPE_NAME = re.compile(rf"(?P<stem>.*?)(?:赛季|轮换(?P<number>{_WAR_ROTATION_NUMBER.pattern})?)")
 _UNICODE_ROMAN = "ⅰⅱⅲⅳⅴⅵⅶⅷⅸⅹⅺⅻ"
@@ -469,11 +468,15 @@ def _war_scope(payload, terms):
     season, week = _war_scope_head(payload, rest[0], stages)
     if season is None:
         return None, None, rest
-    rest.pop(0)
+    rotation = _war_rotation_alias(rest.pop(0))
     if week is None and rest:
         week = _war_scope_week(season, rest[0], stages)
         if week is not None or _war_season_alias(season, rest[0]):
+            rotation = rotation or _war_rotation_alias(rest[0])
             rest.pop(0)
+    if week is None and rotation:
+        # 「错视轮换」点的是轮换，不是整个赛季：落到赛季眼下显示的那一轮。
+        week = _war_shown_week(season)
     return season, week, rest
 
 
@@ -534,6 +537,15 @@ def _war_season_alias(season, query):
     """「错视赛季 错视轮换」里的第二项：没有编号、词干还是这个赛季。"""
     stem, number = _war_scope_key(query)
     return not number and (not stem or stem in _war_season_stems(season))
+
+
+def _war_rotation_alias(query):
+    """「错视轮换」「轮换」：不带编号的轮换，区别于只点到赛季的「错视赛季」「错视」。"""
+    return _normalize(query).endswith("轮换")
+
+
+def _war_shown_week(season):
+    return season.current_week() or (season.weeks[-1] if season.weeks else None)
 
 
 def _war_stage_names(payload):

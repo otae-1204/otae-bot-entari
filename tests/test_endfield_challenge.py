@@ -544,12 +544,13 @@ class EndfieldChallengeTests(unittest.TestCase):
         self.assertEqual((unknown.challenge_terms, unknown.challenge_difficulty), (("野性旧事·未知",), ""))
         self.assertTrue(commands.parse_command("回响 野性旧事·普通 残酷").error)
 
-    def test_war_season_and_rotation_aliases_open_the_running_overview(self):
-        # 「错视轮换」「错视赛季」只点到赛季，过去会被补成当前轮换的第一关「死兽鸣吼」。
+    def test_war_running_rotation_aliases_open_the_running_overview(self):
+        # 「错视轮换」过去会被补成当前轮换的第一关「死兽鸣吼」。
         payload = parse_war_echoes(_war_illusion_fixture())
         for text in (
-            "回响 错视轮换", "回响 错视赛季", "回响 错视", "回响 错视轮换Ⅲ", "回响 错视轮换III",
-            "回响 错视轮换 3", "回响 错视赛季 错视轮换", "回响 错视赛季 错视轮换Ⅲ", "回响 错视赛季 残酷",
+            "回响 错视轮换", "回响 错视轮换Ⅲ", "回响 错视轮换III", "回响 错视轮换3", "回响 错视轮换 3",
+            "回响 错视轮换 残酷", "回响 错视赛季 错视轮换", "回响 错视赛季 错视轮换Ⅲ", "回响 错视赛季 轮换",
+            "回响 错视 3",
         ):
             with self.subTest(text=text):
                 command = commands.parse_command(text)
@@ -558,14 +559,35 @@ class EndfieldChallengeTests(unittest.TestCase):
                 with self.assertRaises(ChallengeResolutionError):
                     resolve_war_detail(payload, command.challenge_terms, command.challenge_difficulty or "cruel")
 
-    def test_war_past_season_or_rotation_alias_opens_its_history_page(self):
+    def test_war_season_names_open_every_rotation_of_that_season(self):
+        # 只点到赛季（含当期的错视赛季）要看整个赛季，不是总览上的当前轮换。
         payload = parse_war_echoes(_war_illusion_fixture())
         pages = payload.history_pages()
         for text, season_name in (
+            ("回响 错视赛季", "错视赛季"),
+            ("回响 错视", "错视赛季"),
+            ("回响 错视赛季 残酷", "错视赛季"),
             ("回响 谵妄赛季", "谵妄赛季"),
+            ("回响 谵妄", "谵妄赛季"),
+        ):
+            with self.subTest(text=text):
+                command = commands.parse_command(text)
+                page = resolve_war_season_page(payload, command.challenge_terms)
+                self.assertTrue(page)
+                self.assertEqual(pages[page - 1][0].name, season_name)
+                self.assertEqual(payload.seasons[page - 1].name, season_name)
+                with self.assertRaises(ChallengeResolutionError):
+                    resolve_war_detail(payload, command.challenge_terms, command.challenge_difficulty or "cruel")
+
+    def test_war_past_rotation_alias_opens_its_season_history_page(self):
+        payload = parse_war_echoes(_war_illusion_fixture())
+        pages = payload.history_pages()
+        for text, season_name in (
             ("回响 谵妄轮换", "谵妄赛季"),
+            ("回响 谵妄轮换Ⅰ", "谵妄赛季"),
             # 当期赛季里已经结束的轮换不在总览上，翻到列出全部轮换的赛季历史页。
             ("回响 错视轮换Ⅰ", "错视赛季"),
+            ("回响 错视轮换 1", "错视赛季"),
             ("回响 错视赛季 轮换2", "错视赛季"),
         ):
             with self.subTest(text=text):
@@ -607,12 +629,23 @@ class EndfieldChallengeTests(unittest.TestCase):
                 )
             return {name: mock.await_args for name, mock in drawn.items() if mock.await_count}
 
-        for text in ("回响", "回响 错视轮换", "回响 错视赛季"):
+        for text in ("回响", "回响 错视轮换", "回响 错视轮换Ⅲ"):
             with self.subTest(text=text):
                 self.assertEqual(list(asyncio.run(render(text))), ["draw_war_overview"])
-        history = asyncio.run(render("回响 谵妄赛季"))
-        self.assertEqual(list(history), ["draw_war_history"])
-        self.assertEqual((history["draw_war_history"].args[1].name, history["draw_war_history"].kwargs["page"]), ("谵妄赛季", 1))
+        for text, expected in (
+            # 当期赛季名也出整季历史卡，标题和正文都是错视赛季的全部轮换。
+            ("回响 错视赛季", ("错视赛季", 2)),
+            ("回响 错视", ("错视赛季", 2)),
+            ("回响 谵妄赛季", ("谵妄赛季", 1)),
+            ("回响 错视轮换Ⅰ", ("错视赛季", 2)),
+        ):
+            with self.subTest(text=text):
+                history = asyncio.run(render(text))
+                self.assertEqual(list(history), ["draw_war_history"])
+                drawn = history["draw_war_history"]
+                self.assertEqual((drawn.args[1].name, drawn.kwargs["page"], drawn.kwargs["page_count"]), (*expected, 2))
+                if expected[0] == "错视赛季":
+                    self.assertEqual([week.name for week in drawn.args[1].weeks], ["错视轮换Ⅰ", "错视轮换Ⅱ", "错视轮换Ⅲ"])
         detail = asyncio.run(render("回响 死兽鸣吼"))
         self.assertEqual(list(detail), ["draw_war_detail"])
         self.assertEqual(detail["draw_war_detail"].args[3].name, "死兽鸣吼")
