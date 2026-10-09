@@ -167,6 +167,7 @@ from .account.challenge.draw import (
     parse_war_echoes,
     resolve_monument_detail,
     resolve_war_detail,
+    resolve_war_season_page,
 )
 from .account.challenge.i18n import ChallengeLocale, get_challenge_locale, start_challenge_locale_warmup
 from .account.challenge.parsing import (
@@ -1224,6 +1225,14 @@ async def _render_challenge_cards(
 
     raw, locale = await asyncio.gather(load_data("war_echo"), load_locale())
     payload = parse_war_echoes(raw, locale)
+    if command.challenge_view == "detail":
+        # 只点到赛季/轮换（「错视赛季」「错视轮换」）就看赛季卡，不进关卡卡：
+        # 当期正在显示的轮换落回总览，其它赛季或轮换翻到它的历史页。
+        season_page = resolve_war_season_page(payload, command.challenge_terms)
+        if season_page == 0:
+            command = replace(command, challenge_view="overview")
+        elif season_page is not None:
+            command = replace(command, challenge_view="history", page=season_page, all_history=False)
     if command.challenge_view == "overview":
         pngs = await cached_pages(
             "war_echo", "overview", "", "", 0,

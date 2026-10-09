@@ -89,6 +89,7 @@ from .parsing import (
     parse_war_echoes as parse_war_echoes,
     resolve_monument_detail as resolve_monument_detail,
     resolve_war_detail as resolve_war_detail,
+    resolve_war_season_page as resolve_war_season_page,
 )
 
 CHALLENGE_CARD_WIDTH = 1920

@@ -32,6 +32,7 @@ from plugins.endfield.account.challenge.draw import (
     parse_war_echoes,
     resolve_monument_detail,
     resolve_war_detail,
+    resolve_war_season_page,
 )
 from plugins.endfield.account.client import EndfieldOfficialClient
 from plugins.endfield.account.challenge.i18n import build_challenge_locale
@@ -112,6 +113,36 @@ def _war_repeat_fixture() -> dict:
             },
         ],
         "achieves": [],
+    }
+
+
+def _war_illusion_fixture() -> dict:
+    """线上「错视赛季」的形状：赛季和轮换共用词干，轮换编号用罗马数字，当前在第三轮换。"""
+
+    def group(name: str) -> dict:
+        dungeon = {"id": name, "name": name, "isPass": True}
+        return {"name": name, "star": 3, "plusTask": False, "normalDungeon": dungeon, "hardDungeon": dungeon, "cruelDungeon": dungeon}
+
+    def week(name: str, start: str, end: str, groups: list[dict]) -> dict:
+        return {"id": name, "name": name, "startTs": start, "endTs": end, "groups": [], "dungeonGroups": groups}
+
+    return {
+        "seasons": [
+            {
+                "id": "s-past", "name": "谵妄赛季", "startTs": "1500000000", "endTs": "1600000000", "stars": 9, "allPlusTasks": True,
+                "weeks": [week("谵妄轮换Ⅰ", "1500000000", "1600000000", [group("裂地旧创")])],
+            },
+            {
+                "id": "s-current", "name": "错视赛季", "startTs": "1700000000", "endTs": "1900000000", "stars": 6, "allPlusTasks": False,
+                "weeks": [
+                    week("错视轮换Ⅰ", "1700000000", "1720000000", [group("野性旧事")]),
+                    week("错视轮换Ⅱ", "1720000000", "1740000000", [group("裂地旧创")]),
+                    # 「错视回廊」和赛季名撞了两个字，模糊匹配会把它当成「错视赛季」。
+                    week("错视轮换Ⅲ", "1740000000", "1900000000", [group("死兽鸣吼"), group("错视回廊")]),
+                ],
+            },
+        ],
+        "achieves": [{"name": "死兽鸣吼", "star": 3, "firstPassTs": "1750000000"}],
     }
 
 
@@ -512,6 +543,79 @@ class EndfieldChallengeTests(unittest.TestCase):
         unknown = commands.parse_command("回响 野性旧事·未知")
         self.assertEqual((unknown.challenge_terms, unknown.challenge_difficulty), (("野性旧事·未知",), ""))
         self.assertTrue(commands.parse_command("回响 野性旧事·普通 残酷").error)
+
+    def test_war_season_and_rotation_aliases_open_the_running_overview(self):
+        # 「错视轮换」「错视赛季」只点到赛季，过去会被补成当前轮换的第一关「死兽鸣吼」。
+        payload = parse_war_echoes(_war_illusion_fixture())
+        for text in (
+            "回响 错视轮换", "回响 错视赛季", "回响 错视", "回响 错视轮换Ⅲ", "回响 错视轮换III",
+            "回响 错视轮换 3", "回响 错视赛季 错视轮换", "回响 错视赛季 错视轮换Ⅲ", "回响 错视赛季 残酷",
+        ):
+            with self.subTest(text=text):
+                command = commands.parse_command(text)
+                self.assertEqual(command.challenge_view, "detail")
+                self.assertEqual(resolve_war_season_page(payload, command.challenge_terms), 0)
+                with self.assertRaises(ChallengeResolutionError):
+                    resolve_war_detail(payload, command.challenge_terms, command.challenge_difficulty or "cruel")
+
+    def test_war_past_season_or_rotation_alias_opens_its_history_page(self):
+        payload = parse_war_echoes(_war_illusion_fixture())
+        pages = payload.history_pages()
+        for text, season_name in (
+            ("回响 谵妄赛季", "谵妄赛季"),
+            ("回响 谵妄轮换", "谵妄赛季"),
+            # 当期赛季里已经结束的轮换不在总览上，翻到列出全部轮换的赛季历史页。
+            ("回响 错视轮换Ⅰ", "错视赛季"),
+            ("回响 错视赛季 轮换2", "错视赛季"),
+        ):
+            with self.subTest(text=text):
+                page = resolve_war_season_page(payload, commands.parse_command(text).challenge_terms)
+                self.assertTrue(page)
+                self.assertEqual(pages[page - 1][0].name, season_name)
+
+    def test_war_stage_names_still_open_the_stage_detail(self):
+        payload = parse_war_echoes(_war_illusion_fixture())
+        for text, expected in (
+            ("回响 死兽鸣吼", ("错视赛季", "错视轮换Ⅲ", "死兽鸣吼")),
+            ("回响 错视赛季 死兽鸣吼", ("错视赛季", "错视轮换Ⅲ", "死兽鸣吼")),
+            ("回响 错视轮换 死兽鸣吼 残酷", ("错视赛季", "错视轮换Ⅲ", "死兽鸣吼")),
+            ("回响 错视轮换Ⅰ 野性旧事", ("错视赛季", "错视轮换Ⅰ", "野性旧事")),
+            ("回响 错视回廊", ("错视赛季", "错视轮换Ⅲ", "错视回廊")),
+            ("回响 错视赛季 错视回廊", ("错视赛季", "错视轮换Ⅲ", "错视回廊")),
+        ):
+            with self.subTest(text=text):
+                command = commands.parse_command(text)
+                self.assertIsNone(resolve_war_season_page(payload, command.challenge_terms))
+                season, week, group, _ = resolve_war_detail(payload, command.challenge_terms, command.challenge_difficulty or "cruel")
+                self.assertEqual((season.name, week.name, group.name), expected)
+
+    def test_war_echo_command_routes_season_aliases_to_the_season_card(self):
+        import plugins.endfield.handlers as handlers
+
+        async def render(text: str) -> dict:
+            drawn = {name: AsyncMock(return_value=b"png") for name in ("draw_war_overview", "draw_war_history", "draw_war_detail")}
+            with (
+                patch.object(handlers.official_client, "war_echoes", AsyncMock(return_value=_war_illusion_fixture())),
+                patch.object(handlers, "get_challenge_locale", AsyncMock(return_value=None)),
+                patch.object(handlers, "_finish_pngs", AsyncMock()),
+                patch.multiple(handlers, **drawn),
+            ):
+                await handlers._render_challenge_cards(
+                    SimpleNamespace(), SimpleNamespace(), commands.parse_command(text), None,
+                    SimpleNamespace(role_id=f"echo-season-route {text}", server_id="1"), "test-only",
+                    ChallengeIdentity("测试", "官服", "1"), False, "b",
+                )
+            return {name: mock.await_args for name, mock in drawn.items() if mock.await_count}
+
+        for text in ("回响", "回响 错视轮换", "回响 错视赛季"):
+            with self.subTest(text=text):
+                self.assertEqual(list(asyncio.run(render(text))), ["draw_war_overview"])
+        history = asyncio.run(render("回响 谵妄赛季"))
+        self.assertEqual(list(history), ["draw_war_history"])
+        self.assertEqual((history["draw_war_history"].args[1].name, history["draw_war_history"].kwargs["page"]), ("谵妄赛季", 1))
+        detail = asyncio.run(render("回响 死兽鸣吼"))
+        self.assertEqual(list(detail), ["draw_war_detail"])
+        self.assertEqual(detail["draw_war_detail"].args[3].name, "死兽鸣吼")
 
     def test_ambiguous_reply_suggests_a_command_that_resolves(self):
         import plugins.endfield.handlers as endfield_plugin

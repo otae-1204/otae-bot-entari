@@ -200,55 +200,35 @@ def resolve_war_detail(
     if not terms:
         raise ChallengeResolutionError("请提供战争回响赛季、轮换或关卡名称。")
     normalized_difficulty = difficulty if difficulty in {"normal", "hard", "cruel"} else "cruel"
-    season: WarSeason | None = _pick_or_none(
-        str(terms[0]),
-        payload.seasons,
-        lambda item: item.name,
-        rank=lambda item: (item.current(), item.end_ts),
-        path=lambda item: (item.name,),
-    )
+    season, week, rest = _war_scope(payload, terms)
     if season is not None:
-        rest = list(terms[1:])
-        week: WarWeek | None = None
-        if rest:
-            week = _pick_or_none(
-                str(rest[0]),
-                season.weeks,
-                lambda item: item.name,
-                rank=lambda item: (item.current(), item.end_ts),
-                path=lambda item: (season.name, item.name),
-            )
-            if week is not None:
-                rest.pop(0)
         if week is None:
             week = season.current_week() or (season.weeks[-1] if season.weeks else None)
         if week is None:
             raise ChallengeResolutionError(f"赛季“{season.name}”下暂无轮换记录。")
-        if rest:
-            group = _pick_or_none(" ".join(rest), week.groups, lambda item: item.name)
-            if group is not None:
-                dungeon = group.dungeon(normalized_difficulty)
-                if dungeon is not None:
-                    return season, week, group, dungeon
-            dungeon_candidates = [
-                (week_item, group_item, group_item.dungeon(normalized_difficulty))
-                for week_item in season.weeks
-                for group_item in week_item.groups
-                if group_item.dungeon(normalized_difficulty) is not None
-            ]
-            selected_week, group, dungeon = _pick(
-                " ".join(rest),
-                dungeon_candidates,
-                lambda item: item[2].name,
-                rank=lambda item: (item[0].current(), item[0].end_ts),
-                path=lambda item: (season.name, item[0].name),
-            )
-            return season, selected_week, group, dungeon
-        group = week.groups[0] if week.groups else None
-        dungeon = group.dungeon(normalized_difficulty) if group else None
-        if group is None or dungeon is None:
-            raise ChallengeResolutionError(f"轮换“{week.name}”暂无{_difficulty_label(normalized_difficulty)}数据。")
-        return season, week, group, dungeon
+        if not rest:
+            # 只点到赛季/轮换时该看赛季卡（resolve_war_season_page），
+            # 不能替玩家挑轮换里的第一关。
+            raise ChallengeResolutionError(f"请在“{week.name}”后补充关卡名称。")
+        group = _pick_or_none(" ".join(rest), week.groups, lambda item: item.name)
+        if group is not None:
+            dungeon = group.dungeon(normalized_difficulty)
+            if dungeon is not None:
+                return season, week, group, dungeon
+        dungeon_candidates = [
+            (week_item, group_item, group_item.dungeon(normalized_difficulty))
+            for week_item in season.weeks
+            for group_item in week_item.groups
+            if group_item.dungeon(normalized_difficulty) is not None
+        ]
+        selected_week, group, dungeon = _pick(
+            " ".join(rest),
+            dungeon_candidates,
+            lambda item: item[2].name,
+            rank=lambda item: (item[0].current(), item[0].end_ts),
+            path=lambda item: (season.name, item[0].name),
+        )
+        return season, selected_week, group, dungeon
 
     candidates = [
         (season_item, week, group, group.dungeon(normalized_difficulty))
@@ -264,6 +244,24 @@ def resolve_war_detail(
         rank=_war_rank,
         path=lambda item: (item[0].name, item[1].name),
     )
+
+
+def resolve_war_season_page(payload: WarEchoPayload, terms: Sequence[str]) -> int | None:
+    """Route terms that stop at a season or rotation to that season's card.
+
+    ``None`` means a stage was named and the caller should resolve the detail.
+    ``0`` is the running overview (what ``/ef 回响`` shows); any other value is
+    the 1-based ``/ef 回响 历史`` page holding that season, whose card lists
+    every rotation.
+    """
+    season, week, rest = _war_scope(payload, terms)
+    if season is None or rest:
+        return None
+    if season is payload.current():
+        shown = season.current_week() or (season.weeks[-1] if season.weeks else None)
+        if week is None or week is shown:
+            return 0
+    return next(index for index, item in enumerate(payload.seasons, 1) if item is season)
 
 
 def _monument_dungeon(raw, difficulty, locale: ChallengeLocale | None = None):
@@ -446,6 +444,131 @@ def _war_rank(item):
     """Prefer the rotation that is running now, then the newest one."""
     week, season = item[1], item[0]
     return (week.current(), season.current(), week.end_ts, season.end_ts)
+
+
+def _war_period_rank(item):
+    """Same preference for a bare season or rotation: running now, then newest."""
+    return (item.current(), item.end_ts)
+
+
+# 赛季与轮换共用一个词干：「错视赛季」「错视轮换Ⅲ」都是「错视」。不带编号的
+# 「错视轮换」因此是赛季的别称而不是关卡名；轮换编号的 Ⅲ / III / 3 视为同一个。
+_WAR_ROTATION_NUMBER = re.compile(r"[ⅰ-ⅻ]|[ivx]+|\d+")
+_WAR_SCOPE_NAME = re.compile(rf"(?P<stem>.*?)(?:赛季|轮换(?P<number>{_WAR_ROTATION_NUMBER.pattern})?)")
+_UNICODE_ROMAN = "ⅰⅱⅲⅳⅴⅵⅶⅷⅸⅹⅺⅻ"
+_ASCII_ROMAN = {"i": 1, "v": 5, "x": 10}
+
+
+def _war_scope(payload, terms):
+    """Split the leading season/rotation terms off; whatever is left names a stage."""
+    rest = [str(item) for item in terms]
+    if not rest:
+        return None, None, rest
+    # 关卡全名不让给赛季/轮换的模糊匹配：0.38 的门槛下，和赛季名撞两个字就够了。
+    stages = _war_stage_names(payload)
+    season, week = _war_scope_head(payload, rest[0], stages)
+    if season is None:
+        return None, None, rest
+    rest.pop(0)
+    if week is None and rest:
+        week = _war_scope_week(season, rest[0], stages)
+        if week is not None or _war_season_alias(season, rest[0]):
+            rest.pop(0)
+    return season, week, rest
+
+
+def _war_scope_head(payload, query, stages):
+    """Resolve the first term to ``(season, rotation-or-None)``, before any stage name."""
+    normalized = _normalize(query)
+    exact = [item for item in payload.seasons if _normalize(item.name) == normalized]
+    if exact:
+        return _best(exact, _war_period_rank), None
+    stem, number = _war_scope_key(query)
+    rotations = [
+        (season, week)
+        for season in payload.seasons
+        for week in season.weeks
+        if _normalize(week.name) == normalized or (number and _war_scope_key(week.name) == (stem, number))
+    ]
+    if rotations:
+        return _best(rotations, _war_rank)
+    seasons = [item for item in payload.seasons if stem and stem in _war_season_stems(item)]
+    if seasons:
+        return _best(seasons, _war_period_rank), None
+    if normalized in stages:
+        return None, None
+    season = _pick_or_none(
+        query,
+        payload.seasons,
+        lambda item: item.name,
+        rank=_war_period_rank,
+        path=lambda item: (item.name,),
+    )
+    return season, None
+
+
+def _war_scope_week(season, query, stages):
+    stem, number = _war_scope_key(query)
+    if not number and _WAR_ROTATION_NUMBER.fullmatch(stem):
+        # 「错视轮换 3」：编号被空格拆成了单独一项。
+        stem, number = "", _rotation_order(stem)
+    if number:
+        numbered = [
+            item for item in season.weeks
+            if _war_scope_key(item.name)[1] == number and stem in ("", _war_scope_key(item.name)[0])
+        ]
+        if numbered:
+            return _best(numbered, _war_period_rank)
+    if _normalize(query) in stages:
+        return None
+    return _pick_or_none(
+        query,
+        season.weeks,
+        lambda item: item.name,
+        rank=_war_period_rank,
+        path=lambda item: (season.name, item.name),
+    )
+
+
+def _war_season_alias(season, query):
+    """「错视赛季 错视轮换」里的第二项：没有编号、词干还是这个赛季。"""
+    stem, number = _war_scope_key(query)
+    return not number and (not stem or stem in _war_season_stems(season))
+
+
+def _war_stage_names(payload):
+    return {
+        _normalize(name)
+        for season in payload.seasons
+        for week in season.weeks
+        for group in week.groups
+        for name in (group.name, *(item.name for item in (group.normal, group.hard, group.cruel) if item))
+    }
+
+
+def _war_season_stems(season):
+    stems = {_war_scope_key(season.name)[0]} | {_war_scope_key(week.name)[0] for week in season.weeks}
+    stems.discard("")
+    return stems
+
+
+def _war_scope_key(value):
+    """「错视赛季」→ ("错视", 0)；「错视轮换Ⅲ」「错视轮换III」「错视轮换3」→ ("错视", 3)。"""
+    text = _normalize(value)
+    match = _WAR_SCOPE_NAME.fullmatch(text)
+    if match is None:
+        return text, 0
+    number = match.group("number")
+    return match.group("stem"), _rotation_order(number) if number else 0
+
+
+def _rotation_order(number):
+    if number.isdecimal():
+        return int(number)
+    if number in _UNICODE_ROMAN:
+        return _UNICODE_ROMAN.index(number) + 1
+    digits = [_ASCII_ROMAN[char] for char in number]
+    return sum(-item if item < following else item for item, following in zip(digits, digits[1:] + [0]))
 
 
 def _monument_group_rank(group):
