@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from ..i18n import localized_text, server_label
+from .artwork import artwork_levels, artwork_manifest, map_id
 from .models import (
     COLLECTION_COLUMNS,
     CollectionProgress,
@@ -24,7 +25,11 @@ def build_exploration_view(
     server_name: str = "",
     version: str = "",
 ) -> ExplorationView:
-    """Read every domain/level; unknown counts must never become zero or completed."""
+    """Read every domain/level; unknown counts must never become zero or completed.
+
+    Names of regions in the packaged artwork come from its local manifest, since
+    card/detail often answers in English or with bare IDs; nothing is fetched.
+    """
     detail = _mapping(detail)
     base = _mapping(detail.get("base"))
     warnings: list[str] = []
@@ -76,7 +81,8 @@ def build_exploration_view(
         regions.append(
             ExplorationRegion(
                 region_id=region_id,
-                name=localized_text(raw_region.get("name"))
+                name=_artwork_region_name(region_id, levels)
+                or localized_text(raw_region.get("name"))
                 or _id(raw_region.get("domainId"))
                 or "未命名地区",
                 levels=tuple(levels),
@@ -88,7 +94,8 @@ def build_exploration_view(
         server_name=server_label(server_name or localized_text(base.get("serverName"))),
         # currentTs is request time, not the game's last synchronization time.
         saved_at=_timestamp(base.get("saveTime")),
-        regions=tuple(regions),
+        # The API lists the oldest map first; the card puts the newest on top.
+        regions=tuple(reversed(regions)),
         warnings=tuple(dict.fromkeys(warnings)),
         version=version,
     )
@@ -111,11 +118,29 @@ def _level(raw: Mapping, fallback: Mapping, index: int) -> ExplorationLevel:
             count = _number(value) if key in raw else _number(fallback.get(key))
             total = None
         values.append(CollectionProgress(count, total))
+    known = artwork_levels().get(level_id)
     return ExplorationLevel(
         level_id=level_id,
-        name=localized_text(raw.get("name")) or _id(raw.get("levelId")) or "未命名地区",
+        name=(known[1]["name"] if known else "")
+        or localized_text(raw.get("name"))
+        or _id(raw.get("levelId"))
+        or "未命名地区",
         collections=tuple(values),
     )
+
+
+def _artwork_region_name(region_id: str, levels: list[ExplorationLevel]) -> str:
+    """The packaged map's name, by (aliased) ID or else the one map its levels share."""
+    maps = artwork_manifest()["maps"]
+    matched = [item for item in maps if item["id"] == map_id(region_id)]
+    if not matched:
+        parents = {
+            known[0]["id"]: known[0]
+            for level in levels
+            if (known := artwork_levels().get(level.level_id))
+        }
+        matched = list(parents.values())
+    return matched[0]["name"] if len(matched) == 1 else ""
 
 
 def _mapping(value: Any) -> Mapping:

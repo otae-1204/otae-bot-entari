@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import re
@@ -27,6 +28,7 @@ from plugins.endfield.account.exploration.thumbnails import (
 )
 from plugins.endfield.account.store import EndfieldRole, EndfieldStore
 from plugins.endfield.catalog.commands import parse_command
+from plugins.endfield.providers.akedata import AKEDATA_TIMEOUT_SECONDS
 
 FIXTURE = Path(__file__).parent / "fixtures/endfield/exploration/screenshot.json"
 
@@ -39,6 +41,45 @@ def build(detail=None):
     return build_exploration_view(
         detail_fixture() if detail is None else detail, uid="****4321", server_name="1"
     )
+
+
+def production_detail():
+    """Simulate card/detail as served: domain_N IDs, English or bare-ID names."""
+
+    def level(level_id, name):
+        return {
+            "levelId": level_id,
+            "name": name,
+            "trchestCount": {"count": 1, "total": 2},
+        }
+
+    return {
+        "domain": [
+            {
+                "domainId": "domain_1",
+                "name": "Valley IV",
+                "levels": [
+                    level("map01_lv001", "The Hub"),
+                    level("map01_lv002", "Valley Pass"),
+                ],
+            },
+            {
+                "domainId": "domain_2",
+                "name": {"en": "Wuling"},
+                "levels": [
+                    level("indie_dg007", "indie_dg007"),
+                    level("map02_lv005", "Test Area"),
+                    level("indie_dg016", "indie_dg016"),
+                    level("map02_lv099", "Frontier Pass"),
+                ],
+            },
+            {
+                "domainId": "domain_3",
+                "name": "New Domain",
+                "levels": [level("map03_lv001", "New Level")],
+            },
+        ]
+    }
 
 
 class ExplorationParsingTests(unittest.TestCase):
@@ -65,7 +106,16 @@ class ExplorationParsingTests(unittest.TestCase):
 
     def test_screenshot_keeps_all_regions_and_six_column_order(self):
         view = build()
+        # The API lists the oldest map first; the card reverses that, newest on top,
+        # and keeps each region's own level order.
+        domains = detail_fixture()["domain"]
+        self.assertEqual([domain["name"] for domain in domains], ["四号谷地", "武陵"])
         self.assertEqual([region.name for region in view.regions], ["武陵", "四号谷地"])
+        for region, domain in zip(view.regions, reversed(domains)):
+            self.assertEqual(
+                [level.level_id for level in region.levels],
+                [level["levelId"] for level in domain["levels"]],
+            )
         self.assertEqual(view.level_count, 13)
         self.assertEqual(view.regions[0].levels[3].name, "应龙关")
         self.assertEqual(
@@ -77,6 +127,47 @@ class ExplorationParsingTests(unittest.TestCase):
             [26, 16, 4, 0, 2, 8],
         )
         self.assertEqual(view.regions[-1].levels[-1].name, "矿脉源区")
+
+    def test_production_ids_take_packaged_chinese_names_newest_map_first(self):
+        view = build(production_detail())
+        self.assertEqual(
+            [(region.region_id, region.name) for region in view.regions],
+            [
+                ("domain_3", "New Domain"),
+                ("domain_2", "武陵"),
+                ("domain_1", "四号谷地"),
+            ],
+        )
+        self.assertEqual(
+            [[level.name for level in region.levels] for region in view.regions],
+            [
+                # Absent from the packaged artwork: the API's own text stays.
+                ["New Level"],
+                ["首墩内部", "试验园区", "遂明", "Frontier Pass"],
+                ["枢纽区", "谷地通道"],
+            ],
+        )
+        # A parent without a known ID still takes the one map its levels share.
+        detail = production_detail()
+        detail["domain"][1]["domainId"] = "domain_wuling"
+        self.assertEqual(build(detail).regions[1].name, "武陵")
+        # Levels from two different maps name no parent.
+        detail["domain"][1]["levels"].append({"levelId": "map01_lv003"})
+        self.assertEqual(build(detail).regions[1].name, "Wuling")
+        self.assertEqual(build(detail).regions[1].levels[-1].name, "阿伯莉采石场")
+        doc = html.fromstring(draw.render_exploration_html(build(production_detail())))
+        self.assertEqual(
+            doc.xpath('//tr[@class="group"]//b/text()'),
+            ["New Domain", "武陵", "四号谷地"],
+        )
+        self.assertEqual(
+            [node.get("style") for node in doc.xpath("//tbody")],
+            [
+                "--region-color:#ffd000",
+                "--region-color:#6bffff",
+                "--region-color:#c1ff55",
+            ],
+        )
 
     def test_future_regions_and_names_are_not_hardcoded(self):
         detail = {
@@ -517,6 +608,27 @@ class ExplorationVersionTests(unittest.IsolatedAsyncioTestCase):
             ):
                 self.assertEqual(await version.fetch_exploration_version(), expected)
 
+    async def test_cold_manifest_lookup_is_not_cut_short_of_its_http_timeout(self):
+        bounds = []
+        real_timeout = asyncio.timeout
+
+        def recorded_timeout(delay):
+            bounds.append(delay)
+            return real_timeout(delay)
+
+        async def cold_manifest():
+            await asyncio.sleep(0.01)
+            return {"latest": "1.5.3@10506507-7"}
+
+        with (
+            patch.object(version.asyncio, "timeout", recorded_timeout),
+            patch.object(version, "fetch_akedata_manifest", cold_manifest),
+        ):
+            self.assertEqual(await version.fetch_exploration_version(), "1.5")
+        # A 5 s bound used to turn a slow but healthy fetch into "版本未知".
+        self.assertEqual(len(bounds), 1)
+        self.assertGreater(bounds[0], AKEDATA_TIMEOUT_SECONDS)
+
     async def test_lookup_failure_keeps_exploration_available(self):
         for error in (RuntimeError("invalid manifest"), TimeoutError()):
             with (
@@ -733,6 +845,21 @@ class ExplorationThumbnailTests(unittest.TestCase):
         view = replace(build(), regions=(region,))
         self.assertEqual(len(match_thumbnails(view, tree, index)), 1)
 
+    def test_domain_ids_reach_their_map_tree_parent_without_guessing(self):
+        tree, index = self.metadata()
+        level = replace(build().regions[0].levels[4], level_id="x", name="藏剑谷")
+        # English parent names as card/detail sends them; only the ID alias links.
+        for region_id, expected in (("domain_2", 1), ("domain_1", 0)):
+            with self.subTest(region_id=region_id):
+                region = ExplorationRegion(region_id, "Wuling", (level,))
+                view = replace(build(), regions=(region,))
+                self.assertEqual(len(match_thumbnails(view, tree, index)), expected)
+        # The alias finds the parent; a duplicated level name still never guesses.
+        tree["data"]["maps"][0]["levels"].append({"id": "another", "name": "藏剑谷"})
+        region = ExplorationRegion("domain_2", "Wuling", (level,))
+        view = replace(build(), regions=(region,))
+        self.assertEqual(match_thumbnails(view, tree, index), {})
+
     def test_sprite_only_maps_and_complete_texture_fallback(self):
         tree, index = self.metadata()
         textures = index["datasets"]["images"]["files"]
@@ -816,6 +943,67 @@ class ExplorationThumbnailAsyncTests(unittest.IsolatedAsyncioTestCase):
             )
         )
         fetch.assert_not_awaited()
+
+    async def test_production_ids_use_official_icons_without_network(self):
+        from plugins.endfield.account.exploration import thumbnails
+        from plugins.endfield.account.exploration.artwork import artwork_url
+
+        view = build(production_detail())
+        known = replace(
+            view,
+            regions=tuple(
+                replace(
+                    region,
+                    levels=tuple(
+                        level
+                        for level in region.levels
+                        if not level.level_id.startswith(("map03", "map02_lv099"))
+                    ),
+                )
+                for region in view.regions
+            ),
+        )
+        with patch.object(thumbnails, "fetch_json", AsyncMock()) as fetch:
+            result = await thumbnails.fetch_exploration_thumbnails(known)
+        fetch.assert_not_awaited()
+        self.assertEqual(
+            list(result),
+            [
+                ("domain_2", "indie_dg007"),
+                ("domain_2", "map02_lv005"),
+                ("domain_2", "indie_dg016"),
+                ("domain_1", "map01_lv001"),
+                ("domain_1", "map01_lv002"),
+            ],
+        )
+        self.assertTrue(all(thumb.official for thumb in result.values()))
+        # 首墩内部 shares 首墩's artwork, as in the official component.
+        self.assertEqual(
+            result["domain_2", "indie_dg007"].tiles[0].url,
+            artwork_url("regions/map02_lv004.png"),
+        )
+        # Raw English names under an unknown parent: the unique level ID still hits.
+        raw = replace(
+            known,
+            regions=(
+                ExplorationRegion(
+                    "domain_9",
+                    "Wuling",
+                    tuple(
+                        replace(level, name=level.level_id)
+                        for level in known.regions[1].levels
+                    ),
+                ),
+            ),
+        )
+        self.assertEqual(
+            list(thumbnails.match_official_thumbnails(raw)),
+            [
+                ("domain_9", "indie_dg007"),
+                ("domain_9", "map02_lv005"),
+                ("domain_9", "indie_dg016"),
+            ],
+        )
 
     async def test_new_region_falls_back_without_replacing_official_artwork(self):
         from plugins.endfield.account.exploration import thumbnails

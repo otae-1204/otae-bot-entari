@@ -13,7 +13,7 @@ from otae_bot.infrastructure.http.client import fetch_json
 
 from ...providers.akedata import AKEDATA_DATA_BASE, AKEDATA_HEADERS
 from ...rendering.health import record_assets
-from .artwork import artwork_manifest, artwork_url
+from .artwork import artwork_levels, artwork_manifest, artwork_url, map_id
 from .models import ExplorationView
 
 logger = logging.getLogger(__name__)
@@ -83,17 +83,19 @@ def match_thumbnails(view: ExplorationView, tree: dict, index: dict) -> Thumbnai
 
 def _matching_levels(view: ExplorationView, maps: list[dict]):
     for region in view.regions:
-        parents = [
-            item
-            for item in maps
-            if isinstance(item, dict) and item.get("id") == region.region_id
-        ]
-        if not parents:
+        # card/detail's domain_N is the map tree's mapNN; try it before the name.
+        for key, value in (
+            ("id", region.region_id),
+            ("id", map_id(region.region_id)),
+            ("name", region.name),
+        ):
             parents = [
                 item
                 for item in maps
-                if isinstance(item, dict) and item.get("name") == region.name
+                if isinstance(item, dict) and item.get(key) == value
             ]
+            if parents:
+                break
         if len(parents) != 1:
             continue
         candidates = parents[0].get("levels")
@@ -112,11 +114,18 @@ def _matching_levels(view: ExplorationView, maps: list[dict]):
 
 
 def match_official_thumbnails(view: ExplorationView) -> ThumbnailMap:
+    """Packaged artwork, by parent region first, else by a globally unique level ID."""
+    scoped = dict(_matching_levels(view, artwork_manifest()["maps"]))
     result: ThumbnailMap = {}
-    for key, level in _matching_levels(view, artwork_manifest()["maps"]):
-        url = artwork_url(level["image"])
-        if url:
-            result[key] = MapThumbnail(1, 1, (MapTile(url, 0, 0),), official=True)
+    for region in view.regions:
+        for level in region.levels:
+            key = (region.region_id, level.level_id)
+            known = scoped.get(key)
+            if known is None and level.level_id in artwork_levels():
+                known = artwork_levels()[level.level_id][1]
+            url = artwork_url(known["image"]) if known else ""
+            if url:
+                result[key] = MapThumbnail(1, 1, (MapTile(url, 0, 0),), official=True)
     return result
 
 

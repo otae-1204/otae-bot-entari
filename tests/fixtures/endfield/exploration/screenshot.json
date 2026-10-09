@@ -2,6 +2,7 @@
   "_meta": {
     "source": "用户于 2026-10-07 提供的森空岛截图；只录入截图可见的 13 个区域，非完整账号响应。",
     "labels": "六列名称与顺序由用户指定；横杠转换为明确的 0/0。",
+    "order": "大地区按接口顺序旧地图在前；出图时倒序，新地图在上。地区内顺序照录截图。",
     "ids": "所有地区与区域 ID 均为测试占位，不是游戏 ID。"
   },
   "detail": {
@@ -9,6 +10,68 @@
       "name": "截图示例（非实时查询）"
     },
     "domain": [
+      {
+        "domainId": "sample-valley",
+        "name": "四号谷地",
+        "levels": [
+          {
+            "levelId": "sample-2-1",
+            "name": "供能高地",
+            "trchestCount": {
+              "count": 36,
+              "total": 36
+            },
+            "puzzleCount": {
+              "count": 23,
+              "total": 23
+            },
+            "blackboxCount": {
+              "count": 0,
+              "total": 0
+            },
+            "pieceCount": {
+              "count": 0,
+              "total": 0
+            },
+            "equipTrchestCount": {
+              "count": 0,
+              "total": 0
+            },
+            "trstarCount": {
+              "count": 0,
+              "total": 0
+            }
+          },
+          {
+            "levelId": "sample-2-2",
+            "name": "矿脉源区",
+            "trchestCount": {
+              "count": 65,
+              "total": 65
+            },
+            "puzzleCount": {
+              "count": 39,
+              "total": 39
+            },
+            "blackboxCount": {
+              "count": 3,
+              "total": 3
+            },
+            "pieceCount": {
+              "count": 2,
+              "total": 2
+            },
+            "equipTrchestCount": {
+              "count": 0,
+              "total": 0
+            },
+            "trstarCount": {
+              "count": 0,
+              "total": 0
+            }
+          }
+        ]
+      },
       {
         "domainId": "sample-wuling",
         "name": "武陵",
@@ -315,68 +378,6 @@
             "equipTrchestCount": {
               "count": 8,
               "total": 8
-            },
-            "trstarCount": {
-              "count": 0,
-              "total": 0
-            }
-          }
-        ]
-      },
-      {
-        "domainId": "sample-valley",
-        "name": "四号谷地",
-        "levels": [
-          {
-            "levelId": "sample-2-1",
-            "name": "供能高地",
-            "trchestCount": {
-              "count": 36,
-              "total": 36
-            },
-            "puzzleCount": {
-              "count": 23,
-              "total": 23
-            },
-            "blackboxCount": {
-              "count": 0,
-              "total": 0
-            },
-            "pieceCount": {
-              "count": 0,
-              "total": 0
-            },
-            "equipTrchestCount": {
-              "count": 0,
-              "total": 0
-            },
-            "trstarCount": {
-              "count": 0,
-              "total": 0
-            }
-          },
-          {
-            "levelId": "sample-2-2",
-            "name": "矿脉源区",
-            "trchestCount": {
-              "count": 65,
-              "total": 65
-            },
-            "puzzleCount": {
-              "count": 39,
-              "total": 39
-            },
-            "blackboxCount": {
-              "count": 3,
-              "total": 3
-            },
-            "pieceCount": {
-              "count": 2,
-              "total": 2
-            },
-            "equipTrchestCount": {
-              "count": 0,
-              "total": 0
             },
             "trstarCount": {
               "count": 0,

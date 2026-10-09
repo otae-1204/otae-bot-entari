@@ -42,6 +42,7 @@ AKEDATA_HEADERS = {
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
     "Referer": "https://cf.akedata.top/",
 }
+AKEDATA_TIMEOUT_SECONDS = 30.0
 # I18nTextTable_CN 约 18MB，超过 fetch_json 默认 10MB 上限。
 _I18N_MAX_BYTES = 64 * 1024 * 1024
 _I18N_SUFFIX = "/I18nTextTable_CN.json"
@@ -101,7 +102,7 @@ async def _get(
         f"{AKEDATA_DATA_BASE}{path}",
         namespace="akedata",
         headers=AKEDATA_HEADERS,
-        timeout_seconds=30.0,
+        timeout_seconds=AKEDATA_TIMEOUT_SECONDS,
         max_bytes=max_bytes,
         read_only=True,
         **({"ttl_seconds": ttl_seconds} if ttl_seconds is not None else {}),

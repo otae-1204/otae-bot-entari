@@ -8,14 +8,21 @@ import re
 
 import httpx
 
-from ...providers.akedata import fetch_akedata_manifest, game_version_label
+from ...providers.akedata import (
+    AKEDATA_TIMEOUT_SECONDS,
+    fetch_akedata_manifest,
+    game_version_label,
+)
 
 logger = logging.getLogger(__name__)
+# The manifest URL changes every minute, so lookups are often cold. Never cut one
+# short of its own HTTP timeout; this bound only stops a stalled request.
+LOOKUP_TIMEOUT_SECONDS = AKEDATA_TIMEOUT_SECONDS + 10
 
 
 async def fetch_exploration_version() -> str:
     try:
-        async with asyncio.timeout(5):
+        async with asyncio.timeout(LOOKUP_TIMEOUT_SECONDS):
             manifest = await fetch_akedata_manifest()
         label = game_version_label(str(manifest.get("latest") or ""))
         return label if re.fullmatch(r"[0-9]+\.[0-9]+", label) else ""

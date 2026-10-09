@@ -2065,13 +2065,16 @@ async def _handle_exploration(
         return await matcher.finish("尚未绑定终末地账号，请先私聊发送 /ef 绑定。")
     with cold_start_command(matcher):
         token = account_store.decrypt_token(role, cipher)
-        detail = await _card_detail_with_snapshot(token, role)
+        # A cold version lookup can take a while; overlap it with the account fetch.
+        detail, game_version = await asyncio.gather(
+            _card_detail_with_snapshot(token, role), fetch_exploration_version()
+        )
         view = build_exploration_view(
             detail,
             uid=role.masked_uid if group else role.role_id,
             nickname=role.nickname,
             server_name=role.server_name or role.server_id,
-            version=await fetch_exploration_version(),
+            version=game_version,
         )
 
         async def render():
