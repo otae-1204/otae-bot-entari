@@ -17,6 +17,10 @@ GROUP_FEATURE_HELP = "本群插件开关：\n/功能 列表 —— 查看本群�
 TEXT_TOPICS.update({name: GROUP_FEATURE_HELP for name in ("功能", "插件", "plugin")})
 CHANGELOG_HELP = "更新日志查询：\n/更新日志 —— 查看最新版本更新说明\n/更新日志 列表 —— 查看版本目录列表（每页 12 项）\n/更新日志 <版本号/序号/关键词> —— 查询指定版本的更新条目（如 /更新日志 v1.14.0、/更新日志 2）\n/更新日志 统计 —— 查看版本与提交汇总数据\n别名：/更新、/changelog、/版本；版本按阶段划分，每项条目均对应仓库真实提交。"
 TEXT_TOPICS.update({name: CHANGELOG_HELP for name in ("更新", "更新日志", "changelog", "版本")})
+ARKNIGHTS_HELP = "明日方舟森空岛签到：/ak 帮助 查看全部子命令，别名 /明日方舟、/arknights。\n/ak 绑定（私聊，Token 或手机号验证码）、/ak 账号、/ak 主账号 <选择器>、/ak 解绑 <选择器>（私聊）。\n/ak 签到 [全部|编号|昵称|UID后四位] 默认签到全部角色；若还绑定了终末地，会顺带签到终末地全部角色并合成一张图。\n账号按 QQ 隔离，登录凭据加密保存；绑定和解绑请私聊操作，请勿公开 Token 或验证码。"
+TEXT_TOPICS.update({name: ARKNIGHTS_HELP for name in ("ak", "明日方舟", "arknights", "森空岛")})
+SIGNIN_HELP = "签到：/ef 签到（终末地）或 /ak 签到（明日方舟），选择器只作用于该命令的游戏。\n若同一 QQ 还绑定了另一款游戏，会顺带签到它的全部已绑定角色，两张结果卡上下合成一张图；未绑定另一款时只返回当前游戏。\n本群关闭了另一款游戏时不会顺带签到；单个角色失败只影响它自己。"
+TEXT_TOPICS.update({name: SIGNIN_HELP for name in ("签到", "checkin")})
 
 # 子指令 → 图片文件名（不含扩展名）映射
 # 每个目标都必须有对应的 assets/image/help/<name>.png，否则该主题无法解析；

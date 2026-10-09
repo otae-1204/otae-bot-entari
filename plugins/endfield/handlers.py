@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+import sys
 import tempfile
 import unicodedata
 from collections.abc import Awaitable, Callable
@@ -21,6 +22,15 @@ from loguru import logger
 from nepattern import AnyString
 
 from otae_bot.config.settings import Config
+from otae_bot.attendance_delivery import build_delivery, deliver
+from otae_bot.attendance_registry import (
+    AttendanceCapability,
+    AttendanceResult,
+    collect_companion_outcomes,
+    register_attendance_capability,
+    signed_outcome,
+)
+from otae_bot.group_features import feature_store, scope_from_event
 from otae_bot.infrastructure.cache import AsyncTTLCache, CacheStats
 from otae_bot.adapters.entari import (
     ArgVal,
@@ -53,7 +63,6 @@ from .account.challenge.i18n import clear_challenge_locale, close_challenge_loca
 from .account.client import (
     ACCOUNT_PROVIDER_CN,
     ACCOUNT_PROVIDER_SKPORT,
-    AttendanceResult,
     CURRENCY_TYPES,
     EndfieldAPIError,
     EndfieldOfficialClient,
@@ -178,9 +187,6 @@ from .gacha.assets import EndfieldGachaAssetCache, apply_gacha_metadata
 from .gacha.xhh import XhhAPIError, XhhLoginSession
 from .catalog.models import (
     AttendanceCardView,
-    AttendanceMilestoneView,
-    AttendanceRewardView,
-    AttendanceRoleView,
     DailyAccountView,
     DailyDashboardView,
     GachaHistoryItemView,
@@ -215,6 +221,10 @@ from .cold_start import (
 )
 from .calendar.akedata import AkeDataVersionCalendarSource, VersionCalendarError
 from .paths import HELP_IMAGE_PATH as ENDFIELD_HELP_IMAGE_PATH
+from .attendance import (
+    format_attendance_report,
+    sign_roles as sign_attendance_roles,
+)
 from .providers.repository import AkeDataIncomplete, query_snapshot
 from .encyclopedia import archives as encyclopedia_archives
 from .encyclopedia import draw as encyclopedia_draw
@@ -938,7 +948,7 @@ async def _handle_personal_command(matcher, event: Event, command: ParsedEndfiel
             )
         if command.action == "attendance":
             cipher = CredentialCipher.from_env()
-            return await _handle_attendance(matcher, qq_user_id, command, cipher, group=is_group(event))
+            return await _handle_attendance(matcher, event, qq_user_id, command, cipher, bot=bot)
         if command.action == "daily":
             cipher = CredentialCipher.from_env()
             return await _handle_daily(matcher, qq_user_id, command, cipher, group=is_group(event))
@@ -2079,37 +2089,87 @@ async def _render_account_pages(
 
 async def _handle_attendance(
     matcher,
+    event: Event,
     qq_user_id: str,
     command: ParsedEndfieldCommand,
     cipher: CredentialCipher,
     *,
-    group: bool,
+    bot=None,
 ) -> None:
     roles = account_store.resolve_roles(qq_user_id, command.account_selector)
     if not roles:
         return await matcher.finish("未找到对应的终末地账号，请先私聊发送 /ef 绑定 进行添加。")
-    views: list[AttendanceRoleView] = []
-    for role in roles:
-        try:
-            async with ROLE_TASKS.claim(role):
-                token = account_store.decrypt_token(role, cipher)
-                result = await official_client.attendance(token, role)
-            views.append(_attendance_view(role, result))
-        except TaskAlreadyRunning:
-            views.append(AttendanceRoleView(role.nickname, role.masked_uid, role.server_name, "failed", "当前任务正在处理中"))
-        except EndfieldAPIError as exc:
-            views.append(AttendanceRoleView(role.nickname, role.masked_uid, role.server_name, "failed", str(exc)))
-        except CredentialKeyError as exc:
-            views.append(AttendanceRoleView(role.nickname, role.masked_uid, role.server_name, "failed", str(exc)))
-        except Exception as exc:
-            logger.error(
-                f"[endfield-account] attendance failed: stored_role={role.id} error_type={type(exc).__name__}"
-            )
-            views.append(AttendanceRoleView(role.nickname, role.masked_uid, role.server_name, "failed", "签到执行失败，请稍后再试"))
-    png = await draw_attendance_card(
-        AttendanceCardView(views, format_timestamp(int(__import__("time").time())))
+    view = await sign_attendance_roles(account_store, official_client, cipher, roles)
+    outcomes = [
+        signed_outcome(
+            "endfield", png=await _attendance_png(view), text=format_attendance_report(view)
+        )
+    ]
+    # The selector only chose Endfield roles.  A bound Arknights account is
+    # signed in full below, unless this group switched Arknights off.
+    scope = scope_from_event(bot, event)
+    outcomes.extend(
+        await collect_companion_outcomes(
+            qq_user_id,
+            current="endfield",
+            group=is_group(event),
+            enabled=lambda feature: feature_store.is_enabled(scope, feature),
+        )
     )
-    return await _finish_png(matcher, png)
+    await deliver(matcher.send, await build_delivery(outcomes))
+    return await matcher.finish()
+
+
+async def _attendance_png(view: AttendanceCardView) -> bytes | None:
+    """Render the card, or return ``None`` so the caller sends full text."""
+    try:
+        return await draw_attendance_card(view)
+    except _ExitException:
+        raise
+    except Exception as exc:  # noqa: BLE001 - the text result must still be delivered
+        logger.warning(
+            f"[endfield-account] attendance card render failed error_type={type(exc).__name__}"
+        )
+        return None
+
+
+# ------------------------------------- attendance started by /ak 签到
+
+
+def _companion_roles(user_id: str) -> list[EndfieldRole]:
+    """Every role this user bound, without touching credentials."""
+    return account_store.list_roles(user_id)
+
+
+async def _companion_attendance(user_id: str, *, group: bool) -> AttendanceResult:
+    """Sign every bound Endfield role after ``/ak 签到`` signed Arknights.
+
+    ``group`` is part of the capability contract; this game's attendance card
+    always carries masked UIDs, so there is nothing to hide or reveal here.
+    """
+    roles = account_store.list_roles(user_id)
+    if not roles:
+        return AttendanceResult(ok=False, text="尚未绑定终末地账号，请私聊使用 /zmd 绑定。")
+    try:
+        cipher = CredentialCipher.from_env()
+    except CredentialKeyError as exc:
+        return AttendanceResult(ok=False, text=str(exc))
+    view = await sign_attendance_roles(account_store, official_client, cipher, roles)
+    return AttendanceResult(
+        png=await _attendance_png(view),
+        text=format_attendance_report(view),
+    )
+
+
+register_attendance_capability(
+    AttendanceCapability(
+        game="endfield",
+        owner=__name__,
+        module=sys.modules[__name__],
+        roles=_companion_roles,
+        sign=_companion_attendance,
+    )
+)
 
 
 async def _handle_daily(
@@ -2274,23 +2334,6 @@ async def _handle_xhh_import(matcher, qq_user_id: str, command: ParsedEndfieldCo
         f"{role.nickname} 小黑盒历史抽卡统计导入成功：涵盖 {len(imported.pools)} 个卡池，"
         f"累计 {imported.total_count} 抽，共包含 {len(imported.six_stars)} 条六星记录。\n"
         "发送 /ef 抽卡 即可查阅合并统计后的分析卡片；逐抽明细页仍以官方接口记录为准。"
-    )
-
-
-def _attendance_view(role: EndfieldRole, result: AttendanceResult) -> AttendanceRoleView:
-    return AttendanceRoleView(
-        nickname=role.nickname,
-        uid=role.masked_uid,
-        server_name=server_label(role.server_name or role.server_id),
-        status=result.status,
-        message=result.message,
-        rewards=[AttendanceRewardView(item.name, item.count, item.icon_url) for item in result.rewards],
-        monthly_count=result.monthly_count,
-        calendar_days=result.calendar_days,
-        milestones=[
-            AttendanceMilestoneView(item.day, item.reward.count, item.reward.icon_url)
-            for item in result.milestones
-        ],
     )
 
 

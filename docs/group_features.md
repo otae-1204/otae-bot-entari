@@ -21,6 +21,7 @@
 | `hyw` | `q`、`何意味` |
 | `grok_bot` | `grok`、`grokbot` |
 | `endfield` | `ef`、`终末地` |
+| `arknights` | `ak`、`明日方舟` |
 | `steamInfo` | `steam` |
 | `bilibilibot` | `bili`、`bilibili` |
 | `changelog` | `更新日志`、`changelog`、`版本` |
