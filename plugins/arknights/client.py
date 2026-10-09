@@ -24,13 +24,15 @@ import json
 import logging
 import re
 import time
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
-from typing import Any
+from typing import Any, TypeVar
 from urllib.parse import urlencode
 
 import httpx
+
+from otae_bot.infrastructure.http.tls import shared_ssl_context
 
 from .store import RoleCandidate
 
@@ -79,6 +81,13 @@ OPERATION_BINDING = "查询游戏绑定"
 # reported as "already signed".
 ALREADY_SIGNED_CODE = "10001"
 CREDENTIAL_INVALID_CODES = frozenset({"401", "403"})
+# Skland rejects a stale or invalidated ``cred``/sign token with these codes,
+# in the body ``code`` or as the HTTP status.  A freshly exchanged context can
+# repair that, so a signed request is retried once with one (same set as the
+# Endfield client's ``_SKLAND_CONTEXT_RETRY_CODES``).
+CONTEXT_RETRY_CODES = frozenset({"401", "10000", "10003"})
+SIGNED_OPERATIONS = frozenset({OPERATION_ATTENDANCE, OPERATION_ATTENDANCE_STATUS, OPERATION_BINDING})
+CREDENTIAL_EXPIRED_MESSAGE = "森空岛凭据已失效或登录状态异常，请重新私聊使用 /ak 绑定。"
 
 # Official calendar slot kinds.  Only "daily" entries form the cumulative
 # sign-in ladder; "first" and "activity" are separate and must stay excluded.
@@ -88,6 +97,7 @@ DAILY_CALENDAR_TYPE = "daily"
 ORIGINIUM_REWARD_NAME = "合成玉"
 
 _SAFE_CODE = re.compile(r"[0-9]{1,16}")
+_T = TypeVar("_T")
 
 
 class ArknightsAPIError(RuntimeError):
@@ -682,8 +692,14 @@ class ArknightsClient:
         timeout: float = 25.0,
         context_ttl_seconds: float = CONTEXT_TTL_SECONDS,
     ):
+        # A shared TLS context: httpx would otherwise read the CA bundle
+        # synchronously for this client.  Callers on the event loop build it
+        # first with ``ashared_ssl_context`` so this lookup is a cache hit.
         self.http = http or httpx.AsyncClient(
-            timeout=timeout, follow_redirects=True, trust_env=False
+            timeout=timeout,
+            follow_redirects=True,
+            trust_env=False,
+            verify=shared_ssl_context(trust_env=False),
         )
         self._owns_http = http is None
         self._contexts: dict[str, _SklandContext] = {}
@@ -719,8 +735,10 @@ class ArknightsClient:
         return token
 
     async def discover_roles(self, account_token: str) -> list[RoleCandidate]:
-        context = await self._context(account_token)
-        payload = await self._signed_request(OPERATION_BINDING, context, "GET", BINDING_PATH)
+        payload = await self._with_context(
+            account_token,
+            lambda context: self._signed_request(OPERATION_BINDING, context, "GET", BINDING_PATH),
+        )
         return parse_arknights_bindings(payload)
 
     # ------------------------------------------------------------ attendance
@@ -735,10 +753,19 @@ class ArknightsClient:
         there never downgrades the successful sign-in, but it also means the
         stale pre-POST calendar is never reused.
 
+        A credential the server rejected (:data:`CONTEXT_RETRY_CODES`) is
+        exchanged again and the whole attempt runs once more; the rejected POST
+        signed nothing, and the repeated probe still reports a day that did get
+        signed as ``already``.
+
         Raises :class:`ArknightsAPIError` for failures; an expired credential is
         therefore always an error and is never reported as already signed.
         """
-        context = await self._context(account_token)
+        return await self._with_context(
+            account_token, lambda context: self._attendance(context, role)
+        )
+
+    async def _attendance(self, context: _SklandContext, role: Any) -> AttendanceResult:
         status_payload = await self._attendance_status_payload(context, role)
         if attendance_has_today(status_payload) is True:
             # Today is already signed, so the first read already contains today.
@@ -810,18 +837,66 @@ class ArknightsClient:
 
     # --------------------------------------------------------- skland context
 
-    async def _context(self, account_token: str, *, refresh: bool = False) -> _SklandContext:
+    async def _with_context(
+        self, account_token: str, call: Callable[[_SklandContext], Awaitable[_T]]
+    ) -> _T:
+        """Run signed requests, exchanging a rejected context once.
+
+        A second rejection means the stored login itself no longer works, so
+        the user is told to bind again instead of seeing a bare business code.
+        """
+        context = await self._context(account_token)
+        try:
+            return await call(context)
+        except ArknightsAPIError as exc:
+            if not _should_refresh_context(exc):
+                raise
+        fresh = await self._context(account_token, refresh=True, stale=context)
+        try:
+            return await call(fresh)
+        except ArknightsAPIError as exc:
+            if not _should_refresh_context(exc):
+                raise
+            raise ArknightsAPIError(
+                CREDENTIAL_EXPIRED_MESSAGE, operation=exc.operation, code=exc.code
+            ) from None
+
+    async def _context(
+        self,
+        account_token: str,
+        *,
+        refresh: bool = False,
+        stale: _SklandContext | None = None,
+    ) -> _SklandContext:
+        """Return the cached context, or exchange the account token for one.
+
+        ``refresh`` skips the cache.  With ``stale`` it only skips that very
+        context: when concurrent requests were all rejected with it, the first
+        one exchanges a new context and the others reuse it.
+        """
         key = hashlib.sha256(str(account_token).encode("utf-8")).hexdigest()[:24]
-        cached = self._contexts.get(key)
-        if cached is not None and not refresh and cached.expires_at > time.monotonic():
+        cached = self._usable_context(key, refresh=refresh, stale=stale)
+        if cached is not None:
             return cached
         async with self._context_lock:
-            cached = self._contexts.get(key)
-            if cached is not None and not refresh and cached.expires_at > time.monotonic():
+            cached = self._usable_context(key, refresh=refresh, stale=stale)
+            if cached is not None:
                 return cached
+            # A rejected context must not be reused even if the exchange fails.
+            self._contexts.pop(key, None)
             context = await self._create_context(account_token)
             self._contexts[key] = context
             return context
+
+    def _usable_context(
+        self, key: str, *, refresh: bool, stale: _SklandContext | None
+    ) -> _SklandContext | None:
+        cached = self._contexts.get(key)
+        if cached is None or cached.expires_at <= time.monotonic():
+            return None
+        if refresh and (stale is None or cached is stale):
+            return None
+        return cached
 
     async def _create_context(self, account_token: str) -> _SklandContext:
         raw_token = extract_account_token(account_token)
@@ -998,11 +1073,12 @@ class ArknightsClient:
                 "今日已签到。", operation=operation, code=safe, already_signed=True
             )
         if safe in CREDENTIAL_INVALID_CODES:
-            return ArknightsAPIError(
-                "森空岛凭据已失效或登录状态异常，请重新私聊使用 /ak 绑定。",
-                operation=operation,
-                code=safe,
-            )
+            return ArknightsAPIError(CREDENTIAL_EXPIRED_MESSAGE, operation=operation, code=safe)
         return ArknightsAPIError(
             f"{operation}失败（{safe or '未知'}）。", operation=operation, code=safe
         )
+
+
+def _should_refresh_context(error: ArknightsAPIError) -> bool:
+    """Retry only failures that a fresh signing context can actually repair."""
+    return error.operation in SIGNED_OPERATIONS and error.code in CONTEXT_RETRY_CODES

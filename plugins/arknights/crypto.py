@@ -1,10 +1,11 @@
 """AES-GCM credential storage for the Arknights Skland binding.
 
-The Arknights database is separate from the Endfield one, but operators may
-already have provisioned a 32-byte key for that plugin.  ``ARKNIGHTS_CREDENTIAL_KEY``
-is the preferred variable; ``ENDFIELD_CREDENTIAL_KEY`` is only read as a
-fallback so a fresh deployment does not need a second secret.  This module never
-generates or rewrites ``.env``.
+The Arknights database is separate from the Endfield one, and so is its key:
+only ``ARKNIGHTS_CREDENTIAL_KEY`` is read.  ``ENDFIELD_CREDENTIAL_KEY`` is never
+used as a fallback, so the two games' secrets can be rotated or revoked
+independently and a missing Arknights key is reported instead of silently
+encrypting with another plugin's secret.  This module never generates or
+rewrites ``.env``.
 """
 
 from __future__ import annotations
@@ -15,9 +16,7 @@ from dataclasses import dataclass
 
 from Crypto.Cipher import AES
 
-PRIMARY_KEY_ENV_NAME = "ARKNIGHTS_CREDENTIAL_KEY"
-FALLBACK_KEY_ENV_NAME = "ENDFIELD_CREDENTIAL_KEY"
-KEY_ENV_NAMES = (PRIMARY_KEY_ENV_NAME, FALLBACK_KEY_ENV_NAME)
+KEY_ENV_NAME = "ARKNIGHTS_CREDENTIAL_KEY"
 ASSOCIATED_DATA = b"arknights-account-token-v1"
 
 
@@ -44,21 +43,18 @@ class ArknightsCipher:
 
     @classmethod
     def from_env(cls) -> ArknightsCipher:
-        for name in KEY_ENV_NAMES:
-            value = os.getenv(name, "").strip()
-            if not value:
-                continue
-            try:
-                key = base64.b64decode(value, validate=True)
-            except (ValueError, TypeError) as exc:
-                raise CredentialKeyError(f"{name} 不是有效的 Base64 密钥。") from exc
-            if len(key) != 32:
-                raise CredentialKeyError(f"{name} 解码后不是 32 字节密钥。")
-            return cls(key)
-        raise CredentialKeyError(
-            "未配置 ARKNIGHTS_CREDENTIAL_KEY（可回退 ENDFIELD_CREDENTIAL_KEY），"
-            "明日方舟账号绑定与签到已禁用。"
-        )
+        value = os.getenv(KEY_ENV_NAME, "").strip()
+        if not value:
+            raise CredentialKeyError(
+                f"未配置环境变量 {KEY_ENV_NAME}，明日方舟账号绑定与签到已禁用。"
+            )
+        try:
+            key = base64.b64decode(value, validate=True)
+        except (ValueError, TypeError) as exc:
+            raise CredentialKeyError(f"{KEY_ENV_NAME} 不是有效的 Base64 密钥。") from exc
+        if len(key) != 32:
+            raise CredentialKeyError(f"{KEY_ENV_NAME} 解码后不是 32 字节密钥。")
+        return cls(key)
 
     def encrypt(
         self,

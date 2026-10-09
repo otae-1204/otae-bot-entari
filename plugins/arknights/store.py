@@ -354,9 +354,9 @@ class ArknightsStore:
         """Resolve one selector to exactly one role, or explain the failure.
 
         Matching is exact by design: full UID, then UID suffix (at least four
-        characters), then the listed index, then an exact nickname.  Nothing is
-        guessed and nothing fuzzy is accepted, so a selector can never sign in
-        or delete an unintended account.
+        characters), then the listed index (fewer than four digits), then an
+        exact nickname.  Nothing is guessed and nothing fuzzy is accepted, so a
+        selector can never sign in or delete an unintended account.
         """
         roles = self.list_roles(qq_user_id)
         value = str(selector or "").strip()
@@ -378,7 +378,9 @@ class ArknightsStore:
             if suffixed:
                 return _single_or_ambiguous(suffixed, value)
 
-        if value.isdigit():
+        # Four or more digits are meant as a UID suffix.  One that matched no
+        # suffix above must not fall back to an index: "0001" is not role #1.
+        if value.isdecimal() and len(value) < 4:
             index = int(value) - 1
             if 0 <= index < len(roles):
                 role = roles[index]

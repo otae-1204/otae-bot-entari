@@ -16,6 +16,7 @@ import importlib.util
 import json
 import sys
 import tempfile
+import threading
 import types
 import unittest
 from pathlib import Path
@@ -388,6 +389,19 @@ class ArknightsBindingParseTests(unittest.TestCase):
 
 
 class ArknightsClientFlowTests(unittest.IsolatedAsyncioTestCase):
+    def test_default_client_uses_the_shared_tls_context_and_ignores_proxies(self):
+        with mock.patch.object(client_module.httpx, "AsyncClient") as async_client:
+            client = client_module.ArknightsClient()
+
+        async_client.assert_called_once_with(
+            timeout=25.0,
+            follow_redirects=True,
+            trust_env=False,
+            verify=client_module.shared_ssl_context(trust_env=False),
+        )
+        self.assertIs(client.http, async_client.return_value)
+        self.assertTrue(client._owns_http)
+
     async def test_credential_falls_back_to_second_route_with_fresh_code(self):
         paths: list[str] = []
         grants = 0
@@ -541,6 +555,125 @@ class ArknightsClientFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("已签到", str(caught.exception))
 
 
+class _SklandServer:
+    """Fake passport + Skland: each grant issues a new ``cred``; replies are scripted."""
+
+    def __init__(self, replies):
+        self.replies = list(replies)
+        self.grants = 0
+        self.requests: list[tuple[str, str, str, str]] = []
+
+    async def __call__(self, request: httpx.Request):
+        if request.url.host == "as.hypergryph.com":
+            self.grants += 1
+            return httpx.Response(200, json={"status": 0, "data": {"code": f"oauth-{self.grants}"}})
+        if request.url.path.endswith("/user/auth/generate_cred_by_code"):
+            return httpx.Response(200, json={"code": 0, "data": {"cred": f"cred-{self.grants}", "token": "t"}})
+        self.requests.append(
+            (request.method, request.url.path, request.headers["cred"], request.content.decode())
+        )
+        if not self.replies:
+            raise AssertionError(f"unexpected request {request.method} {request.url}")
+        return self.replies.pop(0)
+
+    def posts(self):
+        return [(cred, body) for method, _path, cred, body in self.requests if method == "POST"]
+
+
+def _expired(code: int = 10000) -> httpx.Response:
+    return httpx.Response(200, json={"code": code, "message": "用户未登录 cred=leaked"})
+
+
+class ArknightsContextRetryTests(unittest.IsolatedAsyncioTestCase):
+    """Rejected credentials (10000 / 10003 / 401) get one fresh context, then a rebind hint."""
+
+    BILIBILI_ROLE = SimpleNamespace(uid="20005678", game_id="1", channel_name="B服")
+
+    async def _run(self, server, call):
+        http = httpx.AsyncClient(transport=httpx.MockTransport(server))
+        client = client_module.ArknightsClient(http)
+        try:
+            return await call(client)
+        finally:
+            await http.aclose()
+
+    async def test_a_rejected_attendance_is_retried_once_with_a_fresh_context(self):
+        for rejection in (_expired(10000), _expired(10003), httpx.Response(401, text="Unauthorized")):
+            with self.subTest(status=rejection.status_code, body=rejection.text[:20]):
+                server = _SklandServer([
+                    _expired(10000),  # status probe with the stale cred
+                    rejection,  # the POST is rejected too: nothing was signed
+                    httpx.Response(200, json={"code": 0, "data": {"records": []}}),
+                    httpx.Response(200, json=attendance_success_payload()),
+                    httpx.Response(200, json={"code": 0, "data": {"records": []}}),
+                ])
+                result = await self._run(
+                    server, lambda client: client.attendance("account-token", self.BILIBILI_ROLE)
+                )
+                self.assertEqual(result.status, "success")
+                self.assertEqual(server.grants, 2)
+                body = '{"uid":"20005678","gameId":"1"}'
+                self.assertEqual(server.posts(), [("cred-1", body), ("cred-2", body)])
+
+    async def test_a_day_signed_before_the_rejection_is_reported_as_already(self):
+        server = _SklandServer([
+            _expired(10003),
+            _expired(10003),
+            httpx.Response(200, json={"code": 0, "data": {"hasToday": True}}),
+        ])
+        result = await self._run(
+            server, lambda client: client.attendance("account-token", self.BILIBILI_ROLE)
+        )
+        self.assertEqual(result.status, "already")
+        self.assertEqual(len(server.posts()), 1)  # only the rejected first attempt
+
+    async def test_a_second_rejection_asks_the_user_to_bind_again(self):
+        server = _SklandServer([_expired(10000)] * 4)
+        with self.assertRaises(client_module.ArknightsAPIError) as caught:
+            await self._run(
+                server, lambda client: client.attendance("account-token", self.BILIBILI_ROLE)
+            )
+        message = str(caught.exception)
+        self.assertIn("请重新私聊使用 /ak 绑定", message)
+        self.assertNotIn("leaked", message)
+        self.assertFalse(caught.exception.already_signed)
+        self.assertEqual(server.grants, 2)  # exactly one retry
+        self.assertEqual(len(server.posts()), 2)
+
+    async def test_role_discovery_is_retried_after_an_http_401(self):
+        server = _SklandServer([
+            httpx.Response(401, json={"code": 0}),
+            httpx.Response(200, json=binding_payload()),
+        ])
+        roles = await self._run(server, lambda client: client.discover_roles("account-token"))
+        self.assertEqual([role.uid for role in roles], ["10001234", "20005678"])
+        self.assertEqual([cred for _m, _p, cred, _b in server.requests], ["cred-1", "cred-2"])
+
+    async def test_other_failures_are_not_retried(self):
+        server = _SklandServer([
+            httpx.Response(200, json={"code": 0, "data": {"records": []}}),
+            httpx.Response(200, json={"code": 10002, "message": "活动未开始"}),
+        ])
+        with self.assertRaises(client_module.ArknightsAPIError) as caught:
+            await self._run(
+                server, lambda client: client.attendance("account-token", self.BILIBILI_ROLE)
+            )
+        self.assertEqual(caught.exception.code, "10002")
+        self.assertEqual(server.grants, 1)
+
+    async def test_concurrent_rejections_share_one_fresh_context(self):
+        http = httpx.AsyncClient(transport=httpx.MockTransport(_SklandServer([])))
+        client = client_module.ArknightsClient(http)
+        self.addAsyncCleanup(http.aclose)
+        stale = await client._context("account-token")
+        fresh = await client._context("account-token", refresh=True, stale=stale)
+        self.assertIsNot(fresh, stale)
+        # A second request that was rejected with the same stale context reuses
+        # the context the first one already exchanged.
+        again = await client._context("account-token", refresh=True, stale=stale)
+        self.assertIs(again, fresh)
+
+
 class ArknightsAttendanceTests(unittest.IsolatedAsyncioTestCase):
     def _client(self, handler) -> tuple[client_module.ArknightsClient, httpx.AsyncClient]:
         http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
@@ -672,43 +805,49 @@ class ArknightsCipherTests(unittest.TestCase):
             crypto.ArknightsCipher(b"short")
         with mock.patch.dict(
             "os.environ",
-            {crypto.PRIMARY_KEY_ENV_NAME: base64.b64encode(b"short").decode()},
+            {crypto.KEY_ENV_NAME: base64.b64encode(b"short").decode()},
             clear=False,
         ), self.assertRaises(crypto.CredentialKeyError) as caught:
             crypto.ArknightsCipher.from_env()
-        self.assertIn(crypto.PRIMARY_KEY_ENV_NAME, str(caught.exception))
+        self.assertIn(crypto.KEY_ENV_NAME, str(caught.exception))
 
     def test_invalid_base64_names_the_offending_variable(self):
         with mock.patch.dict(
             "os.environ",
-            {crypto.PRIMARY_KEY_ENV_NAME: "not base64!!"},
+            {crypto.KEY_ENV_NAME: "not base64!!"},
             clear=False,
         ), self.assertRaises(crypto.CredentialKeyError) as caught:
             crypto.ArknightsCipher.from_env()
-        self.assertIn(crypto.PRIMARY_KEY_ENV_NAME, str(caught.exception))
+        self.assertIn(crypto.KEY_ENV_NAME, str(caught.exception))
         self.assertIn("Base64", str(caught.exception))
 
-    def test_falls_back_to_the_endfield_key(self):
-        key = base64.b64encode(b"f" * 32).decode()
-        with mock.patch.dict(
-            "os.environ",
-            {crypto.PRIMARY_KEY_ENV_NAME: "", crypto.FALLBACK_KEY_ENV_NAME: key},
-            clear=False,
-        ):
-            cipher = crypto.ArknightsCipher.from_env()
-        self.assertEqual(cipher.decrypt(cipher.encrypt("token")), "token")
+    def test_the_endfield_key_is_never_a_fallback(self):
+        endfield_key = base64.b64encode(b"f" * 32).decode()
+        for arknights_key in ("", "   "):
+            with self.subTest(arknights_key=arknights_key), mock.patch.dict(
+                "os.environ",
+                {crypto.KEY_ENV_NAME: arknights_key, "ENDFIELD_CREDENTIAL_KEY": endfield_key},
+                clear=False,
+            ), self.assertRaises(crypto.CredentialKeyError) as caught:
+                crypto.ArknightsCipher.from_env()
+            message = str(caught.exception)
+            self.assertIn("ARKNIGHTS_CREDENTIAL_KEY", message)
+            self.assertNotIn("ENDFIELD", message)
 
     def test_missing_key_message_is_actionable(self):
         with mock.patch.dict(
-            "os.environ",
-            {crypto.PRIMARY_KEY_ENV_NAME: "", crypto.FALLBACK_KEY_ENV_NAME: ""},
-            clear=False,
+            "os.environ", {crypto.KEY_ENV_NAME: ""}, clear=False
         ), self.assertRaises(crypto.CredentialKeyError) as caught:
             crypto.ArknightsCipher.from_env()
         message = str(caught.exception)
         self.assertIn("未配置", message)
-        self.assertIn(crypto.PRIMARY_KEY_ENV_NAME, message)
-        self.assertIn(crypto.FALLBACK_KEY_ENV_NAME, message)
+        self.assertIn("ARKNIGHTS_CREDENTIAL_KEY", message)
+
+    def test_only_the_arknights_key_is_read(self):
+        source = (ROOT / "plugins/arknights/crypto.py").read_text(encoding="utf-8")
+        code = source.split('"""', 2)[2]  # skip the module docstring that explains why
+        self.assertNotIn("ENDFIELD_CREDENTIAL_KEY", code)
+        self.assertEqual(crypto.KEY_ENV_NAME, "ARKNIGHTS_CREDENTIAL_KEY")
 
 
 # -------------------------------------------------------------------- store
@@ -838,6 +977,39 @@ class ArknightsStoreTests(unittest.TestCase):
         self.assertIsNone(self.store.resolve("7", "5678").role)
         # A full nickname still resolves when nothing numeric matches.
         self.assertEqual(self.store.resolve("7", "甲").role.uid, "10001234")
+
+    def test_four_or_more_digits_never_fall_back_to_an_index(self):
+        self._bind()  # 10001234 (#1) and 20005678 (#2)
+        for selector in ("0001", "0002", "00001", "0000002"):
+            with self.subTest(selector=selector):
+                resolution = self.store.resolve("7", selector)
+                self.assertEqual(resolution.reason, store_module.NOT_FOUND)
+                self.assertIsNone(resolution.role)
+                roles, _ = self.store.resolve_roles("7", selector)
+                self.assertEqual(roles, ())
+                self.assertFalse(self.store.set_primary("7", selector).resolved)
+                self.assertFalse(self.store.unbind("7", selector).resolved)
+        self.assertEqual([item.uid for item in self.store.list_roles("7")], ["10001234", "20005678"])
+        self.assertEqual(self.store.list_roles("7")[0].is_primary, True)
+        # Short numbers are still indexes, including full-width digits from an IME.
+        self.assertEqual(self.store.resolve("7", "2").role.uid, "20005678")
+        self.assertEqual(self.store.resolve("7", "02").role.uid, "20005678")
+        self.assertEqual(self.store.resolve("7", "２").role.uid, "20005678")
+        # Digits that are not decimal never crash the int() conversion.
+        self.assertEqual(self.store.resolve("7", "²").reason, store_module.NOT_FOUND)
+
+    def test_four_digits_that_are_a_uid_suffix_select_that_role(self):
+        self._bind(
+            roles=[
+                store_module.RoleCandidate("10001234", "1", "甲", "官服"),
+                store_module.RoleCandidate("30000001", "1", "丙", "B服"),
+            ]
+        )
+        # "0001" is the B服 role's suffix, not role #1.
+        self.assertEqual(self.store.resolve("7", "0001").role.uid, "30000001")
+        removed = self.store.unbind("7", "0001")
+        self.assertEqual(removed.role.uid, "30000001")
+        self.assertEqual([item.uid for item in self.store.list_roles("7")], ["10001234"])
 
     def test_bulk_selector_is_refused_for_single_account_operations(self):
         self._bind()
@@ -1199,17 +1371,24 @@ class ArknightsRendererTests(unittest.TestCase):
 
 
 class _FakeMatcher:
-    def __init__(self):
+    """``messages`` keeps everything shown to the user, ``sent`` only ``send()``."""
+
+    def __init__(self, *, fail_sends: int = 0):
         self.messages: list = []
         self.sent: list = []
+        self.fail_sends = fail_sends
 
     async def finish(self, message=None):
         if message is not None:
             self.messages.append(message)
 
     async def send(self, message=None):
+        if self.fail_sends > 0:
+            self.fail_sends -= 1
+            raise RuntimeError("message connection interrupted")
         if message is not None:
             self.sent.append(message)
+            self.messages.append(message)
 
     def last_text(self) -> str:
         return str(self.messages[-1]) if self.messages else ""
@@ -1236,6 +1415,112 @@ class ArknightsHandlerTests(unittest.IsolatedAsyncioTestCase):
     def test_storage_and_http_client_are_created_lazily(self):
         self.assertIsNone(self.handlers._store)
         self.assertIsNone(self.handlers._client)
+
+    async def test_the_first_client_builds_its_tls_context_off_the_event_loop(self):
+        from otae_bot.infrastructure.http import tls
+
+        loop_thread = threading.get_ident()
+        built_on: list[int] = []
+        context = object()
+
+        def create_ssl_context(**_kwargs):
+            built_on.append(threading.get_ident())
+            return context
+
+        constructed: list[object] = []
+
+        def client_factory():
+            # By the time the client asks for the context it must be cached.
+            constructed.append(tls._contexts.get(tls._key(False)))
+            return mock.Mock(close=mock.AsyncMock())
+
+        with (
+            mock.patch.dict(tls._contexts, clear=True),
+            mock.patch.object(tls.httpx, "create_ssl_context", side_effect=create_ssl_context),
+            mock.patch.object(self.handlers, "ArknightsClient", side_effect=client_factory),
+            mock.patch.object(self.handlers, "_client", None),
+        ):
+            first = await self.handlers._client_instance()
+            second = await self.handlers._client_instance()
+
+        self.assertIs(first, second)
+        self.assertEqual(len(built_on), 1)
+        self.assertNotEqual(built_on[0], loop_thread)
+        self.assertEqual(constructed, [context])
+
+    async def _bind(self, *answers, phone_code=None):
+        """Run /ak 绑定 with scripted replies, recording sensitivity per prompt."""
+        from otae_bot.adapters import message_log
+
+        answers = list(answers)
+        prompts: list[tuple[str, bool, str]] = []
+
+        async def prompt(message, timeout):
+            reply = answers.pop(0)
+            # What Entari's [message] logger would print for this private reply.
+            record = {"message": f"[QQ] 博士(7) -> {reply!r}"}
+            message_log.redact_record(record)
+            prompts.append((message, message_log.is_sensitive("7"), record["message"]))
+            return SimpleNamespace(extract_plain_text=lambda: reply)
+
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        store = store_module.ArknightsStore(Path(directory.name) / "ak.db")
+        self.addCleanup(store.close)
+        client = mock.Mock(
+            send_phone_code=mock.AsyncMock(),
+            token_by_phone_code=mock.AsyncMock(return_value=phone_code),
+            discover_roles=mock.AsyncMock(
+                return_value=[store_module.RoleCandidate("10001234", "1", "甲", "官服")]
+            ),
+        )
+        cipher = crypto.ArknightsCipher(b"k" * 32)
+        matcher = _FakeMatcher()
+        with (
+            mock.patch.object(self.handlers, "prompt", prompt),
+            mock.patch.object(self.handlers, "_store_instance", lambda: store),
+            mock.patch.object(self.handlers, "_client_instance", mock.AsyncMock(return_value=client)),
+            mock.patch.object(self.handlers.ArknightsCipher, "from_env", return_value=cipher),
+        ):
+            await self.handlers._dispatch(matcher, _event(private=True), commands_module.parse_command("绑定"))
+        self.assertEqual(answers, [])
+        self.assertFalse(message_log.is_sensitive("7"))
+        return matcher, prompts, client
+
+    async def test_token_binding_keeps_the_token_out_of_the_message_log(self):
+        token = "hgAccountToken0123456789abcdefXYZ"
+        matcher, prompts, client = await self._bind("1", f'{{"code":0,"data":{{"content":"{token}"}}}}')
+        client.discover_roles.assert_awaited_once_with(token)
+        self.assertIn("绑定完成", matcher.last_text())
+        self.assertTrue(all(sensitive for _message, sensitive, _log in prompts))
+        for _message, _sensitive, logged in prompts:
+            self.assertNotIn(token, logged)
+
+    async def test_sms_binding_keeps_the_phone_and_code_out_of_the_message_log(self):
+        phone, code, token = "13812345678", "654321", "sms-account-token-secret-value"
+        matcher, prompts, client = await self._bind("2", phone, code, phone_code=token)
+        client.send_phone_code.assert_awaited_once_with(phone)
+        client.token_by_phone_code.assert_awaited_once_with(phone, code)
+        self.assertIn("绑定完成", matcher.last_text())
+        self.assertEqual(len(prompts), 3)
+        self.assertTrue(all(sensitive for _message, sensitive, _log in prompts))
+        logged = "\n".join(line for _message, _sensitive, line in prompts)
+        for secret in (phone, code, phone[3:7]):
+            self.assertNotIn(secret, logged)
+
+    async def test_a_failed_binding_still_ends_the_sensitive_dialog(self):
+        from otae_bot.adapters import message_log
+
+        async def prompt(message, timeout):
+            raise RuntimeError("prompt broke")
+
+        with mock.patch.object(self.handlers, "prompt", prompt), mock.patch.object(
+            self.handlers.ArknightsCipher, "from_env", return_value=crypto.ArknightsCipher(b"k" * 32)
+        ):
+            matcher = _FakeMatcher()
+            await self.handlers._dispatch(matcher, _event(private=True), commands_module.parse_command("绑定"))
+        self.assertIn("暂时不可用", matcher.last_text())
+        self.assertFalse(message_log.is_sensitive("7"))
 
     async def test_binding_is_refused_in_a_group_chat(self):
         matcher = _FakeMatcher()
@@ -1290,7 +1575,9 @@ class ArknightsHandlerTests(unittest.IsolatedAsyncioTestCase):
 
         stack = contextlib.ExitStack()
         stack.enter_context(mock.patch.object(self.handlers, "_store_instance", lambda: store))
-        stack.enter_context(mock.patch.object(self.handlers, "_client_instance", lambda: client))
+        stack.enter_context(
+            mock.patch.object(self.handlers, "_client_instance", mock.AsyncMock(return_value=client))
+        )
         stack.enter_context(mock.patch.object(self.handlers, "ArknightsCipher", _StubCipher))
         stack.enter_context(
             mock.patch.object(
@@ -1388,6 +1675,22 @@ class ArknightsHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(delivered, [b"\x89PNG-card"])
         self.assertEqual(matcher.messages, [])
 
+    async def test_long_numbers_that_are_no_uid_suffix_select_nothing(self):
+        store, cipher = self._bound_store()
+        client = _FakeClient({})
+        for text in ("签到 0001", "签到 0002", "解绑 0001", "主账号 0002"):
+            with self.subTest(command=text):
+                matcher = _FakeMatcher()
+                with self._patch_runtime(store, cipher, client):
+                    await self.handlers._dispatch(
+                        matcher, _event(private=True), commands_module.parse_command(text)
+                    )
+                self.assertIn("未找到", matcher.last_text())
+        self.assertEqual(client.calls, [])
+        roles = store.list_roles("7")
+        self.assertEqual([item.uid for item in roles], ["10001234", "20005678"])
+        self.assertTrue(roles[0].is_primary)
+
     async def test_attendance_png_returns_none_when_the_renderer_raises(self):
         view = models_module.AttendanceCardView(roles=(), generated_at="x")
         with mock.patch.object(
@@ -1400,17 +1703,19 @@ class ArknightsHandlerTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await self.handlers._attendance_png(view), b"png")
 
     async def test_missing_key_message_reaches_the_user(self):
-        matcher = _FakeMatcher()
-        with mock.patch.dict(
-            "os.environ",
-            {crypto.PRIMARY_KEY_ENV_NAME: "", crypto.FALLBACK_KEY_ENV_NAME: ""},
-            clear=False,
-        ):
-            await self.handlers._dispatch(
-                matcher, _event(private=True), commands_module.parse_command("绑定")
-            )
-        self.assertIn("未配置", matcher.last_text())
-        self.assertIn(crypto.PRIMARY_KEY_ENV_NAME, matcher.last_text())
+        endfield_key = base64.b64encode(b"f" * 32).decode()
+        for text in ("绑定", "签到"):
+            with self.subTest(command=text), mock.patch.dict(
+                "os.environ",
+                {crypto.KEY_ENV_NAME: "", "ENDFIELD_CREDENTIAL_KEY": endfield_key},
+                clear=False,
+            ):
+                matcher = _FakeMatcher()
+                await self.handlers._dispatch(
+                    matcher, _event(private=True), commands_module.parse_command(text)
+                )
+            self.assertIn("未配置", matcher.last_text())
+            self.assertIn("ARKNIGHTS_CREDENTIAL_KEY", matcher.last_text())
 
 
 class ArknightsCleanupTests(unittest.IsolatedAsyncioTestCase):

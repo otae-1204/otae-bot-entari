@@ -748,7 +748,7 @@ class GameCapabilityWiringTests(unittest.IsolatedAsyncioTestCase):
         stub = type("_Cipher", (), {"from_env": classmethod(lambda cls: cipher)})
         with (
             mock.patch.object(self.arknights, "_store_instance", lambda: store),
-            mock.patch.object(self.arknights, "_client_instance", lambda: client),
+            mock.patch.object(self.arknights, "_client_instance", mock.AsyncMock(return_value=client)),
             mock.patch.object(self.arknights, "ArknightsCipher", stub),
             mock.patch.object(
                 self.arknights, "draw_attendance_card", mock.AsyncMock(return_value=None)
@@ -793,7 +793,7 @@ class GameCapabilityWiringTests(unittest.IsolatedAsyncioTestCase):
         stub = type("_Cipher", (), {"from_env": classmethod(lambda cls: cipher)})
         with (
             mock.patch.object(self.arknights, "_store_instance", lambda: store),
-            mock.patch.object(self.arknights, "_client_instance", lambda: client),
+            mock.patch.object(self.arknights, "_client_instance", mock.AsyncMock(return_value=client)),
             mock.patch.object(self.arknights, "ArknightsCipher", stub),
             mock.patch.object(
                 self.arknights, "draw_attendance_card", mock.AsyncMock(return_value=b"png")

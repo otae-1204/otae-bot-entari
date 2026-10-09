@@ -309,7 +309,7 @@ async def main() -> None:
             lambda view: "",
             result=attendance_registry.AttendanceResult(
                 ok=False,
-                text="未配置 ARKNIGHTS_CREDENTIAL_KEY（可回退 ENDFIELD_CREDENTIAL_KEY）。",
+                text="未配置环境变量 ARKNIGHTS_CREDENTIAL_KEY，明日方舟账号绑定与签到已禁用。",
             ),
         ),
     ]

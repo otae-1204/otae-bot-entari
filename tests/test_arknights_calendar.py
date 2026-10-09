@@ -565,7 +565,9 @@ class AttendanceFlowTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(client_module.ArknightsAPIError) as caught:
             await self._run(handler)
         self.assertFalse(caught.exception.already_signed)
-        self.assertEqual(handler.posts, 1)
+        # One rejected POST per context: the original and the single refreshed one.
+        self.assertEqual(handler.posts, 2)
+        self.assertIn("请重新私聊使用 /ak 绑定", str(caught.exception))
 
 
 # -------------------------------------------------------------------- views

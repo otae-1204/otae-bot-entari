@@ -27,11 +27,13 @@ from otae_bot.adapters.entari import (
     on_alconna,
     prompt,
 )
+from otae_bot.adapters.message_log import sensitive_input
 from otae_bot.attendance_registry import (
     AttendanceCapability,
     AttendanceResult,
     register_attendance_capability,
 )
+from otae_bot.infrastructure.http.tls import ashared_ssl_context
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
 
 from .attendance import sign_roles
@@ -94,10 +96,14 @@ def _store_instance() -> ArknightsStore:
     return _store
 
 
-def _client_instance() -> ArknightsClient:
+async def _client_instance() -> ArknightsClient:
     global _client
     if _client is None:
-        _client = ArknightsClient()
+        # The first request runs on the event loop: build the shared TLS context
+        # in a worker thread so the client's own lookup is only a cache hit.
+        await ashared_ssl_context(trust_env=False)
+        if _client is None:
+            _client = ArknightsClient()
     return _client
 
 
@@ -146,7 +152,9 @@ async def _dispatch(matcher, event: Event, command) -> None:
             return await matcher.finish(PRIVATE_ONLY_NOTICE)
 
         if command.action == ACTION_BIND:
-            return await _handle_bind(matcher, user_id)
+            # The [message] log hides codes and tokens this user sends until the dialog ends.
+            with sensitive_input(user_id):
+                return await _handle_bind(matcher, user_id)
         if command.action == ACTION_ACCOUNTS:
             return await _handle_accounts(matcher, user_id, reveal_uid=not group)
         if command.action == ACTION_PRIMARY:
@@ -189,7 +197,7 @@ async def _handle_bind(matcher, user_id: str) -> None:
     if not account_token:
         return None
 
-    roles = await _client_instance().discover_roles(account_token)
+    roles = await (await _client_instance()).discover_roles(account_token)
     if not roles:
         return await matcher.finish(
             "该鹰角账号下未找到明日方舟角色（支持官服与 B服；请确认已在森空岛绑定角色）。"
@@ -234,7 +242,8 @@ async def _bind_phone(matcher) -> str | None:
     if not PHONE_PATTERN.fullmatch(phone):
         await matcher.finish("手机号格式不正确，绑定已取消。")
         return None
-    await _client_instance().send_phone_code(phone)
+    client = await _client_instance()
+    await client.send_phone_code(phone)
     code = await _prompt_text(CODE_PROMPT, timeout=120)
     if code is None:
         await matcher.finish(CANCELLED_TEXT)
@@ -242,7 +251,7 @@ async def _bind_phone(matcher) -> str | None:
     if not CODE_PATTERN.fullmatch(code):
         await matcher.finish("验证码格式不正确，绑定已取消。")
         return None
-    return await _client_instance().token_by_phone_code(phone, code)
+    return await client.token_by_phone_code(phone, code)
 
 
 # ------------------------------------------------------------- account admin
@@ -289,7 +298,7 @@ async def _handle_attendance(matcher, user_id: str, selector: str, *, group: boo
     roles, resolution = store.resolve_roles(user_id, selector)
     if not roles:
         return await matcher.finish(format_selector_failure(resolution, reveal_uid=not group))
-    view = await sign_roles(store, _client_instance(), cipher, roles)
+    view = await sign_roles(store, await _client_instance(), cipher, roles)
     await _finish_attendance_view(matcher, view, group=group)
 
 
@@ -346,7 +355,7 @@ async def _signin_attendance(user_id: str, *, group: bool) -> AttendanceResult:
         cipher = ArknightsCipher.from_env()
     except CredentialKeyError as exc:
         return AttendanceResult(ok=False, text=str(exc))
-    view = await sign_roles(store, _client_instance(), cipher, roles)
+    view = await sign_roles(store, await _client_instance(), cipher, roles)
     return AttendanceResult(
         png=await _attendance_png(view),
         text=format_attendance_report(view, reveal_uid=not group),
