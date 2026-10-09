@@ -1,11 +1,13 @@
-"""Shared registry behind the unified ``/签到`` entry point.
+"""Shared registry that lets ``/ak 签到`` and ``/ef 签到`` sign the other game too.
 
 Each game plugin owns its own database, credential decryption and HTTP client.
 Importing another plugin's ``handlers`` module would re-run its command
 registration and initialization as a side effect, so a game instead registers a
-small capability object while it loads and the unified entry point only walks
-this registry.  Nothing here sends a message or finishes a matcher: the caller
-renders and delivers, which keeps the loop testable without an Entari session.
+small capability object while it loads.  After a game command signed its own
+roles, it walks this registry for the *other* games the user has bound.
+Nothing here sends a message or finishes a matcher: the caller renders and
+delivers (see :mod:`otae_bot.attendance_delivery`), which keeps the loop
+testable without an Entari session.
 
 This is shared code, so it must never import ``plugins.*`` — that dependency
 direction is enforced by ``tests/test_architecture.py``.
@@ -31,31 +33,19 @@ DISABLED = "disabled"
 UNAVAILABLE = "unavailable"
 FAILED = "failed"
 
-# Games the unified entry point knows about, in execution order.  Labels and
-# binding hints live here so a game whose plugin is not loaded is still reported
-# precisely instead of being mistaken for "not bound".
+# Known games in execution order, with the label shown in notices.  A game
+# missing here still runs, after the known ones, under its own id.
 GAME_ORDER: tuple[str, ...] = ("endfield", "arknights")
-GAME_IDENTITIES: dict[str, tuple[str, str]] = {
-    "endfield": ("终末地", "/zmd 绑定"),
-    "arknights": ("明日方舟", "/ak 绑定"),
+GAME_LABELS: dict[str, str] = {
+    "endfield": "终末地",
+    "arknights": "明日方舟",
 }
 
 FAILURE_RETRY_MESSAGE = "签到失败，请稍后重试"
 
 
 def game_label(game: str) -> str:
-    return GAME_IDENTITIES.get(game, (game, ""))[0]
-
-
-def game_bind_hint(game: str) -> str:
-    default_hint = f"/{game} 绑定" if game else "绑定"
-    return GAME_IDENTITIES.get(game, (game, default_hint))[1]
-
-
-def unbound_notice() -> str:
-    """Prompt used only when no game has anything bound for this user."""
-    hints = "、".join(f"{hint}（{label}）" for label, hint in GAME_IDENTITIES.values())
-    return f"尚未绑定任何签到账号。请私聊使用 {hints}完成绑定。"
+    return GAME_LABELS.get(game, game)
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,17 +75,23 @@ class AttendanceOutcome:
         return self.status == SIGNED and self.png is not None
 
 
+def signed_outcome(game: str, *, png: bytes | None, text: str) -> AttendanceOutcome:
+    """The result of the game the user actually asked for."""
+    return AttendanceOutcome(game, game_label(game), SIGNED, text, png)
+
+
 @dataclass(frozen=True)
 class AttendanceCapability:
-    """One game's contribution to ``/签到``.
+    """What one game offers when *another* game's sign-in command runs.
 
     ``roles`` answers "does this user have anything bound here?" without
     touching credentials, so an unbound user never triggers a key error.
     ``sign`` performs the whole game run — every bound character, isolated
-    failures, rendered card — and returns the result.  ``module`` identifies the
-    registering module so a hot reload can replace stale state, and
-    ``feature_key`` names the group switch that still governs this game (the
-    game plugin's own key unless a game says otherwise).
+    failures, rendered card — and returns the result; the selector the user
+    typed belongs to the command's own game and is never passed here.
+    ``module`` identifies the registering module so a hot reload can replace
+    stale state, and ``feature_key`` names the group switch that still governs
+    this game (the game plugin's own key unless a game says otherwise).
     """
 
     game: str
@@ -185,7 +181,7 @@ async def collect_outcomes(
     enabled: Callable[[str], bool],
     games: Sequence[str] = GAME_ORDER,
 ) -> list[AttendanceOutcome]:
-    """Run every registered game for one user, never letting one abort another.
+    """Run the given games for one user, never letting one abort another.
 
     ``enabled`` answers the group switch question for a game's plugin key.  It
     is only consulted for games that are actually registered, so a group switch
@@ -217,7 +213,7 @@ async def collect_outcomes(
             raise
         except Exception as exc:  # noqa: BLE001 - one game must not abort the other
             logger.error(
-                f"[signin] binding lookup failed: game={game} error_type={type(exc).__name__}"
+                f"[attendance] binding lookup failed: game={game} error_type={type(exc).__name__}"
             )
             outcomes.append(
                 AttendanceOutcome(
@@ -226,11 +222,7 @@ async def collect_outcomes(
             )
             continue
         if not roles:
-            outcomes.append(
-                AttendanceOutcome(
-                    game, label, UNBOUND, f"{label}：尚未绑定，请私聊使用 {game_bind_hint(game)}。"
-                )
-            )
+            outcomes.append(AttendanceOutcome(game, label, UNBOUND))
             continue
         try:
             result = await capability.sign(user_id, group=group)
@@ -238,7 +230,7 @@ async def collect_outcomes(
             raise
         except Exception as exc:  # noqa: BLE001 - one game must not abort the other
             logger.error(
-                f"[signin] attendance failed: game={game} error_type={type(exc).__name__}"
+                f"[attendance] attendance failed: game={game} error_type={type(exc).__name__}"
             )
             outcomes.append(
                 AttendanceOutcome(game, label, FAILED, f"{label}：{FAILURE_RETRY_MESSAGE}。")
@@ -252,39 +244,51 @@ async def collect_outcomes(
     return outcomes
 
 
-def build_notice(outcomes: Sequence[AttendanceOutcome]) -> str:
-    """The text sent besides the per-game cards; empty when nothing is needed.
+async def collect_companion_outcomes(
+    user_id: str,
+    *,
+    current: str,
+    group: bool,
+    enabled: Callable[[str], bool],
+) -> list[AttendanceOutcome]:
+    """Sign every *other* registered game in which this user bound roles.
 
-    Problems that need attention — a closed group switch, an unloaded plugin, a
-    failed run — are always reported.  A game the user simply never bound stays
-    silent while another game produced a result, so a single-game user is not
-    nagged on every sign-in; it is only named when nothing ran at all.
+    ``/ak 签到`` and ``/ef 签到`` call this after signing their own game.  The
+    other game always signs all of its bound roles.  A game the user never
+    bound, a game this group switched off and a game whose plugin is not loaded
+    produce nothing at all: the user asked for one game, so only the other
+    game's real results and real failures are worth a word.
     """
-    notes = [
+    games = tuple(game for game in registry.games() if game != current)
+    outcomes = await collect_outcomes(user_id, group=group, enabled=enabled, games=games)
+    return [outcome for outcome in outcomes if outcome.status in {SIGNED, FAILED}]
+
+
+def build_notice(outcomes: Sequence[AttendanceOutcome]) -> str:
+    """The text sent besides the cards; empty when nothing needs attention.
+
+    Problems — a closed group switch, an unloaded plugin, a failed run — are
+    reported with their own text.  A game the user simply never bound is
+    never mentioned.
+    """
+    return "\n".join(
         outcome.text
         for outcome in outcomes
         if outcome.status in {DISABLED, UNAVAILABLE, FAILED} and outcome.text
-    ]
-    if any(outcome.status == SIGNED for outcome in outcomes):
-        return "\n".join(notes)
-    unbound = [outcome for outcome in outcomes if outcome.status == UNBOUND]
-    if unbound and len(unbound) == len(outcomes):
-        return unbound_notice()
-    notes.extend(outcome.text for outcome in unbound if outcome.text)
-    return "\n".join(notes)
+    )
 
 
 async def on_plugin_unloaded(event: PluginUnloaded) -> None:
     """Release registrations of a plugin that will not come back."""
     plugin_id = str(getattr(event, "plugin_id", "") or "")
     if registry.unregister_owner(plugin_id):
-        logger.debug(f"[signin] released attendance capability of {plugin_id}")
+        logger.debug(f"[attendance] released attendance capability of {plugin_id}")
 
 
 __all__ = [
     "DISABLED",
     "FAILED",
-    "GAME_IDENTITIES",
+    "GAME_LABELS",
     "GAME_ORDER",
     "SIGNED",
     "UNAVAILABLE",
@@ -294,12 +298,12 @@ __all__ = [
     "AttendanceRegistry",
     "AttendanceResult",
     "build_notice",
+    "collect_companion_outcomes",
     "collect_outcomes",
-    "game_bind_hint",
     "game_label",
     "on_plugin_unloaded",
     "register_attendance_capability",
     "registry",
-    "unbound_notice",
+    "signed_outcome",
     "unregister_attendance_capability",
 ]

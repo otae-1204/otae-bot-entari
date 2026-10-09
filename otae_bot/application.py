@@ -50,7 +50,7 @@ def create_app() -> Entari:
     listen(Cleanup)(close_shared_resources)
     listen(PluginLoadedSuccess)(on_plugin_loaded)
     # A game plugin that is unloaded for good must stop advertising its
-    # attendance capability to the unified /签到 entry point.
+    # attendance capability to the other game's /ak 签到 or /ef 签到.
     listen(PluginUnloaded)(on_plugin_unloaded)
     for name in discover_plugins():
         load_plugin(name)

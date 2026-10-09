@@ -330,32 +330,38 @@ async def check_group_switches():
 
 asyncio.get_event_loop().run_until_complete(check_group_switches())
 
-async def check_signin_dispatch():
-    # The unified /签到 entry is registered by its own plugin, answers an
-    # unbound user with one binding prompt, and still obeys its group switch.
-    session = group_session(user='test-root')
-    await run_command(session, '/签到')
-    assert session.send.await_count == 1, session.send.await_args_list
-    assert '尚未绑定任何签到账号' in str(session.send.await_args.args[0]), session.send.await_args_list
-    session = group_session(user='test-root')
-    await run_command(session, '/签到 全部')
-    assert session.send.await_count == 1, session.send.await_args_list
-    assert '用法：/签到' in str(session.send.await_args.args[0]), session.send.await_args_list
-    probe = group_session(user='test-root')
-    scope = scope_from_event(probe.account, probe.event)
-    feature_store.set_enabled(scope, 'signin', False)
+async def check_attendance_dispatch():
+    # There is no standalone /签到 command; each game's own 签到 also signs the
+    # other game, and needs the injected account for that game's group switch.
+    assert 'plugins.signin' not in plugin_service.plugins
     session = group_session(user='test-root')
     await run_command(session, '/签到')
     session.send.assert_not_awaited()
-    feature_store.set_enabled(scope, 'signin', True)
+    arknights = sys.modules['plugins.arknights.handlers']
+    endfield = sys.modules['plugins.endfield.handlers']
+    recorded = AsyncMock()
+    session = group_session(user='test-root')
+    with patch.object(arknights, '_handle_attendance', recorded):
+        await run_command(session, '/ak 签到 1234')
+    recorded.assert_awaited_once()
+    assert recorded.await_args.kwargs['bot'] is session.account, recorded.await_args
+    assert recorded.await_args.args[3] == '1234', recorded.await_args
+    recorded = AsyncMock()
+    session = group_session(user='test-root')
+    with (patch.object(endfield, '_handle_attendance', recorded),
+          patch.object(endfield.CredentialCipher, 'from_env', return_value=object())):
+        await run_command(session, '/ef 签到 1234')
+    recorded.assert_awaited_once()
+    assert recorded.await_args.kwargs['bot'] is session.account, recorded.await_args
+    assert recorded.await_args.args[3].account_selector == '1234', recorded.await_args
     # Both games must have registered their attendance capability while loading.
     from otae_bot.attendance_registry import registry
     assert registry.games() == ('endfield', 'arknights'), registry.games()
 
-asyncio.get_event_loop().run_until_complete(check_signin_dispatch())
+asyncio.get_event_loop().run_until_complete(check_attendance_dispatch())
 
 # A direct call to the cleanup function misses Entari's parameter injection.
-async def check_signin_real_unload_reload():
+async def check_attendance_real_unload_reload():
     from arclet.entari import Entari, load_plugin
     from arclet.entari.plugin import unload_plugin_async
     from otae_bot.attendance_registry import registry
@@ -370,7 +376,7 @@ async def check_signin_real_unload_reload():
     assert registry.get('arknights').module is not old.module
     assert len(registry) == 2
 
-asyncio.get_event_loop().run_until_complete(check_signin_real_unload_reload())
+asyncio.get_event_loop().run_until_complete(check_attendance_real_unload_reload())
 
 # Exercise the actual incoming-event path, including quote lookup and the
 # prefix filter. CommandExecute alone skips the prefix filter that caused this bug.

@@ -3,8 +3,8 @@
 Kept free of Entari imports so the loop can be exercised directly in tests: one
 character failing (expired credential, network error, duplicate request, storage
 fault) must never stop the remaining characters from being signed in.  Both
-``/ef 签到`` and the unified ``/签到`` entry point call :func:`sign_roles` and
-then render the returned view with this game's own card.
+``/ef 签到`` and ``/ak 签到`` (which also signs a bound Endfield account) call
+:func:`sign_roles` and then render the returned view with this game's own card.
 """
 
 from __future__ import annotations

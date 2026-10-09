@@ -1412,6 +1412,21 @@ class ArknightsHandlerTests(unittest.IsolatedAsyncioTestCase):
 
         cls.handlers = handlers
 
+    def setUp(self):
+        from otae_bot import attendance_delivery, attendance_registry
+
+        # No other game is registered here, so /ak 签到 only signs Arknights;
+        # tests/test_signin_registry.py covers the combined reply.
+        self.enterContext(
+            mock.patch.object(attendance_registry, "registry", attendance_registry.AttendanceRegistry())
+        )
+        self.images: list[bytes] = []
+        self.enterContext(mock.patch.object(attendance_delivery, "png_image", self._image))
+
+    def _image(self, data: bytes) -> str:
+        self.images.append(data)
+        return f"IMAGE-{len(self.images)}"
+
     def test_storage_and_http_client_are_created_lazily(self):
         self.assertIsNone(self.handlers._store)
         self.assertIsNone(self.handlers._client)
@@ -1661,19 +1676,33 @@ class ArknightsHandlerTests(unittest.IsolatedAsyncioTestCase):
             {"token-a": client_module.AttendanceResult("already", "今日已签到", ())}
         )
         matcher = _FakeMatcher()
-        delivered: list[bytes] = []
-
-        async def _capture(_matcher, png):
-            delivered.append(png)
-
-        with self._patch_runtime(store, cipher, client, card=b"\x89PNG-card"), mock.patch.object(
-            self.handlers, "_finish_png", _capture
-        ):
+        with self._patch_runtime(store, cipher, client, card=b"\x89PNG-card"):
             await self.handlers._dispatch(
                 matcher, _event(private=True), commands_module.parse_command("签到 1234")
             )
-        self.assertEqual(delivered, [b"\x89PNG-card"])
-        self.assertEqual(matcher.messages, [])
+        self.assertEqual(self.images, [b"\x89PNG-card"])
+        self.assertEqual(len(matcher.messages), 1)
+        self.assertNotIsInstance(matcher.messages[0], str)
+        self.assertNotIn("签到结果", str(matcher.messages[0]))  # no duplicate text report
+
+    async def test_image_send_failure_falls_back_to_text_without_signing_again(self):
+        store, cipher = self._bound_store()
+        client = _FakeClient(
+            {"token-a": client_module.AttendanceResult("success", "签到成功", ())}
+        )
+        matcher = _FakeMatcher(fail_sends=1)
+        with self._patch_runtime(store, cipher, client, card=b"\x89PNG-card"):
+            await self.handlers._dispatch(
+                matcher, _event(private=False), commands_module.parse_command("签到")
+            )
+        self.assertEqual(client.calls, ["10001234", "20005678"])  # each role signed once
+        self.assertEqual(self.images, [b"\x89PNG-card"])
+        self.assertEqual(len(matcher.messages), 1)
+        text = matcher.messages[0]
+        self.assertIsInstance(text, str)
+        self.assertIn("明日方舟森空岛签到结果", text)
+        self.assertIn("****1234", text)
+        self.assertNotIn("10001234", text)
 
     async def test_long_numbers_that_are_no_uid_suffix_select_nothing(self):
         store, cipher = self._bound_store()

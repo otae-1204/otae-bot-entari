@@ -1,13 +1,15 @@
-"""Render the unified ``/签到`` messages using sample accounts.
+"""Render the combined ``/ak 签到`` / ``/ef 签到`` messages using sample accounts.
 
-Drives the real orchestration (``otae_bot.attendance_registry``) and the two
-games' real card renderers with fabricated roles, then writes the exact message
-sequence the chat would receive:
+Drives the real orchestration (``otae_bot.attendance_registry`` and
+``otae_bot.attendance_delivery``) and the two games' real card renderers with
+fabricated roles, then writes the exact message sequence the chat would receive.
+The requested game's card is on top; the other game's bound roles follow:
 
-* ``both-success``      — 一张上下拼接的卡片（终末地 + 明日方舟）
-* ``six-accounts``      — 终末地 3 个角色 + 明日方舟 3 个角色，均含奖励和累签轨道
-* ``one-failed``        — 一条消息，包含终末地卡片 + 明日方舟文字失败提示
-* ``none-bound``        — 单条绑定提示
+* ``both-success``      — ``/ak 签到``：明日方舟在上、终末地在下的一张拼接图
+* ``six-accounts``      — ``/ef 签到``：终末地 3 个角色 + 明日方舟 3 个角色，均含奖励和累签轨道
+* ``one-failed``        — ``/ef 签到``：终末地卡片 + 明日方舟的文字失败提示（同一条消息）
+* ``one-role-failed``   — ``/ef 签到``：明日方舟卡片里单个角色失败
+* ``other-unbound``     — ``/ak 签到``：未绑定终末地，只发明日方舟卡片、不提示
 
 Never reads ``.env``, the account databases or any real credential.  Both game
 packages are imported through throwaway package names so neither plugin's
@@ -72,9 +74,7 @@ try:
     for module in ("models", "rendering.cards"):
         importlib.import_module(f"{ARKNIGHTS_PACKAGE}.{module}")
 
-    from otae_bot import attendance_registry
-    _package("signin_result_preview", "signin")
-    presentation = importlib.import_module("signin_result_preview.presentation")
+    from otae_bot import attendance_delivery, attendance_registry
     from otae_bot.infrastructure.rendering.browser import close_browser
     from otae_bot.infrastructure.rendering.executor import close_image_executor
 finally:
@@ -227,21 +227,28 @@ def capability(game: str, view, renderer, report, result=None, roles=("role",)):
     )
 
 
-async def run_case(name: str, capabilities, *, html_only: bool, output_dir: Path) -> dict:
+async def run_case(name: str, current: str, capabilities, *, output_dir: Path) -> dict:
+    """Model ``/<current> 签到``: sign ``current``, then every other bound game."""
     registry = attendance_registry.AttendanceRegistry()
+    own = next(item for item in capabilities if item.game == current)
     for item in capabilities:
-        registry.register(item)
+        if item is not own:
+            registry.register(item)
+    result = await own.sign("10001", group=True)
+    outcomes = [attendance_registry.signed_outcome(current, png=result.png, text=result.text)]
     original = attendance_registry.registry
     attendance_registry.registry = registry
     try:
-        outcomes = await attendance_registry.collect_outcomes(
-            "10001", group=True, enabled=lambda game: True
+        outcomes.extend(
+            await attendance_registry.collect_companion_outcomes(
+                "10001", current=current, group=True, enabled=lambda game: True
+            )
         )
     finally:
         attendance_registry.registry = original
 
     messages: list[dict] = []
-    delivery = await presentation.build_delivery(outcomes)
+    delivery = await attendance_delivery.build_delivery(outcomes)
     if delivery.png is not None:
         path = output_dir / f"{name}.png"
         path.write_bytes(delivery.png)
@@ -264,7 +271,7 @@ async def main() -> None:
     parser.add_argument("--output-dir", type=Path, default=ROOT / "output/signin-preview")
     parser.add_argument(
         "--case", default="all",
-        choices=("all", "both-success", "six-accounts", "one-failed", "one-role-failed", "none-bound"),
+        choices=("all", "both-success", "six-accounts", "one-failed", "one-role-failed", "other-unbound"),
     )
     parser.add_argument(
         "--html-only",
@@ -313,9 +320,14 @@ async def main() -> None:
             ),
         ),
     ]
-    none_bound = [
+    other_unbound = [
+        capability(
+            "arknights",
+            arknights_success_view(),
+            arknights_renderer,
+            lambda view: "（明日方舟文字兜底结果）",
+        ),
         capability("endfield", None, None, lambda view: "", roles=()),
-        capability("arknights", None, None, lambda view: "", roles=()),
     ]
     one_role_failed = [
         capability(
@@ -341,18 +353,16 @@ async def main() -> None:
 
     report: dict[str, dict] = {}
     try:
-        for name, capabilities in (
-            ("both-success", both_success),
-            ("six-accounts", six_accounts),
-            ("one-failed", one_failed),
-            ("one-role-failed", one_role_failed),
-            ("none-bound", none_bound),
+        for name, current, capabilities in (
+            ("both-success", "arknights", both_success),
+            ("six-accounts", "endfield", six_accounts),
+            ("one-failed", "endfield", one_failed),
+            ("one-role-failed", "endfield", one_role_failed),
+            ("other-unbound", "arknights", other_unbound),
         ):
             if args.case not in ("all", name):
                 continue
-            report[name] = await run_case(
-                name, capabilities, html_only=args.html_only, output_dir=args.output_dir
-            )
+            report[name] = await run_case(name, current, capabilities, output_dir=args.output_dir)
             print(f"== {name} ==")
             for message in report[name]["messages"]:
                 if message["kind"] == "image":

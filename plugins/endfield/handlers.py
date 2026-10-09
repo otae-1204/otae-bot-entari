@@ -22,11 +22,15 @@ from loguru import logger
 from nepattern import AnyString
 
 from otae_bot.config.settings import Config
+from otae_bot.attendance_delivery import build_delivery, deliver
 from otae_bot.attendance_registry import (
     AttendanceCapability,
     AttendanceResult,
+    collect_companion_outcomes,
     register_attendance_capability,
+    signed_outcome,
 )
+from otae_bot.group_features import feature_store, scope_from_event
 from otae_bot.infrastructure.cache import AsyncTTLCache, CacheStats
 from otae_bot.adapters.entari import (
     ArgVal,
@@ -944,7 +948,7 @@ async def _handle_personal_command(matcher, event: Event, command: ParsedEndfiel
             )
         if command.action == "attendance":
             cipher = CredentialCipher.from_env()
-            return await _handle_attendance(matcher, qq_user_id, command, cipher)
+            return await _handle_attendance(matcher, event, qq_user_id, command, cipher, bot=bot)
         if command.action == "daily":
             cipher = CredentialCipher.from_env()
             return await _handle_daily(matcher, qq_user_id, command, cipher, group=is_group(event))
@@ -2085,23 +2089,35 @@ async def _render_account_pages(
 
 async def _handle_attendance(
     matcher,
+    event: Event,
     qq_user_id: str,
     command: ParsedEndfieldCommand,
     cipher: CredentialCipher,
+    *,
+    bot=None,
 ) -> None:
     roles = account_store.resolve_roles(qq_user_id, command.account_selector)
     if not roles:
         return await matcher.finish("未找到对应的终末地账号，请先私聊发送 /ef 绑定 进行添加。")
     view = await sign_attendance_roles(account_store, official_client, cipher, roles)
-    return await _finish_attendance_view(matcher, view)
-
-
-async def _finish_attendance_view(matcher, view: AttendanceCardView) -> None:
-    """Send the card, or the full text result when the renderer is unavailable."""
-    png = await _attendance_png(view)
-    if png is None:
-        return await matcher.finish(format_attendance_report(view))
-    return await _finish_png(matcher, png)
+    outcomes = [
+        signed_outcome(
+            "endfield", png=await _attendance_png(view), text=format_attendance_report(view)
+        )
+    ]
+    # The selector only chose Endfield roles.  A bound Arknights account is
+    # signed in full below, unless this group switched Arknights off.
+    scope = scope_from_event(bot, event)
+    outcomes.extend(
+        await collect_companion_outcomes(
+            qq_user_id,
+            current="endfield",
+            group=is_group(event),
+            enabled=lambda feature: feature_store.is_enabled(scope, feature),
+        )
+    )
+    await deliver(matcher.send, await build_delivery(outcomes))
+    return await matcher.finish()
 
 
 async def _attendance_png(view: AttendanceCardView) -> bytes | None:
@@ -2117,16 +2133,16 @@ async def _attendance_png(view: AttendanceCardView) -> bytes | None:
         return None
 
 
-# ------------------------------------------------- unified /签到 registration
+# ------------------------------------- attendance started by /ak 签到
 
 
-def _signin_roles(user_id: str) -> list[EndfieldRole]:
+def _companion_roles(user_id: str) -> list[EndfieldRole]:
     """Every role this user bound, without touching credentials."""
     return account_store.list_roles(user_id)
 
 
-async def _signin_attendance(user_id: str, *, group: bool) -> AttendanceResult:
-    """Run the whole Endfield sign-in for the unified ``/签到`` entry point.
+async def _companion_attendance(user_id: str, *, group: bool) -> AttendanceResult:
+    """Sign every bound Endfield role after ``/ak 签到`` signed Arknights.
 
     ``group`` is part of the capability contract; this game's attendance card
     always carries masked UIDs, so there is nothing to hide or reveal here.
@@ -2150,8 +2166,8 @@ register_attendance_capability(
         game="endfield",
         owner=__name__,
         module=sys.modules[__name__],
-        roles=_signin_roles,
-        sign=_signin_attendance,
+        roles=_companion_roles,
+        sign=_companion_attendance,
     )
 )
 

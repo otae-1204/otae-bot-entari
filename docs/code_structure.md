@@ -10,7 +10,8 @@ otae_bot/
   lifecycle.py                 单实例锁、共享资源释放
   plugin_registry.py           按原顺序发现顶层插件
   group_features.py            按机器人账号和群保存插件开关
-  attendance_registry.py       统一签到：游戏注册表与调度循环（不导入插件）
+  attendance_registry.py       双游戏签到：游戏注册表与调度循环（不导入插件）
+  attendance_delivery.py       双游戏签到：结果卡拼接、发送与文字回退
   paths.py                     随源码定位的资源根目录
   config/                      环境变量解析、原有路径配置
   adapters/                    Entari 会话/命令/定时任务、OneBot、消息构造、[message] 日志脱敏
@@ -87,9 +88,9 @@ tests/                         功能回归、结构约束、真实插件加载�
 无需为了转换一份数据引入账号客户端或事件注册。
 
 跨游戏功能通过 `otae_bot` 下的注册表解耦，而不是在插件之间互相导入 `handlers`：
-统一签到入口 `plugins/signin/` 只调用 `otae_bot.attendance_registry` 里登记的
-能力，终末地与明日方舟在各自加载时注册，插件卸载时由 `application.py` 清理。
-详见 [统一签到入口](unified_signin.md)。
+`/ak 签到` 与 `/ef 签到` 签完本游戏后，只调用 `otae_bot.attendance_registry` 里另一款
+游戏登记的能力，再用 `otae_bot.attendance_delivery` 拼图发送；终末地与明日方舟在各自
+加载时注册，插件卸载时由 `application.py` 清理。详见 [双游戏签到合并](unified_signin.md)。
 
 运行 `python -m pytest tests/test_architecture.py` 检查依赖边界、
 单实例锁、关闭顺序及真实 Entari 插件加载。其余回归测试的运行方式和基线限制

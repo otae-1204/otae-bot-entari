@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import re
 import sys
-import tempfile
 from typing import Any
 
 from arclet.alconna import Alconna, Args, MultiVar
@@ -20,21 +19,22 @@ from nepattern import AnyString
 
 from otae_bot.adapters.entari import (
     ArgVal,
-    ChainMsg,
     event_user_id,
     is_group,
-    make_image,
     on_alconna,
     prompt,
 )
 from otae_bot.adapters.message_log import sensitive_input
+from otae_bot.attendance_delivery import build_delivery, deliver
 from otae_bot.attendance_registry import (
     AttendanceCapability,
     AttendanceResult,
+    collect_companion_outcomes,
     register_attendance_capability,
+    signed_outcome,
 )
+from otae_bot.group_features import feature_store, scope_from_event
 from otae_bot.infrastructure.http.tls import ashared_ssl_context
-from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
 
 from .attendance import sign_roles
 from .client import ArknightsAPIError, ArknightsClient, extract_account_token
@@ -128,11 +128,11 @@ async def _prompt_text(message: str, *, timeout: int) -> str | None:
 
 
 @_arknights_alconna.handle()
-async def handle_arknights(event: Event, rest: ArgVal) -> None:
-    await _dispatch(_arknights_alconna, event, parse_command(_rest(rest)))
+async def handle_arknights(event: Event, rest: ArgVal, bot=None) -> None:
+    await _dispatch(_arknights_alconna, event, parse_command(_rest(rest)), bot=bot)
 
 
-async def _dispatch(matcher, event: Event, command) -> None:
+async def _dispatch(matcher, event: Event, command, bot=None) -> None:
     try:
         if command.error:
             return await matcher.finish(command.error)
@@ -161,7 +161,7 @@ async def _dispatch(matcher, event: Event, command) -> None:
             return await _handle_primary(matcher, user_id, command.selector, reveal_uid=not group)
         if command.action == ACTION_UNBIND:
             return await _handle_unbind(matcher, user_id, command.selector, reveal_uid=not group)
-        return await _handle_attendance(matcher, user_id, command.selector, group=group)
+        return await _handle_attendance(matcher, event, user_id, command.selector, bot=bot)
     except CredentialKeyError as exc:
         return await matcher.finish(str(exc))
     except ArknightsAPIError as exc:
@@ -292,22 +292,34 @@ async def _handle_unbind(matcher, user_id: str, selector: str, *, reveal_uid: bo
 # ---------------------------------------------------------------- attendance
 
 
-async def _handle_attendance(matcher, user_id: str, selector: str, *, group: bool) -> None:
+async def _handle_attendance(matcher, event: Event, user_id: str, selector: str, *, bot=None) -> None:
+    group = is_group(event)
     cipher = ArknightsCipher.from_env()
     store = _store_instance()
     roles, resolution = store.resolve_roles(user_id, selector)
     if not roles:
         return await matcher.finish(format_selector_failure(resolution, reveal_uid=not group))
     view = await sign_roles(store, await _client_instance(), cipher, roles)
-    await _finish_attendance_view(matcher, view, group=group)
-
-
-async def _finish_attendance_view(matcher, view: AttendanceCardView, *, group: bool) -> None:
-    """Send the card, or the full text result when the renderer is unavailable."""
-    png = await _attendance_png(view)
-    if png is None:
-        return await matcher.finish(format_attendance_report(view, reveal_uid=not group))
-    return await _finish_png(matcher, png)
+    outcomes = [
+        signed_outcome(
+            "arknights",
+            png=await _attendance_png(view),
+            text=format_attendance_report(view, reveal_uid=not group),
+        )
+    ]
+    # The selector only chose Arknights roles.  A bound Endfield account is
+    # signed in full below, unless this group switched Endfield off.
+    scope = scope_from_event(bot, event)
+    outcomes.extend(
+        await collect_companion_outcomes(
+            user_id,
+            current="arknights",
+            group=group,
+            enabled=lambda feature: feature_store.is_enabled(scope, feature),
+        )
+    )
+    await deliver(matcher.send, await build_delivery(outcomes))
+    return await matcher.finish()
 
 
 async def _attendance_png(view: AttendanceCardView) -> bytes | None:
@@ -323,28 +335,16 @@ async def _attendance_png(view: AttendanceCardView) -> bytes | None:
         return None
 
 
-async def _finish_png(matcher, png: bytes) -> None:
-    return await matcher.finish(ChainMsg([_png_image(png)]))
+# ------------------------------------- attendance started by /ef 签到
 
 
-def _png_image(png: bytes):
-    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as file:
-        file.write(png)
-        file.flush()
-        schedule_temp_file_cleanup(file.name)
-        return make_image(path=file.name)
-
-
-# ------------------------------------------------- unified /签到 registration
-
-
-def _signin_roles(user_id: str) -> list:
+def _companion_roles(user_id: str) -> list:
     """Every role this user bound, without touching credentials."""
     return _store_instance().list_roles(user_id)
 
 
-async def _signin_attendance(user_id: str, *, group: bool) -> AttendanceResult:
-    """Run the whole Arknights sign-in for the unified ``/签到`` entry point."""
+async def _companion_attendance(user_id: str, *, group: bool) -> AttendanceResult:
+    """Sign every bound Arknights role after ``/ef 签到`` signed Endfield."""
     store = _store_instance()
     roles = store.list_roles(user_id)
     if not roles:
@@ -367,8 +367,8 @@ register_attendance_capability(
         game="arknights",
         owner=__name__,
         module=sys.modules[__name__],
-        roles=_signin_roles,
-        sign=_signin_attendance,
+        roles=_companion_roles,
+        sign=_companion_attendance,
     )
 )
 

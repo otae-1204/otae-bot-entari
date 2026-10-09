@@ -30,7 +30,6 @@ PLUGIN_NAMES = {
     "minecraft_plugin": ("Minecraft", "mc", "我的世界"),
     "peek": ("窥视",),
     "radar": ("AI 智商雷达", "radar", "智商雷达"),
-    "signin": ("统一签到", "签到", "checkin"),
     "steamInfo": ("Steam", "steam"),
     "tibo_radar": ("Tibo 雷达", "tibo", "雷达"),
 }
