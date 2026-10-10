@@ -2061,7 +2061,7 @@ async def _handle_exploration(
     role = account_store.resolve_role(qq_user_id, command.account_selector)
     if role is None:
         if command.account_selector:
-            return await matcher.finish("未找到对应账号，请发送 /ef 账号 查看编号，再使用 /zmd 探索 <编号>。")
+            return await matcher.finish("未找到对应账号，请发送 /ef 账号 查看编号，再使用 /ef 探索 <编号>。")
         return await matcher.finish("尚未绑定终末地账号，请先私聊发送 /ef 绑定。")
     with cold_start_command(matcher):
         token = account_store.decrypt_token(role, cipher)
