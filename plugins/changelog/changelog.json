@@ -1,15 +1,36 @@
 {
   "schema": 2,
-  "head": "50ddd04",
+  "head": "4d275ff",
   "generated_from": {
     "first_commit": "8e1b455",
     "first_date": "2026-06-17",
-    "last_date": "2026-10-28",
-    "commit_count": 385,
+    "last_date": "2026-10-29",
+    "commit_count": 386,
     "merge_commit_count": 36,
-    "version_count": 51
+    "version_count": 52
   },
   "releases": [
+    {
+      "version": "v1.37.4",
+      "date": "2026-10-29",
+      "from": "2026-10-29",
+      "to": "2026-10-29",
+      "title": "工具参数 schema 兼容严格网关",
+      "summary": "以图搜图与整页截图的二选一参数改为自包含分支，Gemini 等严格的 OpenAI 兼容网关不再拒绝工具声明。",
+      "tags": [
+        "HYW"
+      ],
+      "highlights": [
+        {
+          "kind": "fix",
+          "date": "2026-10-29",
+          "text": "hyw-frontier 的 reverse_image_search / jina_pageshot 参数改用 anyOf 分支各自声明 properties 与 required，去掉 not；工具定义出口统一清洗 schema，补齐分支属性、丢弃无法满足的 required。",
+          "commits": [
+            "4d275ff"
+          ]
+        }
+      ]
+    },
     {
       "version": "v1.37.3",
       "date": "2026-10-28",
