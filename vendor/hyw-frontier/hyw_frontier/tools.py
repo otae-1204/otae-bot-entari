@@ -38,7 +38,9 @@ def _provider_definition(value, provider):
 def tool_definitions(search_provider: str | None = None) -> list[dict]:
     if search_provider is not None and search_provider not in SEARCH_PROVIDERS:
         raise ValueError("Unsupported search provider")
-    return [_provider_definition(tool, search_provider) for tool in _REGISTRY
+    from .schema_sanitize import sanitize_tool_definition
+    return [sanitize_tool_definition(_provider_definition(tool, search_provider))
+            for tool in _REGISTRY
             if tool["name"] not in DISABLED_TOOLS
             and (search_provider is None or search_provider in tool.get("search_providers", SEARCH_PROVIDERS))]
 
