@@ -139,13 +139,41 @@
       "anyOf": [
         {
           "type": "object",
+          "properties": {
+            "source_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "description": "最近含图用户消息的原图 source_id，或 crop_user_image 成功返回的 crop_id（搜索裁剪后的图片）；不传图片 base64"
+            },
+            "page": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "description": "仅控制 TinEye 结果页码，默认 1；只有确认存在下一页时翻页，Yandex 复用任务内原查询缓存"
+            }
+          },
           "required": ["source_id"],
-          "not": {"required": ["url"]}
+          "additionalProperties": false
         },
         {
           "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 2000,
+              "description": "可公开访问的 HTTPS 图片直链；有 source_id 时不要填写"
+            },
+            "page": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "description": "仅控制 TinEye 结果页码，默认 1；只有确认存在下一页时翻页，Yandex 复用任务内原查询缓存"
+            }
+          },
           "required": ["url"],
-          "not": {"required": ["source_id"]}
+          "additionalProperties": false
         }
       ],
       "additionalProperties": false
@@ -174,13 +202,29 @@
       "anyOf": [
         {
           "type": "object",
+          "properties": {
+            "url": {
+              "type": "string", "minLength": 8, "maxLength": 2000,
+              "description": "要抓取整页截图的公开网页地址；首次抓取时填写"
+            }
+          },
           "required": ["url"],
-          "not": {"anyOf": [{"required": ["pageshot_id"]}, {"required": ["bbox"]}]}
+          "additionalProperties": false
         },
         {
           "type": "object",
+          "properties": {
+            "pageshot_id": {
+              "type": "string", "minLength": 10, "maxLength": 100,
+              "description": "当前任务此前 jina_pageshot 返回的 pageshot_id；裁剪时填写"
+            },
+            "bbox": {
+              "type": "array", "items": {"type": "integer", "minimum": 0}, "minItems": 4, "maxItems": 4,
+              "description": "pageshot_attachment 附件像素坐标 [left, top, right, bottom]，右下边界不包含"
+            }
+          },
           "required": ["pageshot_id", "bbox"],
-          "not": {"required": ["url"]}
+          "additionalProperties": false
         }
       ],
       "additionalProperties": false
