@@ -1,15 +1,36 @@
 {
   "schema": 2,
-  "head": "4d275ff",
+  "head": "e2938bb",
   "generated_from": {
     "first_commit": "8e1b455",
     "first_date": "2026-06-17",
-    "last_date": "2026-10-29",
-    "commit_count": 386,
+    "last_date": "2026-11-09",
+    "commit_count": 387,
     "merge_commit_count": 36,
-    "version_count": 52
+    "version_count": 53
   },
   "releases": [
+    {
+      "version": "v1.37.5",
+      "date": "2026-11-09",
+      "from": "2026-11-09",
+      "to": "2026-11-09",
+      "title": "推理档位配置生效",
+      "summary": "HYW_REASONING_MODE 现在会传给模型，配置 low 等档位不再被默认 auto 覆盖。",
+      "tags": [
+        "HYW"
+      ],
+      "highlights": [
+        {
+          "kind": "fix",
+          "date": "2026-11-09",
+          "text": "HYW 配置新增 reasoning_mode，读取 HYW_REASONING_MODE（auto/high/medium/low，非法值回退 auto），调用 hyw-frontier 时一并传入；单次请求超时仍取 HYW_REQUEST_TIMEOUT。",
+          "commits": [
+            "e2938bb"
+          ]
+        }
+      ]
+    },
     {
       "version": "v1.37.4",
       "date": "2026-10-29",
