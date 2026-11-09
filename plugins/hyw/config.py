@@ -45,6 +45,7 @@ class HywConfig:
     render: bool = True
     timeout: float = 300
     request_timeout: float = 90
+    reasoning_mode: str = "auto"
     max_concurrent: int = 2
     max_tool_images: int = 600
     max_reader_images: int = 30
@@ -103,6 +104,9 @@ class HywConfig:
         reader_engine = str(_env("HYW_READER_ENGINE", "") or cls.reader_engine).strip().lower()
         if reader_engine not in {"default", "browser"}:
             reader_engine = cls.reader_engine
+        reasoning_mode = str(_env("HYW_REASONING_MODE", "") or cls.reasoning_mode).strip().lower()
+        if reasoning_mode not in {"auto", "high", "medium", "low"}:
+            reasoning_mode = cls.reasoning_mode
         return cls(
             api_key=api_key,
             base_url=base_url,
@@ -112,6 +116,7 @@ class HywConfig:
             render=str(_env("HYW_RENDER", True)).lower() not in {"false", "0", "no"},
             timeout=max(1.0, _env_float("HYW_TIMEOUT", cls.timeout)),
             request_timeout=max(1.0, _env_float("HYW_REQUEST_TIMEOUT", cls.request_timeout)),
+            reasoning_mode=reasoning_mode,
             max_concurrent=max(1, _env_int("HYW_MAX_CONCURRENT", cls.max_concurrent)),
             max_tool_images=max(0, _env_int("HYW_MAX_TOOL_IMAGES", cls.max_tool_images)),
             max_reader_images=max(0, _env_int("HYW_MAX_READER_IMAGES", cls.max_reader_images)),

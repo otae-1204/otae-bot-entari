@@ -371,6 +371,7 @@ async def run_request(session: Session, config: HywConfig, scope: Scope, text: s
                 max_tool_images=config.max_tool_images,
                 max_reader_images=config.max_reader_images,
                 reader_engine=config.reader_engine,
+                reasoning_mode=config.reasoning_mode,
                 timeout=config.request_timeout,
                 history=prior or None,
                 images=None if rich else (model_images or None),

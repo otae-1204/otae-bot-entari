@@ -55,6 +55,13 @@ class ConfigTests(unittest.TestCase):
              self.assertRaises(ValueError):
             HywConfig.from_env()
 
+    def test_reasoning_mode_is_read_and_invalid_values_fall_back_to_auto(self):
+        cases = {None: "auto", "": "auto", "low": "low", " High ": "high", "medium": "medium", "max": "auto"}
+        for raw, expected in cases.items():
+            values = {} if raw is None else {"HYW_REASONING_MODE": raw}
+            with self.subTest(raw=raw), patch("plugins.hyw.config._env", side_effect=_env(values)):
+                self.assertEqual(HywConfig.from_env().reasoning_mode, expected)
+
 
 class HistoryTests(unittest.TestCase):
     def test_sources_are_visible_in_channel_and_cleared_per_sender(self):
@@ -703,6 +710,43 @@ def _config(**overrides) -> HywConfig:
     return HywConfig(**values)
 
 
+def _fake_frontier(answer) -> dict:
+    import types
+
+    package = types.ModuleType("hyw_frontier")
+    package.answer = answer
+    errors = types.ModuleType("hyw_frontier.errors")
+    errors.FrontierError = FrontierError
+    rendering = types.ModuleType("hyw_frontier.rendering")
+    rendering.RenderError = RenderError
+    titles = types.ModuleType("hyw_frontier.source_titles")
+    titles.source_key = lambda url: url
+    titles.source_titles = lambda messages: {}
+    return {
+        "hyw_frontier": package, "hyw_frontier.errors": errors,
+        "hyw_frontier.rendering": rendering, "hyw_frontier.source_titles": titles,
+    }
+
+
+class AnswerCallTests(unittest.IsolatedAsyncioTestCase):
+    async def test_reasoning_mode_and_request_timeout_reach_answer(self):
+        import sys
+        from types import SimpleNamespace
+
+        from plugins.hyw import handlers
+
+        result = SimpleNamespace(messages=[], links=[], kind="text", png=None, display_text="答", text="答")
+        answer = AsyncMock(return_value=result)
+        session = AsyncMock()
+        session.send = AsyncMock(return_value=[])
+        config = _config(reasoning_mode="low", request_timeout=42)
+        with patch.dict(sys.modules, _fake_frontier(answer)):
+            await handlers.run_request(session, config, ("qq", "b", "g", "c", "u"), "问题", [], [])
+        kwargs = answer.await_args.kwargs
+        self.assertEqual(kwargs["reasoning_mode"], "low")
+        self.assertEqual(kwargs["timeout"], 42)
+
+
 class FailureLogTests(unittest.IsolatedAsyncioTestCase):
     def assert_redacted(self, text: str):
         for secret in SECRETS:
@@ -740,17 +784,10 @@ class FailureLogTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_frontier_error_in_run_request_is_logged_before_the_user_message(self):
         import sys
-        import types
 
         from plugins.hyw import handlers
 
-        package = types.ModuleType("hyw_frontier")
-        package.answer = AsyncMock(side_effect=_model_failure())
-        errors = types.ModuleType("hyw_frontier.errors")
-        errors.FrontierError = FrontierError
-        rendering = types.ModuleType("hyw_frontier.rendering")
-        rendering.RenderError = RenderError
-        modules = {"hyw_frontier": package, "hyw_frontier.errors": errors, "hyw_frontier.rendering": rendering}
+        modules = _fake_frontier(AsyncMock(side_effect=_model_failure()))
         with patch.dict(sys.modules, modules), patch.object(handlers, "logger") as log:
             with self.assertRaises(HywError) as raised:
                 await handlers.run_request(AsyncMock(), _config(), ("qq", "b", "g", "c", "u"), "问题", [], [])
