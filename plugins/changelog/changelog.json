@@ -1,15 +1,36 @@
 {
   "schema": 2,
-  "head": "a0bc2d7",
+  "head": "3ea7f94",
   "generated_from": {
     "first_commit": "8e1b455",
     "first_date": "2026-06-17",
     "last_date": "2026-11-10",
-    "commit_count": 389,
+    "commit_count": 390,
     "merge_commit_count": 36,
-    "version_count": 54
+    "version_count": 55
   },
   "releases": [
+    {
+      "version": "v1.37.7",
+      "date": "2026-11-10",
+      "from": "2026-11-10",
+      "to": "2026-11-10",
+      "title": "/q 恢复可用",
+      "summary": "修复 Gemini 网关拒收工具定义、/q 每次都报「模型请求失败」的问题；类似情况改为提示管理员检查工具定义。",
+      "tags": [
+        "HYW"
+      ],
+      "highlights": [
+        {
+          "kind": "fix",
+          "date": "2026-11-10",
+          "text": "上游 Gemini 兼容网关不再接受以图搜图与整页截图的参数定义，/q 每次都返回 HTTP 400 并只显示「模型请求失败」；两个工具的参数改为平铺写法，二选一的用法改由工具执行前检查，传错时直接提示正确用法、不发起搜图或截图。之后若再遇到工具定义或请求格式被拒，/q 会提示「工具参数 schema 或请求格式被模型拒绝，请联系管理员检查工具定义」，其他失败仍隐藏原始报错。",
+          "commits": [
+            "3ea7f94"
+          ]
+        }
+      ]
+    },
     {
       "version": "v1.37.6",
       "date": "2026-11-10",
