@@ -110,9 +110,12 @@ def retry_after_seconds(error: BaseException) -> float | None:
     return max(0.0, (parsed - datetime.now(timezone.utc)).total_seconds())
 
 
-def transient_failure(error: BaseException) -> bool:
-    if isinstance(error, (TimeoutError, asyncio.TimeoutError)):
-        return True
+_TIMEOUT_NAMES = frozenset({"TimeoutException", "ReadTimeout", "WriteTimeout", "ConnectTimeout", "PoolTimeout",
+                            "APITimeoutError"})
+_TRANSIENT_NAMES = _TIMEOUT_NAMES | {"RemoteProtocolError", "ReadError", "WriteError", "ConnectError"}
+
+
+def _chain_names(error: BaseException) -> list[str]:
     names = []
     seen = set()
     current: BaseException | None = error
@@ -120,8 +123,21 @@ def transient_failure(error: BaseException) -> bool:
         seen.add(id(current))
         names.append(type(current).__name__)
         current = getattr(current, "__cause__", None) or getattr(current, "__context__", None)
-    return any(name in {"TimeoutException", "ReadTimeout", "WriteTimeout", "ConnectTimeout", "PoolTimeout",
-                        "RemoteProtocolError", "ReadError", "WriteError", "ConnectError"} for name in names)
+    return names
+
+
+def timeout_failure(error: BaseException) -> bool:
+    """A pure timeout: no HTTP status, the request simply ran out of time."""
+    if http_status(error) is not None:
+        return False
+    return (isinstance(error, (TimeoutError, asyncio.TimeoutError))
+            or any(name in _TIMEOUT_NAMES for name in _chain_names(error)))
+
+
+def transient_failure(error: BaseException) -> bool:
+    if isinstance(error, (TimeoutError, asyncio.TimeoutError)):
+        return True
+    return any(name in _TRANSIENT_NAMES for name in _chain_names(error))
 
 
 def retry_delay(attempt: int, *, base: float, limit: float, retry_after: float | None) -> float:
@@ -395,7 +411,7 @@ class ModelSession:
         except ImportError:
             raise FrontierError(f"缺少 {config.api} 接入依赖，请安装 hyw-frontier[{config.api}] 可选依赖。") from None
 
-    async def _request(self, request, on_event):
+    async def _request(self, request, on_event, timeout=None):
         from pydantic_ai.messages import ModelResponse, PartStartEvent, PartDeltaEvent, TextPart, ThinkingPart, ToolCallPart, TextPartDelta, ThinkingPartDelta, ToolCallPartDelta
         from pydantic_ai.models import ModelRequestParameters
         from pydantic_ai.tools import ToolDefinition
@@ -406,7 +422,7 @@ class ModelSession:
             for t in request["context"]["tools"]], allow_text_output=True)
         # Never mutate a borrowed/shared Model; explicit dynamic effort is request-local.
         settings = (dict(model.settings) if model.settings else None) if self.preserve_settings else default_model_settings(
-            self.api, self.timeout, request.get("reasoning"), max_output_tokens=model.settings["max_tokens"])
+            self.api, timeout or self.timeout, request.get("reasoning"), max_output_tokens=model.settings["max_tokens"])
         if request.get("reasoning") is not None:
             settings = with_reasoning(settings, self.api, request["reasoning"])
         if self.provider == "deepseek" and self.api == "responses" and (settings or {}).get("openai_reasoning_effort") != "none":
@@ -477,10 +493,10 @@ class ModelSession:
         emit({"type": "model_stream_end", "reason": result["stopReason"], "usage": result["usage"]})
         return result
 
-    async def _guarded(self, operation, abort=None):
+    async def _guarded(self, operation, abort=None, timeout=None):
         task = asyncio.create_task(operation)
         try:
-            async with asyncio.timeout(self.timeout):
+            async with asyncio.timeout(timeout or self.timeout):
                 while not task.done():
                     if (self.cancel_event is not None and self.cancel_event.is_set()) or (abort is not None and abort.is_set()):
                         raise FrontierError("请求已取消。", diagnostics={"code": "cancelled"})
@@ -502,13 +518,21 @@ class ModelSession:
         if current is self.loop:
             raise FrontierError("不能在模型所属事件循环中阻塞调用同步后端；请 await answer(...)。")
 
-    def _plan_retry(self, error: BaseException, attempt: int) -> float | None:
+    def retry_timeout(self) -> float:
+        """A request that already ran out of time gets one shorter try, not another full wait."""
+        return min(self.timeout, 30.0, max(15.0, self.timeout / 2))
+
+    def _plan_retry(self, error: BaseException, attempt: int, *, timeouts: int = 0) -> float | None:
+        """`timeouts` counts earlier timed-out attempts of this request, `error` excluded."""
         if self._retry_attempts <= 1 or self._retry_budget <= 0 or attempt >= self._retry_attempts:
             return None
         status = http_status(error)
         if status is not None:
             if status not in RETRYABLE_STATUSES:
                 return None
+        elif timeout_failure(error):
+            if timeouts >= 1:
+                return None  # At most one extra attempt after timing out.
         elif not transient_failure(error):
             return None
         wait = retry_delay(attempt, base=self._retry_base, limit=self._retry_max_delay,
@@ -529,20 +553,28 @@ class ModelSession:
             await asyncio.sleep(min(0.2, remaining))
 
     async def _request_retried(self, request, on_event, abort=None):
-        attempt = 1
+        attempt, timeouts, timeout = 1, 0, self.timeout
         while True:
             if abort is not None and abort.is_set():
                 raise FrontierError("请求已取消。", diagnostics={"code": "cancelled"})
             try:
-                return await self._guarded(self._request(request, on_event), abort)
+                return await self._guarded(self._request(request, on_event, timeout), abort, timeout)
             except FrontierError:
                 raise
             except Exception as error:
-                wait = self._plan_retry(error, attempt)
+                # Type and status only: SDK messages may echo credentials or response bodies.
+                status, kind, timed_out = http_status(error), type(error).__name__, timeout_failure(error)
+                wait = self._plan_retry(error, attempt, timeouts=timeouts)
                 if wait is None:
+                    if attempt > 1:
+                        _RETRY_LOG.warning("[hyw] model request failed after retries: attempts=%s error=%s status=%s",
+                                           attempt, kind, status)
                     raise
-                _RETRY_LOG.warning("[hyw] retrying model request: attempt=%s wait=%.1fs status=%s",
-                                   attempt + 1, wait, http_status(error))
+                if timed_out:
+                    timeouts += 1
+                    timeout = self.retry_timeout()
+                _RETRY_LOG.warning("[hyw] retrying model request: attempt=%s wait=%.1fs error=%s status=%s timeout=%.0fs",
+                                   attempt + 1, wait, kind, status, timeout)
                 await self._interruptible_sleep(wait)
                 attempt += 1
 

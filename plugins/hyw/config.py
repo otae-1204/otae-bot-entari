@@ -59,6 +59,7 @@ class HywConfig:
     timeout: float = 300
     request_timeout: float = 90
     reasoning_mode: str = "auto"
+    max_rounds: int = 10
     render_timeout: float = 45
     render_max_images: int = 16
     render_max_edge: int = 1024
@@ -133,6 +134,7 @@ class HywConfig:
             timeout=max(1.0, _env_float("HYW_TIMEOUT", cls.timeout)),
             request_timeout=max(1.0, _env_float("HYW_REQUEST_TIMEOUT", cls.request_timeout)),
             reasoning_mode=reasoning_mode,
+            max_rounds=_env_at_least("HYW_MAX_ROUNDS", cls.max_rounds, 1),
             render_timeout=_env_positive("HYW_RENDER_TIMEOUT", cls.render_timeout),
             render_max_images=_env_at_least("HYW_RENDER_MAX_IMAGES", cls.render_max_images, 0),
             # The render worker accepts at most 1280px previews; tiny edges would be useless.

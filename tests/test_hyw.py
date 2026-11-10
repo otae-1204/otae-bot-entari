@@ -75,6 +75,13 @@ class ConfigTests(unittest.TestCase):
                 with self.subTest(key=key, raw=raw), patch("plugins.hyw.config._env", side_effect=_env(values)):
                     self.assertEqual(getattr(HywConfig.from_env(), field), value)
 
+    def test_max_rounds_is_read_and_falls_back_to_10(self):
+        cases = {None: 10, "6": 6, " 1 ": 1, "0": 10, "-3": 10, "x": 10, "2.5": 10}
+        for raw, expected in cases.items():
+            values = {} if raw is None else {"HYW_MAX_ROUNDS": raw}
+            with self.subTest(raw=raw), patch("plugins.hyw.config._env", side_effect=_env(values)):
+                self.assertEqual(HywConfig.from_env().max_rounds, expected)
+
     def test_render_image_cap_does_not_touch_the_tool_image_budget(self):
         values = {"HYW_RENDER_MAX_IMAGES": "3"}
         with patch("plugins.hyw.config._env", side_effect=_env(values)):
@@ -788,6 +795,22 @@ class AnswerCallTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(callable(kwargs["on_event"]))
         self.assertFalse(inspect.iscoroutinefunction(kwargs["on_event"]))
 
+    async def test_max_rounds_reaches_answer(self):
+        import sys
+        from types import SimpleNamespace
+
+        from plugins.hyw import handlers
+
+        result = SimpleNamespace(messages=[], links=[], kind="text", png=None, display_text="答", text="答")
+        answer = AsyncMock(return_value=result)
+        session = AsyncMock()
+        session.send = AsyncMock(return_value=[])
+        with patch("plugins.hyw.config._env", side_effect=_env({"HYW_API_KEY": "k"})):
+            default = HywConfig.from_env()
+        for config, expected in ((default, 10), (_config(max_rounds=4), 4)):
+            with self.subTest(expected=expected), patch.dict(sys.modules, _fake_frontier(answer)):
+                await handlers.run_request(session, config, ("qq", "b", "g", "c", "u"), "问题", [], [])
+                self.assertEqual(answer.await_args.kwargs["max_rounds"], expected)
 
 
 def _sent_texts(session) -> list[str]:

@@ -422,6 +422,7 @@ async def run_request(session: Session, config: HywConfig, scope: Scope, text: s
                 max_reader_images=config.max_reader_images,
                 reader_engine=config.reader_engine,
                 reasoning_mode=config.reasoning_mode,
+                max_rounds=config.max_rounds,
                 timeout=config.request_timeout,
                 render_timeout=config.render_timeout,
                 render_max_images=config.render_max_images,
