@@ -147,8 +147,40 @@ def retry_delay(attempt: int, *, base: float, limit: float, retry_after: float |
     return window / 2 + random.uniform(0, window / 2)
 
 
+# Lower-cased markers of an upstream that rejected the tool schema / request shape, e.g. Gemini:
+# "functionDeclaration 'parameters' schema specified other fields alongside any_of".
+_SCHEMA_REJECTION_MARKERS = ("functiondeclaration", "function_declaration", "any_of", "parameters schema",
+                             "invalid json payload", "invalid argument", "invalid_argument")
+TOOL_SCHEMA_REJECTED_MESSAGE = "工具参数 schema 或请求格式被模型拒绝，请联系管理员检查工具定义。"
+
+
+def _error_text(error: BaseException) -> str:
+    """Lower-cased error text across the chain, only for keyword matching; never shown or logged."""
+    parts, seen = [], set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen and len(seen) < 8:
+        seen.add(id(current))
+        for value in (current, getattr(current, "body", None), getattr(current, "message", None)):
+            if value is None:
+                continue
+            try:
+                parts.append(str(value))
+            except Exception:  # noqa: BLE001 - a broken __str__ must not mask the failure
+                pass
+        current = current.__cause__ or current.__context__
+    return "\n".join(parts).lower()
+
+
+def schema_rejected(error: BaseException) -> bool:
+    return http_status(error) == 400 and any(marker in _error_text(error) for marker in _SCHEMA_REJECTION_MARKERS)
+
+
 def safe_model_error(error: Exception) -> FrontierError:
     status = http_status(error)
+    if schema_rejected(error):
+        # Fixed text chosen by keyword only: the upstream body may echo URLs, keys or the request.
+        return FrontierError(TOOL_SCHEMA_REJECTED_MESSAGE, diagnostics={
+            "code": "tool_schema_rejected", "http_status": 400, "retryable": False})
     code = f"http_{status}" if status else "model_error"
     message = {401: "模型认证失败，请检查 API Key 或服务账号凭据。", 402: "模型账户额度不足。",
                403: "模型接口拒绝访问。", 404: "模型或 API 端点不存在；未回退其他模型或协议。",

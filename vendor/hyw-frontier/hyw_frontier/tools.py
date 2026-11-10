@@ -35,6 +35,31 @@ def _provider_definition(value, provider):
                      and provider not in item.get("search_providers", SEARCH_PROVIDERS))}
 
 
+def exclusive_arguments_error(name: str, args) -> str | None:
+    """Mutually exclusive parameters that the flat schema cannot express.
+
+    Gemini-backed gateways reject ``anyOf`` beside ``properties``, so these rules live
+    here and run before any network work. Messages never echo argument values.
+    """
+    if not isinstance(args, dict):
+        return None
+    if name == "reverse_image_search":
+        has_source, has_url = "source_id" in args, "url" in args
+        if has_source and has_url:
+            return "source_id 与 url 不能同时传；用户原图或裁剪图只传 source_id，公开图片直链只传 url。本次未执行搜索"
+        if not has_source and not has_url:
+            return "缺少图片：source_id 与 url 必须恰好传一个（用户原图或裁剪图传 source_id，公开图片直链传 url）。本次未执行搜索"
+    elif name == "jina_pageshot":
+        has_url, has_id, has_bbox = "url" in args, "pageshot_id" in args, "bbox" in args
+        if has_url and (has_id or has_bbox):
+            return "url 不能与 pageshot_id/bbox 混用；首次抓取只传 url，裁剪只传 pageshot_id 与 bbox。本次未执行截图"
+        if not has_url and not (has_id and has_bbox):
+            if has_id or has_bbox:
+                return "裁剪须同时传 pageshot_id 与 bbox；首次抓取则只传 url。本次未执行截图"
+            return "缺少参数：首次抓取只传 url，裁剪只传 pageshot_id 与 bbox。本次未执行截图"
+    return None
+
+
 def tool_definitions(search_provider: str | None = None) -> list[dict]:
     if search_provider is not None and search_provider not in SEARCH_PROVIDERS:
         raise ValueError("Unsupported search provider")
@@ -141,6 +166,8 @@ class ToolRuntime:
                     path = ".".join(map(str, invalid.absolute_path)) or "arguments"
                     # No raw invalid values in errors; they could contain secrets or excessive text.
                     result = {"ok": False, "code": "invalid_arguments", "error": f"{path} 不符合 {invalid.validator} 约束，请按工具参数 schema 修正"}
+                elif (exclusive := exclusive_arguments_error(name, args)) is not None:
+                    result = {"ok": False, "code": "invalid_arguments", "error": exclusive}
                 elif name == "set_reasoning":
                     result = (self.set_reasoning(args["level"]) if self.set_reasoning is not None else
                               {"ok": False, "code": "reasoning_unavailable", "error": "当前任务未启用动态思考，保持模型原有设置"})
@@ -222,6 +249,7 @@ class ToolRuntime:
             call["name"] for call in calls
             if call.get("name") in self._validators and call["name"] in ("web_search", "search_images", "jina_read_url", "jina_pageshot", "reverse_image_search")
             and self._validators[call["name"]].is_valid(call.get("arguments"))
+            and exclusive_arguments_error(call["name"], call.get("arguments")) is None
         }
         # Apply task settings serially before introductions/network work, never from worker threads.
         for index, call in enumerate(calls):
