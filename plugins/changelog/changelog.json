@@ -1,15 +1,44 @@
 {
   "schema": 2,
-  "head": "e2938bb",
+  "head": "a0bc2d7",
   "generated_from": {
     "first_commit": "8e1b455",
     "first_date": "2026-06-17",
-    "last_date": "2026-11-09",
-    "commit_count": 387,
+    "last_date": "2026-11-10",
+    "commit_count": 389,
     "merge_commit_count": 36,
-    "version_count": 53
+    "version_count": 54
   },
   "releases": [
+    {
+      "version": "v1.37.6",
+      "date": "2026-11-10",
+      "from": "2026-11-10",
+      "to": "2026-11-10",
+      "title": "卡片失败不丢答案，/q 提速",
+      "summary": "卡片渲染失败时改发文字答案并注明「卡片生成失败」；模型超时不再满额反复重试，默认轮次降到 10。",
+      "tags": [
+        "HYW"
+      ],
+      "highlights": [
+        {
+          "kind": "fix",
+          "date": "2026-11-10",
+          "text": "卡片渲染超时或超限时，/q 改发完整文字答案并在开头注明「卡片生成失败」，不再只回「请稍后重试」；公式过多或过长时直接跳过绘制。渲染排队与预热不再占用绘制时限（HYW_RENDER_TIMEOUT，默认 45 秒），送渲染的配图按正文顺序最多 16 张（HYW_RENDER_MAX_IMAGES）、最长边 1024（HYW_RENDER_MAX_EDGE）；日志按轮记录模型、工具与渲染各阶段耗时。",
+          "commits": [
+            "5bc18db"
+          ]
+        },
+        {
+          "kind": "fix",
+          "date": "2026-11-10",
+          "text": "模型请求超时后至多再试 1 次，重试时限缩短到 15–30 秒，不再按满 90 秒连试 3 次；429/5xx 仍按 HYW_RETRY_* 重试，日志带上异常类型与状态码。每次提问的轮次上限改读 HYW_MAX_ROUNDS，默认 10。",
+          "commits": [
+            "a0bc2d7"
+          ]
+        }
+      ]
+    },
     {
       "version": "v1.37.5",
       "date": "2026-11-09",
