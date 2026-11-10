@@ -38,6 +38,16 @@ class ModelBackend(Protocol):
     def call(self, request: dict) -> dict: ...
 
 
+def answer_links(parsed: dict) -> tuple[str, ...]:
+    """Ordered reference links for a text reply; an unparseable body just has none."""
+    from md2png.model import Limits, RenderError as EngineError
+    from .pillow_card import adapt_answer
+    try:
+        return tuple(ref.url for ref in adapt_answer(parsed, {}, Limits(max_chars=256 * 1024)).references)
+    except (EngineError, RecursionError):
+        return ()
+
+
 @dataclass(frozen=True)
 class Answer:
     text: str
@@ -51,6 +61,8 @@ class Answer:
     costs: Costs = field(default_factory=Costs)
     kind: Literal['text', 'image'] = 'image'
     display_text: str = ''
+    # Non-empty only when a card was attempted and failed: the RenderError code.
+    render_error: str = ''
 
 
 async def answer(
@@ -74,6 +86,9 @@ async def answer(
     max_reader_images: int = MAX_READER_IMAGES,
     reader_engine: Literal['default', 'browser'] = 'browser',
     timeout: float = 300,
+    render_timeout: float = 45,
+    render_max_images: int | None = None,
+    render_max_edge: int | None = None,
     system_prompt: str | None = None,
     history: list[dict] | None = None,
     images: list[dict] | None = None,
@@ -86,7 +101,14 @@ async def answer(
     `kind='text'`: send `display_text` directly; `png=None`, `render_ms=0`.
     `kind='image'`: Markdown is rendered to `png` bytes; `display_text` is the
     cleaned Markdown body for inspection. `text` always retains the raw model output.
-    Rendering failures raise RenderError; image answers never fall back to text.
+    A failed card never discards the finished answer: it returns `kind='text'` with
+    `render_error` set to the RenderError code and a `render_fallback` diagnostic
+    (stage, timings and image/icon counts only). Only cancellation still raises.
+    `render_timeout` (default 45s) bounds the worker prewarm and the drawing separately;
+    drawing starts its own budget once the worker is ready; queueing is never timed.
+    `render_max_images` keeps the first N referenced pictures in reading order (None:
+    no extra cap beyond `max_tool_images`); `render_max_edge` shrinks wider pictures
+    before they reach the rendering process. Site icons keep their fixed limits.
 
     `send(text)` is invoked ONLY by a valid `send_process_intro` tool call: normally
     once per question, with one optional pre-read supplement. Sync and async callbacks
@@ -142,6 +164,13 @@ async def answer(
         raise ValueError('max_tool_images must be a non-negative integer')
     if timeout <= 0:
         raise ValueError("timeout must be positive")
+    if (isinstance(render_timeout, bool) or not isinstance(render_timeout, (int, float))
+            or not 0 < render_timeout < float("inf")):
+        raise ValueError("render_timeout must be a positive, finite number of seconds")
+    if render_max_images is not None and (type(render_max_images) is not int or render_max_images < 0):
+        raise ValueError("render_max_images must be None or a non-negative integer")
+    if render_max_edge is not None and (type(render_max_edge) is not int or render_max_edge < 1):
+        raise ValueError("render_max_edge must be None or a positive integer")
     if backend is not None and any(value is not None for value in (home, api, base_url, api_key)):
         raise ValueError("Choose backend or connection settings; backend owns its credentials and transport")
     native_model = None
@@ -226,31 +255,45 @@ async def answer(
                          "kind": kind, "display_text": display_text,
                          "available_image_urls": list(agent.image_assets)})
                 if kind == 'text':
-                    from md2png.model import Limits
-                    from .pillow_card import adapt_answer
-                    document = adapt_answer(parsed, {}, Limits())
                     return Answer(text=text, png=None, messages=deepcopy(agent.context['messages']),
                                   answer_ms=round((rendering - started) * 1000), render_ms=0,
                                   truncated=truncated, diagnostics=(),
-                                  links=tuple(ref.url for ref in document.references), costs=costs,
+                                  links=answer_links(parsed), costs=costs,
                                   kind=kind, display_text=display_text)
-                observe({"type": "render_start", "engine": "Pillow/md2png-hyw"})
-                renderer = CardRenderer()
+                observe({"type": "render_start", "engine": "Pillow/md2png-hyw", "timeout_s": render_timeout,
+                         "max_images": render_max_images, "max_edge": render_max_edge,
+                         "available_images": len(agent.image_assets), "available_icons": len(agent.favicon_assets)})
+                renderer = CardRenderer(timeout=render_timeout)
                 resources.callback(renderer.close)
                 try:
                     card = renderer.render(text, metadata={"truncated": truncated,
                                                           "source_titles": source_titles(agent.context["messages"])},
                                            cancel=cancelled, max_tool_images=max_tool_images,
+                                           max_images=render_max_images, max_image_edge=render_max_edge,
                                            font_set=fonts or FontSet.bundled(),
                                            **({'image_assets': agent.image_assets} if agent.image_assets else {}),
                                            **({'favicon_assets': agent.favicon_assets} if agent.favicon_assets else {}))
-                except RenderError as error:
-                    observe({"type": "render_error", "code": error.code,
-                             "duration_ms": round((time.monotonic() - rendering) * 1000)})
-                    raise
+                except Exception as error:
+                    # The answer is finished; a card failure must not discard it.
+                    code = error.code if isinstance(error, RenderError) else "render_failed"
+                    report = {"stage": getattr(error, "stage", ""), "timings": dict(getattr(error, "timings", {})),
+                              "selection": dict(getattr(error, "selection", {})),
+                              "error_type": type(error).__name__}
+                    render_ms = round((time.monotonic() - rendering) * 1000)
+                    observe({"type": "render_error", "code": code, "duration_ms": render_ms, **report})
+                    if code == "cancelled" or cancelled.is_set():
+                        raise
+                    observe({"type": "render_fallback", "code": code, "stage": report["stage"]})
+                    return Answer(text=text, png=None, messages=deepcopy(agent.context["messages"]),
+                                  answer_ms=round((rendering - started) * 1000), render_ms=render_ms,
+                                  truncated=truncated,
+                                  diagnostics=({"code": "render_fallback", "render_code": code, **report},),
+                                  links=answer_links(parsed), costs=costs, kind="text",
+                                  display_text=display_text, render_error=code)
                 observe({"type": "render_end", "duration_ms": round((time.monotonic() - rendering) * 1000),
                          "image": {"mime_type": "image/png", "bytes": len(card.png)},
                          "stages_ms": card.timings,
+                         "selection": dict(card.diagnostics[0]) if card.diagnostics else {},
                          "diagnostics": list(card.diagnostics)})
                 return Answer(text, card.png, deepcopy(agent.context["messages"]),
                               round((rendering - started) * 1000), round((time.monotonic() - rendering) * 1000),

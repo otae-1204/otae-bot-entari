@@ -127,19 +127,40 @@ def adapt_answer(parsed: dict, metadata: dict, limits: Limits, *, reading: bool 
                        title_inlines=title_inlines, reading=reading)
 
 
+def _blocks(document: HywDocument):
+    pending = [block for section in reversed(document.sections) for block in reversed(section)]
+    while pending:
+        block = pending.pop()
+        yield block
+        pending.extend(reversed(block.children))
+
+
+def image_order(document: HywDocument) -> list[str]:
+    """Image targets in reading order, first occurrence only."""
+    ordered = [span.target for block in _blocks(document) for span in block.inlines if span.kind == 'image']
+    return list(dict.fromkeys([*ordered, *document.gallery]))
+
+
+def formula_over_budget(document: HywDocument, limits: Limits) -> bool:
+    """Formula failures the rasterizer is certain to hit; callers skip drawing instead.
+
+    Every formula is rasterized, and the per-formula character cap and the distinct-formula
+    cap are checked before any layout work. Other formula budgets need layout to judge.
+    """
+    formulas = {span.text for span in document.title_inlines if span.kind == 'math'}
+    for block in _blocks(document):
+        if block.kind == 'math' and block.text:
+            formulas.add(block.text)
+        formulas.update(span.text for span in block.inlines if span.kind == 'math')
+    return (len(formulas) > limits.max_assets
+            or any(len(text) > limits.max_math_chars for text in formulas))
+
+
 def referenced_assets(document: HywDocument, images: dict, icons: dict) -> tuple[dict, dict]:
     """Select by the adapted AST, preserving exact URLs and reviewed image bytes."""
     from md2png.hyw.document import source_origin
 
-    def targets(block):
-        for span in block.inlines:
-            if span.kind == 'image':
-                yield span.target
-        for child in block.children:
-            yield from targets(child)
-
-    used = {url for section in document.sections for block in section for url in targets(block)}
-    used.update(document.gallery)
+    used = set(image_order(document))
     origins = {source_origin(ref.url) for ref in document.references}
     return ({url: raw for url, raw in images.items() if url in used},
             {origin: raw for origin, raw in icons.items() if origin in origins})

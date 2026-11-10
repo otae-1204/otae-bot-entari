@@ -48,6 +48,10 @@ class RenderError(FrontierError):
         }
         self.code = code if code in messages else "render_failed"
         super().__init__(messages[self.code], diagnostics={"code": self.code})
+        # Filled by CardRenderer.render(): the phase that failed plus counts/timings only.
+        self.stage = ""
+        self.timings: dict[str, float] = {}
+        self.selection: dict = {}
 
 
 RENDER_LIMIT_CODES = frozenset({
@@ -79,6 +83,11 @@ def engine_error_code(error: Exception) -> str:
     if 'asset' in message or 'embedded image' in message:
         return 'render_asset_invalid'
     return 'render_failed'
+
+
+def worker_timeout(remaining: float) -> float:
+    """Worker drawing budget: finish (and report) before the parent's deadline kills it."""
+    return max(0.0, min(remaining, max(0.1, min(remaining - 5, remaining * .9))))
 
 
 def png_size(data: bytes) -> tuple[int, int]:
@@ -149,6 +158,9 @@ class CardRenderer:
     MAX_WORKER_RSS_MB = 512
 
     def __init__(self, timeout: float = 45):
+        """`timeout` bounds the worker prewarm and the drawing separately; never the slot queue."""
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not 0 < timeout < float('inf'):
+            raise ValueError('render timeout must be a positive, finite number of seconds')
         self.timeout = timeout
         self.slots = BoundedSemaphore(1)
         self.closed = Event()
@@ -276,57 +288,113 @@ class CardRenderer:
 
     def render(self, answer: str, *, metadata: dict, cancel: Event,
                font_set: FontSet | None = None, image_assets: dict[str, bytes] | None = None,
-               favicon_assets: dict[str, bytes] | None = None, max_tool_images: int = 600) -> RenderedCard:
-        from .media import MAX_JPEG_BYTES
+               favicon_assets: dict[str, bytes] | None = None, max_tool_images: int = 600,
+               max_images: int | None = None, max_image_edge: int | None = None) -> RenderedCard:
+        """Queueing for the slot has no deadline (cancellation still stops it); cold-start
+        prewarm has its own `timeout`; the drawing deadline starts once the worker is ready.
+
+        `max_images` keeps the first N referenced pictures in reading order (the rest stay
+        links); `max_image_edge` shrinks wider previews through media.compress().
+        Raised RenderErrors carry `stage`, `timings` and `selection` (counts only).
+        """
+        report = {'stage': 'select', 'timings': {}, 'selection': {}}
+        started = time.monotonic()
+        try:
+            return self._render(answer, report, started, metadata=metadata, cancel=cancel, font_set=font_set,
+                                image_assets=image_assets, favicon_assets=favicon_assets,
+                                max_tool_images=max_tool_images, max_images=max_images,
+                                max_image_edge=max_image_edge)
+        except RenderError as error:
+            report['timings']['total_ms'] = round((time.monotonic() - started) * 1000, 2)
+            error.stage = report['stage']
+            error.timings = dict(report['timings'])
+            error.selection = dict(report['selection'])
+            raise
+
+    def _render(self, answer: str, report: dict, started: float, *, metadata: dict, cancel: Event,
+                font_set: FontSet | None, image_assets: dict[str, bytes] | None,
+                favicon_assets: dict[str, bytes] | None, max_tool_images: int,
+                max_images: int | None, max_image_edge: int | None) -> RenderedCard:
+        from .media import MAX_EDGE, MAX_JPEG_BYTES, fit_edge
         from .favicon_assets import MAX_ICONS, MAX_ICON_BYTES
         from md2png.hyw.document import source_origin
         from md2png.model import Limits, RenderError as EngineError
-        from .pillow_card import adapt_answer, parse_protocol, referenced_assets
+        from PIL import Image
+        from .pillow_card import adapt_answer, formula_over_budget, image_order, parse_protocol, referenced_assets
+        timings = report['timings']
         if len(answer.encode()) > 256 * 1024:
             raise RenderError('render_text_limit')
         if cancel.is_set() or self.closed.is_set():
             raise RenderError('cancelled')
-        started = time.monotonic()
         available_images, available_icons = len(image_assets or {}), len(favicon_assets or {})
+        limits = Limits(max_chars=256 * 1024)
         try:
-            document = adapt_answer(parse_protocol(answer), metadata,
-                                    Limits(max_chars=256 * 1024), reading=True,
+            document = adapt_answer(parse_protocol(answer), metadata, limits, reading=True,
                                     image_urls=set(image_assets or {}))
         except EngineError as error:
             raise RenderError(engine_error_code(error)) from error
+        if formula_over_budget(document, limits):
+            # Certain to fail inside the worker: skip drawing altogether.
+            raise RenderError('render_formula_limit')
         image_assets, favicon_assets = referenced_assets(document, image_assets or {}, favicon_assets or {})
-        selection = {'code': 'render_asset_selection', 'available_images': available_images,
-                     'selected_images': len(image_assets), 'available_icons': available_icons,
-                     'selected_icons': len(favicon_assets)}
+        selection = report['selection']
+        selection.update(code='render_asset_selection', available_images=available_images,
+                         referenced_images=len(image_assets), selected_images=len(image_assets),
+                         available_icons=available_icons, selected_icons=len(favicon_assets))
         if (len(favicon_assets) > MAX_ICONS or any(not isinstance(origin, str)
                 or not origin or source_origin(origin) != origin or not isinstance(raw, bytes)
                 or len(raw) > MAX_ICON_BYTES for origin, raw in favicon_assets.items())):
             raise RenderError('render_asset_invalid')
         image_assets = image_assets or {}
+        if max_images is not None and len(image_assets) > max_images:
+            kept = [url for url in image_order(document) if url in image_assets][:max_images]
+            image_assets = {url: image_assets[url] for url in kept}
+            selection['dropped_images'] = selection['referenced_images'] - len(image_assets)
         if (type(max_tool_images) is not int or max_tool_images < 0
                 or len(image_assets) > max_tool_images or any(not isinstance(url, str) or not isinstance(raw, bytes)
                 or len(raw) > MAX_JPEG_BYTES for url, raw in image_assets.items())):
             raise RenderError('render_asset_invalid')
-        selection_ms = (time.monotonic() - started) * 1000
-        deadline = started + self.timeout
+        if max_image_edge is not None:
+            edge, resized, rejected = min(max_image_edge, MAX_EDGE), 0, []
+            for url, raw in image_assets.items():
+                self._check(cancel, float('inf'))
+                try:
+                    image_assets[url], shrunk = fit_edge(raw, edge)
+                    resized += shrunk
+                except (OSError, ValueError, SyntaxError, Image.DecompressionBombError, Image.DecompressionBombWarning):
+                    rejected.append(url)  # Left as a link, like any picture without bytes.
+            for url in rejected:
+                del image_assets[url]
+            selection.update(max_image_edge=edge, resized_images=resized, rejected_images=len(rejected))
+        selection['selected_images'] = len(image_assets)
+        timings['selection_ms'] = round((time.monotonic() - started) * 1000, 2)
+        report['stage'] = 'queue'
         queued = time.monotonic()
-        self._acquire(cancel, deadline)
-        queue_ms = (time.monotonic() - queued) * 1000
+        # Queueing never times out: the slot holder is bounded by its own prepare/draw
+        # budgets, and cancellation/close still stop the wait.
+        self._acquire(cancel, float('inf'))
+        timings['queue_ms'] = round((time.monotonic() - queued) * 1000, 2)
         clean_rejection = False
         try:
+            report['stage'] = 'prepare'
             prepare_started = time.monotonic()
             previous_worker = self._worker
-            process = self._ensure_worker(cancel, deadline, font_set)
+            process = self._ensure_worker(cancel, prepare_started + self.timeout, font_set)
             # A reused, ready worker performs no preparation. Poll/lookup overhead
             # belongs to total_ms, not a machine-speed-dependent phantom prewarm.
-            prepare_ms = ((time.monotonic() - prepare_started) * 1000
-                          if process is not previous_worker else 0)
+            timings['prepare_ms'] = round((time.monotonic() - prepare_started) * 1000
+                                          if process is not previous_worker else 0, 2)
+            report['stage'] = 'draw'
+            draw_started = time.monotonic()
+            deadline = draw_started + self.timeout
             with tempfile.TemporaryDirectory(prefix='hyw-card-') as directory:
                 work = Path(directory)
                 payload = work / 'input.json'
+                self._check(cancel, deadline)
                 payload.write_text(json.dumps({'answer': answer, 'metadata': metadata,
                     'font_set': asdict(font_set) if font_set else None,
                     'max_tool_images': max_tool_images,
+                    'timeout': round(worker_timeout(deadline - time.monotonic()), 3),
                     'image_assets': {url: base64.b64encode(raw).decode('ascii') for url, raw in image_assets.items()},
                     'favicon_assets': {origin: base64.b64encode(raw).decode('ascii')
                                        for origin, raw in favicon_assets.items()}},
@@ -341,6 +409,7 @@ class CardRenderer:
                     # Stop writers before TemporaryDirectory removes their files.
                     self._discard()
                     raise
+                timings['draw_ms'] = round((time.monotonic() - draw_started) * 1000, 2)
                 with self.lock:
                     self._requests += 1
                     recycle = self._requests >= self.MAX_WORKER_REQUESTS or result.get('rss_mb', 0) >= self.MAX_WORKER_RSS_MB
@@ -356,13 +425,16 @@ class CardRenderer:
                 self._check(cancel, deadline)
                 if recycle:
                     self._discard()
-                timings = result.get('timings', {})
-                timings.update(selection_ms=round(selection_ms, 2), queue_ms=round(queue_ms, 2), prepare_ms=round(prepare_ms, 2),
-                               total_ms=round((time.monotonic() - started) * 1000, 2))
+                card_timings = {**(result.get('timings') or {}), **timings,
+                                'total_ms': round((time.monotonic() - started) * 1000, 2)}
                 return RenderedCard(png, bool(result.get('recovered')), result.get('mode', 'text'),
-                                    (selection, *result.get('diagnostics', ())), timings,
+                                    (dict(selection), *result.get('diagnostics', ())), card_timings,
                                     tuple(result.get('links', ())))
         except Exception as error:
+            if report['stage'] == 'prepare':
+                timings['prepare_ms'] = round((time.monotonic() - prepare_started) * 1000, 2)
+            elif report['stage'] == 'draw' and 'draw_ms' not in timings:
+                timings['draw_ms'] = round((time.monotonic() - draw_started) * 1000, 2)
             if not clean_rejection or cancel.is_set() or self.closed.is_set():
                 self._discard()
             if cancel.is_set() or self.closed.is_set():

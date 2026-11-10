@@ -117,7 +117,7 @@ def download(candidate: Candidate, cancel: Event, timeout: float = DOWNLOAD_TIME
     return candidate, raw, status, round((time.monotonic() - started) * 1000, 2)
 
 
-def compress(raw: bytes, *, min_edge: int = 64):
+def compress(raw: bytes, *, min_edge: int = 64, max_edge: int = MAX_EDGE):
     """One fast resize/JPEG pass; a second smaller pass only for unusually noisy images."""
     with warnings.catch_warnings(), ExitStack() as resources:
         warnings.simplefilter('error', Image.DecompressionBombWarning)
@@ -127,9 +127,9 @@ def compress(raw: bytes, *, min_edge: int = 64):
                 or min(source.size) < min_edge):
             raise ValueError('unsupported_image')
         source.seek(0)  # Animated images use the first frame only.
-        source.draft('RGB', (MAX_EDGE, MAX_EDGE))
+        source.draft('RGB', (max_edge, max_edge))
         image = resources.enter_context(closing(ImageOps.exif_transpose(source)))
-        image.thumbnail((MAX_EDGE, MAX_EDGE), Image.Resampling.BILINEAR, reducing_gap=2.0)
+        image.thumbnail((max_edge, max_edge), Image.Resampling.BILINEAR, reducing_gap=2.0)
         if image.mode in ('RGBA', 'LA') or (image.mode == 'P' and 'transparency' in image.info):
             rgba = resources.enter_context(closing(image.convert('RGBA')))
             image = resources.enter_context(closing(Image.new('RGB', rgba.size, 'white')))
@@ -147,6 +147,21 @@ def compress(raw: bytes, *, min_edge: int = 64):
         if buffer.tell() > MAX_JPEG_BYTES:
             raise ValueError('compressed_image_too_large')
         return buffer.getvalue(), image.size
+
+
+def fit_edge(raw: bytes, max_edge: int) -> tuple[bytes, bool]:
+    """Render-side bound on an approved preview: shrink through compress() only when too wide.
+
+    Only the header is read to decide; pixels are decoded by compress() alone, with the
+    same format/pixel/bomb guards. Returns (bytes, resized).
+    """
+    with warnings.catch_warnings(), ExitStack() as resources:
+        warnings.simplefilter('error', Image.DecompressionBombWarning)
+        source = resources.enter_context(closing(Image.open(resources.enter_context(BytesIO(raw)))))
+        size = source.size
+    if max(size) <= max_edge:
+        return raw, False
+    return compress(raw, min_edge=1, max_edge=max_edge)[0], True
 
 
 class ImagePipeline:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -26,6 +27,18 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+def _env_positive(name: str, default: float) -> float:
+    """Positive, finite seconds; anything else falls back to the default."""
+    value = _env_float(name, default)
+    return value if math.isfinite(value) and value > 0 else default
+
+
+def _env_at_least(name: str, default: int, minimum: int) -> int:
+    """Integers below ``minimum`` are treated as invalid, not clamped."""
+    value = _env_int(name, default)
+    return value if value >= minimum else default
+
+
 def _proxy(name: str, fallback: str = "") -> str:
     value = str(_env(name, "") or "").strip()
     if value.lower() == "direct":
@@ -46,6 +59,9 @@ class HywConfig:
     timeout: float = 300
     request_timeout: float = 90
     reasoning_mode: str = "auto"
+    render_timeout: float = 45
+    render_max_images: int = 16
+    render_max_edge: int = 1024
     max_concurrent: int = 2
     max_tool_images: int = 600
     max_reader_images: int = 30
@@ -117,6 +133,10 @@ class HywConfig:
             timeout=max(1.0, _env_float("HYW_TIMEOUT", cls.timeout)),
             request_timeout=max(1.0, _env_float("HYW_REQUEST_TIMEOUT", cls.request_timeout)),
             reasoning_mode=reasoning_mode,
+            render_timeout=_env_positive("HYW_RENDER_TIMEOUT", cls.render_timeout),
+            render_max_images=_env_at_least("HYW_RENDER_MAX_IMAGES", cls.render_max_images, 0),
+            # The render worker accepts at most 1280px previews; tiny edges would be useless.
+            render_max_edge=min(1280, _env_at_least("HYW_RENDER_MAX_EDGE", cls.render_max_edge, 64)),
             max_concurrent=max(1, _env_int("HYW_MAX_CONCURRENT", cls.max_concurrent)),
             max_tool_images=max(0, _env_int("HYW_MAX_TOOL_IMAGES", cls.max_tool_images)),
             max_reader_images=max(0, _env_int("HYW_MAX_READER_IMAGES", cls.max_reader_images)),

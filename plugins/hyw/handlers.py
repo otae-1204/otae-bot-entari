@@ -6,6 +6,7 @@ import binascii
 import json
 import os
 import re
+import uuid
 from io import BytesIO
 from pathlib import Path
 
@@ -323,6 +324,54 @@ def _google_home(config: HywConfig) -> Path:
     return home
 
 
+RENDER_FAILED = "卡片生成失败"
+
+# Timings, counts and codes only. Events also carry answer text, tool arguments/results
+# and prompts; none of those fields may reach the log.
+_EVENT_FIELDS = {
+    "model_start": ("round", "reasoning_level", "images_sent", "new_images_sent"),
+    "model_first_output": ("round", "duration_ms"),
+    "tool_end": ("round", "name", "duration_ms", "ok", "code", "partial"),
+    "round_timing": ("round", "model_ms", "tool_ms", "media_download_ms", "image_processing_ms", "total_ms"),
+    "round_limit_warning": ("round", "max_rounds"),
+    "render_start": ("timeout_s", "max_images", "max_edge", "available_images", "available_icons"),
+    "render_end": ("duration_ms",),
+    "render_error": ("code", "stage", "error_type", "duration_ms"),
+}
+_RENDER_TIMINGS = ("selection_ms", "queue_ms", "prepare_ms", "draw_ms", "worker_ms", "total_ms")
+_RENDER_COUNTS = ("referenced_images", "selected_images", "dropped_images", "resized_images",
+                  "rejected_images", "selected_icons")
+
+
+def _scalar(value) -> bool:
+    return value is None or isinstance(value, (bool, int, float)) or (isinstance(value, str) and len(value) <= 64)
+
+
+def _event_fields(event: dict) -> list[tuple[str, object]] | None:
+    kind = event.get("type")
+    if kind not in _EVENT_FIELDS or (kind == "round_timing" and not event.get("complete")):
+        return None
+    fields = [(key, event.get(key)) for key in _EVENT_FIELDS[kind] if key in event]
+    if kind in {"render_end", "render_error"}:
+        timings = event.get("stages_ms") if kind == "render_end" else event.get("timings")
+        selection = event.get("selection")
+        if isinstance(timings, dict):
+            fields.extend((key, timings[key]) for key in _RENDER_TIMINGS if key in timings)
+        if isinstance(selection, dict):
+            fields.extend((key, selection[key]) for key in _RENDER_COUNTS if key in selection)
+    return [(key, value) for key, value in fields if _scalar(value)]
+
+
+def event_logger(request_id: str):
+    """`answer(on_event=...)` observer: one INFO line per round / tool / render phase."""
+    def observe(event: dict):
+        fields = _event_fields(event) if isinstance(event, dict) else None
+        if fields is not None:
+            logger.info("[hyw] {} req={} {}", event["type"], request_id,
+                        " ".join(f"{key}={value}" for key, value in fields))
+    return observe
+
+
 async def _prepared_blocks(config: HywConfig, text: str, images: list[str]) -> list[dict]:
     blocks = []
     if text:
@@ -355,6 +404,7 @@ async def run_request(session: Session, config: HywConfig, scope: Scope, text: s
     async def send(message: str):
         await send_text(session, message)
 
+    request_id = uuid.uuid4().hex[:8]
     try:
         try:
             result = await answer(
@@ -373,13 +423,23 @@ async def run_request(session: Session, config: HywConfig, scope: Scope, text: s
                 reader_engine=config.reader_engine,
                 reasoning_mode=config.reasoning_mode,
                 timeout=config.request_timeout,
+                render_timeout=config.render_timeout,
+                render_max_images=config.render_max_images,
+                render_max_edge=config.render_max_edge,
+                on_event=event_logger(request_id),
                 history=prior or None,
                 images=None if rich else (model_images or None),
                 message_content=message_content,
             )
         except RenderError as error:
-            logger.warning("[hyw] card render failed: {}", failure_summary(error, _config_secrets(config)))
-            raise HywError("文本回答已生成完毕，但生成渲染卡片时失败，请稍后重试。") from None
+            # hyw-frontier now returns the text itself; this only covers a raise that still carries it.
+            logger.warning("[hyw] card render failed: req={} {}", request_id,
+                           failure_summary(error, _config_secrets(config)))
+            body = getattr(error, "display_text", "")
+            if not isinstance(body, str) or not body.strip():
+                raise HywError(f"{RENDER_FAILED}，且没能取回文字答案，请稍后重试。") from None
+            await send_text(session, f"{RENDER_FAILED}\n\n{body}")
+            return
         except FrontierError as error:
             logger.warning("[hyw] answer failed: {}", failure_summary(error, _config_secrets(config)))
             raise HywError(str(error)) from None
@@ -391,15 +451,24 @@ async def run_request(session: Session, config: HywConfig, scope: Scope, text: s
     history = _continuable(result.messages)
     listed = _listed_sources(result)
     receipts = []
+    render_error = getattr(result, "render_error", "") or ""
+    card_failed = bool(config.render and render_error)
+    logger.info("[hyw] answer_done req={} kind={} answer_ms={} render_ms={} render_error={}", request_id,
+                result.kind, getattr(result, "answer_ms", None), getattr(result, "render_ms", None), render_error or "-")
+    if render_error:
+        logger.warning("[hyw] card render failed, sending text instead: req={} code={}", request_id, render_error)
     if config.render and result.kind == "image" and result.png:
         try:
             jpeg = _png_jpeg(result.png)
         except OSError:
             jpeg = b""
+            card_failed = True
+            logger.warning("[hyw] card png could not be converted, sending text instead: req={}", request_id)
         if jpeg:
             receipts = await session.send(MessageChain([make_image(raw=jpeg)]), reply_to=True) or []
     if not receipts:
-        receipts = await send_text(session, result.display_text or result.text)
+        body = result.display_text or result.text
+        receipts = await send_text(session, f"{RENDER_FAILED}\n\n{body}" if card_failed else body)
     _remember(scope, receipts, history, listed)
 
 

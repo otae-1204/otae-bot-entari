@@ -13,6 +13,16 @@ import time
 
 from .rendering import MAX_CARD_HEIGHT, MAX_IMAGE_BYTES, RenderError, RENDER_LIMIT_CODES, engine_error_code
 
+DEFAULT_DRAW_TIMEOUT = 40.0
+MAX_DRAW_TIMEOUT = 600.0
+
+
+def draw_timeout(value) -> float:
+    """The parent sends its remaining drawing budget; never draw past it."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 < value < float('inf'):
+        return DEFAULT_DRAW_TIMEOUT
+    return min(float(value), MAX_DRAW_TIMEOUT)
+
 
 class RenderRuntime:
     """Only font assets and the parser survive requests. Never cache answer/layout/results."""
@@ -62,7 +72,7 @@ def render(work: Path, runtime: RenderRuntime | None = None) -> dict:
     stage = time.perf_counter()
     parsed = runtime.parser.parse(answer) if runtime else parse_protocol(answer)
     timings['protocol_ms'] = round((time.perf_counter() - stage) * 1000, 2)
-    limits = Limits(max_chars=256 * 1024, max_height=MAX_CARD_HEIGHT, timeout=40)
+    limits = Limits(max_chars=256 * 1024, max_height=MAX_CARD_HEIGHT, timeout=draw_timeout(data.get('timeout')))
     try:
         stage = time.perf_counter()
         from .media import MAX_IMAGES, MAX_JPEG_BYTES, MAX_EDGE

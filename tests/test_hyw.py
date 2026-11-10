@@ -62,6 +62,26 @@ class ConfigTests(unittest.TestCase):
             with self.subTest(raw=raw), patch("plugins.hyw.config._env", side_effect=_env(values)):
                 self.assertEqual(HywConfig.from_env().reasoning_mode, expected)
 
+    def test_render_limits_are_read_with_safe_fallbacks(self):
+        cases = {
+            ("HYW_RENDER_TIMEOUT", "render_timeout"): {None: 45, "20": 20, "7.5": 7.5, "0": 45, "-1": 45,
+                                                       "nan": 45, "inf": 45, "x": 45},
+            ("HYW_RENDER_MAX_IMAGES", "render_max_images"): {None: 16, "4": 4, "0": 0, "-1": 16, "x": 16},
+            ("HYW_RENDER_MAX_EDGE", "render_max_edge"): {None: 1024, "800": 800, "5000": 1280, "10": 1024, "x": 1024},
+        }
+        for (key, field), expected in cases.items():
+            for raw, value in expected.items():
+                values = {} if raw is None else {key: raw}
+                with self.subTest(key=key, raw=raw), patch("plugins.hyw.config._env", side_effect=_env(values)):
+                    self.assertEqual(getattr(HywConfig.from_env(), field), value)
+
+    def test_render_image_cap_does_not_touch_the_tool_image_budget(self):
+        values = {"HYW_RENDER_MAX_IMAGES": "3"}
+        with patch("plugins.hyw.config._env", side_effect=_env(values)):
+            config = HywConfig.from_env()
+        self.assertEqual(config.max_tool_images, 600)
+        self.assertEqual(config.render_max_images, 3)
+
 
 class HistoryTests(unittest.TestCase):
     def test_sources_are_visible_in_channel_and_cleared_per_sender(self):
@@ -745,6 +765,135 @@ class AnswerCallTests(unittest.IsolatedAsyncioTestCase):
         kwargs = answer.await_args.kwargs
         self.assertEqual(kwargs["reasoning_mode"], "low")
         self.assertEqual(kwargs["timeout"], 42)
+
+    async def test_render_settings_and_event_logger_reach_answer(self):
+        import inspect
+        import sys
+        from types import SimpleNamespace
+
+        from plugins.hyw import handlers
+
+        result = SimpleNamespace(messages=[], links=[], kind="text", png=None, display_text="答", text="答")
+        answer = AsyncMock(return_value=result)
+        session = AsyncMock()
+        session.send = AsyncMock(return_value=[])
+        config = _config(render_timeout=33, render_max_images=5, render_max_edge=800)
+        with patch.dict(sys.modules, _fake_frontier(answer)):
+            await handlers.run_request(session, config, ("qq", "b", "g", "c", "u"), "问题", [], [])
+        kwargs = answer.await_args.kwargs
+        self.assertEqual(kwargs["render_timeout"], 33)
+        self.assertEqual(kwargs["render_max_images"], 5)
+        self.assertEqual(kwargs["render_max_edge"], 800)
+        self.assertEqual(kwargs["max_tool_images"], 600)
+        self.assertTrue(callable(kwargs["on_event"]))
+        self.assertFalse(inspect.iscoroutinefunction(kwargs["on_event"]))
+
+
+
+def _sent_texts(session) -> list[str]:
+    return ["".join(getattr(part, "text", "") for part in call.args[0]) for call in session.send.await_args_list]
+
+
+class RenderFallbackTests(unittest.IsolatedAsyncioTestCase):
+    async def _run(self, result=None, *, error=None, config=None):
+        import sys
+
+        from plugins.hyw import handlers
+
+        answer = AsyncMock(return_value=result, side_effect=error)
+        session = AsyncMock()
+        session.send = AsyncMock(return_value=[])
+        with patch.dict(sys.modules, _fake_frontier(answer)), patch.object(handlers, "logger") as log:
+            await handlers.run_request(session, config or _config(), ("qq", "b", "g", "c", "u"), "问题", [], [])
+        return session, log
+
+    def _result(self, **overrides):
+        from types import SimpleNamespace
+
+        values = dict(messages=[], links=["https://example.com/a"], kind="text", png=None,
+                      display_text="# 标题\n\n完整答案正文", text="<final_response>完整答案正文</final_response>",
+                      render_error="", answer_ms=1200, render_ms=45_100)
+        values.update(overrides)
+        return SimpleNamespace(**values)
+
+    async def test_a_failed_card_still_delivers_the_answer_text(self):
+        for code in ("render_timeout", "render_formula_limit"):
+            with self.subTest(code=code):
+                session, log = await self._run(self._result(render_error=code))
+                sent = _sent_texts(session)
+                self.assertEqual(sent, ["卡片生成失败\n\n# 标题\n\n完整答案正文"])
+                self.assertNotIn("请稍后重试", "".join(sent))
+                warning = " ".join(str(call) for call in log.warning.call_args_list)
+                self.assertIn(code, warning)
+                self.assertNotIn("完整答案正文", warning)
+
+    async def test_plain_text_answers_get_no_failure_note(self):
+        session, _ = await self._run(self._result())
+        self.assertEqual(_sent_texts(session), ["# 标题\n\n完整答案正文"])
+
+    async def test_render_disabled_sends_text_without_a_failure_note(self):
+        session, _ = await self._run(self._result(render_error="render_timeout"), config=_config(render=False))
+        self.assertEqual(_sent_texts(session), ["# 标题\n\n完整答案正文"])
+
+    async def test_a_raised_render_error_carrying_the_text_is_still_delivered(self):
+        error = RenderError("图片渲染超时。", diagnostics={"code": "render_timeout"})
+        error.display_text = "完整答案正文"
+        session, _ = await self._run(error=error)
+        self.assertEqual(_sent_texts(session), ["卡片生成失败\n\n完整答案正文"])
+
+    async def test_a_raised_render_error_without_text_says_so(self):
+        with self.assertRaises(HywError) as raised:
+            await self._run(error=RenderError("图片渲染超时。", diagnostics={"code": "render_timeout"}))
+        self.assertIn("卡片生成失败", str(raised.exception))
+        self.assertNotIn("文本回答已生成完毕", str(raised.exception))
+
+
+class EventLogTests(unittest.TestCase):
+    def test_timings_and_counts_are_logged_without_text_or_arguments(self):
+        from plugins.hyw import handlers
+
+        events = [
+            {"type": "model_start", "round": 1, "reasoning_level": "medium", "images_sent": 0, "new_images_sent": 0},
+            {"type": "model_first_output", "round": 1, "duration_ms": 812.5},
+            {"type": "tool_start", "round": 1, "name": "web_search", "arguments": {"query": "SECRET-QUERY"}},
+            {"type": "tool_end", "round": 1, "name": "web_search", "duration_ms": 950.0, "ok": True, "code": None,
+             "partial": False, "result": {"content": [{"text": "SECRET-RESULT"}]}, "sources": [{"url": "u"}]},
+            {"type": "round_timing", "round": 1, "phase": "model", "complete": False, "model_ms": 1.0},
+            {"type": "round_timing", "round": 1, "phase": "finished", "complete": True, "model_ms": 4100.5,
+             "tool_ms": 950.0, "media_download_ms": 0, "image_processing_ms": 0, "total_ms": 5100.5},
+            {"type": "answer_ready", "text": "SECRET-ANSWER", "display_text": "SECRET-ANSWER"},
+            {"type": "text_delta", "delta": "SECRET-ANSWER"},
+            {"type": "effective_prompt", "system_prompt": "SECRET-PROMPT"},
+            {"type": "render_start", "timeout_s": 45, "max_images": 16, "max_edge": 1024,
+             "available_images": 40, "available_icons": 6},
+            {"type": "render_end", "duration_ms": 9000, "image": {"bytes": 1},
+             "stages_ms": {"selection_ms": 3.0, "queue_ms": 0.1, "prepare_ms": 1500.0, "draw_ms": 7400.0,
+                           "worker_ms": 7390.0, "total_ms": 9000.0, "layout_ms": 1.0},
+             "selection": {"code": "render_asset_selection", "referenced_images": 20, "selected_images": 16,
+                           "dropped_images": 4, "selected_icons": 5},
+             "diagnostics": [{"message": "SECRET-DIAG"}]},
+            {"type": "render_error", "code": "render_timeout", "stage": "draw", "error_type": "RenderError",
+             "duration_ms": 46000, "timings": {"queue_ms": 0.0, "prepare_ms": 900.0, "draw_ms": 45000.0,
+                                               "total_ms": 46000.0},
+             "selection": {"selected_images": 16, "selected_icons": 3}},
+        ]
+        observe = handlers.event_logger("abc123")
+        with patch.object(handlers, "logger") as log:
+            for event in events:
+                observe(event)
+            observe("not a dict")
+        lines = [call.args[0].replace("{}", "%s") % call.args[1:] for call in log.info.call_args_list]
+        joined = "\n".join(lines)
+        self.assertEqual(len(lines), 7)
+        self.assertTrue(all("req=abc123" in line for line in lines))
+        self.assertIn("model_start req=abc123 round=1 reasoning_level=medium", joined)
+        self.assertIn("tool_end req=abc123 round=1 name=web_search duration_ms=950.0 ok=True", joined)
+        self.assertIn("round_timing req=abc123 round=1 model_ms=4100.5 tool_ms=950.0", joined)
+        self.assertIn("queue_ms=0.1 prepare_ms=1500.0 draw_ms=7400.0 worker_ms=7390.0 total_ms=9000.0", joined)
+        self.assertIn("selected_images=16 dropped_images=4 selected_icons=5", joined)
+        self.assertIn("render_error req=abc123 code=render_timeout stage=draw error_type=RenderError", joined)
+        for secret in ("SECRET-QUERY", "SECRET-RESULT", "SECRET-ANSWER", "SECRET-PROMPT", "SECRET-DIAG"):
+            self.assertNotIn(secret, joined)
 
 
 class FailureLogTests(unittest.IsolatedAsyncioTestCase):
