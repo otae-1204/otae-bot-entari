@@ -2,10 +2,13 @@
 
 from pathlib import Path
 
-from otae_bot.compat.entari import ChainMsg, make_image as ChainImage, ArgVal
+from arclet.alconna import Alconna, Args, MultiVar
+from arclet.entari import Image, MessageChain, Session, command
+from arclet.entari.command import Match
+from nepattern import AnyString
 
 from otae_bot.config.paths import IMAGE_PATH
-from otae_bot.compat.entari import cmd as _cmd, get_rest
+from otae_bot.messaging.inbound import get_rest
 from otae_bot.infrastructure.rendering.help_runtime import cached_help_image
 
 HELP_IMAGE_DIR = Path(IMAGE_PATH) / "help"
@@ -65,32 +68,33 @@ def _available_topics() -> list[str]:
     })
 
 
-help_cmd = _cmd("help", aliases={"Help", "h", "帮助"}, priority=5, block=True)
+help_cmd = Alconna(["help", "Help", "h", "帮助"], Args["rest;?", MultiVar(AnyString)])
 
 
-@help_cmd.handle()
-async def handle_help_command(rest: ArgVal[str]):
+@command.on(help_cmd)
+async def handle_help_command(session: Session, rest: Match[tuple[str, ...]]):
     command_args = get_rest(rest)
 
     if command_args.lower() in TEXT_TOPICS:
-        await help_cmd.finish(TEXT_TOPICS[command_args.lower()])
+        await session.send(TEXT_TOPICS[command_args.lower()])
         return
 
     if command_args.lower() in ("list", "列表"):
         available = _available_topics()
         if available:
-            await help_cmd.finish("可用帮助主题：\n" + "\n".join(f"  /help {t}" for t in available))
-        await help_cmd.finish("暂无可用的帮助图，请联系管理员检查 assets/image/help/ 目录。")
+            await session.send("可用帮助主题：\n" + "\n".join(f"  /help {t}" for t in available))
+            return
+        await session.send("暂无可用的帮助图，请联系管理员检查 assets/image/help/ 目录。")
         return
 
     # 未给出主题时默认发主帮助图；给了未知主题则不匹配，落到下面的提示。
     topic = TOPIC_MAP.get(command_args.lower()) if command_args else "main"
     chosen = await cached_help_image(topic) if topic else None
     if chosen:
-        await help_cmd.finish(ChainMsg([ChainImage(path=str(chosen))]))
+        await session.send(MessageChain([Image.of(path=Path(chosen))]))
         return
 
     # 无匹配图片 → 提示
     available = _available_topics()
     tip = "可用帮助主题：\n" + "\n".join(f"  /help {t}" for t in available) if available else "暂无可用的帮助图，请联系管理员检查 assets/image/help/ 目录。"
-    await help_cmd.finish(tip)
+    await session.send(tip)
