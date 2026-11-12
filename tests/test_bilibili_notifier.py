@@ -9,6 +9,7 @@ from typing import Any, Callable
 import pytest
 from loguru import logger
 
+from otae_bot.config import settings
 from tests.support.loaders import _load_bili_new_module
 
 
@@ -923,8 +924,8 @@ def test_narrowed_scope_still_delivers_other_accounts_lottery_row(monkeypatch):
 
         assert [row_id for row_id, _ in recorder.sent] == [row]
 
-    monkeypatch.setenv("BILI_LOTTERY_FILTER_UIDS", "1265652806")
-    asyncio.run(scenario())
+    with settings.override({"plugins": {"plugins.bilibilibot": {"lottery_filter_uids": "1265652806"}}}):
+        asyncio.run(scenario())
 
-    asyncio.run(scenario())
+        asyncio.run(scenario())
 

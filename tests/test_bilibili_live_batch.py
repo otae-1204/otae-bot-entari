@@ -301,12 +301,12 @@ async def test_batch_transport_failure_falls_back_to_per_room_queries(bili, tmp_
 
 @asyncio_test
 async def test_batch_env_switch_skips_the_batch_endpoint(bili, tmp_path, monkeypatch):
-    """BILI_LIVE_BATCH=0 is the documented rollback path (plan section 6, stage 3).
+    """live_batch: false is the documented rollback path (plan section 6, stage 3).
 
     With the switch off the poller must never touch the batch endpoint and go
     straight to per-room queries instead.
     """
-    monkeypatch.setenv("BILI_LIVE_BATCH", "0")
+    monkeypatch.setattr(bili.poller, "live_batch_enabled", lambda: False)
     backend = Backend(
         batch={"1": entry("1")},
         rooms={
@@ -339,7 +339,6 @@ async def test_batch_env_switch_skips_the_batch_endpoint(bili, tmp_path, monkeyp
 @asyncio_test
 async def test_batch_endpoint_is_the_default_path(bili, tmp_path, monkeypatch):
     """Without the kill switch the batch endpoint stays the single request."""
-    monkeypatch.delenv("BILI_LIVE_BATCH", raising=False)
     backend = Backend(
         batch={"1": entry("1")},
         rooms={

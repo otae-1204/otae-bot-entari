@@ -9,14 +9,13 @@ from __future__ import annotations
 import json
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
+from otae_bot.config import settings
 from plugins.bilibilibot.api.mapping import dynamic_item_to_card
 from plugins.bilibilibot.detect import detect_dynamic
 from plugins.bilibilibot.lottery_filter import (
     ALL_ACCOUNTS,
     DEFAULT_FILTER_UIDS,
-    LOTTERY_FILTER_UIDS_ENV,
     applies_to,
     lottery_reason,
     parse_filter_uids,
@@ -28,6 +27,10 @@ from plugins.bilibilibot.models import KIND_DYNAMIC, BiliCard, TargetInfo
 FIXTURES = Path(__file__).parent / "fixtures/bilibili/endfield_official"
 OFFICIAL_UID = "1265652806"
 OTHER_UID = "12345"
+
+
+def _uids(value: str):
+    return settings.override({"plugins": {"plugins.bilibilibot": {"lottery_filter_uids": value}}})
 
 
 def sample(name: str) -> dict:
@@ -214,17 +217,19 @@ class AccountListTests(unittest.TestCase):
             with self.subTest(raw=raw):
                 self.assertEqual(parse_filter_uids(raw), frozenset({ALL_ACCOUNTS}))
 
-    def test_environment_variable_drives_the_scope(self):
-        with patch.dict("os.environ", {LOTTERY_FILTER_UIDS_ENV: "999"}):
+    def test_setting_drives_the_scope(self):
+        with _uids("999"):
             self.assertTrue(applies_to("999"))
             self.assertFalse(applies_to(OFFICIAL_UID))
-        with patch.dict("os.environ", {LOTTERY_FILTER_UIDS_ENV: ""}):
+        with _uids(""):
             self.assertFalse(applies_to(OFFICIAL_UID))
-        with patch.dict("os.environ", {LOTTERY_FILTER_UIDS_ENV: ALL_ACCOUNTS}):
+        with _uids(ALL_ACCOUNTS):
+            self.assertTrue(applies_to(OTHER_UID))
+        with settings.override({}):
             self.assertTrue(applies_to(OTHER_UID))
 
-    def test_explicit_list_overrides_the_environment(self):
-        with patch.dict("os.environ", {LOTTERY_FILTER_UIDS_ENV: "999"}):
+    def test_explicit_list_overrides_the_setting(self):
+        with _uids("999"):
             self.assertTrue(applies_to(OFFICIAL_UID, frozenset({OFFICIAL_UID})))
             self.assertFalse(applies_to("999", frozenset({OFFICIAL_UID})))
 

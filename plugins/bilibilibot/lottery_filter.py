@@ -4,22 +4,21 @@ B 站账号会把社交抽奖混进动态流里，这类内容不是游戏资讯
 判定完全本地、确定性，只读取 B 站标记的结构化节点类型、正文与转发原文，
 不调用模型，也不做图片 OCR。
 
-默认对所有账号生效，账号列表由 BILI_LOTTERY_FILTER_UIDS 配置：逗号分隔的 UID
+默认对所有账号生效，账号列表由 entari.yml 的 plugins.bilibilibot.lottery_filter_uids 配置：逗号分隔的 UID
 收窄到指定账号，``*`` 或 ``all`` 表示全部账号，显式留空表示关闭过滤。
 """
 
 from __future__ import annotations
 
 import html
-import os
 import re
 import unicodedata
 from collections.abc import Iterator
 from typing import Any
 
+from .config import bili_settings
 from .models import KIND_DYNAMIC, BiliCard
 
-LOTTERY_FILTER_UIDS_ENV = "BILI_LOTTERY_FILTER_UIDS"
 # 写成这个值表示所有账号都过滤。
 ALL_ACCOUNTS = "*"
 ALL_ACCOUNTS_ALIASES = frozenset({ALL_ACCOUNTS, "all"})
@@ -65,7 +64,7 @@ def parse_filter_uids(raw: str | None) -> frozenset[str]:
 
 def filter_uids() -> frozenset[str]:
     """当前生效的账号列表。"""
-    return parse_filter_uids(os.getenv(LOTTERY_FILTER_UIDS_ENV))
+    return parse_filter_uids(bili_settings().lottery_filter_uids)
 
 
 def applies_to(uid: str, uids: frozenset[str] | None = None) -> bool:

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import os
-
 from arclet.alconna import Alconna, Args, MultiVar
 from arclet.entari import Cleanup, listen
 from nepattern import AnyString
@@ -20,6 +18,7 @@ from otae_bot.compat.entari import (
 from otae_bot.delivery import FAILED, Target, deliver
 
 from plugins.bilibilibot.api import BiliApi
+from plugins.bilibilibot.config import bili_settings
 from plugins.bilibilibot.draw import draw_bili_card
 from plugins.bilibilibot.models import BiliCard
 from plugins.bilibilibot.notifier import Notifier, SenderUnavailable
@@ -29,17 +28,14 @@ from plugins.bilibilibot.store import BiliStore
 
 
 store = BiliStore()
+_settings = bili_settings()
 client = BiliApi(
-    sessdata=os.getenv("BILI_SESSDATA", ""),
-    buvid3=os.getenv("BILI_BUVID3", ""),
-    dm_img_list=os.getenv("BILI_DM_IMG_LIST", ""),
-    dm_img_str=os.getenv("BILI_DM_IMG_STR", ""),
-    dm_cover_img_str=os.getenv("BILI_DM_COVER_IMG_STR", ""),
-    rsshub_base_urls=[
-        item.strip()
-        for item in os.getenv("BILI_RSSHUB_BASE_URLS", "https://rsshub.app,https://rss.materium.io").split(",")
-        if item.strip()
-    ],
+    sessdata=_settings.sessdata,
+    buvid3=_settings.buvid3,
+    dm_img_list=_settings.dm_img_list,
+    dm_img_str=_settings.dm_img_str,
+    dm_cover_img_str=_settings.dm_cover_img_str,
+    rsshub_base_urls=[item.strip() for item in _settings.rsshub_base_urls if item.strip()],
 )
 service = BiliService(store, client)
 
@@ -188,7 +184,7 @@ async def handle_bili(event: Event, rest: ArgVal):
             "/bili list [all|live|video|dynamic] - 查看当前订阅列表\n"
             "/bili refresh <all|live|video|dynamic> <UID 或 room:直播间号> - 立即刷新状态\n"
             "注：输入纯数字默认按 UID 识别；若针对直播间号请加上 room: 前缀。\n"
-            "注：动态订阅默认跳过抽奖发起与开奖结算；用 BILI_LOTTERY_FILTER_UIDS 可收窄或关闭。"
+            "注：动态订阅默认跳过抽奖发起与开奖结算；用 entari.yml 的 plugins.bilibilibot.lottery_filter_uids 可收窄或关闭。"
         )
 
     action = parts[0].lower()

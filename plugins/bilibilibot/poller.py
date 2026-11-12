@@ -9,7 +9,6 @@ transaction before waking the notifier (refactor plan, section 5.3).
 from __future__ import annotations
 
 import asyncio
-import os
 import time
 from time import perf_counter
 from typing import Callable
@@ -17,6 +16,7 @@ from typing import Callable
 from loguru import logger
 
 from .api.mapping import dynamic_item_to_card
+from .config import bili_settings
 from .detect import detect_dynamic, detect_live, detect_video, seen_items_of
 from .lottery_filter import applies_to
 from .models import BiliEvent, KIND_DYNAMIC, KIND_LIVE, KIND_VIDEO, SeenItem, TargetInfo
@@ -29,15 +29,10 @@ MAX_BACKOFF_SECONDS = 30 * 60
 DYNAMIC_CARD_LIMIT = 5
 # A failing UP logs once per half hour; repeats are demoted to debug.
 VIDEO_FAILURE_LOG_INTERVAL = 1800
-# Escape hatch from plan section 6/phase 3: set to 0 to skip the batch endpoint
-# entirely and go straight back to per-room queries.
-LIVE_BATCH_ENV = "BILI_LIVE_BATCH"
-
-
 def live_batch_enabled() -> bool:
-    """Read the batch-live kill switch; anything but 0/false/no/off keeps it on."""
-    raw = os.getenv(LIVE_BATCH_ENV, "").strip().lower()
-    return raw not in {"0", "false", "no", "off"}
+    """Escape hatch from plan section 6/phase 3: ``plugins.bilibilibot.live_batch: false``
+    skips the batch endpoint and goes straight back to per-room queries."""
+    return bili_settings().live_batch
 
 
 def event_key(event: BiliEvent, now: int) -> str:
@@ -162,7 +157,7 @@ class Poller:
             except Exception as exc:
                 logger.warning(f"[bilibilibot] live batch failed, falling back to per-room: {exc}")
         else:
-            logger.info(f"[bilibilibot] live batch disabled by {LIVE_BATCH_ENV}, using per-room queries")
+            logger.info("[bilibilibot] live batch disabled by plugins.bilibilibot.live_batch, using per-room queries")
         if observations is not None:
             for target in targets:
                 observation = observations.get(target.uid)
