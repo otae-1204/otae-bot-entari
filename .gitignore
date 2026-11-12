@@ -56,3 +56,8 @@ tmp_*
 
 # ── Local rollback copies (kept out of git; use commit history instead) ──
 backups/
+
+# ── Config conversion (scripts/convert_config.py) backups and moved-aside legacy files ──
+*.bak-*
+configs.legacy/
+entari.legacy.yml
