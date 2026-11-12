@@ -726,7 +726,7 @@ B站订阅结果
 
 #### 实现
 
-- `otae_bot/adapters/runtime.py` 按 `self_id` 保存全部在线账号，下线时移除。`get_bot()` 仍返回
+- `otae_bot/accounts/runtime.py` 按 `self_id` 保存全部在线账号，下线时移除。`get_bot()` 仍返回
   默认账号（仍在线的最后一次登录），该账号下线时退回另一个在线账号；新增 `get_bots()`、
   `get_bot_for_guild(group_id)`。
 - 每个账号所在的群来自 Satori `guild.list`：账号上线时在后台获取一次；推送前若某账号的群列表

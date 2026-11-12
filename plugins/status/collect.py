@@ -15,7 +15,7 @@ from pathlib import Path
 
 from arclet.entari.plugin.service import plugin_service
 
-from otae_bot.adapters import runtime
+from otae_bot.accounts import runtime
 from otae_bot.adapters.entari import timer
 from otae_bot.command_usage import usage_recorder
 from otae_bot.command_usage.store import TodaySummary

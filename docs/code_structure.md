@@ -19,7 +19,8 @@ otae_bot/
   group_permissions.py         当前机器人账号、当前群的管理员权限核验
   paths.py                     随源码定位的资源根目录
   config/                      环境变量解析、原有路径配置
-  adapters/                    Entari 会话/命令/定时任务、账号登记、消息构造
+  adapters/                    Entari 会话/命令/定时任务、消息构造
+  accounts/                    在线账号登记与各账号所在群（runtime.py）
   pipeline/                    每条事件与订阅器都经过的全局钩子：群开关、指令输入、引用回退、[message] 日志脱敏
   infrastructure/
     cache.py                   有界异步缓存

@@ -17,7 +17,7 @@ import pytest
 from loguru import logger
 from PIL import Image
 
-from otae_bot.adapters import runtime
+from otae_bot.accounts import runtime
 from otae_bot.delivery import is_not_in_group
 from plugins.bilibilibot import handlers
 from plugins.bilibilibot.models import BiliCard, BiliEvent, KIND_LIVE, OutboxRow

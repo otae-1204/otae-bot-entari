@@ -5,7 +5,7 @@ import os
 from arclet.alconna import Alconna, Args, MultiVar
 from arclet.entari import Cleanup, listen
 from nepattern import AnyString
-from otae_bot.adapters import runtime
+from otae_bot.accounts import runtime
 from otae_bot.adapters.entari import close_scheduled_jobs, listen_message, on_ready, get_plaintext
 from arclet.entari import Account as Bot, Event
 from loguru import logger

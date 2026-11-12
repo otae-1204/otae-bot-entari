@@ -57,7 +57,7 @@ class ArchitectureTests(unittest.TestCase):
                 if isinstance(node, ast.ImportFrom):
                     module = node.module or ""
                     self.assertFalse(
-                        module.startswith(("arclet.entari", "otae_bot.adapters"))
+                        module.startswith(("arclet.entari", "otae_bot.adapters", "otae_bot.accounts", "otae_bot.pipeline"))
                         or "rendering" in module.split("."),
                         (path, module),
                     )
@@ -79,7 +79,7 @@ class ArchitectureTests(unittest.TestCase):
             "utils.http_client": "otae_bot.infrastructure.http.client",
             "utils.async_cache": "otae_bot.infrastructure.cache",
             "utils.entari_native": "otae_bot.adapters.entari",
-            "utils.runtime": "otae_bot.adapters.runtime",
+            "utils.runtime": "otae_bot.accounts.runtime",
             "utils.image_executor": "otae_bot.infrastructure.rendering.executor",
             "utils.image_utils": "otae_bot.infrastructure.rendering.browser",
             "utils.json_store": "otae_bot.infrastructure.storage.json_store",

@@ -41,7 +41,7 @@ from loguru import logger
 from nepattern import AnyString
 from satori import ChannelType
 
-from otae_bot.adapters import runtime
+from otae_bot.accounts import runtime
 
 
 @dataclass
