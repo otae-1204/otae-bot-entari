@@ -1760,7 +1760,7 @@ class CoreLogicTests(unittest.TestCase):
         dm_finish_source = source[start:end]
 
         self.assertIn("async def _finish_dm_image_or_text", source)
-        self.assertIn("await message.send(target, bot)", source)
+        self.assertIn("await _send_private(bot, user_id, message)", dm_finish_source)
         self.assertIn("stop_session()", dm_finish_source)
         self.assertIn("await ChainMsg.text(fallback).send()", dm_finish_source)
         self.assertNotIn("await matcher.send(", dm_finish_source)

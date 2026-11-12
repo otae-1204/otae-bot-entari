@@ -29,6 +29,7 @@ def _account():
     return SimpleNamespace(
         self_id="bot", platform="qq-client", adapter="onebot",
         friend_approve=AsyncMock(), guild_approve=AsyncMock(), guild_member_approve=AsyncMock(),
+        protocol=SimpleNamespace(send_private_message=AsyncMock(return_value=[SimpleNamespace(id="m")])),
     )
 
 
@@ -52,10 +53,9 @@ class ArkTests(unittest.TestCase):
 
     async def _notify(self, content):
         account = _account()
+        sent = account.protocol.send_private_message
         event = SimpleNamespace(message=SimpleNamespace(message=_elements(content)), content=None)
-        sent = AsyncMock(return_value=[])
-        with patch.object(handlers, "superuser", "42"), patch.object(handlers.ChainMsg, "send", sent), \
-                patch.object(handlers.ark_invite, "finish", AsyncMock()):
+        with patch.object(handlers, "superuser", "42"), patch.object(handlers.ark_invite, "finish", AsyncMock()):
             self.assertTrue(await handlers._is_ark_group_invite(event))
             await handlers.handle_ark_group_invite(event, account)
         return account, sent
@@ -65,6 +65,8 @@ class ArkTests(unittest.TestCase):
 
         account, sent = asyncio.run(self._notify(f"<onebot:json data={quoteattr(ARK)}/>"))
         sent.assert_awaited_once()
+        self.assertEqual(sent.await_args.args[0], "42")
+        self.assertIn("收到群邀请卡片消息", str(sent.await_args.args[1]))
         self.assertEqual(handlers._pending, {})
         account.guild_approve.assert_not_awaited()
 
@@ -112,6 +114,18 @@ class RequestEventTests(unittest.IsolatedAsyncioTestCase):
                     getattr(account, api).assert_awaited_once_with(request_id="flag-2", approve=decision, comment="")
                     self.assertEqual(send.await_args.args[0], f"已{'同意' if decision else '拒绝'}加入 测试群。")
                     self.assertEqual(handlers._pending, {})
+
+    async def test_superuser_is_notified_privately_and_a_failed_notice_drops_the_request(self):
+        account = _account()
+        handlers._pending["bot:flag-3"] = {"guild_name": "测试群"}
+        await handlers._notify_superuser(account, "测试群", "张三", "bot:flag-3", "100")
+        user, message = account.protocol.send_private_message.await_args.args
+        self.assertEqual(user, "42")
+        self.assertIn("群号：100", str(message))
+        self.assertIn("bot:flag-3", handlers._pending)
+        account.protocol.send_private_message.side_effect = RuntimeError("not a friend")
+        await handlers._notify_superuser(account, "测试群", "张三", "bot:flag-3", "100")
+        self.assertNotIn("bot:flag-3", handlers._pending)
 
     def test_listeners_are_bound_to_the_entari_event_classes(self):
         from pathlib import Path

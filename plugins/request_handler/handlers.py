@@ -10,8 +10,6 @@ from loguru import logger
 from otae_bot.adapters.entari import (
     ChainMsg,
     Pred,
-    SendDest,
-    account_adapter_name,
     event_chain,
     event_plain_text,
     event_user_id,
@@ -19,6 +17,7 @@ from otae_bot.adapters.entari import (
     listen_message,
 )
 from otae_bot.config.settings import Config
+from otae_bot.delivery import Target, deliver
 from plugins.request_handler.ark import parse_ark_invite_segment
 from plugins.request_handler.text import entity_label, parse_decision, select_invite_reply, text_or_empty
 
@@ -140,10 +139,6 @@ async def handle_ark_group_invite(event: Event, bot: Bot):
 
 async def _notify_superuser(bot: Bot, guild_name: str, user_name: str, key: str, guild_id: str = ""):
     try:
-        target = SendDest(
-            superuser, "", False, True, "",
-            account_adapter_name(bot),
-        )
         lines = [
             "收到入群邀请：",
             f"群名：{guild_name}",
@@ -155,7 +150,7 @@ async def _notify_superuser(bot: Bot, guild_name: str, user_name: str, key: str,
             "",
             "请回复「同意」加入群聊，或回复「拒绝」忽略此邀请。",
         ])
-        await ChainMsg.text("\n".join(lines)).send(target, bot)
+        (await deliver(Target.private(superuser), ChainMsg.text("\n".join(lines)), account=bot)).raise_for_failure()
         logger.info(f"群邀请已转发给超级用户: {guild_name}")
     except Exception as e:
         logger.error(f"通知超级用户失败: {e}")
@@ -166,18 +161,14 @@ async def _notify_superuser(bot: Bot, guild_name: str, user_name: str, key: str,
 async def _notify_ark_invite(bot: Bot, guild_name: str, user_name: str, info: dict):
     """Ark 群卡片不是可审批请求，只通知超级用户手动处理。"""
     try:
-        target = SendDest(
-            superuser, "", False, True, "",
-            account_adapter_name(bot),
-        )
-        await ChainMsg.text(
+        (await deliver(Target.private(superuser), ChainMsg.text(
             f"收到群邀请卡片消息：\n"
             f"群名：{guild_name}\n"
             f"群号：{text_or_empty(info.get('group_code')) or '未知'}\n"
             f"邀请人：{user_name}\n\n"
             f"该卡片不是 QQ 系统的入群请求，无法自动通过；"
             f"请在 QQ 里使用“邀请 bot 加入群聊”的系统入口邀请。"
-        ).send(target, bot)
+        ), account=bot)).raise_for_failure()
         logger.info(f"群邀请卡片已转发给超级用户（不可自动审批）: {guild_name}")
     except Exception as e:
         logger.error(f"通知超级用户失败: {e}")

@@ -18,9 +18,10 @@ from otae_bot.adapters.entari import Pred
 from loguru import logger
 from arclet.letoderea import ExitState
 from otae_bot.adapters.entari import (
-    ChainMsg, At, ArgVal, SendDest, event_plain_text, event_user_id,
-    make_image as ChainImage, account_adapter_name, stop_session,
+    ChainMsg, At, ArgVal, event_plain_text, event_user_id,
+    make_image as ChainImage, stop_session,
 )
+from otae_bot.delivery import Target, deliver
 
 from arclet.alconna import Args, MultiVar
 from nepattern import AnyString
@@ -259,11 +260,9 @@ async def _finish_image_or_text(
     await matcher.finish(message)
 
 
-def _private_target(bot: Bot, user_id: str) -> SendDest:
-    return SendDest(
-        user_id, "", False, True, "",
-        account_adapter_name(bot),
-    )
+async def _send_private(bot: Bot, user_id: str, message: ChainMsg) -> None:
+    """Private message through the command's account; a failed send raises."""
+    (await deliver(Target.private(user_id), message, account=bot)).raise_for_failure()
 
 
 async def _finish_dm_image_or_text(
@@ -275,7 +274,6 @@ async def _finish_dm_image_or_text(
     *args: Any,
     **kwargs: Any,
 ) -> None:
-    target = _private_target(bot, user_id)
     try:
         output = await run_image_render(renderer, *args, **kwargs)
         message = ChainMsg([_to_image_segment(output)])
@@ -285,7 +283,7 @@ async def _finish_dm_image_or_text(
         stop_session()
         return
     try:
-        await message.send(target, bot)
+        await _send_private(bot, user_id, message)
     except Exception as exc:
         logger.warning(f"[MCSM] send DM image failed, fallback to text: {exc}")
         await ChainMsg.text(fallback).send()
@@ -1611,16 +1609,12 @@ async def _cmd_bind_panel(
     _store.set_pending_key(user_id, group_id, url)
 
     try:
-        target = SendDest(
-            user_id, "", False, True, "",
-            account_adapter_name(bot),
-        )
-        await ChainMsg.text(
+        await _send_private(bot, user_id, ChainMsg.text(
             f"请直接回复本条私聊消息以提供 MCSM API Key：\n"
             f"面板地址: {url}\n\n"
             f"可在 MCSM 控制面板的“API 密钥”管理页获取。\n"
             f"若需放弃本次关联，请回复“取消”。"
-        ).send(target, bot)
+        ))
     except Exception as e:
         _store.clear_pending_key(user_id)
         _store.clear_panel(group_id)
@@ -1692,7 +1686,7 @@ def _match_daemon(daemons: List[dict], value: str) -> dict | None:
 
 
 async def _send_private_text(bot: Bot, user_id: str, text: str) -> None:
-    await ChainMsg.text(text).send(_private_target(bot, user_id), bot)
+    await _send_private(bot, user_id, ChainMsg.text(text))
 
 
 def _candidate_line(index: int, inst: dict) -> str:
