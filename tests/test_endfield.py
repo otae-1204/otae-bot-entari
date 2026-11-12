@@ -3279,7 +3279,10 @@ class EndfieldServiceTests(unittest.TestCase):
         self.assertEqual(draw.equipment_catalog_layout(view), (1900, 8))
 
     def test_equipment_attribute_query_is_wired_into_the_handler(self):
-        source = (ROOT / "plugins/endfield/handlers.py").read_text(encoding="utf-8")
+        source = "\n".join(
+            (ROOT / "plugins/endfield" / name).read_text(encoding="utf-8")
+            for name in ("handlers.py", "caches.py")
+        )
 
         self.assertIn('"equipment_attribute": lambda key, source: _render_equipment_attribute', source)
         self.assertIn("attribute_filters = parse_equipment_attribute_filters(query)", source)

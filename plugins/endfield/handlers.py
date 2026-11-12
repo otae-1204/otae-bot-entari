@@ -5,7 +5,6 @@ import hashlib
 import json
 import re
 import sys
-import tempfile
 import unicodedata
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, replace
@@ -43,9 +42,7 @@ from otae_bot.hypergryph.captcha import (
     render_geetest_html,
     upload_captcha_page,
 )
-from otae_bot.infrastructure.cache import AsyncTTLCache, CacheStats
 from otae_bot.accounts.ready import get_bot, on_ready
-from otae_bot.messaging.forward import send_forward
 from otae_bot.messaging.inbound import event_chain, event_user_id, get_group_id, is_group
 from otae_bot.messaging.prompts import prompt, prompt_silently
 from otae_bot.scheduling.jobs import timer
@@ -54,27 +51,17 @@ from otae_bot.command_usage import describe_command
 from otae_bot.infrastructure.rendering.help_runtime import cached_help_image
 from otae_bot.infrastructure.http.asset_policy import asset_render_budget
 from otae_bot.infrastructure.http.assets import broker as asset_broker
-from otae_bot.infrastructure.http.client import (
-    clear_http_cache,
-    get_http_cache_diagnostics,
-    get_http_cache_stats,
-)
-from otae_bot.infrastructure.rendering.browser import browser_queue_snapshot
-from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
 
-from .providers.warfarin import WarfarinAPIError, WarfarinClient
+from .providers.warfarin import WarfarinAPIError
 from .rendering.health import track_render_health
 from .announcements.runtime import AnnouncementRuntime
-from .account.detail.names import clear_account_detail_name_map
-from .account.investment.service import clear_account_investment_catalog
 from .account.prefetch import prefetch_detail_assets
-from .account.challenge.i18n import clear_challenge_locale, close_challenge_locale, fetch_challenge_locale
+from .account.challenge.i18n import close_challenge_locale, fetch_challenge_locale
 from .account.client import (
     ACCOUNT_PROVIDER_CN,
     ACCOUNT_PROVIDER_SKPORT,
     CURRENCY_TYPES,
     EndfieldAPIError,
-    EndfieldOfficialClient,
     HypergryphCaptchaRequired,
     account_credential_fingerprint,
     encode_account_credential,
@@ -82,7 +69,7 @@ from .account.client import (
     is_asia_role,
 )
 from .account.crypto import CredentialCipher, CredentialKeyError
-from .account.store import EndfieldRole, EndfieldStore, RoleCandidate
+from .account.store import EndfieldRole, RoleCandidate
 from .account.i18n import server_label
 from .account.currency.service import (
     aggregate_currency_logs,
@@ -131,7 +118,6 @@ from .catalog.commands import (
     strip_message_mentions,
 )
 from .rendering.cards import (
-    clear_render_asset_caches,
     draw_archive_progress_card,
     draw_archive_stats_card,
     draw_equipment_card,
@@ -149,7 +135,6 @@ from .rendering.cards import (
     draw_gacha_history_card,
 )
 from .calendar.draw import draw_version_calendar
-from .calendar.official import OfficialVersionCalendarSource
 from .calendar.official_draw import draw_official_version_calendar
 from .account.detail.draw import draw_account_detail_cards
 from .account.detail.service import build_account_detail_view, build_daily_account_view
@@ -190,7 +175,7 @@ from .account.challenge.parsing import (
     _monument_difficulty_label as _challenge_monument_difficulty_label,
 )
 from .stages.draw import draw_stage_card, draw_stage_catalog_cards
-from .stages.service import EndfieldStageService, StageVariantNotFound
+from .stages.service import StageVariantNotFound
 from .stages.fz import StageDataIncomplete
 from .gacha.service import (
     EndfieldGachaService,
@@ -199,7 +184,7 @@ from .gacha.service import (
     filter_xhh_import_six_stars,
     format_timestamp,
 )
-from .gacha.assets import EndfieldGachaAssetCache, apply_gacha_metadata
+from .gacha.assets import apply_gacha_metadata
 from .gacha.xhh import XhhAPIError, XhhLoginSession
 from .catalog.models import (
     AttendanceCardView,
@@ -210,29 +195,20 @@ from .catalog.models import (
     LoadoutView,
 )
 from .catalog.service import (
-    EndfieldService,
     build_fz_operator_catalog_view,
     build_fz_weapon_catalog_view,
     format_status_quick_calc,
 )
-from .catalog.random_wiki import RandomWikiService, is_public_wiki_candidate
-from .medals.store import MedalSnapshotStore
-from .archives.store import ArchiveSnapshotStore
-from .catalog.refresh import (
-    CollectionSnapshotRefresher,
-    SnapshotPersistenceError,
-)
+from .catalog.random_wiki import is_public_wiki_candidate
+from .catalog.refresh import SnapshotPersistenceError
 from .ownership.service import (
     GroupMemberListError,
     OwnershipRefreshResult,
     OwnershipStatsRendererUnavailable,
-    OwnershipStatsService,
     collect_group_member_ids,
     is_group_manager,
-    register_ownership_stats_renderer,
     render_ownership_stats,
 )
-from .ownership.draw import draw_ownership_stats
 from .usage.draw import (
     draw_usage_history,
     draw_usage_overview,
@@ -247,17 +223,15 @@ from .usage.service import (
     FAMILY_WAR_ECHO as USAGE_FAMILY_WAR_ECHO,
     UsageRefreshResult as UsageStatsRefreshResult,
     UsageResolutionError,
-    UsageStatsService,
     UsageUnavailableError,
 )
-from .providers.akedata import clear_i18n_process_warm
 from .providers.registry import source_label, source_order
 from .cold_start import (
     cold_start_command,
     notice_before_public_data,
     notice_default_ake_public,
 )
-from .calendar.akedata import AkeDataVersionCalendarSource, VersionCalendarError
+from .calendar.akedata import VersionCalendarError
 from .paths import HELP_IMAGE_PATH as ENDFIELD_HELP_IMAGE_PATH
 from .config import EndfieldSettings, endfield_settings
 from .attendance import (
@@ -270,87 +244,53 @@ from .encyclopedia import draw as encyclopedia_draw
 from .encyclopedia import index as encyclopedia_index
 from .encyclopedia import service as encyclopedia_service
 from .encyclopedia.props import PropEffectIncomplete
+from .state import (
+    account_store,
+    archive_store,
+    calendar_source,
+    client,
+    collection_refresher,
+    gacha_asset_cache,
+    medal_store,
+    official_calendar_source,
+    official_client,
+    ownership_stats_service,
+    random_wiki_service,
+    service,
+    stage_service,
+    usage_stats_service,
+)
+from . import caches
+from .caches import (
+    CARD_RENDER_VERSION,
+    ChallengeCacheKey,
+    _ACCOUNT_PAGE_CACHE,
+    _CALENDAR_CACHE,
+    _CARD_CACHE,
+    _CARD_DETAIL_CACHE,
+    _CHALLENGE_DATA_CACHE,
+    _CHALLENGE_RENDER_CACHE,
+    _LOADOUT_CACHE,
+    _cache_status_lines,
+    _clear_endfield_caches,
+    _normalize_cache_scope,
+)
+from .replies import (
+    _IncompletePages,
+    _finish_png,
+    _finish_pngs,
+    _is_endfield_superuser,
+    _one_page,
+    _png_image,
+    _send_forward_pngs,
+)
 
 
-client = WarfarinClient()
-service = EndfieldService(client)
-stage_service = EndfieldStageService(client)
-gacha_asset_cache = EndfieldGachaAssetCache(service)
-account_store = EndfieldStore()
-official_client = EndfieldOfficialClient()
-ownership_stats_service = OwnershipStatsService(account_store, official_client)
-register_ownership_stats_renderer(draw_ownership_stats)
-usage_stats_service = UsageStatsService(account_store, official_client)
-calendar_source = AkeDataVersionCalendarSource(client)
-official_calendar_source = OfficialVersionCalendarSource()
-medal_store = MedalSnapshotStore()
-archive_store = ArchiveSnapshotStore()
-collection_refresher = CollectionSnapshotRefresher(service, medal_store, archive_store)
-random_wiki_service = RandomWikiService(service, stage_service, lambda: archive_store.load_current_view())
-_FORWARD_SENDER_NAME = "Endfield"
 # 抽卡分析：超过 N 张图改为一条合并转发（每节点 1 张）；plugins.endfield.gacha_forward_above: 0 关闭转发。
 GACHA_FORWARD_ABOVE_DEFAULT = EndfieldSettings().gacha_forward_above
 GACHA_FALLBACK_BATCH = 3                # 合并转发不可用时，每条消息最多几张图
 FORWARD_MAX_NODES = 50                  # 单条合并转发的节点上限，超出拆成多条
 _GACHA_FORWARD_SENDER_NAME = "终末地抽卡分析"
-# 成品图缓存（资料卡、配装、账号页、挑战页）。key 已含视图内容 digest、渲染版本
-# （账号页 / 挑战页还含素材代次），内容一变 key 就变；TTL 只决定同一结果能复用多久。
-# 素材代次变化或 /ef dev clear 时整体失效。个人原始数据只在 _CARD_DETAIL_CACHE（60 秒，
-# key 含凭据指纹）与 _CHALLENGE_DATA_CACHE（60 秒）里短暂复用，不落盘。
-RENDER_CACHE_TTL_SECONDS = 30 * 60.0
-CARD_CACHE_TTL_SECONDS = RENDER_CACHE_TTL_SECONDS
-CARD_CACHE_MAX_BYTES = 48 * 1024 * 1024
-CARD_RENDER_VERSION = "endfield-card-v58"
-CardCacheKey = tuple[str, str, str, str, str, str, str]
-_CARD_CACHE: AsyncTTLCache[CardCacheKey, tuple[bytes, ...]] = AsyncTTLCache(
-    ttl_seconds=CARD_CACHE_TTL_SECONDS,
-    max_bytes=CARD_CACHE_MAX_BYTES,
-    max_entries=64,
-    # A card can render as several images, so bound the cache on total bytes, not page count.
-    sizeof=lambda pages: sum(len(page) for page in pages),
-)
-_LOADOUT_CACHE: AsyncTTLCache[tuple[str, str], bytes] = AsyncTTLCache(
-    ttl_seconds=RENDER_CACHE_TTL_SECONDS, max_bytes=24 * 1024 * 1024, max_entries=32, sizeof=len,
-)
-_ACCOUNT_PAGE_CACHE: AsyncTTLCache[tuple[str, ...], tuple[bytes, ...]] = AsyncTTLCache(
-    ttl_seconds=RENDER_CACHE_TTL_SECONDS, max_bytes=32 * 1024 * 1024, max_entries=24,
-    sizeof=lambda pages: sum(map(len, pages)),
-)
-_ASSET_GENERATION = 0
-_CALENDAR_CACHE: AsyncTTLCache[str, bytes] = AsyncTTLCache(
-    ttl_seconds=600.0,
-    max_bytes=8 * 1024 * 1024,
-    max_entries=4,
-    sizeof=len,
-)
-# 挑战的原始个人 API 数据只复用 60 秒；渲染结果按成品图 TTL。
-CHALLENGE_CACHE_TTL_SECONDS = 60.0
-ChallengeCacheKey = tuple
-_CHALLENGE_DATA_CACHE: AsyncTTLCache[tuple[str, str, str], dict] = AsyncTTLCache(
-    ttl_seconds=CHALLENGE_CACHE_TTL_SECONDS,
-    max_bytes=12 * 1024 * 1024,
-    max_entries=16,
-    sizeof=lambda payload: len(json.dumps(payload, ensure_ascii=False, separators=(",", ":"))),
-)
-_CHALLENGE_RENDER_CACHE: AsyncTTLCache[ChallengeCacheKey, tuple[bytes, ...]] = AsyncTTLCache(
-    ttl_seconds=RENDER_CACHE_TTL_SECONDS,
-    max_bytes=48 * 1024 * 1024,
-    max_entries=64,
-    sizeof=lambda pages: sum(len(page) for page in pages),
-)
-# 同一凭据同一角色的 card/detail 60 秒内复用（账号 / 基建 / 养成 / 探索 / 日常连查），
-# 仅进程内存。key 是（凭据指纹, role_id, server_id），不含 token 原文；不挂 on_event，
-# 免得 key 流进任何回调。
-CARD_DETAIL_CACHE_TTL_SECONDS = 60.0
-CardDetailCacheKey = tuple[str, str, str]
-_CARD_DETAIL_CACHE: AsyncTTLCache[CardDetailCacheKey, dict] = AsyncTTLCache(
-    ttl_seconds=CARD_DETAIL_CACHE_TTL_SECONDS,
-    max_bytes=16 * 1024 * 1024,
-    max_entries=64,
-    sizeof=lambda detail: len(
-        json.dumps(detail, ensure_ascii=False, separators=(",", ":"), default=str)
-    ),
-)
 
 Resolver = Callable[..., Awaitable[list[EndfieldCandidate]]]
 Renderer = Callable[[str, str], Awaitable[bytes | tuple[bytes, ...] | None]]
@@ -1021,13 +961,6 @@ def _format_usage_refresh_result(
     return "\n".join(lines)
 
 
-def _is_endfield_superuser(user_id: str) -> bool:
-    configured = Config.SUPERUSERS or ()
-    if isinstance(configured, str):
-        configured = [configured]
-    return str(user_id) in {str(value) for value in configured}
-
-
 def _format_ownership_refresh_result(scope: str, refresh: OwnershipRefreshResult) -> str:
     scope_label = "全局" if scope == "global" else "当前群"
     if refresh.catalog_error:
@@ -1418,7 +1351,7 @@ async def _render_challenge_cards(
             variant,
             locale.version if locale is not None else "api-copy",
             CARD_RENDER_VERSION,
-            _ASSET_GENERATION,
+            caches._ASSET_GENERATION,
             hashlib.sha256(json.dumps(
                 [raw, asdict(identity)], sort_keys=True, ensure_ascii=False,
                 separators=(",", ":"),
@@ -1588,40 +1521,6 @@ async def _finish_challenge_pages(session, event, bot, pngs: tuple[bytes, ...], 
         return
 
 
-async def _send_forward_pngs(
-    session,
-    bot,
-    pngs: tuple[bytes, ...],
-    *,
-    sender_name: str = _FORWARD_SENDER_NAME,
-    log_tag: str = "endfield-challenge",
-) -> str:
-    """Send PNG pages as one merged forward; returns the path used (``satori`` / ``images``).
-
-    The standard ``<message forward>`` element is tried first.  If it raises (or
-    there is no session), the pages go out as ordinary image messages, one per
-    message in the same order; an error from that propagates to the caller.
-    """
-    uin = str(getattr(bot, "self_id", "") or getattr(bot, "id", "") or "") or None
-    images: list = []
-    try:
-        images = [_png_image(png) for png in pngs]
-        await send_forward(session, images, name=sender_name, uin=uin)
-        return "satori"
-    except ExitState:
-        raise
-    except Exception as exc:
-        logger.warning(
-            f"[{log_tag}] satori forward element failed, "
-            f"sending {len(pngs)} pages as images: {type(exc).__name__}: {exc}"
-        )
-    if len(images) != len(pngs):
-        images = [_png_image(png) for png in pngs]
-    for image in images:
-        await session.send(MessageChain([image]))
-    return "images"
-
-
 def _gacha_forward_above() -> int:
     """抽卡分析超过多少张图改为合并转发；0 = 关闭合并转发（回滚开关）。"""
     return max(0, endfield_settings().gacha_forward_above)
@@ -1672,10 +1571,6 @@ async def _finish_gacha_pngs(session, event, bot, pngs: tuple[bytes, ...]) -> No
         f"[endfield-gacha] deliver mode=batches pages={len(pngs)} forwarded={sent} batches={len(batches)} "
         f"elapsed={perf_counter() - started:.2f}s"
     )
-
-
-async def _one_page(page) -> tuple[bytes, ...]:
-    return (await page,)
 
 
 BINDING_SELECT_ATTEMPTS = 3
@@ -2475,11 +2370,6 @@ async def _handle_exploration(
         )
 
 
-class _IncompletePages(Exception):
-    def __init__(self, pages: tuple[bytes, ...]):
-        self.pages = pages
-
-
 async def _render_account_pages(
     kind: str, role, group: bool, view, render, *, data_seconds: float = 0.0
 ) -> tuple[bytes, ...]:
@@ -2498,7 +2388,7 @@ async def _render_account_pages(
     ).hexdigest()
     key = (
         CARD_RENDER_VERSION,
-        str(_ASSET_GENERATION),
+        str(caches._ASSET_GENERATION),
         kind,
         str(role.role_id),
         str(role.server_id),
@@ -3982,12 +3872,8 @@ async def _render_stage_catalog(key: str, source: str = "") -> tuple[bytes, ...]
     )
 
 
-async def _finish_png(session, png: bytes) -> None:
-    return await _finish_pngs(session, (png,))
-
-
 async def _render_current_version_calendar() -> bytes:
-    generation = _ASSET_GENERATION
+    generation = caches._ASSET_GENERATION
     try:
         calendar = await calendar_source.current_ake_primary()
         return await _CALENDAR_CACHE.get_or_create(
@@ -4021,23 +3907,6 @@ async def _finish_endfield_help(session) -> None:
         await session.send(MessageChain([Image.of(path=Path(image))]))
         return
     await session.send(format_help())
-
-
-async def _finish_pngs(session, pngs: tuple[bytes, ...]) -> None:
-    await session.send(MessageChain([_png_image(png) for png in pngs]))
-
-
-def _png_image(png: bytes):
-    """Persist one PNG to a temp file and wrap it as an image element.
-
-    LLOneBot resolves ``file://`` locally, so a temp file avoids inflating the
-    payload with a base64 data URI for every page of a merged forward.
-    """
-    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as file:
-        file.write(png)
-        file.flush()
-        schedule_temp_file_cleanup(file.name)
-        return Image.of(path=Path(file.name))
 
 
 async def _handle_dev_command(command: ParsedEndfieldCommand) -> str:
@@ -4157,171 +4026,6 @@ def _exact_archive_names(entries, query: str) -> tuple[str, ...]:
 
 class _CardNotFound(Exception):
     pass
-
-
-def _normalize_cache_scope(value: str) -> str | None:
-    normalized = str(value or "").strip().lower()
-    if normalized in {"all", "全部"}:
-        return "all"
-    if normalized in {"operator", "op", "干员"}:
-        return "operator"
-    if normalized in {"weapon", "wp", "武器"}:
-        return "weapon"
-    if normalized in {"equipment", "equip", "eq", "装备"}:
-        return "equipment"
-    if normalized in {"stage", "stages", "关卡", "副本"}:
-        return "stage"
-    if normalized in {"icon", "icons", "图标", "素材"}:
-        return "icon"
-    return None
-
-
-async def _clear_endfield_caches(scope: str) -> int:
-    global _ASSET_GENERATION
-    # 个人 card/detail 体积小，任何清缓存入口都顺带清掉。
-    removed = await _CARD_DETAIL_CACHE.clear()
-    if scope in {"all", "icon", "operator", "weapon", "equipment", "stage"}:
-        _ASSET_GENERATION += 1
-        removed += await _ACCOUNT_PAGE_CACHE.clear()
-    if scope == "all":
-        removed += clear_render_asset_caches()
-        removed += gacha_asset_cache.clear_caches()
-        removed += await _CARD_CACHE.clear()
-        removed += await _LOADOUT_CACHE.clear()
-        removed += await _CALENDAR_CACHE.clear()
-        removed += await _CHALLENGE_DATA_CACHE.clear()
-        removed += await _CHALLENGE_RENDER_CACHE.clear()
-        removed += await service.clear_query_caches()
-        removed += await clear_http_cache("endfield-")
-        removed += await clear_http_cache("akedata")
-        clear_i18n_process_warm()
-        removed += stage_service.clear_caches()
-        removed += calendar_source.clear_caches()
-        removed += clear_account_detail_name_map()
-        removed += clear_account_investment_catalog()
-        removed += clear_challenge_locale()
-        _forget_asset_prefetch()
-    elif scope == "icon":
-        removed += clear_render_asset_caches()
-        removed += gacha_asset_cache.clear_caches()
-        removed += await _CARD_CACHE.clear()
-        removed += await _LOADOUT_CACHE.clear()
-        removed += await _CALENDAR_CACHE.clear()
-        removed += await _CHALLENGE_RENDER_CACHE.clear()
-        removed += await clear_http_cache("endfield-assets")
-        removed += await clear_http_cache("endfield-account")
-        removed += await clear_http_cache("endfield-gacha")
-        removed += await clear_http_cache("endfield-official-calendar")
-        _forget_asset_prefetch()
-    elif scope in {"operator", "weapon", "equipment", "stage"}:
-        removed += await _LOADOUT_CACHE.clear()
-        removed += await service.clear_query_caches()
-        cache_kinds = (
-            {scope, "equipment_catalog", "equipment_attribute"}
-            if scope == "equipment" else {scope, f"{scope}_catalog"}
-        )
-        removed += await _CARD_CACHE.clear(lambda key: key[1] in cache_kinds)
-        removed += await clear_http_cache("endfield-api")
-        removed += await clear_http_cache("akedata")
-        clear_i18n_process_warm()
-        removed += clear_account_detail_name_map()
-        removed += clear_account_investment_catalog()
-        if scope == "stage":
-            removed += stage_service.clear_caches()
-    return removed
-
-
-def _forget_asset_prefetch() -> None:
-    """After clearing images: drop the restart hot set and queued prefetches (refills keep going)."""
-    asset_broker.hotset.clear()
-    asset_broker.cancel_background()
-
-
-async def _cache_status_lines() -> list[str]:
-    api_stats = await get_http_cache_stats("endfield-api")
-    asset_stats = await get_http_cache_stats("endfield-assets")
-    table_stats = await get_http_cache_stats("akedata")
-    card_stats = await _CARD_CACHE.stats()
-    loadout_stats = await _LOADOUT_CACHE.stats()
-    account_stats = await _ACCOUNT_PAGE_CACHE.stats()
-    detail_stats = await _CARD_DETAIL_CACHE.stats()
-    diagnostics = await get_http_cache_diagnostics()
-    return [
-        _format_cache_stats("API", api_stats),
-        _format_cache_stats("AKEData", table_stats),
-        _format_cache_stats("远程素材", asset_stats),
-        _format_cache_stats("成品卡片", card_stats),
-        _format_cache_stats("配装卡片", loadout_stats),
-        _format_cache_stats("账号卡片", account_stats),
-        _format_cache_stats("账号数据", detail_stats),
-        _format_memory_pools(diagnostics),
-        *_format_asset_queue(diagnostics.get("broker")),
-        _format_community_queue(official_client.community_context_metrics()),
-        _format_browser_queue(browser_queue_snapshot()),
-        f"缓存策略: 成品图 TTL {int(RENDER_CACHE_TTL_SECONDS)}s / 下载并发 8",
-    ]
-
-
-def _format_browser_queue(snapshot: dict) -> str:
-    """Render slots in use, renders waiting by priority, slot count and pooled browser contexts."""
-    waiting = snapshot["waiting"]
-    return (
-        f"浏览器: 在途 {snapshot['inflight']} / 排队 交互 {waiting['interactive']} 后台 {waiting['background']} / "
-        f"并发 {snapshot['concurrency']} / context {snapshot['contexts']}"
-    )
-
-
-def _format_community_queue(metrics: dict) -> str:
-    """Community credential exchanges and their queueing: counters and durations only."""
-    def seconds(key: str) -> str:
-        return f"{metrics.get(key, 0) / 1000:.1f}s"
-
-    return (
-        f"社区换签: 命中 {metrics.get('cache_hits', 0)} / 换签 {metrics.get('exchange_attempts', 0)}"
-        f"（失败 {metrics.get('exchange_failed', 0)}，熔断拒绝 {metrics.get('circuit_rejections', 0)}）/ "
-        f"等待锁 {metrics.get('lock_waits', 0)} 次 共 {seconds('lock_wait_ms')} / "
-        f"等待间隔 {metrics.get('interval_waits', 0)} 次 共 {seconds('interval_wait_ms')} / "
-        f"换签耗时 {seconds('exchange_ms')}"
-    )
-
-
-def _format_asset_queue(snapshot: dict | None) -> list[str]:
-    """In-flight and queued asset downloads by priority, and today's prefetch traffic."""
-    if not snapshot:
-        return []
-    waiting = snapshot["waiting"]
-    prefetch = snapshot["prefetch"]
-    mib = 1024 * 1024
-    return [
-        f"素材队列: 在途 {snapshot['inflight']} / 排队 交互 {waiting['interactive']} "
-        f"续传 {waiting['refill']} 后台 {waiting['background']} / 续传中 {snapshot['refill']} / "
-        f"今日预取 {prefetch['bytes'] / mib:.1f} MiB / 剩余 {prefetch['remaining_bytes'] / mib:.1f} MiB"
-    ]
-
-
-def _format_cache_stats(label: str, stats: CacheStats) -> str:
-    return (
-        f"{label}: {stats.entries} 项 / {stats.bytes / 1024 / 1024:.1f} MiB / "
-        f"直接命中 {stats.direct_hits} / 未命中 {stats.misses} / 等待合并 {stats.coalesced} / "
-        f"过期 {stats.expirations} / 容量淘汰 {stats.capacity_evictions} / 超限 {stats.oversized}"
-    )
-
-
-def _format_memory_pools(diagnostics: dict) -> str:
-    """Pool fill for small images and the I18n slot; large images are served from disk."""
-    pools = diagnostics["pools"]
-    counters = [
-        values for namespace, values in diagnostics["namespaces"].items()
-        if namespace.startswith("endfield-")
-    ]
-    large_hits = int(sum(values.get("large_disk_hits", 0) for values in counters))
-    bypassed = int(sum(values.get("bypassed", 0) for values in counters))
-    mib = 1024 * 1024
-    return (
-        f"素材池: 小图 {pools['assets']['bytes'] / mib:.1f}/{pools['assets']['budget_bytes'] / mib:.0f} MiB · "
-        f"I18n 常驻 {pools['i18n']['bytes'] / mib:.1f} MiB · "
-        f"大图直通命中 {large_hits} · 直通跳过 {bypassed}"
-    )
 
 
 def _dedupe_candidates(candidates: list[EndfieldCandidate]) -> list[EndfieldCandidate]:

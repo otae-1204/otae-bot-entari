@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 from otae_bot.infrastructure.http.client import HttpResource
-from plugins.endfield import handlers
+from plugins.endfield import caches, handlers
 from plugins.endfield.account import draw as account_draw
 from plugins.endfield.account import prefetch
 from plugins.endfield.account.detail.draw import _account_detail_icon_urls
@@ -160,14 +160,14 @@ class CardDetailSnapshotTests(unittest.IsolatedAsyncioTestCase):
 class BrokerWiringTests(unittest.IsolatedAsyncioTestCase):
     async def test_clearing_icons_forgets_the_hot_set_and_queued_prefetches(self):
         broker = Mock()
-        with patch.object(handlers, "asset_broker", broker), patch.object(
-            handlers, "clear_http_cache", AsyncMock(return_value=0)
+        with patch.object(caches, "asset_broker", broker), patch.object(
+            caches, "clear_http_cache", AsyncMock(return_value=0)
         ):
-            await handlers._clear_endfield_caches("icon")
+            await caches._clear_endfield_caches("icon")
             broker.hotset.clear.assert_called_once_with()
             broker.cancel_background.assert_called_once_with()
             broker.reset_mock()
-            await handlers._clear_endfield_caches("operator")
+            await caches._clear_endfield_caches("operator")
             broker.hotset.clear.assert_not_called()
 
     async def test_status_shows_the_asset_queue(self):
@@ -184,8 +184,8 @@ class BrokerWiringTests(unittest.IsolatedAsyncioTestCase):
                 "prefetch": {"bytes": 12 << 20, "remaining_bytes": 288 << 20},
             },
         }
-        with patch.object(handlers, "get_http_cache_diagnostics", AsyncMock(return_value=diagnostics)):
-            lines = await handlers._cache_status_lines()
+        with patch.object(caches, "get_http_cache_diagnostics", AsyncMock(return_value=diagnostics)):
+            lines = await caches._cache_status_lines()
         self.assertIn(
             "素材队列: 在途 3 / 排队 交互 1 续传 2 后台 40 / 续传中 5 / 今日预取 12.0 MiB / 剩余 288.0 MiB",
             lines,

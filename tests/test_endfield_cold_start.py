@@ -12,7 +12,7 @@ import httpx
 from otae_bot.infrastructure.cache import AsyncTTLCache
 from otae_bot.infrastructure.http import client as http
 from otae_bot.infrastructure.http.disk import DiskImage, PublicImageDiskCache
-from plugins.endfield import cold_start, handlers as endfield
+from plugins.endfield import caches, cold_start
 from plugins.endfield.providers import akedata
 
 
@@ -335,29 +335,29 @@ class ColdStartNoticeTests(unittest.IsolatedAsyncioTestCase):
             return 0
 
         with (
-            patch.object(endfield._ACCOUNT_PAGE_CACHE, "clear", zero),
-            patch.object(endfield._LOADOUT_CACHE, "clear", zero),
-            patch.object(endfield._CARD_CACHE, "clear", zero),
-            patch.object(endfield.service, "clear_query_caches", zero),
-            patch.object(endfield, "clear_http_cache", zero),
-            patch.object(endfield, "clear_account_detail_name_map", return_value=0),
-            patch.object(endfield, "clear_account_investment_catalog", return_value=0),
+            patch.object(caches._ACCOUNT_PAGE_CACHE, "clear", zero),
+            patch.object(caches._LOADOUT_CACHE, "clear", zero),
+            patch.object(caches._CARD_CACHE, "clear", zero),
+            patch.object(caches.service, "clear_query_caches", zero),
+            patch.object(caches, "clear_http_cache", zero),
+            patch.object(caches, "clear_account_detail_name_map", return_value=0),
+            patch.object(caches, "clear_account_investment_catalog", return_value=0),
         ):
-            await endfield._clear_endfield_caches("operator")
+            await caches._clear_endfield_caches("operator")
         self.assertFalse(akedata.i18n_process_warm())
 
         akedata.remember_i18n_loaded(I18N_PATH)
         with (
-            patch.object(endfield._ACCOUNT_PAGE_CACHE, "clear", zero),
-            patch.object(endfield, "clear_render_asset_caches", return_value=0),
-            patch.object(endfield.gacha_asset_cache, "clear_caches", return_value=0),
-            patch.object(endfield._CARD_CACHE, "clear", zero),
-            patch.object(endfield._LOADOUT_CACHE, "clear", zero),
-            patch.object(endfield._CALENDAR_CACHE, "clear", zero),
-            patch.object(endfield._CHALLENGE_RENDER_CACHE, "clear", zero),
-            patch.object(endfield, "clear_http_cache", zero),
+            patch.object(caches._ACCOUNT_PAGE_CACHE, "clear", zero),
+            patch.object(caches, "clear_render_asset_caches", return_value=0),
+            patch.object(caches.gacha_asset_cache, "clear_caches", return_value=0),
+            patch.object(caches._CARD_CACHE, "clear", zero),
+            patch.object(caches._LOADOUT_CACHE, "clear", zero),
+            patch.object(caches._CALENDAR_CACHE, "clear", zero),
+            patch.object(caches._CHALLENGE_RENDER_CACHE, "clear", zero),
+            patch.object(caches, "clear_http_cache", zero),
         ):
-            await endfield._clear_endfield_caches("icon")
+            await caches._clear_endfield_caches("icon")
         self.assertTrue(akedata.i18n_process_warm())
 
 

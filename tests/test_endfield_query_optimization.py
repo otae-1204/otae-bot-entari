@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import plugins.endfield.handlers as endfield
+from plugins.endfield import caches
 from plugins.endfield.catalog import commands
 from plugins.endfield.catalog.models import (
     LoadoutEffectView,
@@ -382,7 +383,7 @@ class LoadoutCacheTests(unittest.IsolatedAsyncioTestCase):
             now[0] += 61
             await endfield._render_loadout_view(loadout_view())
             self.assertEqual(renderer.await_count, 1)  # the content-keyed PNG outlives a minute
-            now[0] += endfield.RENDER_CACHE_TTL_SECONDS
+            now[0] += caches.RENDER_CACHE_TTL_SECONDS
             await endfield._render_loadout_view(loadout_view())
         self.assertEqual(renderer.await_count, 2)
         self.assertEqual(endfield._LOADOUT_CACHE.max_entries, 32)
@@ -391,20 +392,20 @@ class LoadoutCacheTests(unittest.IsolatedAsyncioTestCase):
     async def test_dev_clear_clears_dependent_caches(self):
         for scope in ("all", "icon", "operator", "weapon", "equipment", "stage"):
             with self.subTest(scope=scope):
-                await endfield._LOADOUT_CACHE.get_or_create(
+                await caches._LOADOUT_CACHE.get_or_create(
                     ("version", "hash"), AsyncMock(return_value=b"png")
                 )
                 clear_relations = AsyncMock(return_value=0)
                 with (
                     patch.object(
-                        endfield, "clear_http_cache", AsyncMock(return_value=0)
+                        caches, "clear_http_cache", AsyncMock(return_value=0)
                     ),
                     patch.object(
-                        endfield.service, "clear_query_caches", clear_relations
+                        caches.service, "clear_query_caches", clear_relations
                     ),
                 ):
-                    await endfield._clear_endfield_caches(scope)
-                self.assertEqual((await endfield._LOADOUT_CACHE.stats()).entries, 0)
+                    await caches._clear_endfield_caches(scope)
+                self.assertEqual((await caches._LOADOUT_CACHE.stats()).entries, 0)
                 self.assertEqual(
                     clear_relations.await_count, 0 if scope == "icon" else 1
                 )

@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
 
-from plugins.endfield import handlers
+from plugins.endfield import caches, handlers
 from plugins.endfield.account import client as client_module
 from plugins.endfield.account.client import (
     ACCOUNT_PROVIDER_SKPORT,
@@ -147,7 +147,7 @@ class CardDetailReuseTests(_CacheTestCase):
             now[0] += 2
             await handlers._card_detail_with_snapshot("token", ROLE_A)
         self.assertEqual(fetch.await_count, 2)
-        self.assertEqual(handlers.CARD_DETAIL_CACHE_TTL_SECONDS, 60)
+        self.assertEqual(caches.CARD_DETAIL_CACHE_TTL_SECONDS, 60)
 
     async def test_concurrent_queries_share_one_request(self):
         release = asyncio.Event()
@@ -231,13 +231,13 @@ class CardDetailCleanupTests(_CacheTestCase):
             with self.subTest(scope=scope):
                 await self.fill(ROLE_A, ROLE_B)
                 with (
-                    patch.object(handlers, "clear_http_cache", AsyncMock(return_value=0)),
-                    patch.object(handlers.service, "clear_query_caches", AsyncMock(return_value=0)),
-                    patch.object(handlers, "asset_broker", Mock()),
+                    patch.object(caches, "clear_http_cache", AsyncMock(return_value=0)),
+                    patch.object(caches.service, "clear_query_caches", AsyncMock(return_value=0)),
+                    patch.object(caches, "asset_broker", Mock()),
                 ):
-                    removed = await handlers._clear_endfield_caches(scope)
+                    removed = await caches._clear_endfield_caches(scope)
                 self.assertGreaterEqual(removed, 2)
-                self.assertEqual((await handlers._CARD_DETAIL_CACHE.stats()).entries, 0)
+                self.assertEqual((await caches._CARD_DETAIL_CACHE.stats()).entries, 0)
 
     async def test_unbind_forgets_only_that_role(self):
         await self.fill(ROLE_A, ROLE_B)
@@ -284,10 +284,10 @@ class CardDetailCleanupTests(_CacheTestCase):
             "interval_wait_ms": 1900, "exchange_ms": 1236,
         }
         with (
-            patch.object(handlers, "get_http_cache_diagnostics", AsyncMock(return_value=diagnostics)),
-            patch.object(handlers.official_client, "community_context_metrics", return_value=metrics),
+            patch.object(caches, "get_http_cache_diagnostics", AsyncMock(return_value=diagnostics)),
+            patch.object(caches.official_client, "community_context_metrics", return_value=metrics),
         ):
-            lines = await handlers._cache_status_lines()
+            lines = await caches._cache_status_lines()
         self.assertTrue(lines[6].startswith("账号数据: 1 项 / "), lines[6])
         self.assertIn(
             "社区换签: 命中 7 / 换签 3（失败 1，熔断拒绝 0）/ 等待锁 2 次 共 2.5s / "
@@ -318,13 +318,14 @@ class CardDetailPrivacyTests(_CacheTestCase):
         }
         with (
             patch.object(handlers, "official_client", client),
+            patch.object(caches, "official_client", client),
             patch.object(handlers, "logger") as handler_log,
             patch.object(client_module, "logger") as client_log,
-            patch.object(handlers, "get_http_cache_diagnostics", AsyncMock(return_value=diagnostics)),
+            patch.object(caches, "get_http_cache_diagnostics", AsyncMock(return_value=diagnostics)),
         ):
             for _ in range(2):
                 await handlers._card_detail_with_snapshot(token, ROLE_A)
-            lines = await handlers._cache_status_lines()
+            lines = await caches._cache_status_lines()
         await http.aclose()
         client._create_skland_context.assert_awaited_once()  # a real exchange ran
         logged = _logged_text(handler_log, client_log)

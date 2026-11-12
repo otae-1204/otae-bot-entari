@@ -19,7 +19,7 @@ from otae_bot.infrastructure.http.disk import (
     PublicImageDiskCache,
     public_image_request,
 )
-from plugins.endfield import handlers as endfield
+from plugins.endfield import caches, handlers as endfield
 from plugins.endfield.rendering.health import (
     record_asset_seconds,
     record_assets,
@@ -671,12 +671,12 @@ class AccountPageCacheTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_rendered_pages_are_reused_for_thirty_minutes(self):
-        self.assertEqual(endfield._ACCOUNT_PAGE_CACHE.ttl_seconds, 30 * 60)
-        for cache in (endfield._CARD_CACHE, endfield._LOADOUT_CACHE, endfield._CHALLENGE_RENDER_CACHE):
-            self.assertEqual(cache.ttl_seconds, endfield.RENDER_CACHE_TTL_SECONDS)
+        self.assertEqual(caches._ACCOUNT_PAGE_CACHE.ttl_seconds, 30 * 60)
+        for cache in (caches._CARD_CACHE, caches._LOADOUT_CACHE, caches._CHALLENGE_RENDER_CACHE):
+            self.assertEqual(cache.ttl_seconds, caches.RENDER_CACHE_TTL_SECONDS)
         # Raw personal API data keeps its short window.
-        self.assertEqual(endfield._CHALLENGE_DATA_CACHE.ttl_seconds, 60)
-        self.assertEqual(endfield._CARD_DETAIL_CACHE.ttl_seconds, 60)
+        self.assertEqual(caches._CHALLENGE_DATA_CACHE.ttl_seconds, 60)
+        self.assertEqual(caches._CARD_DETAIL_CACHE.ttl_seconds, 60)
 
     async def test_render_log_splits_data_assets_and_drawing(self):
         async def render():
@@ -708,8 +708,8 @@ class CacheStatusTests(unittest.IsolatedAsyncioTestCase):
                 "other": {"large_disk_hits": 100},
             },
         }
-        with patch.object(endfield, "get_http_cache_diagnostics", AsyncMock(return_value=diagnostics)):
-            lines = await endfield._cache_status_lines()
+        with patch.object(caches, "get_http_cache_diagnostics", AsyncMock(return_value=diagnostics)):
+            lines = await caches._cache_status_lines()
         self.assertIn("素材池: 小图 3.0/64 MiB · I18n 常驻 45.0 MiB · 大图直通命中 3 · 直通跳过 3", lines)
         self.assertTrue(all("超限" in line for line in lines[:6]))
         self.assertEqual(lines[-1], "缓存策略: 成品图 TTL 1800s / 下载并发 8")
@@ -729,10 +729,10 @@ class CacheStatusTests(unittest.IsolatedAsyncioTestCase):
             "contexts": 2,
         }
         with (
-            patch.object(endfield, "get_http_cache_diagnostics", AsyncMock(return_value=diagnostics)),
-            patch.object(endfield, "browser_queue_snapshot", return_value=snapshot),
+            patch.object(caches, "get_http_cache_diagnostics", AsyncMock(return_value=diagnostics)),
+            patch.object(caches, "browser_queue_snapshot", return_value=snapshot),
         ):
-            lines = await endfield._cache_status_lines()
+            lines = await caches._cache_status_lines()
         self.assertEqual(lines[-2], "浏览器: 在途 2 / 排队 交互 1 后台 0 / 并发 2 / context 2")
 
 
@@ -795,26 +795,26 @@ class DerivedCacheRepairTests(unittest.IsolatedAsyncioTestCase):
     async def test_global_clear_reaches_public_and_derived_dependencies(self):
         with (
             patch.object(
-                endfield, "clear_http_cache", AsyncMock(return_value=0)
+                caches, "clear_http_cache", AsyncMock(return_value=0)
             ) as http_clear,
             patch.object(
-                endfield.gacha_asset_cache, "clear_caches", return_value=0
+                caches.gacha_asset_cache, "clear_caches", return_value=0
             ) as gacha,
             patch.object(
-                endfield.stage_service, "clear_caches", return_value=0
+                caches.stage_service, "clear_caches", return_value=0
             ) as stages,
             patch.object(
-                endfield.calendar_source, "clear_caches", return_value=0
+                caches.calendar_source, "clear_caches", return_value=0
             ) as calendar,
             patch.object(
-                endfield, "clear_account_detail_name_map", return_value=0
+                caches, "clear_account_detail_name_map", return_value=0
             ) as names,
             patch.object(
-                endfield, "clear_account_investment_catalog", return_value=0
+                caches, "clear_account_investment_catalog", return_value=0
             ) as investment,
-            patch.object(endfield, "clear_challenge_locale", return_value=0) as locale,
+            patch.object(caches, "clear_challenge_locale", return_value=0) as locale,
         ):
-            await endfield._clear_endfield_caches("all")
+            await caches._clear_endfield_caches("all")
         self.assertEqual(
             [call.args for call in http_clear.await_args_list],
             [("endfield-",), ("akedata",)],

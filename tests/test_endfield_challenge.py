@@ -1070,7 +1070,7 @@ class EndfieldForwardSendTests(unittest.TestCase):
         self.assertNotIn("<author", str(make_forward(["仅正文"])))
 
     def test_forward_prefers_satori_element(self):
-        import plugins.endfield.handlers as endfield_plugin
+        import plugins.endfield.replies as endfield_plugin
 
         send_forward = AsyncMock()
         session = SimpleNamespace(send=AsyncMock())
@@ -1091,7 +1091,7 @@ class EndfieldForwardSendTests(unittest.TestCase):
         self.assertEqual(send_forward.await_args.kwargs["uin"], "10001")
 
     def test_forward_failure_sends_each_page_as_an_image_message_in_order(self):
-        import plugins.endfield.handlers as endfield_plugin
+        import plugins.endfield.replies as endfield_plugin
 
         send_forward = AsyncMock(side_effect=RuntimeError("no session"))
         session = SimpleNamespace(send=AsyncMock())
@@ -1120,6 +1120,7 @@ class EndfieldGachaDeliveryTests(unittest.TestCase):
 
     def _run(self, pngs, *, satori=None, send=None, forward_above=None, max_nodes=None):
         import plugins.endfield.handlers as handlers
+        import plugins.endfield.replies as replies
 
         session = SimpleNamespace(send=send or AsyncMock())
         satori = satori or AsyncMock()
@@ -1130,9 +1131,10 @@ class EndfieldGachaDeliveryTests(unittest.TestCase):
             with (
                 settings.override({"plugins": {"plugins.endfield": endfield}}),
                 patch("otae_bot.config.model.logger"),
-                patch.object(handlers, "send_forward", satori),
+                patch.object(replies, "send_forward", satori),
                 patch.object(handlers, "_finish_pngs", finish_pngs),
-                patch.object(handlers, "_png_image", lambda png: handlers.Image(src=f"file:///tmp/{png.decode()}.png")),
+                patch.object(handlers, "_png_image", lambda png: replies.Image(src=f"file:///tmp/{png.decode()}.png")),
+                patch.object(replies, "_png_image", lambda png: replies.Image(src=f"file:///tmp/{png.decode()}.png")),
                 patch.object(handlers, "FORWARD_MAX_NODES", max_nodes or handlers.FORWARD_MAX_NODES),
             ):
                 await handlers._finish_gacha_pngs(session, self.EVENT, self.BOT, pngs)
@@ -1216,6 +1218,7 @@ class EndfieldGachaDeliveryTests(unittest.TestCase):
 
     def test_challenge_history_rule(self):
         import plugins.endfield.handlers as handlers
+        import plugins.endfield.replies as replies
 
         finish_pngs = AsyncMock()
         satori = AsyncMock(side_effect=RuntimeError("no forward"))
@@ -1223,8 +1226,8 @@ class EndfieldGachaDeliveryTests(unittest.TestCase):
         async def run(session, pngs):
             with (
                 patch.object(handlers, "_finish_pngs", finish_pngs),
-                patch.object(handlers, "send_forward", satori),
-                patch.object(handlers, "_png_image", lambda png: handlers.Image(src=f"file:///tmp/{png.decode()}.png")),
+                patch.object(replies, "send_forward", satori),
+                patch.object(replies, "_png_image", lambda png: replies.Image(src=f"file:///tmp/{png.decode()}.png")),
             ):
                 await handlers._finish_challenge_pages(session, self.EVENT, self.BOT, pngs, "/ef 影拓 历史 第N页")
 
