@@ -33,7 +33,7 @@ from typing import Any, TypeVar
 
 from arclet.entari.config import EntariConfig
 
-from .core import CoreSettings
+from .core import CoreSettings, LlmSettings
 from .model import Settings, validate
 
 __all__ = [
@@ -43,6 +43,7 @@ __all__ = [
     "ConfigFileMissing",
     "core_settings",
     "environment",
+    "llm_profile",
     "load_config",
     "loaded_config",
     "network_endpoints",
@@ -171,6 +172,20 @@ def plugin_settings(name: str, model: type[S]) -> S:
 
 def core_settings() -> CoreSettings:
     return _section(CoreSettings, CORE_KEY, _source.data.get(CORE_KEY), CORE_KEY)
+
+
+def llm_profile(name: str) -> LlmSettings:
+    """A named LLM credential group: ``llm`` is ``otae.llm``; ``steam`` is the
+    ``llm_*`` keys of ``plugins.steamInfo`` (shared with the plugins that may borrow it)."""
+    if name == "steam":
+        key = "plugins.steamInfo"
+        raw = _source.plugins.get(key) or {}
+        raw = raw if isinstance(raw, Mapping) else {}
+        group = {field: raw[f"llm_{field}"] for field in ("api_key", "base_url", "model") if f"llm_{field}" in raw}
+        return _section(LlmSettings, f"{key}#llm", group, key)
+    if name == "llm":
+        return core_settings().llm
+    raise ValueError(f"unknown LLM profile: {name}")
 
 
 def server_declaration() -> dict | None:

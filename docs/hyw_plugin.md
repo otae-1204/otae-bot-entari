@@ -6,37 +6,48 @@
 
 ## 配置
 
-在项目根目录 `.env` 填写，重启机器人后生效。`HYW_CONFIG_SOURCE=llm` 或 `steam` 时，整组改用 `LLM_*` 或 `STEAM_LLM_*`。
+在 `entari.yml` 的 `plugins: plugins.hyw:` 段填写，密钥放 `.env` 并用 `${{ env.X :- }}` 引用，重启机器人后生效。`config_source: llm` 或 `steam` 时，`api_key` / `base_url` / `model` 整组改用 `otae.llm` 或 `plugins.steamInfo` 的 `llm_*`。下面是全部键与默认值：
 
-```dotenv
-HYW_CONFIG_SOURCE=hyw
-HYW_API_KEY=
-HYW_BASE_URL=https://openrouter.ai/api/v1
-HYW_MODEL=gemini-3.8-flash
-HYW_CREDENTIALS_FILE=
-HYW_VERTEX_LOCATION=global
-HYW_VERTEX_BASE_URL=
-HYW_PROXY=direct
-HYW_SEARCH_PROXY=direct
-HYW_SEARCH_PROVIDER=ddgs
-HYW_RENDER=true
-HYW_TIMEOUT=300
-HYW_REQUEST_TIMEOUT=90
-HYW_MAX_CONCURRENT=2
-HYW_MAX_TOOL_IMAGES=600
-HYW_MAX_READER_IMAGES=30
-HYW_HOME=data/hyw-frontier
+```yaml
+plugins:
+  plugins.hyw:
+    config_source: hyw
+    api_key: "${{ env.HYW_API_KEY :- }}"
+    base_url: https://openrouter.ai/api/v1
+    model: gemini-3.8-flash
+    credentials_file: ""
+    vertex_location: global
+    vertex_base_url: ""
+    proxy: direct
+    search_proxy: direct
+    render: true
+    search_provider: ddgs
+    search_mode: turbo
+    reader_engine: browser
+    max_tool_images: 600
+    max_reader_images: 30
+    max_concurrent: 2
+    timeout: 300
+    request_timeout: 90
+    reasoning_mode: auto
+    max_rounds: 10
+    render_timeout: 45
+    render_max_images: 16
+    render_max_edge: 1024
+    home: data/hyw-frontier
 ```
 
-`HYW_PROXY=direct` 与 `HYW_SEARCH_PROXY=direct` 表示模型、用户图片和 DuckDuckGo 都直连，不继承全局代理。留空才继承。
+`proxy: direct` 与 `search_proxy: direct` 表示模型、用户图片和 DuckDuckGo 都直连，不继承全局代理（`.env` 的 `HTTP_PROXY` / `HTTPS_PROXY`）。留空才继承。
+
+重试参数由 hyw-frontier 自己从进程环境读取，仍写在 `.env`：`HYW_RETRY_ATTEMPTS`、`HYW_RETRY_BASE_DELAY`、`HYW_RETRY_MAX_DELAY`、`HYW_RETRY_BUDGET`；`jina` / `parallel` 的 `JINA_API_KEY` / `PARALLEL_API_KEY` 同理。
 
 搜索默认 `ddgs`，不需要搜索密钥。`jina` / `parallel` 需要对应的 API Key。读网页走 Jina Reader，网址会发给 Jina。
 
 ## 使用 Google 服务账号凭据（Vertex AI）
 
-把服务账号 JSON 指给 `HYW_CREDENTIALS_FILE`，或使用 `GOOGLE_APPLICATION_CREDENTIALS`。文件不要提交进 Git。
+把服务账号 JSON 指给 `plugins.hyw.credentials_file`，或在 `.env` / 环境里设 `GOOGLE_APPLICATION_CREDENTIALS`。文件不要提交进 Git。
 
-服务账号模式下 `HYW_BASE_URL` 与 `HYW_VERTEX_BASE_URL` 会被忽略，避免把凭据发给中转站。端点由 Google 提供商按凭据里的 `project_id` 和 `HYW_VERTEX_LOCATION`（默认 `global`）推导。模型名使用 `gemini-3.8-flash` 这种 id，不再把模型名写成 `google/<model>`；提供商字段本身是 `google`。
+服务账号模式下 `base_url` 与 `vertex_base_url` 会被忽略，避免把凭据发给中转站。端点由 Google 提供商按凭据里的 `project_id` 和 `vertex_location`（默认 `global`）推导。模型名使用 `gemini-3.8-flash` 这种 id，不再把模型名写成 `google/<model>`；提供商字段本身是 `google`。
 
 未配置密钥或凭据文件时插件仍能加载，调用时提示管理员配置。
 
@@ -92,7 +103,7 @@ QQ 卡片是扩展元素 `<onebot:json data>` / `<onebot:xml data>`，LLBot 原�
 `code` / `http_status` 取自 Hyw-Frontier 的 `diagnostics`，或异常链上的 `code`、`status_code`、
 `response.status_code`。`chain` 沿 `__cause__` / `__context__` 最多记 6 层的类型与消息：
 Hyw-Frontier 用 `raise ... from None` 隐藏了 SDK 原始异常，但它仍在 `__context__` 里，真正的原因通常在这一层。
-消息先脱敏再写日志：`HYW_API_KEY` 与代理地址原文、`Bearer` / `Basic` 凭据、`Authorization` / `Cookie` /
+消息先脱敏再写日志：`api_key` 与代理地址原文、`Bearer` / `Basic` 凭据、`Authorization` / `Cookie` /
 `api_key` / `token` 等键值、URL 的查询串与用户信息、`sk-…`、`AIza…`、`ya29.…`、JWT 和私钥块都替换成 `<redacted>`。
 
 本机若把 DNS 改写成 `198.18.0.0/15`，图片下载允许连接这一段，仍拒绝局域网地址。

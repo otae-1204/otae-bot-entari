@@ -7,85 +7,95 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
+from otae_bot.config import settings
 from plugins.hyw.config import HywConfig, HywError
 from plugins.hyw.handlers import handle_hyw, parts_from, scope_for
 from plugins.hyw.history import HistoryStore, SourceBook
 
 
-def _env(values):
-    def read(key, default=None):
-        return values.get(key, default)
-    return read
+def _hyw(values=None, **sections):
+    data = {"plugins": {"plugins.hyw": values or {}}, **sections}
+    return settings.override(data)
 
 
 class ConfigTests(unittest.TestCase):
     def test_direct_proxy_does_not_inherit_global(self):
-        values = {"HYW_PROXY": "direct", "HYW_SEARCH_PROXY": "direct", "HYW_API_KEY": "k"}
-        with patch("plugins.hyw.config._env", side_effect=_env(values)), \
-             patch("plugins.hyw.config.SYSTEM_PROXY", {"https": "http://127.0.0.1:7890"}):
-            config = HywConfig.from_env()
+        values = {"proxy": "direct", "search_proxy": "direct", "api_key": "k"}
+        with _hyw(values), patch("plugins.hyw.config.system_proxy", return_value={"http": None, "https": "http://127.0.0.1:7890"}):
+            config = HywConfig.from_settings()
         self.assertEqual(config.proxy, "")
         self.assertEqual(config.search_proxy, "")
         self.assertEqual(config.provider, "openai-compatible")
 
+    def test_empty_proxy_inherits_the_process_proxy(self):
+        with _hyw({"api_key": "k"}), patch("plugins.hyw.config.system_proxy", return_value={"http": "http://h:1", "https": None}):
+            config = HywConfig.from_settings()
+        self.assertEqual((config.proxy, config.search_proxy), ("http://h:1", "http://h:1"))
+
     def test_service_account_uses_google_provider_and_ignores_relay_model_prefix(self):
         values = {
-            "HYW_CREDENTIALS_FILE": __file__,
-            "HYW_MODEL": "google/gemini-3.8-flash",
-            "HYW_BASE_URL": "https://llm.hyw.mom/v1",
-            "HYW_VERTEX_LOCATION": "global",
+            "credentials_file": __file__,
+            "model": "google/gemini-3.8-flash",
+            "base_url": "https://llm.hyw.mom/v1",
+            "vertex_location": "global",
         }
-        with patch("plugins.hyw.config._env", side_effect=_env(values)):
-            config = HywConfig.from_env()
+        with _hyw(values):
+            config = HywConfig.from_settings()
         self.assertEqual(config.auth_mode, "service_account")
         self.assertEqual(config.provider, "google")
         self.assertEqual(config.model, "gemini-3.8-flash")
         self.assertNotIn("llm.hyw.mom", config.model)
 
     def test_missing_credentials_file_is_not_configured(self):
-        values = {"HYW_CREDENTIALS_FILE": "data/missing-service-account.json"}
-        with patch("plugins.hyw.config._env", side_effect=_env(values)):
-            config = HywConfig.from_env()
+        with _hyw({"credentials_file": "data/missing-service-account.json"}):
+            config = HywConfig.from_settings()
         self.assertEqual(config.auth_mode, "none")
         self.assertFalse(config.configured)
         self.assertIn("找不到", config.auth_error)
 
     def test_bad_config_source_raises(self):
-        with patch("plugins.hyw.config._env", side_effect=_env({"HYW_CONFIG_SOURCE": "nope"})), \
-             self.assertRaises(ValueError):
-            HywConfig.from_env()
+        with _hyw({"config_source": "nope"}), self.assertRaises(ValueError):
+            HywConfig.from_settings()
+
+    def test_config_source_borrows_a_whole_credential_group(self):
+        with _hyw({"config_source": "llm", "api_key": "own"}, otae={"llm": {"api_key": "general"}}):
+            config = HywConfig.from_settings()
+        self.assertEqual((config.api_key, config.base_url, config.model, config.provider),
+                         ("general", "https://api.deepseek.com", "deepseek-v4-flash", "deepseek"))
+        steam = {"llm_api_key": "steam-key", "llm_base_url": "https://steam.test/v1", "llm_model": "m"}
+        with settings.override({"plugins": {"plugins.hyw": {"config_source": "steam"}, "plugins.steamInfo": steam}}):
+            config = HywConfig.from_settings()
+        self.assertEqual((config.api_key, config.base_url, config.model), ("steam-key", "https://steam.test/v1", "m"))
 
     def test_reasoning_mode_is_read_and_invalid_values_fall_back_to_auto(self):
         cases = {None: "auto", "": "auto", "low": "low", " High ": "high", "medium": "medium", "max": "auto"}
         for raw, expected in cases.items():
-            values = {} if raw is None else {"HYW_REASONING_MODE": raw}
-            with self.subTest(raw=raw), patch("plugins.hyw.config._env", side_effect=_env(values)):
-                self.assertEqual(HywConfig.from_env().reasoning_mode, expected)
+            values = {} if raw is None else {"reasoning_mode": raw}
+            with self.subTest(raw=raw), _hyw(values):
+                self.assertEqual(HywConfig.from_settings().reasoning_mode, expected)
 
     def test_render_limits_are_read_with_safe_fallbacks(self):
         cases = {
-            ("HYW_RENDER_TIMEOUT", "render_timeout"): {None: 45, "20": 20, "7.5": 7.5, "0": 45, "-1": 45,
-                                                       "nan": 45, "inf": 45, "x": 45},
-            ("HYW_RENDER_MAX_IMAGES", "render_max_images"): {None: 16, "4": 4, "0": 0, "-1": 16, "x": 16},
-            ("HYW_RENDER_MAX_EDGE", "render_max_edge"): {None: 1024, "800": 800, "5000": 1280, "10": 1024, "x": 1024},
+            "render_timeout": {None: 45, "20": 20, "7.5": 7.5, "0": 45, "-1": 45, "nan": 45, "inf": 45, "x": 45},
+            "render_max_images": {None: 16, "4": 4, "0": 0, "-1": 16, "x": 16},
+            "render_max_edge": {None: 1024, "800": 800, "5000": 1280, "10": 1024, "x": 1024},
         }
-        for (key, field), expected in cases.items():
+        for field, expected in cases.items():
             for raw, value in expected.items():
-                values = {} if raw is None else {key: raw}
-                with self.subTest(key=key, raw=raw), patch("plugins.hyw.config._env", side_effect=_env(values)):
-                    self.assertEqual(getattr(HywConfig.from_env(), field), value)
+                values = {} if raw is None else {field: raw}
+                with self.subTest(field=field, raw=raw), _hyw(values), patch("otae_bot.config.model.logger"):
+                    self.assertEqual(getattr(HywConfig.from_settings(), field), value)
 
     def test_max_rounds_is_read_and_falls_back_to_10(self):
         cases = {None: 10, "6": 6, " 1 ": 1, "0": 10, "-3": 10, "x": 10, "2.5": 10}
         for raw, expected in cases.items():
-            values = {} if raw is None else {"HYW_MAX_ROUNDS": raw}
-            with self.subTest(raw=raw), patch("plugins.hyw.config._env", side_effect=_env(values)):
-                self.assertEqual(HywConfig.from_env().max_rounds, expected)
+            values = {} if raw is None else {"max_rounds": raw}
+            with self.subTest(raw=raw), _hyw(values), patch("otae_bot.config.model.logger"):
+                self.assertEqual(HywConfig.from_settings().max_rounds, expected)
 
     def test_render_image_cap_does_not_touch_the_tool_image_budget(self):
-        values = {"HYW_RENDER_MAX_IMAGES": "3"}
-        with patch("plugins.hyw.config._env", side_effect=_env(values)):
-            config = HywConfig.from_env()
+        with _hyw({"render_max_images": "3"}):
+            config = HywConfig.from_settings()
         self.assertEqual(config.max_tool_images, 600)
         self.assertEqual(config.render_max_images, 3)
 
@@ -321,7 +331,7 @@ class QuoteTests(unittest.IsolatedAsyncioTestCase):
         from plugins.hyw import handlers
 
         request = AsyncMock()
-        with patch.object(handlers.HywConfig, "from_env", return_value=_config()), \
+        with patch.object(handlers.HywConfig, "from_settings", return_value=_config()), \
              patch.object(handlers, "run_request", request), patch.object(handlers, "logger") as log:
             await handle_hyw(session, _args(*content))
         return request, log
@@ -562,8 +572,8 @@ class AnswerCallTests(unittest.IsolatedAsyncioTestCase):
         answer = AsyncMock(return_value=result)
         session = AsyncMock()
         session.send = AsyncMock(return_value=[])
-        with patch("plugins.hyw.config._env", side_effect=_env({"HYW_API_KEY": "k"})):
-            default = HywConfig.from_env()
+        with _hyw({"api_key": "k"}):
+            default = HywConfig.from_settings()
         for config, expected in ((default, 10), (_config(max_rounds=4), 4)):
             with self.subTest(expected=expected), patch.dict(sys.modules, _fake_frontier(answer)):
                 await handlers.run_request(session, config, ("qq", "b", "g", "c", "u"), "问题", [], [])
@@ -742,7 +752,7 @@ class FailureLogTests(unittest.IsolatedAsyncioTestCase):
             except ConnectionResetError as error:
                 raise RuntimeError("search backend crashed (api_key=cfg-SECRET-API-KEY)") from error
 
-        with patch.object(handlers.HywConfig, "from_env", return_value=_config()), \
+        with patch.object(handlers.HywConfig, "from_settings", return_value=_config()), \
              patch.object(handlers, "run_request", failing), \
              patch.object(handlers, "logger") as log:
             await handle_hyw(session, type("R", (), {"all_matched_args": {"content": [Text("问题")]}})())

@@ -4,43 +4,62 @@ import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from otae_bot.config.settings import SYSTEM_PROXY, _env
+from otae_bot.config.model import Settings
+from otae_bot.config.model import field as setting
+from otae_bot.config.settings import environment, llm_profile, plugin_settings, system_proxy
+
+DEEPSEEK_BASE_URL = "https://api.deepseek.com"
+DEEPSEEK_MODEL = "deepseek-v4-flash"
 
 
-def _env_int(name: str, default: int) -> int:
-    raw = _env(name, None)
-    if raw is None:
-        return default
-    try:
-        return int(str(raw).strip())
-    except (TypeError, ValueError):
-        return default
+class HywSettings(Settings):
+    """HYW 搜索问答（/q、/hyw、/何意味），见 docs/hyw_plugin.md"""
+
+    config_source: str = setting(
+        default="hyw", description="凭据来源：hyw = 本段；llm = 整组用 otae.llm；steam = 整组用 plugins.steamInfo 的 llm_*"
+    )
+    api_key: str = setting(default="", description="API Key（密钥）")
+    base_url: str = setting(default="https://openrouter.ai/api/v1", description="OpenAI 兼容接口基址")
+    model: str = setting(default="gemini-3.8-flash", description="模型名")
+    credentials_file: str = setting(
+        default="",
+        description="Google 服务账号 JSON 路径（Vertex AI）；留空时看环境变量 GOOGLE_APPLICATION_CREDENTIALS",
+    )
+    vertex_location: str = setting(default="global", description="服务账号模式下的区域段")
+    vertex_base_url: str = setting(default="", description="覆盖 Vertex 基址；留空按 project_id 自动推导")
+    proxy: str = setting(default="", description="模型和用户图片下载代理；留空继承 HTTP(S)_PROXY，direct = 直连")
+    search_proxy: str = setting(default="", description="搜索/网页读取代理；留空沿用 proxy，direct = 直连")
+    render: bool = setting(default=True, description="是否出卡片图")
+    search_provider: str = setting(default="ddgs", description="搜索：ddgs、jina 或 parallel")
+    search_mode: str = setting(default="turbo", description="搜索模式")
+    reader_engine: str = setting(default="browser", description="网页读取：browser 或 default")
+    max_tool_images: int = setting(default=600, description="工具可取用的图片总数上限")
+    max_reader_images: int = setting(default=30, description="网页读取保留的图片数上限")
+    max_concurrent: int = setting(default=2, description="同时进行的问答数")
+    timeout: float = setting(default=300, description="一次问答总超时秒数")
+    request_timeout: float = setting(
+        default=90, description="单次模型调用超时秒数；超时后至多再试 1 次，重试超时取 min(30, max(15, 本值/2))"
+    )
+    reasoning_mode: str = setting(default="auto", description="推理强度：auto（全程 medium）、high、medium、low")
+    max_rounds: int = setting(default=10, description="每次提问的模型轮次上限（含最终作答；小于 1 回退 10）")
+    render_timeout: float = setting(default=45, description="卡片绘制时限秒数；失败时改发纯文字答案")
+    render_max_images: int = setting(default=16, description="送进卡片渲染的配图上限，按正文引用顺序保留前 N 张")
+    render_max_edge: int = setting(default=1024, description="送渲染前配图最长边像素（64–1280）")
+    home: str = setting(default="data/hyw-frontier", description="hyw-frontier 的数据目录")
 
 
-def _env_float(name: str, default: float) -> float:
-    raw = _env(name, None)
-    if raw is None:
-        return default
-    try:
-        return float(str(raw).strip())
-    except (TypeError, ValueError):
-        return default
-
-
-def _env_positive(name: str, default: float) -> float:
+def _positive(value: float, default: float) -> float:
     """Positive, finite seconds; anything else falls back to the default."""
-    value = _env_float(name, default)
     return value if math.isfinite(value) and value > 0 else default
 
 
-def _env_at_least(name: str, default: int, minimum: int) -> int:
+def _at_least(value: int, default: int, minimum: int) -> int:
     """Integers below ``minimum`` are treated as invalid, not clamped."""
-    value = _env_int(name, default)
     return value if value >= minimum else default
 
 
-def _proxy(name: str, fallback: str = "") -> str:
-    value = str(_env(name, "") or "").strip()
+def _proxy(value: str, fallback: str = "") -> str:
+    value = value.strip()
     if value.lower() == "direct":
         return ""
     if value:
@@ -87,22 +106,25 @@ class HywConfig:
         return False
 
     @classmethod
-    def from_env(cls) -> "HywConfig":
-        source = str(_env("HYW_CONFIG_SOURCE", "hyw")).strip().lower()
-        prefixes = {"hyw": "HYW", "llm": "LLM", "steam": "STEAM_LLM"}
-        if source not in prefixes:
-            raise ValueError("HYW_CONFIG_SOURCE 应为 hyw、llm 或 steam")
-        prefix = prefixes[source]
-        default_base = cls.base_url if source == "hyw" else "https://api.deepseek.com"
-        default_model = cls.model if source == "hyw" else "deepseek-v4-flash"
-        proxy = _proxy("HYW_PROXY", str(SYSTEM_PROXY.get("https") or SYSTEM_PROXY.get("http") or "").strip())
-        search_proxy = _proxy("HYW_SEARCH_PROXY", proxy)
-        base_url = str(_env(f"{prefix}_BASE_URL", "") or default_base).strip().rstrip("/")
-        model = str(_env(f"{prefix}_MODEL", "") or default_model).strip()
-        credentials_file = str(_env("HYW_CREDENTIALS_FILE", "") or _env("GOOGLE_APPLICATION_CREDENTIALS", "") or "").strip()
-        vertex_location = str(_env("HYW_VERTEX_LOCATION", "") or "").strip() or "global"
-        vertex_base_url = str(_env("HYW_VERTEX_BASE_URL", "") or "").strip().rstrip("/")
-        api_key = str(_env(f"{prefix}_API_KEY", "") or "").strip()
+    def from_settings(cls, settings: HywSettings | None = None) -> "HywConfig":
+        settings = settings or plugin_settings("hyw", HywSettings)
+        source = settings.config_source.strip().lower()
+        if source not in {"hyw", "llm", "steam"}:
+            raise ValueError("plugins.hyw.config_source 应为 hyw、llm 或 steam")
+        if source == "hyw":
+            api_key, base_url, model = settings.api_key, settings.base_url or cls.base_url, settings.model or cls.model
+        else:
+            group = llm_profile(source)
+            api_key, base_url, model = group.api_key, group.base_url or DEEPSEEK_BASE_URL, group.model or DEEPSEEK_MODEL
+        global_proxy = system_proxy()
+        proxy = _proxy(settings.proxy, str(global_proxy["https"] or global_proxy["http"] or "").strip())
+        search_proxy = _proxy(settings.search_proxy, proxy)
+        base_url = base_url.strip().rstrip("/")
+        model = model.strip()
+        credentials_file = (settings.credentials_file.strip() or environment("GOOGLE_APPLICATION_CREDENTIALS"))
+        vertex_location = settings.vertex_location.strip() or "global"
+        vertex_base_url = settings.vertex_base_url.strip().rstrip("/")
+        api_key = api_key.strip()
         auth_mode, auth_error, provider, api = "api_key", "", "openai-compatible", "chat"
         if "api.deepseek.com" in base_url and not credentials_file:
             provider, api = "deepseek", "responses"
@@ -114,14 +136,14 @@ class HywConfig:
             model = model.split("/", 1)[-1]
         elif not api_key:
             auth_mode = "none"
-        home = str(_env("HYW_HOME", "") or cls.home).strip() or cls.home
-        search_provider = str(_env("HYW_SEARCH_PROVIDER", "") or cls.search_provider).strip().lower()
+        home = settings.home.strip() or cls.home
+        search_provider = settings.search_provider.strip().lower() or cls.search_provider
         if search_provider not in {"ddgs", "jina", "parallel"}:
             search_provider = cls.search_provider
-        reader_engine = str(_env("HYW_READER_ENGINE", "") or cls.reader_engine).strip().lower()
+        reader_engine = settings.reader_engine.strip().lower() or cls.reader_engine
         if reader_engine not in {"default", "browser"}:
             reader_engine = cls.reader_engine
-        reasoning_mode = str(_env("HYW_REASONING_MODE", "") or cls.reasoning_mode).strip().lower()
+        reasoning_mode = settings.reasoning_mode.strip().lower() or cls.reasoning_mode
         if reasoning_mode not in {"auto", "high", "medium", "low"}:
             reasoning_mode = cls.reasoning_mode
         return cls(
@@ -130,20 +152,20 @@ class HywConfig:
             model=model,
             proxy=proxy,
             search_proxy=search_proxy,
-            render=str(_env("HYW_RENDER", True)).lower() not in {"false", "0", "no"},
-            timeout=max(1.0, _env_float("HYW_TIMEOUT", cls.timeout)),
-            request_timeout=max(1.0, _env_float("HYW_REQUEST_TIMEOUT", cls.request_timeout)),
+            render=settings.render,
+            timeout=max(1.0, settings.timeout),
+            request_timeout=max(1.0, settings.request_timeout),
             reasoning_mode=reasoning_mode,
-            max_rounds=_env_at_least("HYW_MAX_ROUNDS", cls.max_rounds, 1),
-            render_timeout=_env_positive("HYW_RENDER_TIMEOUT", cls.render_timeout),
-            render_max_images=_env_at_least("HYW_RENDER_MAX_IMAGES", cls.render_max_images, 0),
+            max_rounds=_at_least(settings.max_rounds, cls.max_rounds, 1),
+            render_timeout=_positive(settings.render_timeout, cls.render_timeout),
+            render_max_images=_at_least(settings.render_max_images, cls.render_max_images, 0),
             # The render worker accepts at most 1280px previews; tiny edges would be useless.
-            render_max_edge=min(1280, _env_at_least("HYW_RENDER_MAX_EDGE", cls.render_max_edge, 64)),
-            max_concurrent=max(1, _env_int("HYW_MAX_CONCURRENT", cls.max_concurrent)),
-            max_tool_images=max(0, _env_int("HYW_MAX_TOOL_IMAGES", cls.max_tool_images)),
-            max_reader_images=max(0, _env_int("HYW_MAX_READER_IMAGES", cls.max_reader_images)),
+            render_max_edge=min(1280, _at_least(settings.render_max_edge, cls.render_max_edge, 64)),
+            max_concurrent=max(1, settings.max_concurrent),
+            max_tool_images=max(0, settings.max_tool_images),
+            max_reader_images=max(0, settings.max_reader_images),
             search_provider=search_provider,
-            search_mode=str(_env("HYW_SEARCH_MODE", "") or cls.search_mode).strip() or cls.search_mode,
+            search_mode=settings.search_mode.strip() or cls.search_mode,
             reader_engine=reader_engine,
             auth_mode=auth_mode,
             provider=provider,

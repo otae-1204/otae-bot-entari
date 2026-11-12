@@ -18,6 +18,7 @@ Checks:
 from __future__ import annotations
 
 import base64
+import dataclasses
 import os
 import re
 import struct
@@ -60,7 +61,6 @@ def _bootstrap_under_venv() -> None:
 
 os.chdir(REPO_ROOT)
 _bootstrap_under_venv()
-os.environ["HYW_RENDER"] = "false"
 
 
 def png_bytes(width: int, height: int, rgb: tuple[int, int, int]) -> bytes:
@@ -75,21 +75,18 @@ def png_bytes(width: int, height: int, rgb: tuple[int, int, int]) -> bytes:
 
 
 class SuiteEvidenceTests(unittest.TestCase):
-    def test_env_example_documents_every_hyw_variable(self):
-        template = (REPO_ROOT / ".env.example").read_text(encoding="utf-8")
-        source = (PLUGIN_DIR / "config.py").read_text(encoding="utf-8")
-        documented = set(re.findall(r"^((?:HYW|GOOGLE)_[A-Z0-9_]+)=", template, flags=re.MULTILINE))
-        read = set(re.findall(r'_env\(\s*"((?:HYW|GOOGLE)_[A-Z0-9_]+)"', source))
-        read |= {f"HYW_{name}" for name in ("API_KEY", "BASE_URL", "MODEL")}
-        missing = sorted(read - documented)
-        self.assertEqual(missing, [], f"not documented in .env.example: {missing}")
-        for key in ("HYW_CREDENTIALS_FILE", "HYW_VERTEX_LOCATION", "HYW_VERTEX_BASE_URL"):
-            self.assertIn(key, documented)
+    def test_docs_document_every_hyw_setting(self):
+        from plugins.hyw.config import HywSettings
+
+        docs = (REPO_ROOT / "docs" / "hyw_plugin.md").read_text(encoding="utf-8")
+        documented = set(re.findall(r"^    ([a-z_]+):", docs, flags=re.MULTILINE))
+        declared = {item.name for item in dataclasses.fields(HywSettings)}
+        self.assertEqual(sorted(declared - documented), [], "not documented in docs/hyw_plugin.md")
 
     def test_docs_document_service_account_mode(self):
         docs = (REPO_ROOT / "docs" / "hyw_plugin.md").read_text(encoding="utf-8")
         self.assertIn("## 使用 Google 服务账号凭据（Vertex AI）", docs)
-        for token in ("HYW_CREDENTIALS_FILE", "HYW_VERTEX_LOCATION", "HYW_VERTEX_BASE_URL", "被忽略"):
+        for token in ("credentials_file", "vertex_location", "vertex_base_url", "被忽略"):
             self.assertIn(token, docs)
         self.assertIn("google/", docs)
 
@@ -103,7 +100,7 @@ class LiveServiceAccountTests(unittest.TestCase):
         from plugins.hyw import handlers
         from plugins.hyw.config import HywConfig
 
-        config = HywConfig.from_env()
+        config = dataclasses.replace(HywConfig.from_settings(), render=False)
         if os.environ.get("HYW_LIVE_EVIDENCE") != "1":
             self.skipTest("set HYW_LIVE_EVIDENCE=1 to run the live Vertex round trip")
         if config.auth_mode != "service_account" or not config.credentials_file:

@@ -13,9 +13,9 @@ from .model import Settings, field
 class LlmSettings(Settings):
     """通用 LLM 配置（部署诊断等；HYW 选择 config_source: llm 时也用这一组）"""
 
-    api_key: str = field(default="", description="API Key，填 ${{ env.LLM_API_KEY :- }} 引用 .env")
-    base_url: str = field(default="https://api.deepseek.com", description="OpenAI 兼容接口基址")
-    model: str = field(default="deepseek-v4-flash", description="模型名")
+    api_key: str = field(default="", description="API Key（密钥），填 \"${{ env.LLM_API_KEY :- }}\"")
+    base_url: str = field(default="", description="OpenAI 兼容接口基址；留空 = https://api.deepseek.com")
+    model: str = field(default="", description="模型名；留空 = deepseek-v4-flash")
 
 
 class HttpAssetSettings(Settings):

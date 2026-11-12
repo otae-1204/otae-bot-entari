@@ -14,6 +14,7 @@ httpx2 = pytest.importorskip("httpx2")
 from hyw_frontier import model_backend
 from hyw_frontier.credentials import ModelConnection
 
+from otae_bot.config import settings
 from plugins.hyw.config import HywConfig
 
 OPENCODE = "https://opencode.ai/inference/go/openai/v1"
@@ -44,9 +45,9 @@ class OpenCodeHeaderTests(unittest.TestCase):
             self.assertEqual(model_backend.opencode_headers(OPENCODE)["x-opencode-session"], "fixed-session")
 
     def test_plugin_passes_the_opencode_url_through_unchanged(self):
-        values = {"HYW_API_KEY": "k", "HYW_BASE_URL": OPENCODE + "/", "HYW_MODEL": MODEL}
-        with patch("plugins.hyw.config._env", side_effect=lambda key, default=None: values.get(key, default)):
-            config = HywConfig.from_env()
+        values = {"api_key": "k", "base_url": OPENCODE + "/", "model": MODEL}
+        with settings.override({"plugins": {"plugins.hyw": values}}):
+            config = HywConfig.from_settings()
         self.assertEqual((config.base_url, config.provider, config.api), (OPENCODE, "openai-compatible", "chat"))
 
 

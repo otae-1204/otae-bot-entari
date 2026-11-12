@@ -533,7 +533,7 @@ async def handle_hyw(session: Session, result: Arparma):
         await send_text(session, "已清空你在当前会话的 HYW 对话历史与参考资料缓存。")
         return
     try:
-        config = HywConfig.from_env()
+        config = HywConfig.from_settings()
     except ValueError as error:
         await send_text(session, str(error))
         return

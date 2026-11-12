@@ -273,7 +273,7 @@ def incoming(n, quote):
 
 async def main():
     request = AsyncMock()
-    with patch.object(hyw.HywConfig, 'from_env', return_value=hyw.HywConfig(api_key='test', timeout=5)), \
+    with patch.object(hyw.HywConfig, 'from_settings', return_value=hyw.HywConfig(api_key='test', timeout=5)), \
          patch.dict(hyw.handle_hyw.__globals__, run_request=request), \
          patch.object(httpx, 'AsyncClient', client):
         # 1) 引用合并转发：内容随事件送达，不查询 message.get，也不发任何 HTTP
