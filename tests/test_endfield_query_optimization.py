@@ -8,6 +8,7 @@ from functools import partial
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import plugins.endfield.account.handlers as account_handlers
 import plugins.endfield.catalog.handlers as catalog_handlers
 import plugins.endfield.handlers as endfield
 from plugins.endfield import caches
@@ -473,36 +474,36 @@ class InvestmentConcurrencyTests(unittest.IsolatedAsyncioTestCase):
                 endfield.account_store, "decrypt_token", return_value="test-only"
             ),
             patch.object(
-                endfield,
+                account_handlers,
                 "decode_account_credential",
                 return_value=("skland", "test-only"),
             ),
-            patch.object(endfield, "is_asia_role", return_value=False),
+            patch.object(account_handlers, "is_asia_role", return_value=False),
             patch.object(
-                endfield, "_card_detail_with_snapshot", side_effect=partial(loader, 0)
+                account_handlers, "_card_detail_with_snapshot", side_effect=partial(loader, 0)
             ),
             patch.object(
-                endfield,
+                account_handlers,
                 "fetch_account_investment_catalog",
                 side_effect=partial(loader, 1),
             ),
             patch.object(
-                endfield,
+                account_handlers,
                 "fetch_account_detail_name_map",
                 side_effect=partial(loader, 2),
             ),
             patch.object(
-                endfield, "build_account_investment_view", return_value=loadout_view()
+                account_handlers, "build_account_investment_view", return_value=loadout_view()
             ) as build,
             patch.object(
-                endfield,
+                account_handlers,
                 "draw_account_investment_cards",
                 AsyncMock(return_value=[b"png"]),
             ),
-            patch.object(endfield, "_finish_pngs", AsyncMock(return_value="done")),
+            patch.object(account_handlers, "_finish_pngs", AsyncMock(return_value="done")),
         ):
             task = asyncio.create_task(
-                endfield._render_account_investment(None, role, None, group=True)
+                account_handlers._render_account_investment(None, role, None, group=True)
             )
             try:
                 await asyncio.wait_for(

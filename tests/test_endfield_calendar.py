@@ -6,6 +6,8 @@ from unittest import mock
 
 from arclet.letoderea.exceptions import ExitState
 
+import plugins.endfield.account.binding as account_binding
+import plugins.endfield.account.handlers as account_handlers
 import plugins.endfield.handlers as endfield
 from plugins.endfield.catalog import commands as commands_module
 
@@ -37,16 +39,16 @@ class EndfieldCurrencyLogCommandTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             mock.patch.object(endfield.account_store, "decrypt_token", return_value="token"),
-            mock.patch.object(endfield, "decode_account_credential", return_value=(endfield.ACCOUNT_PROVIDER_CN, "raw")),
-            mock.patch.object(endfield, "is_asia_role", return_value=False),
-            mock.patch.object(endfield, "resolve_query_dates", return_value=(date(2026, 8, 1), date(2026, 8, 12))),
+            mock.patch.object(account_handlers, "decode_account_credential", return_value=(account_binding.ACCOUNT_PROVIDER_CN, "raw")),
+            mock.patch.object(account_handlers, "is_asia_role", return_value=False),
+            mock.patch.object(account_handlers, "resolve_query_dates", return_value=(date(2026, 8, 1), date(2026, 8, 12))),
             mock.patch.object(endfield.official_client, "currency_logs", new=mock.AsyncMock(return_value=empty_logs)),
             mock.patch.object(endfield.account_store, "upsert_currency_logs", return_value=0),
             mock.patch.object(endfield.account_store, "list_currency_logs", return_value=empty_logs),
-            mock.patch.object(endfield, "draw_currency_log_cards", new=mock.AsyncMock(return_value=(b"png",))),
+            mock.patch.object(account_handlers, "draw_currency_log_cards", new=mock.AsyncMock(return_value=(b"png",))),
         ):
             with self.assertRaises(ExitState):
-                await endfield._render_account_currency(
+                await account_handlers._render_account_currency(
                     session,
                     role,
                     command,

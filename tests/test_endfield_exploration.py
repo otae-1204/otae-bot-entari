@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from lxml import html
 
+import plugins.endfield.account.handlers as account_handlers
 from plugins.endfield import handlers
 from plugins.endfield.account.client import EndfieldAPIError
 from plugins.endfield.account.exploration import draw, version
@@ -692,6 +693,7 @@ class ExplorationAsyncTests(unittest.IsolatedAsyncioTestCase):
         session = AsyncMock()
         with (
             patch.object(handlers, "account_store", store),
+            patch.object(account_handlers, "account_store", store),
             patch.object(handlers, "event_user_id", return_value="caller"),
             patch.object(handlers, "is_group", return_value=group),
             patch.object(handlers.CredentialCipher, "from_settings", return_value=Mock()),
@@ -699,13 +701,13 @@ class ExplorationAsyncTests(unittest.IsolatedAsyncioTestCase):
             patch.object(
                 handlers.ownership_stats_service, "persist_detail", AsyncMock()
             ),
-            patch.object(handlers, "draw_exploration_cards", render),
+            patch.object(account_handlers, "draw_exploration_cards", render),
             patch.object(
-                handlers,
+                account_handlers,
                 "fetch_exploration_version",
                 AsyncMock(return_value=game_version),
             ),
-            patch.object(handlers, "_finish_pngs", send),
+            patch.object(account_handlers, "_finish_pngs", send),
         ):
             for index in range(repeat):
                 if index and between is not None:

@@ -97,7 +97,7 @@ async def capture(token, *, history=False):
 
 async def child(args, payload):
     from benchmark_endfield_queries import PublicHTTP, signature
-    import plugins.endfield.handlers as endfield
+    import plugins.endfield.account.handlers as endfield
     from loguru import logger
 
     logger.remove()

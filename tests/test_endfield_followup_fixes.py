@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from urllib.parse import quote
 
+import plugins.endfield.account.handlers as account_handlers
 from plugins.endfield import handlers as end
 from plugins.endfield.account.challenge.i18n import build_challenge_locale
 from plugins.endfield.account.detail.names import build_account_detail_name_map
@@ -91,21 +92,21 @@ class AccountFollowupTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(end.account_store, "decrypt_token", return_value="test-only"),
             patch.object(
-                end, "_card_detail_with_snapshot", AsyncMock(return_value=detail)
+                account_handlers, "_card_detail_with_snapshot", AsyncMock(return_value=detail)
             ),
             patch.object(
                 end.official_client, "currency_balances", AsyncMock(return_value={})
             ),
             patch.object(
-                end, "fetch_account_detail_name_map", AsyncMock(return_value=names())
+                account_handlers, "fetch_account_detail_name_map", AsyncMock(return_value=names())
             ),
-            patch.object(end, "fetch_challenge_locale", locale),
+            patch.object(account_handlers, "fetch_challenge_locale", locale),
             patch.object(
-                end, "_render_account_pages", AsyncMock(return_value=(b"png",))
+                account_handlers, "_render_account_pages", AsyncMock(return_value=(b"png",))
             ) as render,
-            patch.object(end, "_finish_pngs", AsyncMock()),
+            patch.object(account_handlers, "_finish_pngs", AsyncMock()),
         ):
-            await end._render_account_detail(None, role, None, group=True)
+            await account_handlers._render_account_detail(None, role, None, group=True)
             view = render.call_args.args[3]
         self.assertEqual(detail, original)
         return view

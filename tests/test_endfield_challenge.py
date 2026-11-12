@@ -10,6 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import plugins.endfield.gacha.handlers as gacha_handlers
 import plugins.endfield.rendering.cards as endfield_draw
 from plugins.endfield.catalog import commands
 from plugins.endfield.account.challenge import draw as challenge
@@ -1132,12 +1133,12 @@ class EndfieldGachaDeliveryTests(unittest.TestCase):
                 settings.override({"plugins": {"plugins.endfield": endfield}}),
                 patch("otae_bot.config.model.logger"),
                 patch.object(replies, "send_forward", satori),
-                patch.object(handlers, "_finish_pngs", finish_pngs),
-                patch.object(handlers, "_png_image", lambda png: replies.Image(src=f"file:///tmp/{png.decode()}.png")),
+                patch.object(gacha_handlers, "_finish_pngs", finish_pngs),
+                patch.object(gacha_handlers, "_png_image", lambda png: replies.Image(src=f"file:///tmp/{png.decode()}.png")),
                 patch.object(replies, "_png_image", lambda png: replies.Image(src=f"file:///tmp/{png.decode()}.png")),
-                patch.object(handlers, "FORWARD_MAX_NODES", max_nodes or handlers.FORWARD_MAX_NODES),
+                patch.object(gacha_handlers, "FORWARD_MAX_NODES", max_nodes or gacha_handlers.FORWARD_MAX_NODES),
             ):
-                await handlers._finish_gacha_pngs(session, self.EVENT, self.BOT, pngs)
+                await gacha_handlers._finish_gacha_pngs(session, self.EVENT, self.BOT, pngs)
 
         asyncio.run(run())
         return session, satori, finish_pngs
@@ -1214,6 +1215,7 @@ class EndfieldGachaDeliveryTests(unittest.TestCase):
 
         source = (Path(handlers.__file__)).read_text(encoding="utf-8")
         self.assertIn("session, qq_user_id, command, cipher, group=is_group(event), event=event, bot=bot,", source)
+        source = (Path(gacha_handlers.__file__)).read_text(encoding="utf-8")
         self.assertIn("return await _finish_gacha_pngs(session, event, bot, pngs)", source)
 
     def test_challenge_history_rule(self):

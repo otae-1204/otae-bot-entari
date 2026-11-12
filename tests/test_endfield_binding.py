@@ -7,6 +7,8 @@ from unittest import mock
 
 from loguru import logger
 
+import plugins.endfield.account.binding as account_binding
+import plugins.endfield.gacha.handlers as gacha_handlers
 import plugins.endfield.handlers as endfield
 from otae_bot.hypergryph import captcha as hypergryph_captcha
 from otae_bot.pipeline import message_log
@@ -37,7 +39,7 @@ def reply(text):
 
 class SelectionParsingTests(unittest.TestCase):
     def test_numbers_and_listed_uids_mix_with_any_separator(self):
-        parse = endfield.parse_binding_selection
+        parse = account_binding.parse_binding_selection
         self.assertEqual(parse("1095714689", ROLES), ROLES[:1])  # The reply that used to cancel binding.
         self.assertEqual(parse("1、1770431888", ROLES), ROLES[:2])
         self.assertEqual(parse("3, 1095714689", ROLES), [ROLES[0], ROLES[2]])
@@ -51,7 +53,7 @@ class SelectionParsingTests(unittest.TestCase):
     def test_anything_not_in_the_list_is_invalid(self):
         for answer in ("4", "0", "1095714680", "甲", "1 x", "", "、", "1.5"):
             with self.subTest(answer=answer):
-                self.assertIsNone(endfield.parse_binding_selection(answer, ROLES))
+                self.assertIsNone(account_binding.parse_binding_selection(answer, ROLES))
 
 
 class BindingFlowTests(unittest.IsolatedAsyncioTestCase):
@@ -71,9 +73,12 @@ class BindingFlowTests(unittest.IsolatedAsyncioTestCase):
         self.upload = mock.AsyncMock(return_value=CAPTCHA_LINK)
         for target in (
             mock.patch.object(endfield, "account_store", self.store),
+            mock.patch.object(account_binding, "account_store", self.store),
+            mock.patch.object(gacha_handlers, "account_store", self.store),
             mock.patch.object(endfield, "official_client", self.client),
+            mock.patch.object(account_binding, "official_client", self.client),
             mock.patch.object(endfield.ownership_stats_service, "refresh_roles", mock.AsyncMock()),
-            mock.patch.object(endfield, "upload_captcha_page", self.upload),
+            mock.patch.object(account_binding, "upload_captcha_page", self.upload),
         ):
             self.enterContext(target)
 
@@ -88,7 +93,7 @@ class BindingFlowTests(unittest.IsolatedAsyncioTestCase):
 
         event = SimpleNamespace()
         command = commands_module.ParsedEndfieldCommand("bind")
-        with mock.patch.object(endfield, "prompt", prompt), mock.patch.object(endfield, "is_group", return_value=False), \
+        with mock.patch.object(account_binding, "prompt", prompt), mock.patch.object(endfield, "is_group", return_value=False), \
              mock.patch.object(endfield, "event_user_id", return_value=USER), \
              mock.patch.object(endfield.CredentialCipher, "from_settings", return_value=mock.Mock()):
             await endfield._handle_personal_command(self.session, event, command)
@@ -155,7 +160,7 @@ class BindingFlowTests(unittest.IsolatedAsyncioTestCase):
         finished = await self.run_binding("1", "1", TOKEN, "全部")
         self.assertIn("新增 3 个账号", finished)
         self.assertEqual(self.client.discover_roles.await_args.args[0],
-                         endfield.encode_account_credential(TOKEN, ACCOUNT_PROVIDER_CN))
+                         account_binding.encode_account_credential(TOKEN, ACCOUNT_PROVIDER_CN))
         self.assertIn(f"[endfield-bind] user={USER} step=token_received provider={ACCOUNT_PROVIDER_CN}", self.logs)
         self.logs.clear()
         error = endfield.EndfieldAPIError("send_phone_code", "1", "短信发送失败")
@@ -170,7 +175,7 @@ class BindingFlowTests(unittest.IsolatedAsyncioTestCase):
         challenge = hypergryph_captcha.CaptchaChallenge(
             GT, CHALLENGE, True, {"gt": GT, "challenge": CHALLENGE, "success": 1, "new_captcha": True}
         )
-        return endfield.HypergryphCaptchaRequired("发送验证码", "1", "需要人机验证", challenge)
+        return account_binding.HypergryphCaptchaRequired("发送验证码", "1", "需要人机验证", challenge)
 
     def steps(self):
         return [line.split(" step=", 1)[1].split(" ", 1)[0] for line in self.binding_logs()]

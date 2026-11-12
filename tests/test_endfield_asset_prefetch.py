@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 from otae_bot.infrastructure.http.client import HttpResource
+import plugins.endfield.account.handlers as account_handlers
 from plugins.endfield import caches, handlers
 from plugins.endfield.account import draw as account_draw
 from plugins.endfield.account import prefetch
@@ -114,10 +115,10 @@ class CardDetailSnapshotTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(handlers.official_client, "card_detail", AsyncMock(return_value=detail)),
             patch.object(handlers.ownership_stats_service, "persist_detail", side_effect=slow_persist),
-            patch.object(handlers, "prefetch_detail_assets") as prefetch_assets,
+            patch.object(account_handlers, "prefetch_detail_assets") as prefetch_assets,
         ):
             started = time.monotonic()
-            result = await handlers._card_detail_with_snapshot("token", role)
+            result = await account_handlers._card_detail_with_snapshot("token", role)
             self.assertLess(time.monotonic() - started, 0.1)
             self.assertIs(result, detail)
             prefetch_assets.assert_called_once_with(detail, source="card_detail")
@@ -134,18 +135,18 @@ class CardDetailSnapshotTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(handlers.official_client, "card_detail", AsyncMock(return_value={})),
             patch.object(handlers.ownership_stats_service, "persist_detail", AsyncMock(side_effect=RuntimeError)),
-            patch.object(handlers, "prefetch_detail_assets"),
+            patch.object(account_handlers, "prefetch_detail_assets"),
         ):
-            await handlers._card_detail_with_snapshot("token", role)
+            await account_handlers._card_detail_with_snapshot("token", role)
             await asyncio.sleep(0.01)  # the failing write ran and was swallowed
         # A reused detail writes no snapshot; start the second round from a real fetch.
         await handlers._CARD_DETAIL_CACHE.clear()
         with (
             patch.object(handlers.official_client, "card_detail", AsyncMock(return_value={})),
             patch.object(handlers.ownership_stats_service, "persist_detail", side_effect=never),
-            patch.object(handlers, "prefetch_detail_assets"),
+            patch.object(account_handlers, "prefetch_detail_assets"),
         ):
-            await handlers._card_detail_with_snapshot("token", role)
+            await account_handlers._card_detail_with_snapshot("token", role)
         pending = list(handlers._background_tasks)
         self.assertEqual(len(pending), 1)
         with (

@@ -1043,7 +1043,7 @@ class EndfieldEncyclopediaSourceTests(unittest.IsolatedAsyncioTestCase):
     async def _guard_message(self) -> str:
         session = AsyncMock()
         collect = AsyncMock(side_effect=AssertionError("must be rejected before collecting"))
-        with patch.object(catalog_handlers, "_collect_candidates", collect):
+        with patch.object(endfield, "_collect_candidates", collect):
             await endfield._handle_command(session, None, commands.parse_command("道具 xx --source fz"))
         collect.assert_not_awaited()
         session.send.assert_awaited_once()

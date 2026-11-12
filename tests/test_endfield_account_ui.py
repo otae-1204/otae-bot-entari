@@ -4,6 +4,7 @@ import re
 import unittest
 from unittest import mock
 
+import plugins.endfield.account.handlers as account_handlers
 import plugins.endfield.handlers as endfield
 from plugins.endfield.account.detail import draw as account_detail_draw
 from plugins.endfield.account.detail import models as account_detail_models
@@ -616,7 +617,7 @@ class EndfieldAccountDetailRoutingTests(unittest.IsolatedAsyncioTestCase):
         )
         store.decrypt_token.return_value = "token"
         return (
-            mock.patch.object(endfield, "account_store", store),
+            mock.patch.object(account_handlers, "account_store", store),
             mock.patch.object(endfield, "is_group", return_value=group),
             mock.patch.object(endfield.CredentialCipher, "from_settings", return_value=mock.Mock()),
             mock.patch.object(
@@ -626,9 +627,9 @@ class EndfieldAccountDetailRoutingTests(unittest.IsolatedAsyncioTestCase):
                 endfield.official_client, "currency_balances", mock.AsyncMock(return_value={1: 7, 2: 80, 3: 9})
             ),
             mock.patch.object(
-                endfield, "draw_account_detail_cards", mock.AsyncMock(return_value=(b"png",))
+                account_handlers, "draw_account_detail_cards", mock.AsyncMock(return_value=(b"png",))
             ),
-            mock.patch.object(endfield, "_finish_png", mock.AsyncMock()),
+            mock.patch.object(account_handlers, "_finish_png", mock.AsyncMock()),
             store,
         )
 
@@ -641,10 +642,10 @@ class EndfieldAccountDetailRoutingTests(unittest.IsolatedAsyncioTestCase):
         prompt = mock.AsyncMock(return_value=reply)
         with store_patch, group_patch, cipher_patch, detail_patch as detail, currency_patch as currency, draw_patch as draw, finish_patch:
             # AKE 公开数据（名称表、冷启动提示）会真实联网，与路由无关。
-            with mock.patch.object(endfield, "prompt_silently", prompt), mock.patch.object(
-                endfield, "fetch_account_detail_name_map", mock.AsyncMock(return_value=None)
-            ), mock.patch.object(endfield, "notice_default_ake_public", mock.AsyncMock()):
-                await endfield._handle_accounts(
+            with mock.patch.object(account_handlers, "prompt_silently", prompt), mock.patch.object(
+                account_handlers, "fetch_account_detail_name_map", mock.AsyncMock(return_value=None)
+            ), mock.patch.object(account_handlers, "notice_default_ake_public", mock.AsyncMock()):
+                await account_handlers._handle_accounts(
                     session, "qq", command, mock.Mock(), group=group
                 )
         return session, prompt, detail, currency, draw, store

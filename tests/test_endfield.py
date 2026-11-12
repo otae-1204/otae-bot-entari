@@ -889,7 +889,9 @@ class EndfieldCommandParserTests(unittest.TestCase):
                 "prompt_silently": AsyncMock(side_effect=AssertionError("must not prompt")),
             }
             store = Mock()
-            with patch.multiple(handlers, **downstream), \
+            # 只替换 handlers 里还在用的名字（prompt 系列已随各功能移出，派发层本身不再询问）。
+            present = {name: mock for name, mock in downstream.items() if hasattr(handlers, name)}
+            with patch.multiple(handlers, **present), \
                     patch.object(handlers, "account_store", store), \
                     patch.object(handlers, "is_group", return_value=group), \
                     patch.object(handlers, "event_user_id", return_value="10001"), \
@@ -4159,12 +4161,15 @@ from plugins.endfield.catalog.commands import EndfieldCandidate, format_help, fo
 ef = plugin('plugins.endfield.handlers')
 ef_state = plugin('plugins.endfield.state')
 ef_catalog = plugin('plugins.endfield.catalog.handlers')
+ef_account = plugin('plugins.endfield.account.handlers')
+ef_binding = plugin('plugins.endfield.account.binding')
+ef_gacha = plugin('plugins.endfield.gacha.handlers')
 CIPHER = CredentialCipher(b'k' * 32)
 PNG = b'\x89PNG\r\n\x1a\n-endfield-test'
 CN_ROLE = RoleCandidate('b1', '1095714689', '1', '甲', 'China')
 CN_ROLE_2 = RoleCandidate('b2', '1770431888', '1', '乙', 'China')
 ASIA_ROLE = RoleCandidate('b3', '1770431999', '2', '丙', 'Asia')
-real_prompt, real_prompt_silently = ef.prompt, ef.prompt_silently
+real_prompt, real_prompt_silently = ef_binding.prompt, ef_account.prompt_silently
 protocol = default_account.protocol
 sent_ids = []
 _call_api = protocol.call_api
@@ -4352,9 +4357,9 @@ async def main():
         sent = await dialog('/ef 绑定', '1', '2', '123')
         assert sent[2].startswith('请输入鹰角网络账号') and sent[3:] == ['手机号格式不符合标准，绑定流程已终止。'], sent
         assert (await dialog('/ef 绑定', '1', '3'))[2:] == ['二维码扫码暂未开放，请回复 1 或 2 选择其他方式。']
-        with patch.object(ef, 'prompt', short_prompt):
+        with patch.object(ef_binding, 'prompt', short_prompt):
             sent = await dialog('/ef 绑定')
-        assert len(sent) == 3 and '超时' in sent[1] and sent[2] == ef._BINDING_STOPPED['timeout'], sent
+        assert len(sent) == 3 and '超时' in sent[1] and sent[2] == ef_binding._BINDING_STOPPED['timeout'], sent
         # 亚服 Token；多角色选择（先无效再全部）
         ef_state.official_client.discover_roles.return_value = [ASIA_ROLE]
         sent = await dialog('/ef 添加账号', '2', 'asia-token')
@@ -4376,18 +4381,19 @@ async def main():
             assert sent[0].startswith('已绑定的终末地账号列表') and sent[1:] == [cancelled], (text, sent)
             sent = await dialog(text, '9', quote=True)
             assert sent[1:] == ['序号输入有误，请输入 1–3。'], (text, sent)
-        with patch.object(ef, 'prompt_silently', short_prompt_silently):
+        with patch.object(ef_account, 'prompt_silently', short_prompt_silently):
             sent = await dialog('/ef 账号')
         assert len(sent) == 1 and sent[0].startswith('已绑定的终末地账号列表'), sent
 
         # 账号详情 / 基建经真实的渲染入口（数据与出图打桩）
-        with patch.object(ef, '_card_detail_with_snapshot', AsyncMock(return_value={})), \
+        with patch.object(ef_account, '_card_detail_with_snapshot', AsyncMock(return_value={})), \
              patch.object(ef_state.official_client, 'currency_balances', AsyncMock(return_value={})), \
-             patch.object(ef, 'fetch_account_detail_name_map', AsyncMock(return_value=None)), \
-             patch.object(ef, 'build_account_detail_view', return_value=SimpleNamespace(main_mission='主线')), \
-             patch.object(ef, 'build_account_base_view', return_value=SimpleNamespace()), \
+             patch.object(ef_account, 'fetch_account_detail_name_map', AsyncMock(return_value=None)), \
+             patch.object(ef_account, 'build_account_detail_view', return_value=SimpleNamespace(main_mission='主线')), \
+             patch.object(ef_account, 'build_account_base_view', return_value=SimpleNamespace()), \
              patch.object(ef, 'notice_default_ake_public', AsyncMock()), \
-             patch.object(ef, '_render_account_pages', AsyncMock(return_value=(PNG, PNG))):
+             patch.object(ef_account, 'notice_default_ake_public', AsyncMock()), \
+             patch.object(ef_account, '_render_account_pages', AsyncMock(return_value=(PNG, PNG))):
             sent = await dialog('/ef 账号', '1', quote=True)
             assert len(sent) == 2 and is_image(sent[1], 2), sent
             sent = await say('/ef 账号 基建 1', private=True, user='7')
@@ -4407,15 +4413,15 @@ async def main():
         )
         cache = SimpleNamespace(**{name: AsyncMock(return_value={}) for name in (
             'prepare', 'prepare_pool_rules', 'prepare_names', 'prepare_keepsakes', 'prepare_pool_banners')})
-        with patch.object(ef, 'EndfieldGachaService', return_value=gacha), \
-             patch.object(ef, 'gacha_asset_cache', cache), \
-             patch.object(ef, 'draw_gacha_analysis_cards', AsyncMock(return_value=(PNG, PNG, PNG))):
+        with patch.object(ef_gacha, 'EndfieldGachaService', return_value=gacha), \
+             patch.object(ef_gacha, 'gacha_asset_cache', cache), \
+             patch.object(ef_gacha, 'draw_gacha_analysis_cards', AsyncMock(return_value=(PNG, PNG, PNG))):
             sent = await say('/ef 抽卡同步', private=True, user='7')
             assert len(sent) == 1 and '抽卡记录' in sent[0] and '新增收录 3 条' in sent[0], sent
-            with patch.object(ef, '_gacha_forward_above', return_value=0):
+            with patch.object(ef_gacha, '_gacha_forward_above', return_value=0):
                 sent = await say('/ef 抽卡', private=True, user='7')
             assert len(sent) == 1 and is_image(sent[0], 3), sent
-            with patch.object(ef, '_gacha_forward_above', return_value=1):
+            with patch.object(ef_gacha, '_gacha_forward_above', return_value=1):
                 sent = await say('/ef 抽卡', private=True, user='7')
             assert len(sent) == 1 and '<message forward' in sent[0] and sent[0].count('<img') == 3, sent
 

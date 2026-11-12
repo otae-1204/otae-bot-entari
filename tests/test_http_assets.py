@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import plugins.endfield.account.handlers as account_handlers
 import asyncio
 import dataclasses
 import time
@@ -700,7 +701,7 @@ class CardDeadlineTests(unittest.IsolatedAsyncioTestCase):
 
         role = SimpleNamespace(role_id="deadline-role", server_id="1")
         started = time.monotonic()
-        pages = await endfield._render_account_pages("deadline", role, False, View(), render)
+        pages = await account_handlers._render_account_pages("deadline", role, False, View(), render)
         self.assertLess(time.monotonic() - started, 2)
         self.assertEqual(pages, (b"page loaded=1",))
 

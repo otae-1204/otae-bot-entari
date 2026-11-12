@@ -19,6 +19,7 @@ from otae_bot.infrastructure.http.disk import (
     PublicImageDiskCache,
     public_image_request,
 )
+import plugins.endfield.account.handlers as account_handlers
 import plugins.endfield.catalog.handlers as catalog_handlers
 from plugins.endfield import caches, handlers as endfield
 from plugins.endfield.rendering.health import (
@@ -611,7 +612,7 @@ class AccountPageCacheTests(unittest.IsolatedAsyncioTestCase):
         render = AsyncMock(return_value=(b"png",))
 
         async def page(role=self.role, group=True, view=PageView()):
-            return await endfield._render_account_pages(
+            return await account_handlers._render_account_pages(
                 "detail", role, group, view, render
             )
 
@@ -635,7 +636,7 @@ class AccountPageCacheTests(unittest.IsolatedAsyncioTestCase):
             return (b"png",)
 
         for _ in range(3):
-            await endfield._render_account_pages(
+            await account_handlers._render_account_pages(
                 "detail", self.role, True, PageView(), render
             )
         self.assertEqual(calls, 2)
@@ -647,7 +648,7 @@ class AccountPageCacheTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(endfield.account_store, "decrypt_token", return_value="test"),
             patch.object(
-                endfield, "_card_detail_with_snapshot", AsyncMock(return_value={})
+                account_handlers, "_card_detail_with_snapshot", AsyncMock(return_value={})
             ) as detail,
             patch.object(
                 endfield.official_client,
@@ -655,18 +656,18 @@ class AccountPageCacheTests(unittest.IsolatedAsyncioTestCase):
                 AsyncMock(return_value={}),
             ) as balance,
             patch.object(
-                endfield, "fetch_account_detail_name_map", AsyncMock(return_value=None)
+                account_handlers, "fetch_account_detail_name_map", AsyncMock(return_value=None)
             ),
             patch.object(
-                endfield, "build_account_detail_view", return_value=PageView()
+                account_handlers, "build_account_detail_view", return_value=PageView()
             ),
             patch.object(
-                endfield, "draw_account_detail_cards", AsyncMock(return_value=(b"png",))
+                account_handlers, "draw_account_detail_cards", AsyncMock(return_value=(b"png",))
             ) as draw,
-            patch.object(endfield, "_finish_pngs", AsyncMock()),
+            patch.object(account_handlers, "_finish_pngs", AsyncMock()),
         ):
             for _ in range(2):
-                await endfield._render_account_detail(None, self.role, None, group=True)
+                await account_handlers._render_account_detail(None, self.role, None, group=True)
         self.assertEqual(
             (detail.await_count, balance.await_count, draw.await_count), (2, 2, 1)
         )
@@ -684,11 +685,11 @@ class AccountPageCacheTests(unittest.IsolatedAsyncioTestCase):
             record_asset_seconds(0.25)
             return (b"png",)
 
-        with patch.object(endfield, "logger") as log:
-            await endfield._render_account_pages(
+        with patch.object(account_handlers, "logger") as log:
+            await account_handlers._render_account_pages(
                 "detail", self.role, True, PageView(), render, data_seconds=1.5
             )
-            await endfield._render_account_pages(
+            await account_handlers._render_account_pages(
                 "detail", self.role, True, PageView(), render, data_seconds=0.5
             )
         first, second = (call.args[0] for call in log.info.call_args_list)

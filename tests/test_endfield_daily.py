@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import plugins.endfield.account.handlers as account_handlers
 import ast
 import asyncio
 import importlib.util
@@ -213,14 +214,14 @@ class DailyParallelFetchTests(unittest.IsolatedAsyncioTestCase):
 
         draw = AsyncMock(return_value=b"png")
         with (
-            patch.object(handlers, "account_store", store),
+            patch.object(account_handlers, "account_store", store),
             patch.object(handlers.official_client, "card_detail", side_effect=card_detail),
-            patch.object(handlers, "draw_daily_dashboard_card", draw),
-            patch.object(handlers, "_finish_png", AsyncMock()),
-            patch.object(handlers, "prefetch_detail_assets") as prefetch,
+            patch.object(account_handlers, "draw_daily_dashboard_card", draw),
+            patch.object(account_handlers, "_finish_png", AsyncMock()),
+            patch.object(account_handlers, "prefetch_detail_assets") as prefetch,
         ):
             started = time.monotonic()
-            await handlers._handle_daily(
+            await account_handlers._handle_daily(
                 AsyncMock(), "caller", commands_module.parse_command("日常"), Mock(), group=False
             )
             elapsed = time.monotonic() - started

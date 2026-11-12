@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
 
+import plugins.endfield.account.handlers as account_handlers
 from plugins.endfield import caches, handlers
 from plugins.endfield.account import client as client_module
 from plugins.endfield.account.client import (
@@ -49,7 +50,7 @@ class _CacheTestCase(unittest.IsolatedAsyncioTestCase):
         # Module-level cache, and tests share tokens and role ids: start empty.
         await handlers._CARD_DETAIL_CACHE.clear()
         persist = patch.object(handlers.ownership_stats_service, "persist_detail", AsyncMock())
-        prefetch = patch.object(handlers, "prefetch_detail_assets")
+        prefetch = patch.object(account_handlers, "prefetch_detail_assets")
         self.persist = persist.start()
         self.prefetch = prefetch.start()
         self.addCleanup(persist.stop)
@@ -77,7 +78,7 @@ class CardDetailReuseTests(_CacheTestCase):
             elapsed = []
             for _ in range(4):
                 started = time.perf_counter()
-                self.assertIs(await handlers._card_detail_with_snapshot("token", ROLE_A), detail)
+                self.assertIs(await account_handlers._card_detail_with_snapshot("token", ROLE_A), detail)
                 elapsed.append(time.perf_counter() - started)
         await self.drain_background()
         self.assertEqual(fetch.await_count, 1)
@@ -95,9 +96,9 @@ class CardDetailReuseTests(_CacheTestCase):
     async def test_key_holds_a_credential_fingerprint_not_the_token(self):
         fetch = AsyncMock(side_effect=lambda token, _role: _detail(token))
         with patch.object(handlers.official_client, "card_detail", fetch):
-            first = await handlers._card_detail_with_snapshot("token-a", ROLE_A)
-            second = await handlers._card_detail_with_snapshot("token-b", ROLE_A)
-            again = await handlers._card_detail_with_snapshot("token-a", ROLE_A)
+            first = await account_handlers._card_detail_with_snapshot("token-a", ROLE_A)
+            second = await account_handlers._card_detail_with_snapshot("token-b", ROLE_A)
+            again = await account_handlers._card_detail_with_snapshot("token-a", ROLE_A)
         self.assertEqual(fetch.await_count, 2)  # a different credential never reuses
         self.assertEqual(second, _detail("token-b"))
         self.assertIs(again, first)
@@ -127,9 +128,9 @@ class CardDetailReuseTests(_CacheTestCase):
     async def test_roles_do_not_share_entries(self):
         fetch = AsyncMock(side_effect=lambda _token, role: _detail(role.role_id))
         with patch.object(handlers.official_client, "card_detail", fetch):
-            first = await handlers._card_detail_with_snapshot("token", ROLE_A)
-            second = await handlers._card_detail_with_snapshot("token", ROLE_B)
-            self.assertEqual(await handlers._card_detail_with_snapshot("token", ROLE_A), first)
+            first = await account_handlers._card_detail_with_snapshot("token", ROLE_A)
+            second = await account_handlers._card_detail_with_snapshot("token", ROLE_B)
+            self.assertEqual(await account_handlers._card_detail_with_snapshot("token", ROLE_A), first)
         self.assertEqual((first, second), (_detail("r1"), _detail("r2")))
         self.assertEqual(fetch.await_count, 2)
 
@@ -140,12 +141,12 @@ class CardDetailReuseTests(_CacheTestCase):
             patch.object(handlers._CARD_DETAIL_CACHE, "_clock", lambda: now[0]),
             patch.object(handlers.official_client, "card_detail", fetch),
         ):
-            await handlers._card_detail_with_snapshot("token", ROLE_A)
+            await account_handlers._card_detail_with_snapshot("token", ROLE_A)
             now[0] += 59
-            await handlers._card_detail_with_snapshot("token", ROLE_A)
+            await account_handlers._card_detail_with_snapshot("token", ROLE_A)
             self.assertEqual(fetch.await_count, 1)
             now[0] += 2
-            await handlers._card_detail_with_snapshot("token", ROLE_A)
+            await account_handlers._card_detail_with_snapshot("token", ROLE_A)
         self.assertEqual(fetch.await_count, 2)
         self.assertEqual(caches.CARD_DETAIL_CACHE_TTL_SECONDS, 60)
 
@@ -159,7 +160,7 @@ class CardDetailReuseTests(_CacheTestCase):
         fetch = AsyncMock(side_effect=blocked)
         with patch.object(handlers.official_client, "card_detail", fetch):
             tasks = [
-                asyncio.create_task(handlers._card_detail_with_snapshot("token", ROLE_A))
+                asyncio.create_task(account_handlers._card_detail_with_snapshot("token", ROLE_A))
                 for _ in range(2)
             ]
             await asyncio.sleep(0.01)
@@ -174,10 +175,10 @@ class CardDetailReuseTests(_CacheTestCase):
     async def test_a_hit_does_not_wait_for_the_role_lock(self):
         fetch = AsyncMock(return_value=_detail())
         with patch.object(handlers.official_client, "card_detail", fetch):
-            await handlers._card_detail_with_snapshot("token", ROLE_A)
+            await account_handlers._card_detail_with_snapshot("token", ROLE_A)
             async with ROLE_TASKS.claim(ROLE_A):  # e.g. a gacha sync is running
                 detail = await asyncio.wait_for(
-                    handlers._card_detail_with_snapshot("token", ROLE_A), 0.5
+                    account_handlers._card_detail_with_snapshot("token", ROLE_A), 0.5
                 )
         self.assertEqual(detail, _detail())
         self.assertEqual(fetch.await_count, 1)
@@ -187,13 +188,13 @@ class CardDetailReuseTests(_CacheTestCase):
         with patch.object(handlers.official_client, "card_detail", fetch):
             async with ROLE_TASKS.claim(ROLE_A):
                 results = await asyncio.gather(
-                    handlers._card_detail_with_snapshot("token", ROLE_A),
-                    handlers._card_detail_with_snapshot("token", ROLE_A),
+                    account_handlers._card_detail_with_snapshot("token", ROLE_A),
+                    account_handlers._card_detail_with_snapshot("token", ROLE_A),
                     return_exceptions=True,
                 )
             self.assertTrue(all(isinstance(item, TaskAlreadyRunning) for item in results), results)
             fetch.assert_not_awaited()
-            self.assertEqual(await handlers._card_detail_with_snapshot("token", ROLE_A), _detail())
+            self.assertEqual(await account_handlers._card_detail_with_snapshot("token", ROLE_A), _detail())
         self.assertEqual(fetch.await_count, 1)
 
         await handlers._CARD_DETAIL_CACHE.clear()
@@ -208,14 +209,14 @@ class CardDetailReuseTests(_CacheTestCase):
         fetch = AsyncMock(side_effect=failing_once)
         with patch.object(handlers.official_client, "card_detail", fetch):
             results = await asyncio.gather(
-                handlers._card_detail_with_snapshot("token", ROLE_A),
-                handlers._card_detail_with_snapshot("token", ROLE_A),
+                account_handlers._card_detail_with_snapshot("token", ROLE_A),
+                account_handlers._card_detail_with_snapshot("token", ROLE_A),
                 return_exceptions=True,
             )
             self.assertEqual(results, [error, error])
             self.assertEqual(fetch.await_count, 1)
             self.assertEqual(
-                await handlers._card_detail_with_snapshot("token", ROLE_A), _detail("retry")
+                await account_handlers._card_detail_with_snapshot("token", ROLE_A), _detail("retry")
             )
         self.assertEqual(fetch.await_count, 2)
 
@@ -224,7 +225,7 @@ class CardDetailCleanupTests(_CacheTestCase):
     async def fill(self, *roles):
         with patch.object(handlers.official_client, "card_detail", AsyncMock(return_value=_detail())):
             for role in roles:
-                await handlers._card_detail_with_snapshot("token", role)
+                await account_handlers._card_detail_with_snapshot("token", role)
 
     async def test_every_dev_clear_scope_drops_personal_data(self):
         for scope in ("all", "icon", "operator", "weapon", "equipment", "stage"):
@@ -253,9 +254,9 @@ class CardDetailCleanupTests(_CacheTestCase):
         store.unbind.assert_called_once_with("caller", "1")
         fetch = AsyncMock(return_value=_detail("new"))
         with patch.object(handlers.official_client, "card_detail", fetch):
-            await handlers._card_detail_with_snapshot("token", ROLE_B)
+            await account_handlers._card_detail_with_snapshot("token", ROLE_B)
             self.assertEqual(fetch.await_count, 0)  # the other role is still reused
-            self.assertEqual(await handlers._card_detail_with_snapshot("token", ROLE_A), _detail("new"))
+            self.assertEqual(await account_handlers._card_detail_with_snapshot("token", ROLE_A), _detail("new"))
         self.assertEqual(fetch.await_count, 1)
 
     async def test_cleanup_empties_the_cache(self):
@@ -317,14 +318,14 @@ class CardDetailPrivacyTests(_CacheTestCase):
             "namespaces": {},
         }
         with (
-            patch.object(handlers, "official_client", client),
+            patch.object(account_handlers, "official_client", client),
             patch.object(caches, "official_client", client),
-            patch.object(handlers, "logger") as handler_log,
+            patch.object(account_handlers, "logger") as handler_log,
             patch.object(client_module, "logger") as client_log,
             patch.object(caches, "get_http_cache_diagnostics", AsyncMock(return_value=diagnostics)),
         ):
             for _ in range(2):
-                await handlers._card_detail_with_snapshot(token, ROLE_A)
+                await account_handlers._card_detail_with_snapshot(token, ROLE_A)
             lines = await caches._cache_status_lines()
         await http.aclose()
         client._create_skland_context.assert_awaited_once()  # a real exchange ran
@@ -359,13 +360,13 @@ class DailyDashboardReuseTests(_CacheTestCase):
         fetch = AsyncMock(side_effect=card_detail)
         draw = AsyncMock(return_value=b"png")
         with (
-            patch.object(handlers, "account_store", store),
+            patch.object(account_handlers, "account_store", store),
             patch.object(handlers.official_client, "card_detail", fetch),
-            patch.object(handlers, "draw_daily_dashboard_card", draw),
-            patch.object(handlers, "_finish_png", AsyncMock()),
+            patch.object(account_handlers, "draw_daily_dashboard_card", draw),
+            patch.object(account_handlers, "_finish_png", AsyncMock()),
         ):
             for _ in range(2):
-                await handlers._handle_daily(
+                await account_handlers._handle_daily(
                     AsyncMock(), "caller", parse_command("日常"), Mock(), group=False
                 )
                 accounts = draw.await_args.args[0].accounts
@@ -384,13 +385,13 @@ class DailyDashboardReuseTests(_CacheTestCase):
         store.decrypt_token.return_value = "token"
         fetch = AsyncMock(return_value=_detail())
         with (
-            patch.object(handlers, "account_store", store),
+            patch.object(account_handlers, "account_store", store),
             patch.object(handlers.official_client, "card_detail", fetch),
-            patch.object(handlers, "draw_daily_dashboard_card", AsyncMock(return_value=b"png")),
-            patch.object(handlers, "_finish_png", AsyncMock()),
+            patch.object(account_handlers, "draw_daily_dashboard_card", AsyncMock(return_value=b"png")),
+            patch.object(account_handlers, "_finish_png", AsyncMock()),
         ):
-            await handlers._card_detail_with_snapshot("token", role)
-            await handlers._handle_daily(AsyncMock(), "caller", parse_command("日常"), Mock(), group=False)
+            await account_handlers._card_detail_with_snapshot("token", role)
+            await account_handlers._handle_daily(AsyncMock(), "caller", parse_command("日常"), Mock(), group=False)
         self.assertEqual(fetch.await_count, 1)
         self.prefetch.assert_called_once_with(_detail(), source="card_detail")
 
