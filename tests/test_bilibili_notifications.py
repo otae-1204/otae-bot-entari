@@ -24,6 +24,7 @@ from typing import Awaitable, Callable
 import pytest
 from PIL import Image
 
+from otae_bot.delivery import FAILED, SENT, DeliveryResult
 from plugins.bilibilibot import handlers
 from plugins.bilibilibot.models import BiliCard, BiliEvent, KIND_LIVE, OutboxRow
 from plugins.bilibilibot.notifier import Notifier, SenderUnavailable
@@ -75,15 +76,17 @@ def transport(monkeypatch) -> SimpleNamespace:
     """
     state = SimpleNamespace(messages=[], bot=object(), fail=None)
 
-    async def send(chain, dest=None, bot=None) -> None:
-        text = str(chain)
-        if state.fail is not None and state.fail(dest, text):
-            raise RuntimeError("send failed")
-        state.messages.append((dest.id, dest.channel, dest.private, text))
+    async def deliver(target, message, *, account=None, plugin=None):
+        text = str(message)
+        recipient = target.user_id if target.is_private else target.guild_id
+        if state.fail is not None and state.fail(recipient, text):
+            return DeliveryResult(FAILED, account, exception=RuntimeError("send failed"))
+        state.messages.append((recipient, not target.is_private, target.is_private, text))
         # Yield so a wrongly concurrent implementation would interleave.
         await asyncio.sleep(0)
+        return DeliveryResult(SENT, account, ["receipt"])
 
-    monkeypatch.setattr(handlers.ChainMsg, "send", send)
+    monkeypatch.setattr(handlers, "deliver", deliver)
     monkeypatch.setattr(handlers, "get_bot", lambda: state.bot)
     return state
 
@@ -287,7 +290,7 @@ def test_one_recipient_failure_does_not_block_next_recipient(
                 event_key="live:123:live_on:1",
             )
             rejected = cards.image(card) if failure == "image" else card.url
-            transport.fail = lambda dest, text: dest.id == "900" and text == rejected
+            transport.fail = lambda recipient, text: recipient == "900" and text == rejected
 
             async def settled() -> bool:
                 rows = await store.outbox_rows()
@@ -315,24 +318,12 @@ def test_one_recipient_failure_does_not_block_next_recipient(
     asyncio.run(scenario())
 
 
-def test_recipient_type_maps_to_a_channel_or_a_private_destination(monkeypatch):
+def test_recipient_type_maps_to_a_channel_or_a_private_destination():
     """Section 4.4 item 21: group chats are channels, private chats are users."""
-    monkeypatch.setattr(handlers, "account_adapter_name", lambda _bot: "test")
-    bot = object()
-    group = handlers._send_dest("group", "900", bot)
-    assert (group.id, group.parent_id, group.channel, group.private) == (
-        "900",
-        "900",
-        True,
-        False,
-    )
-    private = handlers._send_dest("user", "7", bot)
-    assert (private.id, private.parent_id, private.channel, private.private) == (
-        "7",
-        "",
-        False,
-        True,
-    )
+    group = handlers._target("group", "900")
+    assert (group.guild_id, group.user_id, group.is_private) == ("900", "", False)
+    private = handlers._target("user", "7")
+    assert (private.guild_id, private.user_id, private.is_private) == ("", "7", True)
 
 
 # --- the sender reports an unavailable bot ----------------------------------

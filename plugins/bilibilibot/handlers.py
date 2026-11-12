@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import re
 
 from arclet.alconna import Alconna, Args, MultiVar
 from arclet.entari import Cleanup, listen
@@ -14,12 +13,11 @@ from otae_bot.adapters.entari import Pred
 from otae_bot.adapters.entari import (
     ArgVal,
     ChainMsg,
-    SendDest,
-    account_adapter_name,
     get_bot,
     make_image,
     on_alconna,
 )
+from otae_bot.delivery import FAILED, Target, deliver
 
 from plugins.bilibilibot.api import BiliApi
 from plugins.bilibilibot.draw import draw_bili_card
@@ -46,26 +44,14 @@ client = BiliApi(
 service = BiliService(store, client)
 
 
-def _send_dest(subscriber_type: str, subscriber_id: str, bot: Bot) -> SendDest:
-    adapter_name = account_adapter_name(bot)
+def _target(subscriber_type: str, subscriber_id: str) -> Target:
     if subscriber_type == "group":
-        return SendDest(subscriber_id, subscriber_id, True, False, "", adapter_name)
-    return SendDest(subscriber_id, "", False, True, "", adapter_name)
+        return Target.group(subscriber_id)
+    return Target.private(subscriber_id)
 
 
 async def _render(card: BiliCard) -> bytes:
     return await draw_bili_card(card)
-
-
-# LLBot rejects a group send from an account outside that group, for an image
-# with "getGroupImageUploadInfo ... msgInfo undefined".
-_NOT_IN_GROUP = re.compile(r"msginfo|不在(该|此|这个)?群|not (a )?member|not in (the |this )?group", re.I)
-# A forced guild.list after a failed send, at most this often per account.
-GUILD_RETRY_REFRESH_SECONDS = 60
-
-
-def _not_in_group(exc: Exception) -> bool:
-    return bool(_NOT_IN_GROUP.search(f"{type(exc).__name__}: {exc}"))
 
 
 def _group_senders(group_id: str, default: Bot) -> list[Bot]:
@@ -84,7 +70,8 @@ async def _send(row, png: bytes) -> None:
 
     A group row goes out through an account that is in that group. An account
     rejected as "not in the group" hands over to the next one within this same
-    attempt, so switching accounts never uses up the row's retries.
+    attempt, so switching accounts never uses up the row's retries; deliver()
+    drops that group from the account's listing and lists its groups again.
     """
     try:
         bot = get_bot()
@@ -99,7 +86,7 @@ async def _send(row, png: bytes) -> None:
         senders = _group_senders(group, bot)
         if not senders:
             # Invited since the last listing, or a listing went stale.
-            await runtime.refresh_guilds(max_age=GUILD_RETRY_REFRESH_SECONDS)
+            await runtime.refresh_guilds(max_age=runtime.GUILD_RETRY_REFRESH_SECONDS)
             senders = _group_senders(group, bot)
         if not senders:
             logger.error(
@@ -108,30 +95,25 @@ async def _send(row, png: bytes) -> None:
             )
             raise LookupError(f"no online account is in group {group}")
     card = row.card()
+    target = _target(row.subscriber_type, row.subscriber_id)
     rejected, last_error = [], None
     for sender in senders:
-        destination = _send_dest(row.subscriber_type, row.subscriber_id, sender)
-        try:
-            # Bytes go straight to the adapter: no temporary file to clean up.
-            await ChainMsg([make_image(raw=png)]).send(destination, sender)
-        except Exception as exc:
-            if row.subscriber_type != "group" or not _not_in_group(exc):
-                raise
+        # Bytes go straight to the adapter: no temporary file to clean up.
+        result = await deliver(target, ChainMsg([make_image(raw=png)]), account=sender)
+        if result.status == FAILED:
+            if target.is_private or not result.not_in_group:
+                result.raise_for_failure()
             rejected.append(sender)
-            runtime.forget_guild(sender, row.subscriber_id)
             logger.warning(
                 f"[bilibilibot] account {runtime.account_id(sender)} cannot send to group "
-                f"{row.subscriber_id} ({type(exc).__name__}: {exc}); trying another account"
+                f"{row.subscriber_id} ({type(result.exception).__name__}: {result.exception}); trying another account"
             )
-            last_error = exc
+            last_error = result.exception
             continue
         if card.card_type == "live_on" and card.url.strip():
             # Keep the image and the clickable link together, from the same account.
-            await ChainMsg.text(card.url.strip()).send(destination, sender)
+            (await deliver(target, ChainMsg.text(card.url.strip()), account=sender)).raise_for_failure()
         break
-    if rejected:
-        # The group lists were wrong for someone: list them again for later rows.
-        await runtime.refresh_guilds(max_age=GUILD_RETRY_REFRESH_SECONDS)
     if last_error is not None and len(rejected) == len(senders):
         logger.error(
             f"[bilibilibot] no online account could send to group {row.subscriber_id}; "

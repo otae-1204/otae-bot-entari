@@ -18,6 +18,7 @@ from loguru import logger
 from PIL import Image
 
 from otae_bot.adapters import runtime
+from otae_bot.delivery import is_not_in_group
 from plugins.bilibilibot import handlers
 from plugins.bilibilibot.models import BiliCard, BiliEvent, KIND_LIVE, OutboxRow
 from plugins.bilibilibot.notifier import Notifier
@@ -32,6 +33,11 @@ PNG = _buffer.getvalue()
 MSGINFO = "ServerException: getGroupImageUploadInfo failed: Cannot read properties of undefined (reading 'msgInfo')"
 
 
+# What the accounts' Satori protocol sent: (account, recipient, text); `reject`
+# maps an account id to the error its send raises.
+_transport = SimpleNamespace(messages=[], reject={})
+
+
 def account(self_id, groups=None):
     async def pages():
         if groups is None:
@@ -39,7 +45,15 @@ def account(self_id, groups=None):
         for group in groups:
             yield SimpleNamespace(id=group)
 
-    return SimpleNamespace(self_id=self_id, platform="qq", protocol=SimpleNamespace(guild_list=pages))
+    async def send(recipient, chain):
+        error = _transport.reject.get(self_id)
+        if error is not None:
+            raise error
+        _transport.messages.append((self_id, recipient, str(chain)))
+        return [SimpleNamespace(id="receipt")]
+
+    return SimpleNamespace(self_id=self_id, platform="qq", protocol=SimpleNamespace(
+        guild_list=pages, send_message=send, send_private_message=send))
 
 
 @pytest.fixture
@@ -50,18 +64,10 @@ def accounts():
 
 
 @pytest.fixture
-def transport(monkeypatch):
-    """Records (account, recipient, text); `reject` maps an account id to the error it raises."""
-    state = SimpleNamespace(messages=[], reject={})
-
-    async def send(chain, dest=None, bot=None):
-        error = state.reject.get(bot.self_id)
-        if error is not None:
-            raise error
-        state.messages.append((bot.self_id, dest.id, str(chain)))
-
-    monkeypatch.setattr(handlers.ChainMsg, "send", send)
-    return state
+def transport():
+    _transport.messages.clear()
+    _transport.reject.clear()
+    return _transport
 
 
 @pytest.fixture
@@ -183,6 +189,21 @@ def test_other_errors_and_private_chats_do_not_switch_account(accounts, transpor
 
 def test_not_in_group_errors_are_recognised():
     for text in (MSGINFO, "机器人不在群内", "Bot is not in group 100", "账号不在该群"):
-        assert handlers._not_in_group(RuntimeError(text)), text
+        assert is_not_in_group(RuntimeError(text)), text
     for text in ("send timeout", "HTTP 500: 消息为空", "rate limited"):
-        assert not handlers._not_in_group(RuntimeError(text)), text
+        assert not is_not_in_group(RuntimeError(text)), text
+
+
+def test_a_rejected_account_is_skipped_for_that_group_until_listed_again(accounts, transport):
+    async def scenario():
+        bot1, bot2 = account("1194397508", [GROUP]), account("3898438488", [GROUP])
+        await online(bot2, bot1)
+        transport.reject["1194397508"] = RuntimeError(MSGINFO)
+        await handlers._send(row(card_type="video"), PNG)
+        assert GROUP not in runtime.known_guilds(bot1)
+        transport.messages.clear()
+        await handlers._send(row(card_type="video"), PNG)
+        # The next row goes straight to the account still listed in the group.
+        assert [sender for sender, _, _ in transport.messages] == ["3898438488"]
+
+    asyncio.run(scenario())

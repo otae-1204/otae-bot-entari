@@ -51,7 +51,6 @@ def test_production_senders_share_receipts_in_either_order(
         bot = fake_bot()
         runtime.remember(bot)
         monkeypatch.setattr(handlers, "get_bot", lambda: bot)
-        monkeypatch.setattr(handlers, "account_adapter_name", lambda _: "test")
         monkeypatch.setattr(
             handlers,
             "official_delivery",
