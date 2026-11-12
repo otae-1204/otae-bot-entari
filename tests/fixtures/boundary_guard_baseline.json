@@ -24,16 +24,12 @@
 {"rule": "internal-call", "file": "otae_bot/adapters/onebot.py", "snippet": "if bot is not None and hasattr(bot, \"internal\"):", "count": 1},
 {"rule": "internal-call", "file": "otae_bot/adapters/onebot.py", "snippet": "result = await bot.internal(action=action, **params)", "count": 1},
 {"rule": "internal-call", "file": "otae_bot/adapters/onebot.py", "snippet": "return f\"{base.rstrip('/')}/internal/onebot11\", headers", "count": 1},
-{"rule": "internal-call", "file": "otae_bot/group_permissions.py", "snippet": "account.internal(", "count": 1},
 {"rule": "internal-call", "file": "plugins/request_handler/handlers.py", "snippet": "return await bot.internal(action=action, **params)", "count": 1},
-{"rule": "numeric-id", "file": "otae_bot/group_permissions.py", "snippet": "group_id=int(scope.group_id),", "count": 1},
-{"rule": "numeric-id", "file": "otae_bot/group_permissions.py", "snippet": "user_id=int(user_id),", "count": 1},
 {"rule": "numeric-id", "file": "plugins/hyw/messages.py", "snippet": "action, target, where = \"get_friend_msg_history\", {\"user_id\": int(friend)}, f\"读不", "count": 1},
 {"rule": "numeric-id", "file": "plugins/hyw/messages.py", "snippet": "action, target, where = \"get_group_msg_history\", {\"group_id\": int(peer)}, f\"收到事件", "count": 1},
 {"rule": "numeric-id", "file": "plugins/minecraft_plugin/handlers.py", "snippet": "gid_int = int(group_id)", "count": 1},
 {"rule": "onebot-action", "file": "otae_bot/adapters/onebot.py", "snippet": "action = \"send_group_forward_msg\"", "count": 1},
 {"rule": "onebot-action", "file": "otae_bot/adapters/onebot.py", "snippet": "action = \"send_private_forward_msg\"", "count": 1},
-{"rule": "onebot-action", "file": "otae_bot/group_permissions.py", "snippet": "action=\"get_group_member_info\",", "count": 1},
 {"rule": "onebot-action", "file": "plugins/endfield/ownership/service.py", "snippet": "\"get_group_member_list\",", "count": 1},
 {"rule": "onebot-action", "file": "plugins/hyw/messages.py", "snippet": "action, target, where = \"get_friend_msg_history\", {\"user_id\": int(friend)}, f\"读不", "count": 1},
 {"rule": "onebot-action", "file": "plugins/hyw/messages.py", "snippet": "action, target, where = \"get_group_msg_history\", {\"group_id\": int(peer)}, f\"收到事件", "count": 1},
@@ -62,6 +58,5 @@
 {"rule": "onebot-http", "file": "plugins/request_handler/handlers.py", "snippet": "if ONEBOT_ACCESS_TOKEN:", "count": 1},
 {"rule": "onebot-http", "file": "plugins/request_handler/handlers.py", "snippet": "if ONEBOT_HTTP_URL:", "count": 1},
 {"rule": "onebot-http", "file": "plugins/request_handler/handlers.py", "snippet": "return ONEBOT_ACCESS_TOKEN", "count": 1},
-{"rule": "onebot-http", "file": "plugins/request_handler/handlers.py", "snippet": "urls.append(ONEBOT_HTTP_URL)", "count": 1},
-{"rule": "platform-name", "file": "otae_bot/group_permissions.py", "snippet": "if scope.platform.casefold() not in {\"qq\", \"onebot\"}:", "count": 1}
+{"rule": "onebot-http", "file": "plugins/request_handler/handlers.py", "snippet": "urls.append(ONEBOT_HTTP_URL)", "count": 1}
 ]

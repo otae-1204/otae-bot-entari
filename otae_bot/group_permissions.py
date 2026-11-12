@@ -69,32 +69,4 @@ async def can_manage(account, event, scope: GroupScope) -> bool:
         logger.debug(
             "[group_manager] member lookup failed error_type={}", type(exc).__name__
         )
-    # Some QQ bridges omit roles from Satori members. Query the same account's
-    # OneBot action; never fall back to a different configured HTTP endpoint.
-    if scope.platform.casefold() not in {"qq", "onebot"}:
-        return False
-    try:
-        result = await asyncio.wait_for(
-            account.internal(
-                action="get_group_member_info",
-                group_id=int(scope.group_id),
-                user_id=int(user_id),
-                no_cache=True,
-            ),
-            5,
-        )
-        if not isinstance(result, Mapping) or result.get("status") == "failed":
-            return False
-        if result.get("retcode", 0) != 0:
-            return False
-        data = result.get("data", result)
-        return (
-            str(_field(data, "user_id", "")) == user_id
-            and str(_field(data, "group_id", "")) == scope.group_id
-            and _field(data, "role") in {"admin", "owner"}
-        )
-    except Exception as exc:  # noqa: BLE001 - adapter failures must deny access
-        logger.debug(
-            "[group_manager] permission lookup failed error_type={}", type(exc).__name__
-        )
-        return False
+    return False

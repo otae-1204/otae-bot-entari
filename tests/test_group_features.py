@@ -29,7 +29,6 @@ def session(group="100", user="200", bot="300", roles=(), private=False):
         account=SimpleNamespace(
             platform="qq", self_id=bot,
             guild_member_get=AsyncMock(return_value=SimpleNamespace(roles=[])),
-            internal=AsyncMock(return_value={}),
             protocol=SimpleNamespace(send_message=AsyncMock(return_value=["receipt"]),
                                      send_private_message=AsyncMock(return_value=["private-receipt"])),
         ),
@@ -137,7 +136,6 @@ class PermissionTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(await permissions.can_manage(
                     current.account, current.event, scope_from_event(current.account, current.event)))
             current.account.guild_member_get.assert_not_awaited()
-            current.account.internal.assert_not_awaited()
         for role in ("admin", "owner", Role("administrator"), {"id": "group_owner"}):
             current = session(roles=[role])
             with patch.object(permissions.Config, "SUPERUSERS", []):
@@ -160,28 +158,18 @@ class PermissionTests(unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(await permissions.can_manage(
                     current.account, current.event, scope_from_event(current.account, current.event)))
 
-    async def test_qq_internal_fallback_checks_account_group_user_and_success(self):
+    async def test_member_roles_from_the_lookup_decide_alone(self):
         current = session()
-        current.account.guild_member_get.side_effect = RuntimeError("unsupported")
         scope = scope_from_event(current.account, current.event)
-        good = {"user_id": 200, "group_id": 100, "role": "admin"}
-        for response, allowed in (
-            (good, True), ({"status": "ok", "retcode": 0, "data": good}, True),
-            ({"status": "failed", "data": good}, False),
-            ({"retcode": 1, "data": good}, False),
-            ({**good, "group_id": 101}, False), ({**good, "user_id": 201}, False),
-            ({**good, "role": "member"}, False), ({"role": "admin"}, False),
-        ):
-            with self.subTest(response=response):
-                current.account.internal.return_value = response
+        for roles, allowed in (([Role("admin", "管理员")], True), ([Role("owner", "群主")], True),
+                               ([Role("member", "群成员")], False), ([], False)):
+            with self.subTest(roles=roles):
+                current.account.guild_member_get.return_value = SimpleNamespace(roles=roles)
                 self.assertEqual(await permissions.can_manage(current.account, current.event, scope), allowed)
-        current.account.internal.assert_awaited_with(
-            action="get_group_member_info", group_id=100, user_id=200, no_cache=True)
 
     async def test_failed_permission_checks_deny_access(self):
         current = session()
         current.account.guild_member_get.side_effect = TimeoutError()
-        current.account.internal.side_effect = TimeoutError()
         self.assertFalse(await permissions.can_manage(
             current.account, current.event, scope_from_event(current.account, current.event)))
 
