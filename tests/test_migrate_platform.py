@@ -11,7 +11,6 @@ import time
 from datetime import datetime
 from pathlib import Path
 from types import ModuleType
-from uuid import uuid4
 
 import pytest
 
@@ -19,7 +18,6 @@ from otae_bot.command_usage.store import CallRecord, Scope, UsageStore
 from otae_bot.groups.features import GroupFeatureStore, GroupScope
 from otae_bot.hypergryph.endfield_notifications.classification import Event
 from otae_bot.hypergryph.endfield_notifications.receipts import ReceiptStore
-from plugins.grok_bot.conversations import ConversationScope, SessionStore
 from plugins.tibo_radar.store import TiboStore
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -58,8 +56,8 @@ def build(data: Path, platform: str = OLD) -> None:
 
     switches = GroupFeatureStore(paths["group_manager/switches.json"])
     switches.set_enabled(GroupScope(platform, BOT, "g1"), "hyw", False)
-    switches.set_enabled(GroupScope(platform, BOT, "g1"), "grok_bot", True)
-    switches.set_enabled(GroupScope(platform, BOT, "u1", private=True), "grok_bot", True)
+    switches.set_enabled(GroupScope(platform, BOT, "g1"), "radar", False)
+    switches.set_enabled(GroupScope(platform, BOT, "u1", private=True), "radar", False)
     switches.set_enabled(GroupScope(platform, OTHER_BOT, "g2"), "steamInfo", False)
 
     usage = UsageStore(paths["command_usage/usage.sqlite3"])
@@ -69,10 +67,6 @@ def build(data: Path, platform: str = OLD) -> None:
         CallRecord(time.time() - 10, "other", "g9", "u9", "hyw", "q", "", 10, True, name="别的", nickname="别的"),
     ])
     usage.close()
-
-    sessions = SessionStore(paths["grok_bot/sessions.json"])
-    sessions.put(ConversationScope(platform, BOT, "group", "g1", "g1").key, str(uuid4()), str(uuid4()))
-    sessions.put(ConversationScope(platform, OTHER_BOT, "private", "u1").key, str(uuid4()), str(uuid4()))
 
     tibo = TiboStore(paths["tibo_radar/tibo_radar.db"])
     tibo.subscribe("g1", account_key=f"{platform}:{BOT}")
@@ -134,7 +128,7 @@ def data(tmp_path):
 
 def test_dry_run_changes_nothing(data, capsys):
     before = snapshot(data)
-    assert run(data, "--from", OLD, "--to", NEW, "--include-grok") == 0
+    assert run(data, "--from", OLD, "--to", NEW) == 0
     assert snapshot(data) == before
     assert not (data / "_migration_backup").exists()
     out = capsys.readouterr().out
@@ -143,12 +137,12 @@ def test_dry_run_changes_nothing(data, capsys):
 
 def test_apply_renames_every_store_and_lookups_hit(data):
     paths = data_paths(data)
-    assert run(data, "--from", OLD, "--to", NEW, "--include-grok", "--apply") == 0
+    assert run(data, "--from", OLD, "--to", NEW, "--apply") == 0
 
     switches = GroupFeatureStore(paths["group_manager/switches.json"])
     assert not switches.is_enabled(GroupScope(NEW, BOT, "g1"), "hyw")
-    assert switches.is_enabled(GroupScope(NEW, BOT, "g1"), "grok_bot")
-    assert switches.is_enabled(GroupScope(NEW, BOT, "u1", private=True), "grok_bot")
+    assert not switches.is_enabled(GroupScope(NEW, BOT, "g1"), "radar")
+    assert not switches.is_enabled(GroupScope(NEW, BOT, "u1", private=True), "radar")
     assert not switches.is_enabled(GroupScope(NEW, OTHER_BOT, "g2"), "steamInfo")
     assert OLD not in paths["group_manager/switches.json"].read_text(encoding="utf-8")
 
@@ -161,11 +155,6 @@ def test_apply_renames_every_store_and_lookups_hit(data):
     conn = sqlite3.connect(paths["command_usage/usage.sqlite3"])
     assert conn.execute("SELECT COUNT(*) FROM calls WHERE platform='other'").fetchone()[0] == 1
     conn.close()
-
-    bindings = SessionStore(paths["grok_bot/sessions.json"]).snapshot()["bindings"]
-    assert ConversationScope(NEW, BOT, "group", "g1", "g1").key in bindings
-    assert ConversationScope(NEW, OTHER_BOT, "private", "u1").key in bindings
-    assert len(bindings) == 2
 
     tibo = TiboStore(paths["tibo_radar/tibo_radar.db"])
     assert tibo.subscription("g1").account_key == f"{NEW}:{BOT}"
@@ -191,7 +180,7 @@ def test_apply_renames_every_store_and_lookups_hit(data):
 def test_apply_backs_up_and_is_idempotent(data, capsys):
     before = snapshot(data)
     backup = data.parent / "backup"
-    assert run(data, "--from", OLD, "--to", NEW, "--include-grok", "--apply", "--backup-dir", str(backup)) == 0
+    assert run(data, "--from", OLD, "--to", NEW, "--apply", "--backup-dir", str(backup)) == 0
     for store in migrate.STORES:
         assert (backup / store.path).is_file()
     copy = backup.parent / "backup-as-data"
@@ -200,7 +189,7 @@ def test_apply_backs_up_and_is_idempotent(data, capsys):
 
     after = snapshot(data)
     capsys.readouterr()
-    assert run(data, "--from", OLD, "--to", NEW, "--include-grok", "--apply") == 0
+    assert run(data, "--from", OLD, "--to", NEW, "--apply") == 0
     assert snapshot(data) == after
     assert "没有需要改动的存储" in capsys.readouterr().out
     assert not (data / "_migration_backup").exists()
@@ -208,24 +197,16 @@ def test_apply_backs_up_and_is_idempotent(data, capsys):
 
 def test_round_trip_restores_original(data):
     before = snapshot(data)
-    assert run(data, "--from", OLD, "--to", NEW, "--include-grok", "--apply") == 0
-    assert snapshot(data) != before
-    assert run(data, "--from", NEW, "--to", OLD, "--include-grok", "--apply") == 0
-    assert snapshot(data) == before
-
-
-def test_grok_is_skipped_unless_requested(data, capsys):
-    path = data / "grok_bot/sessions.json"
-    before = path.read_text(encoding="utf-8")
     assert run(data, "--from", OLD, "--to", NEW, "--apply") == 0
-    assert path.read_text(encoding="utf-8") == before
-    assert "--include-grok" in capsys.readouterr().out
+    assert snapshot(data) != before
+    assert run(data, "--from", NEW, "--to", OLD, "--apply") == 0
+    assert snapshot(data) == before
 
 
 def test_self_id_filter(data, capsys):
     paths = data_paths(data)
     usage_before = snapshot(data)["command_usage/usage.sqlite3"]
-    assert run(data, "--from", OLD, "--to", NEW, "--include-grok", "--apply", "--self-id", BOT) == 0
+    assert run(data, "--from", OLD, "--to", NEW, "--apply", "--self-id", BOT) == 0
     assert "--include-unscoped" in capsys.readouterr().out
     assert snapshot(data)["command_usage/usage.sqlite3"] == usage_before
 
@@ -233,9 +214,6 @@ def test_self_id_filter(data, capsys):
     assert not switches.is_enabled(GroupScope(NEW, BOT, "g1"), "hyw")
     assert not switches.is_enabled(GroupScope(OLD, OTHER_BOT, "g2"), "steamInfo")
     assert switches.is_enabled(GroupScope(NEW, OTHER_BOT, "g2"), "steamInfo")
-    bindings = SessionStore(paths["grok_bot/sessions.json"]).snapshot()["bindings"]
-    assert ConversationScope(NEW, BOT, "group", "g1", "g1").key in bindings
-    assert ConversationScope(OLD, OTHER_BOT, "private", "u1").key in bindings
     tibo = TiboStore(paths["tibo_radar/tibo_radar.db"])
     assert tibo.subscription("g2").account_key == f"{OLD}:{OTHER_BOT}"
     tibo.close()
@@ -258,24 +236,20 @@ def test_conflicts_merge_with_store_semantics(data, capsys):
         CallRecord(time.time() - 3600, NEW, "g1", "u2", "hyw", "q", "", 5, True, name="旧二号", nickname="旧二号"),
     ])
     usage.close()
-    sessions = SessionStore(paths["grok_bot/sessions.json"])
-    new_key = ConversationScope(NEW, BOT, "group", "g1", "g1").key
-    kept_agent = str(uuid4())
-    sessions.put(new_key, kept_agent, str(uuid4()))
     store = announcement_store.AnnouncementStore(paths["endfield/announcements.db"])
     new_dest = models.Destination(NEW, BOT, "g1", "g1")
     store.subscribe(models.Subscription(new_dest, created_at=NOW - 500))
 
-    assert run(data, "--from", OLD, "--to", NEW, "--include-grok", "--apply") == 0
+    assert run(data, "--from", OLD, "--to", NEW, "--apply") == 0
     out = capsys.readouterr().out
-    assert "合并的作用域 1" in out and "丢弃的源绑定 1" in out and "丢弃的源订阅 1" in out
+    assert "合并的作用域 1" in out and "丢弃的源订阅 1" in out
 
     switches = GroupFeatureStore(paths["group_manager/switches.json"])
     scope = GroupScope(NEW, BOT, "g1")
     assert not switches.is_enabled(scope, "steamInfo") and not switches.is_enabled(scope, "hyw")
-    assert switches.is_enabled(scope, "grok_bot")
+    assert not switches.is_enabled(scope, "radar")
     saved = json.loads(paths["group_manager/switches.json"].read_text(encoding="utf-8"))
-    assert "hyw" not in saved["enabled"][scope.key]
+    assert "hyw" not in saved["enabled"].get(scope.key, [])
 
     conn = sqlite3.connect(paths["command_usage/usage.sqlite3"])
     names = dict(conn.execute("SELECT user_id, name FROM names WHERE platform=?", (NEW,)))
@@ -283,9 +257,6 @@ def test_conflicts_merge_with_store_semantics(data, capsys):
     assert names == {"u1": "新名片", "u2": "二号"} and users["u1"] == "新昵称" and users["u2"] == "二号昵称"
     assert conn.execute("SELECT COUNT(*) FROM names WHERE platform=?", (OLD,)).fetchone()[0] == 0
     conn.close()
-
-    bindings = SessionStore(paths["grok_bot/sessions.json"]).snapshot()["bindings"]
-    assert bindings[new_key]["agent_id"] == kept_agent
 
     assert store.subscription(new_dest.key).created_at == NOW - 500
     assert store.subscription(models.Destination(OLD, BOT, "g1", "g1").key) is None

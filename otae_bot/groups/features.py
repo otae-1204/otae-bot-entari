@@ -13,8 +13,6 @@ from typing import Any
 from satori import ChannelType
 
 PROTECTED_PLUGINS = {"group_manager", "request_handler"}
-DEFAULT_OFF_PLUGINS = {"grok_bot"}
-SUPERUSER_ENABLE_PLUGINS = {"grok_bot"}
 PLUGIN_NAMES = {
     "McModQuery": ("MC 百科", "mod", "模组", "mcmod"),
     "McWikiQuery": ("MC Wiki", "wiki"),
@@ -24,7 +22,6 @@ PLUGIN_NAMES = {
     "endfield": ("终末地", "ef", "zmd"),
     "forkout": ("叉出去", "fork"),
     "group_manager": ("群管理",),
-    "grok_bot": ("Grok Bot", "grok", "grokbot"),
     "help_plugin": ("帮助", "help"),
     "hyw": ("HYW 问答", "q", "何意味"),
     "mcsm": ("MCSManager",),
@@ -128,9 +125,7 @@ class GroupFeatureStore:
             return True
         with self._lock:
             disabled = self._load().get(scope.key, set())
-            return plugin not in disabled and (
-                plugin not in DEFAULT_OFF_PLUGINS or plugin in self._enabled.get(scope.key, set())
-            )
+            return plugin not in disabled
 
     def set_enabled(self, scope: GroupScope, plugin: str, enabled: bool) -> bool:
         if plugin in PROTECTED_PLUGINS or not plugin:

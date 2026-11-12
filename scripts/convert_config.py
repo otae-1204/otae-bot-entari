@@ -63,6 +63,9 @@ PROCESS_ENV = (
 ENTARI_ENV = ("ENVIRONMENT", "ENTARI_CONFIG_FILE", "ENTARI_CONFIG_EXTENSION")
 #: Documented once but never read by the bot.
 OBSOLETE = ("MCSM_PANEL_URL", "MCSM_API_KEY", "MCSM_GROUP_WHITELIST", "NICKNAME", "COMMAND_START")
+#: Keys of plugins that were archived (see archive/README.md); kept verbatim so secrets are not lost.
+ARCHIVED = ("GROKBOT_GATEWAY_URL", "GROKBOT_GATEWAY_TOKEN", "GROKBOT_AGENT_ID", "GROKBOT_TIMEOUT",
+            "GROKBOT_MAX_PENDING", "GROKBOT_MAX_CONCURRENT", "GROKBOT_PERSONA_FILE")
 
 
 # ── legacy semantics ─────────────────────────────────────────────────────────────
@@ -214,14 +217,6 @@ RULES: dict[str, Rule] = {
     "HYW_RENDER_MAX_IMAGES": _plugin("hyw", "render_max_images", "int", _int),
     "HYW_RENDER_MAX_EDGE": _plugin("hyw", "render_max_edge", "int", _int),
     "HYW_HOME": _plugin("hyw", "home", "str"),
-    # grok_bot
-    "GROKBOT_GATEWAY_URL": _plugin("grok_bot", "gateway_url", "str"),
-    "GROKBOT_GATEWAY_TOKEN": _plugin("grok_bot", "gateway_token", "secret"),
-    "GROKBOT_AGENT_ID": _plugin("grok_bot", "agent_id", "str"),
-    "GROKBOT_TIMEOUT": _plugin("grok_bot", "timeout", "int", _int),
-    "GROKBOT_MAX_PENDING": _plugin("grok_bot", "max_pending", "int", _int),
-    "GROKBOT_MAX_CONCURRENT": _plugin("grok_bot", "max_concurrent", "int", _int),
-    "GROKBOT_PERSONA_FILE": _plugin("grok_bot", "persona_file", "str"),
     # steamInfo
     "STEAM_API_KEYS": _plugin("steamInfo", "api_keys", "secret"),
     "STEAM_API_KEY": _plugin("steamInfo", "api_key", "secret"),
@@ -439,6 +434,9 @@ def build_plan(env: dict[str, Any], configs: Path | None, legacy_yml: Path | Non
         elif key in OBSOLETE:
             plan.obsolete[key] = _text(value)
             plan.report.append(f"{key} -> 旧版就不读取；原样保留在 .env 的「不再读取」段")
+        elif key in ARCHIVED:
+            plan.obsolete[key] = _text(value)
+            plan.report.append(f"{key} -> 所属插件已归档（archive/），不再读取；原样保留在 .env 的「不再读取」段")
         else:
             plan.unknown[key] = _text(value)
             plan.report.append(f"{key} -> 未识别；原样保留在 .env 的「未识别」段")
@@ -532,7 +530,7 @@ def render_env(plan: Plan, newline: str) -> str:
         ("# ── 密钥（entari.yml 用 \"${{ env.名字 :- }}\" 引用）──", plan.secrets),
         ("# ── 第三方代码 / Entari 直接从进程环境读取 ──", plan.process),
         ("# ── 未识别的键（原样保留，bot 不读取；确认无用后可删除）──", plan.unknown),
-        ("# ── 旧版就不读取的键（原样保留；确认无用后可删除）──", plan.obsolete),
+        ("# ── 不再读取的键（旧版就不读取或所属插件已归档；原样保留，确认无用后可删除）──", plan.obsolete),
     )
     for title, values in sections:
         if values:

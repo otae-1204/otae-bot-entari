@@ -186,19 +186,6 @@ async def check_hyw_dispatch():
 
 asyncio.get_event_loop().run_until_complete(check_hyw_dispatch())
 
-async def check_grok_dispatch():
-    session = object.__new__(Session)
-    session.account = SimpleNamespace(platform='qq', self_id='test-bot')
-    session.event = SimpleNamespace(gather=AsyncMock(return_value=None), message=None, user=SimpleNamespace(id='test-user'), guild=None,
-                                    channel=SimpleNamespace(id='test-channel'))
-    session.reply = None
-    session.send = AsyncMock(return_value=[])
-    for name in ('grok', 'grokbot'):
-        await command.execute(_remove_config_prefix(MessageChain('/' + name + ' 帮助')), session)
-    assert session.send.await_count == 2, session.send.await_count
-
-asyncio.get_event_loop().run_until_complete(check_grok_dispatch())
-
 from satori import ChannelType, Role
 from arclet.entari.const import ITEM_ACCOUNT, ITEM_SESSION
 from arclet.letoderea import EVENT, STOP, post
@@ -290,34 +277,6 @@ async def check_group_switches():
     assert feature_store.is_enabled(scope, 'hyw')
     await run_command(current, '/q 帮助')
     current.send.assert_awaited_once()
-
-    await run_command(current, '/功能 关闭 grok')
-    assert not feature_store.is_enabled(scope, 'grok_bot')
-    for name in ('grok', 'grokbot'):
-        await run_command(current, '/' + name + ' 帮助')
-        current.send.assert_not_awaited()
-    other = group_session(group='101')
-    await run_command(other, '/grok 帮助')
-    other.send.assert_not_awaited()
-    admin = group_session(user='group-admin')
-    admin.event.member.roles = [Role('admin')]
-    await run_command(admin, '/功能 开启 grok')
-    assert '仅 SuperUser' in str(admin.send.await_args.args[0])
-    assert not feature_store.is_enabled(scope, 'grok_bot')
-    await run_command(current, '/功能 开启 grokbot')
-    assert feature_store.is_enabled(scope, 'grok_bot')
-    await run_command(current, '/grok 帮助')
-    current.send.assert_awaited_once()
-    grok = plugin_service.plugins['plugins.grok_bot'].module
-    with patch.object(grok.GrokConfig, 'from_settings', return_value=SimpleNamespace()), \\
-         patch.object(grok.queue, 'run', AsyncMock(return_value='已修复')) as repair_run:
-        await run_command(admin, '/grok 修复会话')
-        repair_run.assert_not_awaited()
-        assert '仅 SuperUser' in str(admin.send.await_args.args[0])
-        await run_command(current, '/grok 修复会话')
-        repair_run.assert_awaited_once()
-        assert repair_run.await_args.kwargs['repair_only'] is True
-        assert repair_run.await_args.args[3].peer_id == '100'
 
     # Legacy commands are filtered too, without disabling the manager.
     await run_command(current, '/插件 关闭 help')
@@ -545,52 +504,6 @@ async def check_quoted_command_dispatch():
 
 asyncio.get_event_loop().run_until_complete(check_quoted_command_dispatch())
 
-async def check_grok_quoted_dispatch():
-    grok = plugin_service.plugins['plugins.grok_bot'].module
-    run = AsyncMock(return_value='Grok 回答')
-    with patch.object(grok.GrokConfig, 'from_settings', return_value=SimpleNamespace()), \\
-         patch.object(grok.queue, 'run', run), patch.object(Session, 'send', AsyncMock(return_value=[])) as send:
-        for alias in ('grok', 'grokbot'):
-            run.reset_mock()
-            event = quote_event([Quote('quoted-id'), At('quoted-user'), Text(' /' + alias + ' 解释'), Image(src='https://cdn.example/current.png')])
-            event.account.protocol.message_get.return_value = MessageObject('quoted-id', '引用正文<img src="https://cdn.example/quoted.png"/>', user=User('quoted-user'))
-            await publish(event, scope='.commands')
-            run.assert_awaited_once()
-            assert '引用正文' in run.await_args.args[1], run.await_args
-            assert run.await_args.kwargs['images'] == ('https://cdn.example/current.png', 'https://cdn.example/quoted.png'), run.await_args
-            assert run.await_args.kwargs['account'] is event.account
-            assert send.await_args.kwargs['reply_to'] is True
-            run.reset_mock()
-            await publish(quote_event([Quote('quoted-id'), At('quoted-user'), Text(' /' + alias + ' 解释')], inline='without-author'), scope='.commands')
-            run.assert_awaited_once()
-            assert '被引用的正文' in run.await_args.args[1]
-            assert run.await_args.kwargs['images'] == ('https://example.com/quoted.png',)
-        run.reset_mock()
-        event = quote_event([Text(' /grok '), Image(src='https://cdn.example/only.png')])
-        await publish(event, scope='.commands')
-        run.assert_awaited_once()
-        assert run.await_args.kwargs['images'] == ('https://cdn.example/only.png',)
-        assert '图片进行识别' in run.await_args.args[1], run.await_args
-        run.reset_mock()
-        event = quote_event([Quote('quoted-id'), At('quoted-user'), Text(' /grok')])
-        event.account.protocol.message_get.return_value = MessageObject('quoted-id', '<img src="https://cdn.example/quoted-only.png"/>', user=User('quoted-user'))
-        await publish(event, scope='.commands')
-        run.assert_awaited_once()
-        assert run.await_args.kwargs['images'] == ('https://cdn.example/quoted-only.png',)
-        assert '图片进行识别' in run.await_args.args[1], run.await_args
-
-    async def interrupted_run(*args, on_reply, **kwargs):
-        await on_reply(grok.Reply('插入后的回答'), reply_to=False)
-        return grok.Reply()
-
-    with patch.object(grok.GrokConfig, 'from_settings', return_value=SimpleNamespace()), \\
-         patch.object(grok.queue, 'run', interrupted_run), patch.object(Session, 'send', AsyncMock(return_value=[])) as send:
-        await publish(quote_event([Quote('quoted-id'), At('quoted-user'), Text(' /grok 追加')]), scope='.commands')
-        send.assert_awaited_once()
-        assert send.await_args.kwargs['reply_to'] is False
-
-asyncio.get_event_loop().run_until_complete(check_grok_quoted_dispatch())
-
 async def check_command_space_dispatch():
     # Alconna only splits on ASCII spaces: NBSP / U+3000 used to leave
     # "/zmd\\u00a0回响" as one head that no command matched.
@@ -651,7 +564,6 @@ print('CONTRACT ' + json.dumps({'plugins': sorted(expected), 'jobs': jobs}, ensu
         loaded = json.loads(contract)["plugins"]
         self.assertEqual(loaded, sorted(discover_plugins(ROOT / "plugins")))
         self.assertIn("plugins.hyw", loaded)
-        self.assertIn("plugins.grok_bot", loaded)
 
 
 class LifecycleTests(unittest.IsolatedAsyncioTestCase):

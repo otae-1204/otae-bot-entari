@@ -10,13 +10,11 @@ from nepattern import AnyString
 
 from otae_bot.groups.features import (
     PROTECTED_PLUGINS,
-    SUPERUSER_ENABLE_PLUGINS,
     feature_store,
     plugin_label,
     resolve_plugin,
     scope_from_event,
 )
-from otae_bot.groups.superusers import is_superuser
 from otae_bot.messaging.inbound import get_rest
 from otae_bot.pipeline.feature_gate import loaded_group_plugins
 
@@ -27,7 +25,6 @@ HELP = """本群插件管理（仅限 SuperUser、本群管理员或群主）
 /功能 开启 <插件名> —— 在本群启用指定插件（如 /功能 开启 hyw）
 /功能 关闭 <插件名> —— 在本群禁用指定插件（如 /功能 关闭 hyw）
 支持插件原名及常见别名（如 ef、steam、bili、mc、tibo）。
-Grok Bot 默认关闭，仅 SuperUser 可执行 /功能 开启 grok（管理员与群主可关闭）。
 设置仅作用于当前群且重启后仍保留，不支持跨群指定群号。
 别名：/插件、/plugin。"""
 
@@ -55,8 +52,7 @@ async def handle_group_features(session: Session, rest: Match[tuple[str, ...]]):
                 if name in PROTECTED_PLUGINS:
                     continue
                 status = "开启" if feature_store.is_enabled(scope, name) else "关闭"
-                restriction = "（仅 SuperUser 可开启）" if name in SUPERUSER_ENABLE_PLUGINS else ""
-                lines.append(f"[{status}] {name} · {plugin_label(name)}{restriction}")
+                lines.append(f"[{status}] {name} · {plugin_label(name)}")
             lines.append("格式：/功能 开启 <插件名> 或 /功能 关闭 <插件名>")
             lines.append("注意：基础管理及全局核心插件不支持群内开关。")
             await session.send("\n".join(lines))
@@ -74,9 +70,6 @@ async def handle_group_features(session: Session, rest: Match[tuple[str, ...]]):
             await session.send("基础管理及全局核心插件为系统内置保护插件，不支持群内开关。")
             return
         enabled = actions[parts[0].casefold()]
-        if enabled and name in SUPERUSER_ENABLE_PLUGINS and not is_superuser(session.event):
-            await session.send(f"权限受限：仅 SuperUser 可开启 {plugin_label(name)}，本群管理员与群主仅支持执行关闭。")
-            return
         changed = feature_store.set_enabled(scope, name, enabled)
     except (OSError, ValueError) as exc:
         logger.error("[group_manager] switch storage failed error_type={}", type(exc).__name__)

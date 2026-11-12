@@ -29,10 +29,6 @@ HYW 搜索问答插件已接入：`/q 问题`、图片解释和引用追问。
 AI 智商雷达默认 `/radar` 返回米白纸色与墨绿的“模型观察手册”长图，按国内外和研发厂商集中展示全部模型与档位，带模型图标，同屏查看 IQ、趋势、样本、耗时与成本。
 也支持榜、模型、对比、推荐、预警、性价比和趋势查询；布局与预览见 [新版总览设计](docs/ai_radar_matrix_ui.md)。
 
-Cursor Grok Bot 应用可通过私网网关接入：`/grok 问题`，支持识别发送或引用的图片、转发回复图片与文件，按群聊/私聊隔离会话，默认花园多惠人设。
-Grok Bot 默认关闭，需要 SuperUser 在目标群执行 `/功能 开启 grok`。
-Windows 配置和连接检查见 [Grok Bot 配置与用法](docs/grok_bot_plugin.md)。
-
 群内插件开关：`/功能 列表`、`/功能 关闭 hyw`、`/功能 开启 hyw`。
 仅 SuperUser、本群管理员或群主可执行，详见 [群内功能管理](docs/group_features.md)。
 
@@ -164,8 +160,7 @@ git pull
 | `HYW_CONFIG_SOURCE`、`HYW_*`（除 `HYW_API_KEY`、`HYW_RETRY_*`） | `plugins.hyw.*`（小写，去前缀；`HYW_CREDENTIALS_FILE` → `credentials_file`） |
 | `HYW_API_KEY` | `.env`，`plugins.hyw.api_key` |
 | `HYW_RETRY_*`、`GOOGLE_APPLICATION_CREDENTIALS`、`HTTP_PROXY`、`HTTPS_PROXY` | 仍在 `.env`（第三方代码直接读取） |
-| `GROKBOT_GATEWAY_TOKEN` | `.env`，`plugins.grok_bot.gateway_token` |
-| `GROKBOT_{GATEWAY_URL,AGENT_ID,TIMEOUT,MAX_PENDING,MAX_CONCURRENT,PERSONA_FILE}` | `plugins.grok_bot.{gateway_url,agent_id,timeout,max_pending,max_concurrent,persona_file}` |
+| `GROKBOT_*` | 不再读取（插件已归档，见 `archive/README.md`）；原样保留在 `.env` 的「不再读取」段 |
 | `STEAM_API_KEYS` / `STEAM_API_KEY` / `STEAM_LLM_API_KEY` | `.env`，`plugins.steamInfo.api_keys` / `api_key` / `llm_api_key` |
 | `STEAM_{REQUEST_INTERVAL,DISABLE_BROADCAST_ON_STARTUP,LLM_BASE_URL,LLM_MODEL}` | `plugins.steamInfo.{request_interval,disable_broadcast_on_startup,llm_base_url,llm_model}` |
 | `MCSM_DEPLOY_LARGE_PACKAGE_MB` | `plugins.mcsm.deploy_large_package_mb` |
@@ -215,9 +210,6 @@ arrive expanded inside the quote; see `docs/hyw_plugin.md`).
 
 然后在 `entari.yml` 声明 `plugins.server` 再启动。机器人运行时（持有 `.runtime\bot.lock`）
 `--apply` 会拒绝执行。重复执行不会再改动；`--self-id` 可只迁移指定账号。
-
-Grok 会话绑定默认跳过：云端 Bot 的会话标记由会话键的哈希生成，改键后已绑定的会话会报
-“绑定不一致”。不迁移时，新平台名下的会话会创建新的 Grok Bot；确需迁移可加 `--include-grok`。
 
 回滚：停止机器人，用 `--from qq-client --to llonebot --apply` 反向执行，或从备份目录拷回原文件，
 再改回 `basic.network` 启动。

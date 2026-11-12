@@ -64,20 +64,19 @@ class StoreTests(unittest.TestCase):
         self.assertTrue(self.store.set_enabled(self.scope, "hyw", True))
         self.assertTrue(GroupFeatureStore(self.path).is_enabled(self.scope, "hyw"))
 
-    def test_grok_defaults_off_and_v1_migration_preserves_other_switches(self):
+    def test_v1_migration_preserves_switches(self):
         self.path.write_text(json.dumps({"version": 1, "disabled": {self.scope.key: ["hyw"]}}))
-        self.assertFalse(self.store.is_enabled(self.scope, "grok_bot"))
         self.assertFalse(self.store.is_enabled(self.scope, "hyw"))
-        self.assertTrue(self.store.set_enabled(self.scope, "grok_bot", True))
+        self.assertTrue(self.store.is_enabled(self.scope, "radar"))
+        self.assertTrue(self.store.set_enabled(self.scope, "radar", False))
         restarted = GroupFeatureStore(self.path)
-        self.assertTrue(restarted.is_enabled(self.scope, "grok_bot"))
+        self.assertFalse(restarted.is_enabled(self.scope, "radar"))
         self.assertFalse(restarted.is_enabled(self.scope, "hyw"))
-        self.assertFalse(restarted.is_enabled(GroupScope("qq", "300", "101"), "grok_bot"))
-        self.assertFalse(restarted.is_enabled(GroupScope("qq", "301", "100"), "grok_bot"))
-        self.assertFalse(restarted.is_enabled(GroupScope("qq", "300", "100", private=True), "grok_bot"))
+        self.assertTrue(restarted.is_enabled(GroupScope("qq", "300", "101"), "radar"))
+        self.assertTrue(restarted.is_enabled(GroupScope("qq", "300", "100", private=True), "radar"))
         self.assertEqual(json.loads(self.path.read_text())["version"], 2)
-        self.assertTrue(restarted.set_enabled(self.scope, "grok_bot", False))
-        self.assertFalse(GroupFeatureStore(self.path).is_enabled(self.scope, "grok_bot"))
+        self.assertTrue(restarted.set_enabled(self.scope, "radar", True))
+        self.assertTrue(GroupFeatureStore(self.path).is_enabled(self.scope, "radar"))
 
     def test_failed_write_keeps_memory_and_disk_unchanged(self):
         self.store.set_enabled(self.scope, "hyw", False)
@@ -229,16 +228,6 @@ async def main():
         assert '[关闭] hyw' in one(await say('/功能 列表', member=admin, user='admin'))
         assert '已成功开启' in one(await say('/功能 开启 q', member=owner, user='owner'))
         assert store.is_enabled(SCOPE, 'hyw')
-        # 群主/管理员不能开启 grok，只有 SuperUser 可以；管理员可以关闭
-        for member in (admin, owner):
-            for action in ('开启 grok', 'enable grokbot', '打开 grok_bot'):
-                assert '仅 SuperUser 可开启' in one(await say('/功能 ' + action, member=member, user=member.user.id))
-                assert not store.is_enabled(SCOPE, 'grok_bot')
-        assert '已成功开启' in one(await say('/功能 开启 grok', user='root'))
-        assert store.is_enabled(SCOPE, 'grok_bot')
-        assert '仅 SuperUser 可开启' in one(await say('/功能 列表', user='root'))
-        assert '已成功关闭' in one(await say('/功能 关闭 grok', member=admin, user='admin'))
-        assert not store.is_enabled(SCOPE, 'grok_bot')
         # 跨群、路径、受保护插件都拒绝
         before = store.path.read_bytes()
         assert '本群插件管理' in one(await say('/功能 关闭 hyw 101', user='root'))

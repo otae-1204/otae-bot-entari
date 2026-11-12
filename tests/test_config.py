@@ -158,7 +158,6 @@ class ExampleFileTests(unittest.TestCase):
         from plugins.bilibilibot.config import BiliSettings
         from plugins.eft_helper.config import EftSettings
         from plugins.endfield.config import EndfieldSettings
-        from plugins.grok_bot.config import GrokSettings
         from plugins.hyw.config import HywSettings
         from plugins.mcsm.config import McsmSettings
         from plugins.minecraft_plugin.config import MinecraftSettings
@@ -167,7 +166,7 @@ class ExampleFileTests(unittest.TestCase):
         from plugins.tibo_radar.config import TiboRadarSettings
 
         plugins = {"arknights": ArknightsSettings, "bilibilibot": BiliSettings, "eft_helper": EftSettings,
-                   "endfield": EndfieldSettings, "grok_bot": GrokSettings, "hyw": HywSettings, "mcsm": McsmSettings,
+                   "endfield": EndfieldSettings, "hyw": HywSettings, "mcsm": McsmSettings,
                    "minecraft_plugin": MinecraftSettings, "radar": RadarSettings, "steamInfo": SteamSettings,
                    "tibo_radar": TiboRadarSettings}
         return CoreSettings, plugins

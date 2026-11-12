@@ -116,15 +116,6 @@ plugins:
     gacha_forward_above: 3   # 抽卡分析图超过几张改为合并转发（0 = 关闭合并转发）
     gacha_show_standard: true   # 是否展示基础寻访卡片（隐藏时仍计入总数）
     gacha_rerun_side: "right"   # 重构侧栏放在哪一边：right 或 left
-  # Cursor Grok Bot 应用（/grok、/grokbot），经 Tailscale/SSH 私网网关直连；默认关闭，
-  plugins.grok_bot:
-    gateway_url: ""   # 网关基址，不带 /v1 或 /api；固定绕过全局代理
-    gateway_token: "${{ env.GROKBOT_GATEWAY_TOKEN :- }}"   # gateway.json 中的 token 原文（不含 Bearer 前缀；密钥）
-    agent_id: ""   # 可选：原 QQBOT UUID，仅供只读诊断；问答自动使用各会话独立 Bot
-    timeout: 300   # 输入提交和每轮接收的等待上限秒数（30–1800，分别计时）
-    max_pending: 8   # 等待提交或正在上传/提交的输入上限（1–32）
-    max_concurrent: 4   # 同时接收回复的会话数（1–16）
-    persona_file: ""   # 留空使用 plugins/grok_bot/persona.md（花园多惠）；也可填 UTF-8 文件路径
   # HYW 搜索问答（/q、/hyw、/何意味），见 docs/hyw_plugin.md
   plugins.hyw:
     config_source: "hyw"   # 凭据来源：hyw = 本段；llm = 整组用 otae.llm；steam = 整组用 plugins.steamInfo 的 llm_*

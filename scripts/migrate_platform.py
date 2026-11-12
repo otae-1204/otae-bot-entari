@@ -30,7 +30,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, BinaryIO
-from uuid import UUID
 
 
 class StoreError(Exception):
@@ -145,55 +144,6 @@ def migrate_switches(data: Any, rename: Rename, report: Report) -> Any:
     report.add("重命名的作用域键", len(renames) - len(merged))
     report.add("与已有目标键合并的作用域", len(merged))
     return result
-
-
-def migrate_grok(data: Any, rename: Rename, report: Report) -> Any:
-    """plugins/grok_bot/conversations.py SessionStore."""
-    try:
-        if not isinstance(data, dict) or data.get("version") != 1:
-            raise ValueError
-        UUID(data["installation"])
-        bindings = data["bindings"]
-        if not isinstance(bindings, dict):
-            raise TypeError
-        for entry in bindings.values():
-            UUID(entry["nonce"])
-            if entry["agent_id"] is not None:
-                UUID(entry["agent_id"])
-    except (ValueError, TypeError, KeyError, AttributeError):
-        raise StoreError("结构不符合 SessionStore 格式") from None
-
-    updated: dict[str, Any] = {}
-    renamed = dropped = 0
-    sources = []
-    for key in bindings:
-        parts = _string_list(key, (5,))  # ConversationScope.key
-        if parts[0] != rename.source:
-            continue
-        if not rename.wants(parts[0], parts[1]):
-            report.add("按 --self-id 跳过的绑定", change=False)
-            continue
-        sources.append(key)
-    if not sources:
-        return data
-    new_keys = {}
-    for key in sources:
-        parts = json.loads(key)
-        parts[0] = rename.target
-        new_keys[key] = json.dumps(parts, ensure_ascii=False)
-    for key, entry in bindings.items():
-        new = new_keys.get(key)
-        if new is None:
-            updated[key] = entry
-        elif new in bindings:
-            # The target conversation already has its own Bot; keep it.
-            dropped += 1
-        else:
-            updated[new] = entry
-            renamed += 1
-    report.add("重命名的绑定", renamed)
-    report.add("目标已有绑定而丢弃的源绑定", dropped)
-    return {**data, "bindings": updated}
 
 
 # -- SQLite stores --------------------------------------------------------------
@@ -378,7 +328,6 @@ class Store:
 STORES = (
     Store("群功能开关", "group_manager/switches.json", migrate_switches, sqlite=False),
     Store("指令统计", "command_usage/usage.sqlite3", migrate_usage, sqlite=True, scoped=False),
-    Store("Grok 会话绑定", "grok_bot/sessions.json", migrate_grok, sqlite=False),
     Store("Tibo 雷达订阅", "tibo_radar/tibo_radar.db", migrate_tibo, sqlite=True),
     Store("终末地公告订阅", "endfield/announcements.db", migrate_announcements, sqlite=True),
     Store("终末地通知回执", "endfield/notification_receipts.db", migrate_receipts, sqlite=True),
@@ -489,8 +438,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--self-id", action="append", help="只迁移这些机器人账号（可重复）")
     parser.add_argument("--include-unscoped", action="store_true",
                         help="配合 --self-id：仍迁移不记录账号的存储（指令统计）")
-    parser.add_argument("--include-grok", action="store_true",
-                        help="同时迁移 Grok 会话绑定（会使已绑定会话的云端标记失配，见 README）")
     parser.add_argument("--apply", action="store_true", help="真正写入；不加则只预演")
     parser.add_argument("--backup-dir", type=Path, help="默认 <data-dir>/_migration_backup/<时间戳>/")
     parser.add_argument("--runtime-dir", type=Path, default=Path(".runtime"), help="机器人运行锁所在目录")
@@ -528,10 +475,6 @@ def run(args: argparse.Namespace, rename: Rename) -> int:
             continue
         if not store.scoped and rename.self_ids is not None and not args.include_unscoped:
             print(f"- {label}：不记录机器人账号，指定了 --self-id 时默认跳过（加 --include-unscoped 一并迁移）")
-            continue
-        if store.migrate is migrate_grok and not args.include_grok:
-            print(f"- {label}：默认跳过。会话标记由键的哈希写入云端 Bot，改键后已绑定会话会报绑定不一致；"
-                  "确需迁移请加 --include-grok")
             continue
         try:
             report = plan(store, path, rename)

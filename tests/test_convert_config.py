@@ -199,6 +199,7 @@ class KeyTableTests(unittest.TestCase):
     def test_every_documented_legacy_key_has_a_destination(self):
         documented = set(re.findall(r"^(?:# )?([A-Z][A-Z0-9_]+)=", LEGACY_EXAMPLE.read_text(encoding="utf-8"), re.M))
         handled = (set(convert_config.RULES) | set(convert_config.PROCESS_ENV) | set(convert_config.OBSOLETE)
+                   | set(convert_config.ARCHIVED)
                    | set(convert_config.STRUCTURED))
         self.assertEqual(sorted(documented - handled), [])
         self.assertEqual(sorted(documented - set(LEGACY)), [], "the fixture must cover every documented key")
@@ -220,7 +221,6 @@ class KeyTableTests(unittest.TestCase):
         from plugins.bilibilibot.config import BiliSettings
         from plugins.eft_helper.config import EftSettings
         from plugins.endfield.config import EndfieldSettings
-        from plugins.grok_bot.config import GrokSettings
         from plugins.hyw.config import HywSettings
         from plugins.mcsm.config import McsmSettings
         from plugins.minecraft_plugin.config import MinecraftSettings
@@ -231,7 +231,7 @@ class KeyTableTests(unittest.TestCase):
         models = {
             "plugins.arknights": ArknightsSettings, "plugins.bilibilibot": BiliSettings,
             "plugins.eft_helper": EftSettings, "plugins.endfield": EndfieldSettings,
-            "plugins.grok_bot": GrokSettings, "plugins.hyw": HywSettings, "plugins.mcsm": McsmSettings,
+            "plugins.hyw": HywSettings, "plugins.mcsm": McsmSettings,
             "plugins.minecraft_plugin": MinecraftSettings, "plugins.radar": RadarSettings,
             "plugins.steamInfo": SteamSettings, "plugins.tibo_radar": TiboRadarSettings,
         }
@@ -314,7 +314,13 @@ class ConvertTests(unittest.TestCase):
         env_text = (self.root / ".env").read_bytes().decode("utf-8")
         self.assertTrue(env_text.startswith(convert_config.ENV_MARKER))
         self.assertIn("\r\n", env_text)
+        # 已归档插件（grok_bot）的旧键原样保留在「不再读取」段，密钥不丢
+        section = env_text.index("# ── 不再读取的键")
+        for key in convert_config.ARCHIVED:
+            self.assertGreater(env_text.index(f"\r\n{key}="), section, key)
+        self.assertIn("grok-secret", env_text)
         yml = (self.root / "entari.yml").read_text(encoding="utf-8")
+        self.assertNotIn("grok", yml.lower())
         for value in SECRETS:
             self.assertNotIn(value, yml)
         self.assertIn("# configs/web_screenshot/config.json:", yml)  # preserved as a comment
@@ -375,7 +381,6 @@ class ConvertTests(unittest.TestCase):
         from plugins.eft_helper.config import eft_settings
         from plugins.endfield.account.crypto import CredentialCipher
         from plugins.endfield.config import endfield_settings
-        from plugins.grok_bot.config import GrokConfig
         from plugins.hyw.config import HywConfig
         from plugins.mcsm.config import mcsm_settings
         from plugins.mcsm.deploy import llm_config
@@ -397,9 +402,6 @@ class ConvertTests(unittest.TestCase):
         self.assertEqual((radar.timeout, radar.default_benchmark, radar.proxy, radar.max_bytes),
                          (1.0, "pompeii-adjacency", None, 12582912))
         self.assertIn("otae-bot-radar/", radar.user_agent)
-        grok = GrokConfig.from_settings()
-        self.assertEqual((grok.base_url, grok.token, grok.agent_id, grok.timeout, grok.max_pending,
-                          grok.max_concurrent), ("http://100.64.0.1:1340", "grok-secret", "", 600, 8, 2))
         steam = steam_config()
         self.assertEqual(
             (steam.steam_api_keys, steam.steam_request_interval, steam.steam_disable_broadcast_on_startup,
