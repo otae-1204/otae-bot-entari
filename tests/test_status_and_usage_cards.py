@@ -23,6 +23,7 @@ from otae_bot.command_usage.store import (
 from otae_bot.compat.entari import ArgVal
 from otae_bot.infrastructure.recent_alerts import Alert
 from plugins.status import handlers as status_handlers
+from tests.support.dispatch import run_scenarios
 from plugins.status.collect import Job, Meter, StatusSnapshot
 from plugins.status.presentation import panel_html as status_panel
 from plugins.usage_stats import handlers as stats_handlers
@@ -167,6 +168,61 @@ class UsageHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("指令统计", sent[-1])
         sent = await self.run_command("明天", event())
         self.assertIn("看不懂", sent[-1])
+
+
+
+STATUS_SCENARIOS = r'''
+from unittest.mock import AsyncMock, patch
+from otae_bot.config.settings import Config
+
+status = plugin('plugins.status.handlers')
+Config.SUPERUSERS = ['42']
+seen = []
+
+
+from io import BytesIO
+from PIL import Image as PILImage
+buffer = BytesIO()
+PILImage.new('RGB', (1, 1)).save(buffer, 'PNG')
+PNG = buffer.getvalue()
+
+
+async def card(model):
+    seen.append(model)
+    return PNG
+
+
+async def main():
+    # 别名同样可用；卡片作为图片发出
+    with patch.object(status, 'render_card', card):
+        for text in ('/status', '/状态', '/status 多余参数'):
+            sent = await say(text)
+            assert len(sent) == 1 and sent[0].startswith('<img') and 'base64' in sent[0], sent
+    # 卡片渲染失败退回文本
+    with patch.object(status, 'render_card', AsyncMock(side_effect=RuntimeError('no browser'))):
+        sent = await say('/status')
+        assert len(sent) == 1 and not sent[0].startswith('<img'), sent
+
+    # 详细版只给私聊里的超管；超管在群里、普通人在私聊里都是公开版
+    collect = AsyncMock(side_effect=RuntimeError('stop here'))
+    with patch.object(status, 'collect', collect):
+        for kwargs, detail in ((dict(user='42', private=True), True), (dict(user='42'), False),
+                               (dict(user='7', private=True), False)):
+            collect.reset_mock()
+            await say('/status', **kwargs)
+            assert collect.await_args.kwargs == {'detail': detail}, (kwargs, collect.await_args)
+    print('ALL-OK')
+
+run(main())
+'''
+
+
+class StatusDispatchTests(unittest.TestCase):
+    def test_status_through_the_real_event_path(self):
+        result = run_scenarios(STATUS_SCENARIOS)
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, output[-6000:])
+        self.assertIn("ALL-OK", result.stdout)
 
 
 if __name__ == "__main__":
