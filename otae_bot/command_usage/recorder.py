@@ -231,8 +231,8 @@ def install_command_usage_recorders() -> None:
             continue
         hook = CommandUsageRecorder(name)
         scope.propagators.append(hook)
-        for subscriber, _ in tuple(scope.subscribers.values()):
-            subscriber.propagate(hook)
+        for slot in tuple(scope.subscribers):
+            slot.subscriber.propagate(hook)
 
 
 async def close_command_usage() -> None:

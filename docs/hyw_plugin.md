@@ -53,8 +53,8 @@ HYW_HOME=data/hyw-frontier
 
 ## 引用的消息取不到时（合并转发）
 
-Entari 0.17.4 组装消息事件时，引用不带内联内容就调 Satori `message.get` 取原消息
-（`arclet/entari/event/base.py:329`）。LLBot 取合并转发会回 `500 ServerException: 消息为空`，
+Entari（0.17.4 与 0.19.4 都是）组装消息事件时，引用不带内联内容就调 Satori `message.get` 取原消息
+（0.19.4 的 `arclet/entari/event/base.py:334`）。LLBot 取合并转发会回 `500 ServerException: 消息为空`，
 异常在分发前抛出，整条消息被丢掉：`/q` 没反应，日志里连这条消息都没有。
 
 现在分两层兜住：

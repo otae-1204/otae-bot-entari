@@ -245,7 +245,7 @@ def test_real_renderer_and_entari_protocol_across_three_cycles(radar, monkeypatc
     monkeypatch.setattr(handlers, "render_xfeed", render_xfeed)
 
     async def run():
-        from arclet.letoderea import core as events
+        from arclet.letoderea import utils as events
 
         # Entari binds its event bus at import time; this isolated test owns a
         # fresh asyncio.run loop instead of the application's normal loop.

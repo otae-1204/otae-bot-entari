@@ -29,7 +29,7 @@ def session():
         guild_member_get=AsyncMock(return_value=SimpleNamespace(roles=[])),
         internal=AsyncMock(return_value={}),
     )
-    s.event = SimpleNamespace(
+    s.event = SimpleNamespace(gather=AsyncMock(return_value=None), message=None, 
         user=SimpleNamespace(id="test-user"),
         member=SimpleNamespace(roles=[]),
         guild=SimpleNamespace(id="test-group"),

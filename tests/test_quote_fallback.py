@@ -69,7 +69,7 @@ class GatherFallbackTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(patcher.stop)
 
     async def test_unpatched_gather_drops_the_event(self):
-        # 复现：Entari 0.17.4 的 gather 把 message_get 的异常原样抛出，事件到不了任何订阅者。
+        # 复现：Entari 0.19.4 的 gather（0.17.4 相同） 把 message_get 的异常原样抛出，事件到不了任何订阅者。
         event = _event([Quote("fwd-msg-1"), Text("/q 总结一下")])
         with self.assertRaises(ServerException):
             await _original_gather()(event, {})
@@ -223,8 +223,9 @@ from satori.client.account import Account, ApiInfo
 from satori.exception import NotFoundException, ServerException
 from unittest.mock import AsyncMock, patch
 
-load_plugin('.commands')
-load_plugin('.record_message')
+# Entari 0.19 的内置插件是 niche，主体到应用启动的 blocking 阶段才执行；这里不启动应用，手动执行。
+for builtin in ('$.commands', '$.record_message'):
+    plugin_service.plugins[builtin].exec_apply()
 EntariConfig.instance.basic.prefix = ['/']
 hyw = plugin_service.plugins['plugins.hyw'].module
 import otae_bot.adapters.onebot as onebot

@@ -1350,7 +1350,7 @@ handlers.render_page = AsyncMock(side_effect=RuntimeError('renderer unavailable'
 def session():
     s = object.__new__(Session)
     s.account = SimpleNamespace(platform='qq', self_id='test-bot')
-    s.event = SimpleNamespace(user=SimpleNamespace(id='test-user'), guild=None,
+    s.event = SimpleNamespace(gather=AsyncMock(return_value=None), message=None, user=SimpleNamespace(id='test-user'), guild=None,
                               channel=SimpleNamespace(id='test-channel'))
     s.reply = None
     s.send = AsyncMock(return_value=[])

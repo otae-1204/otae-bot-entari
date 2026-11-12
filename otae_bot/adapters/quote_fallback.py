@@ -1,8 +1,8 @@
 """Dispatch message events even when Entari cannot fetch the quoted message.
 
-Entari 0.17.4 ``MessageEvent.gather`` (``arclet/entari/event/base.py`` 322-347) builds the
+Entari 0.19.4 ``MessageEvent.gather`` (``arclet/entari/event/base.py`` 327-352) builds the
 reply while assembling the event context. A quote without inline children is looked up with
-``account.protocol.message_get(channel, quote.id)`` (base.py:329). LLBot answers a quoted
+``account.protocol.message_get(channel, quote.id)`` (base.py:334). LLBot answers a quoted
 merged forward with ``500 ServerException: 消息为空``; the exception leaves the gather,
 letoderea's ``dispatch`` never reaches a subscriber, and the event is lost: no command runs
 and record_message does not even log it.

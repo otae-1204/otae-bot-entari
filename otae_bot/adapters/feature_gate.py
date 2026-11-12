@@ -48,8 +48,8 @@ def install_group_feature_gates() -> None:
             continue
         gate = GroupFeatureGate(name)
         scope.propagators.insert(0, gate)
-        for subscriber, _ in tuple(scope.subscribers.values()):
-            subscriber.propagate(gate)
+        for slot in tuple(scope.subscribers):
+            slot.subscriber.propagate(gate)
 
 
 async def on_plugin_loaded(event: PluginLoadedSuccess):

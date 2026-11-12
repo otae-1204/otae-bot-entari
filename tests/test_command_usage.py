@@ -48,6 +48,7 @@ def session(group="100", user="200", private=False):
             channel=SimpleNamespace(id=group, type=ChannelType.DIRECT if private else ChannelType.TEXT),
             user=SimpleNamespace(id=user, name="u" + user, nick=None),
             member=SimpleNamespace(nick="名片" + user),
+            message=None,
         ),
     )
 

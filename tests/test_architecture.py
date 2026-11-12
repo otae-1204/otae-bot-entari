@@ -185,7 +185,7 @@ EntariConfig.instance.basic.prefix = ['/']
 async def check_hyw_dispatch():
     session = object.__new__(Session)
     session.account = SimpleNamespace(platform='qq', self_id='test-bot')
-    session.event = SimpleNamespace(user=SimpleNamespace(id='test-user'), guild=None,
+    session.event = SimpleNamespace(gather=AsyncMock(return_value=None), message=None, user=SimpleNamespace(id='test-user'), guild=None,
                                     channel=SimpleNamespace(id='test-channel'))
     session.reply = None
     session.send = AsyncMock(return_value=[])
@@ -199,7 +199,7 @@ asyncio.get_event_loop().run_until_complete(check_hyw_dispatch())
 async def check_grok_dispatch():
     session = object.__new__(Session)
     session.account = SimpleNamespace(platform='qq', self_id='test-bot')
-    session.event = SimpleNamespace(user=SimpleNamespace(id='test-user'), guild=None,
+    session.event = SimpleNamespace(gather=AsyncMock(return_value=None), message=None, user=SimpleNamespace(id='test-user'), guild=None,
                                     channel=SimpleNamespace(id='test-channel'))
     session.reply = None
     session.send = AsyncMock(return_value=[])
@@ -226,7 +226,7 @@ def group_session(group='100', user='test-root', bot='test-bot', private=False):
         guild_member_get=AsyncMock(return_value=SimpleNamespace(roles=[])),
         internal=AsyncMock(return_value={}),
     )
-    session.event = SimpleNamespace(
+    session.event = SimpleNamespace(gather=AsyncMock(return_value=None), message=None, 
         user=SimpleNamespace(id=user), member=SimpleNamespace(roles=[]),
         guild=None if private else SimpleNamespace(id=group),
         channel=SimpleNamespace(id=group, type=ChannelType.DIRECT if private else ChannelType.TEXT),
@@ -344,7 +344,7 @@ async def check_group_switches():
     bili = plugin_service.plugins['plugins.bilibilibot'].module
     listeners = [sub for plg in plugin_service.plugins.values()
                  if plg.path.startswith('plugins.bilibilibot')
-                 for sub, _ in plg._scope.subscribers.values()
+                 for sub in (slot.subscriber for slot in plg._scope.subscribers)
                  if sub.callable_target.__qualname__.startswith('_EventHook.')]
     assert len(listeners) == 1, listeners
     with patch.object(bili.client, 'parse_link', AsyncMock(return_value=None)) as parse_link:
@@ -451,7 +451,8 @@ from arclet.entari import MessageCreatedEvent, load_plugin
 from arclet.letoderea import publish
 from otae_bot.group_features import GroupScope
 from satori import At, Author, Channel, Event, Guild, Image, Login, MessageObject, Quote, Text, User
-load_plugin('.commands')
+# Entari 0.19: built-in niche plugins only run their body when the app starts.
+plugin_service.plugins['$.commands'].exec_apply()
 ids = count()
 hyw = plugin_service.plugins['plugins.hyw'].module
 
