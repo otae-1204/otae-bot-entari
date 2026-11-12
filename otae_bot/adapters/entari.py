@@ -149,7 +149,7 @@ class ChainMsg(MessageChain):
 
     async def send(self, dest: SendDest | None = None, bot: Account | None = None):
         if dest and bot:
-            if not allow_group_delivery(dest, bot):
+            if not dest.private and not allow_group_delivery(bot, dest.parent_id or dest.id):
                 return []
             if dest.private:
                 return await bot.protocol.send_private_message(dest.id, self)

@@ -18,6 +18,8 @@ from loguru import logger
 
 GUILD_REFRESH_SECONDS = 15 * 60
 GUILD_LIST_TIMEOUT_SECONDS = 15
+# A forced guild.list after a failed send, at most this often per account.
+GUILD_RETRY_REFRESH_SECONDS = 60
 
 _accounts: dict[str, Account] = {}
 _status: Any = None
@@ -105,7 +107,7 @@ async def refresh_guilds(account: Any = None, *, max_age: float = 0.0) -> None:
 
 def schedule_guild_refresh(account: Any) -> None:
     """Fetch the account's groups in the background, e.g. right after login."""
-    task = asyncio.get_running_loop().create_task(refresh_guilds(account, max_age=60))
+    task = asyncio.get_running_loop().create_task(refresh_guilds(account, max_age=GUILD_RETRY_REFRESH_SECONDS))
     _background.add(task)
     task.add_done_callback(_background.discard)
 

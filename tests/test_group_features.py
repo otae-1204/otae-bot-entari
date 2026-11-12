@@ -14,7 +14,8 @@ from arclet.letoderea import EVENT, STOP, Scope, Subscriber
 from satori import ChannelType, Role
 
 from otae_bot.adapters import feature_gate, framework_hooks
-from otae_bot.adapters.entari import ArgVal, ChainMsg, SendDest
+from otae_bot.adapters.entari import ArgVal, ChainMsg
+from otae_bot.delivery import Target, deliver
 from otae_bot.group_features import (
     GroupFeatureStore,
     GroupScope,
@@ -324,9 +325,10 @@ class GateTests(unittest.IsolatedAsyncioTestCase):
         results = []
 
         async def notify():
-            for dest in (SendDest("100", "100"), SendDest("101", "101"), SendDest("100", private=True)):
+            for target in (Target.group("100"), Target.group("101"), Target.private("100")):
                 # A worker inherits its plugin's subscriber context.
-                results.append(await asyncio.create_task(ChainMsg.text("test").send(dest, self.current.account)))
+                result = await asyncio.create_task(deliver(target, ChainMsg.text("test"), account=self.current.account))
+                results.append(result.messages)
 
         notify.__module__ = "plugins.hyw.handlers"
         await Subscriber(notify).handle({})
@@ -335,7 +337,8 @@ class GateTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_other_plugin_delivery_is_unaffected(self):
         async def notify():
-            return await ChainMsg.text("test").send(SendDest("100", "100"), self.current.account)
+            result = await deliver(Target.group("100"), ChainMsg.text("test"), account=self.current.account)
+            return result.messages
 
         notify.__module__ = "plugins.endfield.handlers"
         self.assertEqual(await Subscriber(notify).handle({}), ["receipt"])

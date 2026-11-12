@@ -73,13 +73,12 @@ SUPPRESSED_LOG_INTERVAL_SECONDS = 300
 _suppressed_logged: dict[tuple[str, str], float] = {}
 
 
-def allow_group_delivery(dest, account) -> bool:
-    if dest.private:
-        return True
-    name = subscriber_plugin(running_subscriber())
+def allow_group_delivery(account, group_id: str, plugin: str | None = None) -> bool:
+    """Whether ``plugin`` may post to the group; by default the running subscriber's plugin."""
     # Entari's subscriber context is inherited by background tasks, including
     # the shared scheduler's create_task/to_thread callbacks.
-    scope = group_scope(account, dest.parent_id or dest.id)
+    name = plugin if plugin is not None else subscriber_plugin(running_subscriber())
+    scope = group_scope(account, group_id)
     if feature_store.is_enabled(scope, name):
         return True
     _log_suppressed(scope, name)
