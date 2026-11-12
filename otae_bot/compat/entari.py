@@ -2,24 +2,18 @@
 
 from __future__ import annotations
 
-import asyncio
 import contextvars
 import inspect
-from collections.abc import Iterable
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
-from time import perf_counter
 from typing import Any, Callable
 
-import aiohttp
 from arclet.alconna import Alconna, Arparma, Args, Empty, MultiVar
 from arclet.entari import (
     Account,
     At,
-    Author,
     Image as _Image,
-    Message as _MessageElement,
     MessageChain,
     MessageCreatedEvent,
     Quote,
@@ -30,10 +24,7 @@ from arclet.entari import (
 )
 from arclet.entari.command import Match as CommandMatch
 from arclet.entari.event.base import NoticeEvent
-from arclet.letoderea import defer, step_out
-from loguru import logger
 from nepattern import AnyString
-from satori import ChannelType
 
 from otae_bot.accounts.ready import (  # noqa: F401 - re-exported until callers migrate
     get_bot,
@@ -48,12 +39,16 @@ from otae_bot.scheduling.jobs import (  # noqa: F401 - re-exported until callers
     close_scheduled_jobs,
     timer,
 )
+from otae_bot.messaging import prompts as _prompts
+from otae_bot.messaging.forward import make_forward  # noqa: F401 - re-exported until callers migrate
+from otae_bot.messaging.forward import send_forward as _send_forward
 from otae_bot.messaging.inbound import (  # noqa: F401 - re-exported until callers migrate
     event_chain,
     event_plain_text,
     event_user_id,
     get_channel_id,
     get_group_id,
+    get_rest,
     is_group,
 )
 
@@ -85,46 +80,6 @@ def make_image(*, path: str | Path | None = None, url: str | None = None, raw: b
 Image = make_image
 Reply = Quote
 ReplySeg = Quote
-
-
-def make_forward(
-    nodes: Iterable[Any],
-    *,
-    name: str | None = None,
-    uin: str | int | None = None,
-) -> _MessageElement:
-    """Build a Satori merged-forward element (``<message forward>``).
-
-    Each node becomes one child ``<message>``; a node may be a single element, a
-    string, or a sequence of elements.  ``name``/``uin`` are emitted as an
-    ``<author>`` inside every node.  Callers pass one author for the whole
-    forward; per-node senders are not relied on.  This is the only way plugins
-    send a merged forward; there is no protocol-specific fallback.
-    """
-    children: list[_MessageElement] = []
-    for node in nodes:
-        if isinstance(node, str):
-            content: list[Any] = [Text(node)]
-        elif isinstance(node, (list, tuple, MessageChain)):
-            content = [Text(item) if isinstance(item, str) else item for item in node]
-        else:
-            content = [node]
-        if uin:
-            content.insert(0, Author(str(uin), name or None))
-        children.append(_MessageElement(content=content))
-    return _MessageElement(forward=True, content=children)
-
-
-async def send_forward(
-    nodes: Iterable[Any],
-    *,
-    name: str | None = None,
-    uin: str | int | None = None,
-    session: Session | None = None,
-):
-    """Send one merged-forward message through the current Satori session."""
-    target = session or _current_session()
-    return await target.send(MessageChain([make_forward(nodes, name=name, uin=uin)]))
 
 
 class ChainMsg(MessageChain):
@@ -352,42 +307,16 @@ def stop_session() -> None:
     _current_session().stop()
 
 
+async def send_forward(nodes, *, name=None, uin=None, session: Session | None = None):
+    return await _send_forward(session or _current_session(), nodes, name=name, uin=uin)
+
+
 async def prompt(message: str, timeout: int = 60):
-    session = _current_session()
-    started = perf_counter()
-    try:
-        return await session.prompt(message, timeout=timeout)
-    except aiohttp.ClientConnectionError:
-        if perf_counter() - started >= 5:
-            raise
-        logger.warning("[entari] prompt message connection interrupted; retrying once")
-        await asyncio.sleep(0.25)
-        return await session.prompt(message, timeout=timeout)
+    return await _prompts.prompt(_current_session(), message, timeout)
 
 
 async def prompt_silently(message: str, timeout: int = 60):
-    session = _current_session()
-    sent_messages = await session.send(message)
-    message_ids = {
-        str(item.id)
-        for item in sent_messages or ()
-        if getattr(item, "id", None) is not None
-    }
-
-    async def waiter(content: MessageChain, candidate_session: Session):
-        quote_id = str(getattr(getattr(candidate_session.event, "quote", None), "id", "") or "")
-        if not quote_id or quote_id not in message_ids:
-            return None
-        if session.event.user and session.event.user.id == candidate_session.event.user.id:
-            if candidate_session.event.channel.type == ChannelType.DIRECT:
-                return content
-            if session.event.channel and candidate_session.event.channel.id == session.event.channel.id:
-                return content
-
-    waiter.__annotations__ = {"content": MessageChain, "candidate_session": Session}
-    step = step_out(MessageCreatedEvent, waiter, block=False, priority=15)
-    defer(step.dispose)
-    return await step.wait(timeout=timeout)
+    return await _prompts.prompt_silently(_current_session(), message, timeout)
 
 
 def cmd(name: str, aliases: set[str] | None = None, **kwargs):
@@ -402,15 +331,6 @@ def cmd_with_args(name: str, args: Args, aliases: set[str] | None = None, **kwar
     if aliases:
         names.extend(str(alias).lstrip("/") for alias in aliases)
     return on_alconna(Alconna(names, args), **kwargs)
-
-
-def get_rest(rest_match: Match | Any) -> str:
-    if not getattr(rest_match, "available", False):
-        return ""
-    val = getattr(rest_match, "result", "")
-    if isinstance(val, tuple):
-        return " ".join(str(item) for item in val).strip()
-    return str(val).strip() if val is not None else ""
 
 
 def image_from_path(path: str | Path):

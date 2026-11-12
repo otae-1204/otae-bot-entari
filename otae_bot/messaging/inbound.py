@@ -50,3 +50,13 @@ def event_plain_text(event: Any) -> str:
     if text_parts:
         return "".join(text_parts)
     return str(getattr(event, "content", "") or "")
+
+
+def get_rest(rest_match: Any) -> str:
+    """The free-text ``rest`` argument of a command (a ``Match``) as one stripped string."""
+    if not getattr(rest_match, "available", False):
+        return ""
+    val = getattr(rest_match, "result", "")
+    if isinstance(val, tuple):
+        return " ".join(str(item) for item in val).strip()
+    return str(val).strip() if val is not None else ""

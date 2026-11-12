@@ -304,9 +304,7 @@ class CoreLogicTests(unittest.TestCase):
         self.assertEqual(group_session.sent, ["group reply"])
 
     def test_entari_prompt_retries_early_connection_disconnect_once(self):
-        entari_native = _load_module(
-            "entari_native_prompt_retry_for_test", "otae_bot/compat/entari.py"
-        )
+        prompts = _load_module("messaging_prompts_retry_for_test", "otae_bot/messaging/prompts.py")
 
         class FakeSession:
             def __init__(self):
@@ -315,17 +313,13 @@ class CoreLogicTests(unittest.TestCase):
             async def prompt(self, message, timeout):
                 self.calls += 1
                 if self.calls == 1:
-                    raise entari_native.aiohttp.ServerDisconnectedError()
+                    raise prompts.aiohttp.ServerDisconnectedError()
                 return f"{message}:{timeout}"
 
         async def exercise():
             session = FakeSession()
-            token = entari_native._CURRENT_SESSION.set(session)
-            try:
-                with patch.object(entari_native.asyncio, "sleep", return_value=None) as sleep:
-                    result = await entari_native.prompt("验证码已发送", timeout=120)
-            finally:
-                entari_native._CURRENT_SESSION.reset(token)
+            with patch.object(prompts.asyncio, "sleep", return_value=None) as sleep:
+                result = await prompts.prompt(session, "验证码已发送", timeout=120)
             return session, sleep, result
 
         session, sleep, result = asyncio.run(exercise())
@@ -335,15 +329,14 @@ class CoreLogicTests(unittest.TestCase):
         sleep.assert_awaited_once_with(0.25)
 
     def test_entari_silent_prompt_does_not_send_timeout_message(self):
-        entari_native = _load_module(
-            "entari_native_silent_prompt_for_test", "otae_bot/compat/entari.py"
-        )
+        prompts = _load_module("messaging_prompts_silent_for_test", "otae_bot/messaging/prompts.py")
+        from satori import Quote
 
         class FakeSession:
             def __init__(self):
                 self.event = types.SimpleNamespace(
                     user=types.SimpleNamespace(id="user"),
-                    channel=types.SimpleNamespace(id="private", type=entari_native.ChannelType.DIRECT),
+                    channel=types.SimpleNamespace(id="private", type=prompts.ChannelType.DIRECT),
                 )
                 self.sent = []
 
@@ -359,21 +352,21 @@ class CoreLogicTests(unittest.TestCase):
 
             async def wait(self, timeout):
                 self.timeout = timeout
-                content = entari_native.MessageChain("2")
+                content = prompts.MessageChain("2")
                 non_reply = types.SimpleNamespace(event=types.SimpleNamespace(
                     user=types.SimpleNamespace(id="user"),
-                    channel=types.SimpleNamespace(id="private", type=entari_native.ChannelType.DIRECT),
+                    channel=types.SimpleNamespace(id="private", type=prompts.ChannelType.DIRECT),
                     quote=None,
                 ))
                 wrong_reply = types.SimpleNamespace(event=types.SimpleNamespace(
                     user=types.SimpleNamespace(id="user"),
-                    channel=types.SimpleNamespace(id="private", type=entari_native.ChannelType.DIRECT),
-                    quote=entari_native.Quote("other-message"),
+                    channel=types.SimpleNamespace(id="private", type=prompts.ChannelType.DIRECT),
+                    quote=Quote("other-message"),
                 ))
                 correct_reply = types.SimpleNamespace(event=types.SimpleNamespace(
                     user=types.SimpleNamespace(id="user"),
-                    channel=types.SimpleNamespace(id="private", type=entari_native.ChannelType.DIRECT),
-                    quote=entari_native.Quote("candidate-message"),
+                    channel=types.SimpleNamespace(id="private", type=prompts.ChannelType.DIRECT),
+                    quote=Quote("candidate-message"),
                 ))
                 self.non_reply_result = await self.handler(content, non_reply)
                 self.wrong_reply_result = await self.handler(content, wrong_reply)
@@ -391,14 +384,10 @@ class CoreLogicTests(unittest.TestCase):
                 captured["step"] = FakeStep(handler, block)
                 return captured["step"]
 
-            token = entari_native._CURRENT_SESSION.set(session)
-            try:
-                with patch.object(entari_native, "step_out", side_effect=fake_step_out), patch.object(
-                    entari_native, "defer", side_effect=lambda callback: callback
-                ):
-                    result = await entari_native.prompt_silently("候选列表", timeout=60)
-            finally:
-                entari_native._CURRENT_SESSION.reset(token)
+            with patch.object(prompts, "step_out", side_effect=fake_step_out), patch.object(
+                prompts, "defer", side_effect=lambda callback: callback
+            ):
+                result = await prompts.prompt_silently(session, "候选列表", timeout=60)
             return session, captured["step"], result
 
         session, step, result = asyncio.run(exercise())
