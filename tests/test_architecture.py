@@ -358,7 +358,7 @@ async def check_group_switches():
     listeners = [sub for plg in plugin_service.plugins.values()
                  if plg.path.startswith('plugins.bilibilibot')
                  for sub in (slot.subscriber for slot in plg._scope.subscribers)
-                 if sub.callable_target.__qualname__.startswith('_EventHook.')]
+                 if sub.callable_target.__qualname__ == 'handle_link_preview']
     assert len(listeners) == 1, listeners
     with patch.object(bili.client, 'parse_link', AsyncMock(return_value=None)) as parse_link:
         await run_command(current, '/功能 关闭 bili')

@@ -22,6 +22,7 @@ from types import SimpleNamespace
 from typing import Awaitable, Callable
 
 import pytest
+from arclet.entari import Image as EntariImage
 from PIL import Image
 
 from otae_bot.delivery import FAILED, SENT, DeliveryResult
@@ -58,7 +59,7 @@ class FakeCards:
 
     def image(self, card: BiliCard) -> str:
         """The exact message text the adapter receives for this card."""
-        return str(handlers.make_image(raw=self.png(card)))
+        return str(EntariImage.of(raw=self.png(card)))
 
 
 @pytest.fixture

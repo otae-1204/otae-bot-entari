@@ -1,20 +1,15 @@
 from __future__ import annotations
 
 from arclet.alconna import Alconna, Args, MultiVar
-from arclet.entari import Cleanup, listen
+from arclet.entari import Cleanup, Image, MessageChain, MessageCreatedEvent, Session, Text, command, listen
+from arclet.entari.command import Match
 from nepattern import AnyString
 from otae_bot.accounts import runtime
-from otae_bot.compat.entari import close_scheduled_jobs, listen_message, on_ready, get_plaintext
+from otae_bot.accounts.ready import get_bot, on_ready
+from otae_bot.messaging.inbound import event_plain_text
+from otae_bot.scheduling.jobs import close_scheduled_jobs, timer
 from arclet.entari import Account as Bot, Event
 from loguru import logger
-from otae_bot.compat.entari import Pred
-from otae_bot.compat.entari import (
-    ArgVal,
-    ChainMsg,
-    get_bot,
-    make_image,
-    on_alconna,
-)
 from otae_bot.delivery import FAILED, Target, deliver
 
 from plugins.bilibilibot.api import BiliApi
@@ -95,7 +90,7 @@ async def _send(row, png: bytes) -> None:
     rejected, last_error = [], None
     for sender in senders:
         # Bytes go straight to the adapter: no temporary file to clean up.
-        result = await deliver(target, ChainMsg([make_image(raw=png)]), account=sender)
+        result = await deliver(target, MessageChain([Image.of(raw=png)]), account=sender)
         if result.status == FAILED:
             if target.is_private or not result.not_in_group:
                 result.raise_for_failure()
@@ -108,7 +103,7 @@ async def _send(row, png: bytes) -> None:
             continue
         if card.card_type == "live_on" and card.url.strip():
             # Keep the image and the clickable link together, from the same account.
-            (await deliver(target, ChainMsg.text(card.url.strip()), account=sender)).raise_for_failure()
+            (await deliver(target, MessageChain([Text(card.url.strip())]), account=sender)).raise_for_failure()
         break
     if last_error is not None and len(rejected) == len(senders):
         logger.error(
@@ -141,7 +136,7 @@ def _subscriber(event: Event) -> tuple[str, str]:
     return "user", str(getattr(getattr(event, "user", None), "id", ""))
 
 
-def _rest(match: ArgVal) -> str:
+def _rest(match: Match) -> str:
     if not match.available:
         return ""
     val = match.result
@@ -154,7 +149,7 @@ def _parse_args(rest: str) -> list[str]:
     return [part for part in rest.split() if part]
 
 
-async def _handle_result(title: str, ok: list[str], failed: list[str]):
+async def _handle_result(session: Session, title: str, ok: list[str], failed: list[str]):
     lines = [title]
     if ok:
         lines.append("成功:")
@@ -162,21 +157,18 @@ async def _handle_result(title: str, ok: list[str], failed: list[str]):
     if failed:
         lines.append("失败:")
         lines.extend(f"- {item}" for item in failed)
-    await ChainMsg.text("\n".join(lines)).finish()
+    await session.send(MessageChain([Text("\n".join(lines))]))
 
 
-bili_cmd = on_alconna(
-    Alconna(["bili"], Args["rest;?", MultiVar(AnyString)]),
-    priority=5,
-    block=True,
-)
+bili_cmd = Alconna(["bili"], Args["rest;?", MultiVar(AnyString)])
 
 
-@bili_cmd.handle()
-async def handle_bili(event: Event, rest: ArgVal):
+@command.on(bili_cmd)
+async def handle_bili(session: Session, rest: Match[tuple[str, ...]]):
+    event = session.event
     parts = _parse_args(_rest(rest))
     if not parts or parts[0] == "help":
-        await bili_cmd.finish(
+        await session.send(
             "B站订阅指令指南：\n"
             "/bili follow <all|live|video|dynamic> <UID> [更多UID] - 关注 UP 主\n"
             "/bili follow <all|live> room:<直播间号> - 关注直播间（亦可直接发送直播间链接）\n"
@@ -186,57 +178,65 @@ async def handle_bili(event: Event, rest: ArgVal):
             "注：输入纯数字默认按 UID 识别；若针对直播间号请加上 room: 前缀。\n"
             "注：动态订阅默认跳过抽奖发起与开奖结算；用 entari.yml 的 plugins.bilibilibot.lottery_filter_uids 可收窄或关闭。"
         )
+        return
 
     action = parts[0].lower()
     subscriber_type, subscriber_id = _subscriber(event)
 
     if action in {"follow", "unfollow", "refresh"}:
         if len(parts) < 3:
-            await bili_cmd.finish("参数不足：格式为 /bili <follow|unfollow|refresh> <类型> <目标>")
+            await session.send("参数不足：格式为 /bili <follow|unfollow|refresh> <类型> <目标>")
+            return
         kind_arg = parts[1]
         values = parts[2:]
         try:
             expand_kinds(kind_arg)
         except ValueError:
-            await bili_cmd.finish("订阅类型错误：仅支持 all、live、video 或 dynamic。")
+            await session.send("订阅类型错误：仅支持 all、live、video 或 dynamic。")
+            return
         if action == "follow":
             ok, failed = await service.follow(kind_arg, values, subscriber_type, subscriber_id)
-            await _handle_result("B站关注处理结果：", ok, failed)
+            await _handle_result(session, "B站关注处理结果：", ok, failed)
+            return
         if action == "unfollow":
             ok, failed = await service.unfollow(kind_arg, values, subscriber_type, subscriber_id)
-            await _handle_result("B站取消关注处理结果：", ok, failed)
+            await _handle_result(session, "B站取消关注处理结果：", ok, failed)
+            return
         ok, failed = await service.refresh(kind_arg, values)
-        await _handle_result("B站信息刷新结果：", ok, failed)
+        await _handle_result(session, "B站信息刷新结果：", ok, failed)
+        return
 
     if action == "list":
         kind_arg = parts[1] if len(parts) > 1 else None
         try:
             lines = await service.list_subscriptions(subscriber_type, subscriber_id, kind_arg)
         except ValueError:
-            await bili_cmd.finish("订阅类型错误：仅支持 all、live、video 或 dynamic。")
-        await bili_cmd.finish("\n".join(lines))
+            await session.send("订阅类型错误：仅支持 all、live、video 或 dynamic。")
+            return
+        await session.send("\n".join(lines))
+        return
 
-    await bili_cmd.finish("未知子命令：请发送 /bili help 获取完整使用指南。")
+    await session.send("未知子命令：请发送 /bili help 获取完整使用指南。")
 
 
 async def _has_bili_link(event: Event) -> bool:
-    text = get_plaintext(event).strip()
+    text = event_plain_text(event).strip()
     if not text or text.startswith("/"):
         return False
     return ("bilibili.com" in text or "b23.tv" in text or "BV" in text)
 
 
-link_preview = listen_message(rule=Pred(_has_bili_link), priority=20, block=False)
-
-
-@link_preview.handle()
-async def handle_link_preview(bot: Bot, event: Event):
-    text = get_plaintext(event)
+@listen(MessageCreatedEvent)
+async def handle_link_preview(session: Session):
+    event = session.event
+    if not await _has_bili_link(event):
+        return
+    text = event_plain_text(event)
     try:
         card = await service.preview_link(text)
         if card is None:
             return
-        await ChainMsg([await service.card_to_segment(card)]).send()
+        await session.send(MessageChain([await service.card_to_segment(card)]))
     except Exception as exc:
         logger.debug(f"[bilibilibot] link preview skipped: {exc}")
 
@@ -258,8 +258,6 @@ async def _startup():
 
 
 on_ready(_startup)
-
-from otae_bot.compat.entari import timer
 
 
 timer.add_job(poller.tick_live, "interval", minutes=1, id="bili_live_check", replace_existing=True, misfire_grace_time=90)
