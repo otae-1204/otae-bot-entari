@@ -103,7 +103,7 @@ def _size(value: float) -> str:
 
 def _version() -> str:
     try:
-        from plugins.changelog.models import load_changelog
+        from otae_bot.infrastructure.changelog import load_changelog
 
         return load_changelog().latest.version
     except Exception:  # noqa: BLE001 - 版本号只是展示

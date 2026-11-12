@@ -1,6 +1,6 @@
 """更新日志的只读数据模型与加载校验。
 
-数据来自同目录的 ``changelog.json``：按版本号聚合的更新批次，每条更新都带上
+数据来自 ``plugins/changelog/changelog.json``：按版本号聚合的更新批次，每条更新都带上
 它对应的提交与提交日期。这里**不出网、不读环境变量、不注册任何事件**，只做
 解析与校验（框架 §2.1：业务模型与纯转换函数不注册事件、不实例化机器人）。
 
@@ -8,6 +8,9 @@
 区间。覆盖保证由 ``scripts/generate_changelog.py --check`` 在仓库侧强制：
 每个非 merge 提交恰好出现在一个版本的一条更新里。本模块负责另一半——数据
 本身自洽，坏数据要显式报错而不是静默降级成空列表。
+
+放在 ``otae_bot`` 下而不在插件里，是因为更新日志插件和状态插件（取当前版本号）
+都要用，插件之间不能互相 import。
 """
 
 from __future__ import annotations
@@ -17,7 +20,9 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-DATA_FILE = Path(__file__).parent / "changelog.json"
+from otae_bot.config.root import PROJECT_ROOT
+
+DATA_FILE = PROJECT_ROOT / "plugins" / "changelog" / "changelog.json"
 
 #: 更新类型 → 中文标签。顺序即卡片里的展示顺序。
 KIND_LABELS: dict[str, str] = {

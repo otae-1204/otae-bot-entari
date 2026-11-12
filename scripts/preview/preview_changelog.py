@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from plugins.changelog import presentation as views
-from plugins.changelog.models import load_changelog
+from otae_bot.infrastructure.changelog import load_changelog
 from plugins.changelog.presentation import ChangelogPage
 from plugins.changelog.rendering import render_page
 

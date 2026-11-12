@@ -5,7 +5,8 @@
 
 分层（框架 §2.1）：
 
-- ``models.py``：只读数据模型与加载校验，不出网、不读环境变量、不注册事件；
+- ``otae_bot/infrastructure/changelog.py``：只读数据模型与加载校验，不出网、不读环境变量、
+  不注册事件（与 status 插件共用，故放在 ``otae_bot`` 下）；
 - ``formatters.py``：纯文本渲染，图片不可用时的降级通道；
 - ``presentation.py``：只读数据 → 已转义的结构化卡片视图；
 - ``rendering.py`` / ``assets/card.css``：离线 HTML/CSS → PNG；

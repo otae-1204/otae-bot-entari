@@ -14,7 +14,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from html import escape
 
-from .models import KIND_LABELS, KIND_ORDER, Changelog, Release
+from otae_bot.infrastructure.changelog import KIND_LABELS, KIND_ORDER, Changelog, Release
 
 
 @dataclass(frozen=True)

@@ -3,7 +3,7 @@
 职责边界与 ``plugins/radar/handlers.py`` 一致——这里只做四件事：
 
 1. 解析参数（子命令 → 数据查询）；
-2. 从 ``models.load_changelog()`` 取数据（本地 JSON，无网络）；
+2. 从 ``otae_bot.infrastructure.changelog.load_changelog()`` 取数据（本地 JSON，无网络）；
 3. 调 ``formatters`` / ``presentation``；
 4. 发送图片卡片，渲染或图片发送失败时回退到分段文本。
 
@@ -19,9 +19,9 @@ from arclet.entari import Session
 from loguru import logger
 
 from otae_bot.compat.entari import ArgVal, Image, cmd as _cmd, get_rest, send
+from otae_bot.infrastructure.changelog import Changelog, ChangelogDataError, Release, load_changelog
 
 from . import formatters, presentation as views
-from .models import Changelog, ChangelogDataError, Release, load_changelog
 from .rendering import render_page
 
 #: 单段回复上限（与 radar / hyw 一致）。

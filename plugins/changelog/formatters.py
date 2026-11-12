@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from .models import KIND_LABELS, KIND_ORDER, Changelog, Release
+from otae_bot.infrastructure.changelog import KIND_LABELS, KIND_ORDER, Changelog, Release
 
 #: 脚注里回显数据边界，避免用户以为日志比实际更新。
 FOOTNOTE = "版本号按时间段划定；每条更新都对应仓库里的真实提交，合并提交不计入。"

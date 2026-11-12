@@ -1,4 +1,3 @@
 [
-{"rule": "framework-private", "file": "otae_bot/pipeline/framework_hooks.py", "snippet": "from arclet.letoderea.scope import global_propagators", "count": 1},
-{"rule": "plugin-cross-import", "file": "plugins/status/collect.py", "snippet": "from plugins.changelog.models import load_changelog", "count": 1}
+{"rule": "framework-private", "file": "otae_bot/pipeline/framework_hooks.py", "snippet": "from arclet.letoderea.scope import global_propagators", "count": 1}
 ]

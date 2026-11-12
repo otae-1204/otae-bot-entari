@@ -2,7 +2,7 @@
 
 分三层守：
 1. 数据与仓库 git 历史严格对齐（不重不漏），直接调用校验脚本；
-2. 纯函数层（models / formatters / presentation）在内存数据上断言行为；
+2. 纯函数层（otae_bot.infrastructure.changelog / formatters / presentation）在内存数据上断言行为；
 3. 投递与渲染：断言「先渲染完再发」、失败回退完整文本、取消不发回退，
    并用项目共享浏览器真渲染一次，确认卡片宽度与 PNG 格式。
 """
@@ -19,17 +19,17 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from otae_bot.infrastructure.rendering import art_card, art_frame
-from plugins.changelog import formatters
-from plugins.changelog import handlers as changelog_handlers
-from plugins.changelog import presentation as views
-from plugins.changelog import rendering as changelog_rendering
-from plugins.changelog.models import (
+from otae_bot.infrastructure.changelog import (
     KIND_LABELS,
     ChangelogDataError,
     load_changelog,
     parse_changelog,
 )
+from otae_bot.infrastructure.rendering import art_card, art_frame
+from plugins.changelog import formatters
+from plugins.changelog import handlers as changelog_handlers
+from plugins.changelog import presentation as views
+from plugins.changelog import rendering as changelog_rendering
 from plugins.changelog.rendering import CARD_WIDTH, DEVICE_SCALE_FACTOR, page_html
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -73,7 +73,7 @@ class DataIntegrityTests(unittest.TestCase):
         releases = self.changelog.releases
         ends = [release.end_date for release in releases]
         self.assertEqual(ends, sorted(ends, reverse=True))
-        # Same-day windows may touch (v1.14.0 / v1.15.0); models.parse_changelog allows it.
+        # Same-day windows may touch (v1.14.0 / v1.15.0); parse_changelog allows it.
         for newer, older in zip(releases, releases[1:]):
             self.assertGreaterEqual(newer.start_date, older.end_date)
         versions = [release.version for release in releases]
