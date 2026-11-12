@@ -5,7 +5,6 @@ from __future__ import annotations
 import base64
 import importlib
 import importlib.util
-import os
 import re
 import sys
 import types
@@ -18,9 +17,15 @@ from unittest import mock
 
 from PIL import Image
 
+from otae_bot.config import settings
+
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = "endfield_gacha_layout_for_test"
+
+
+def _endfield(**values):
+    return settings.override({"plugins": {"plugins.endfield": values}})
 
 
 def _load(name: str, relative_path: str):
@@ -178,11 +183,11 @@ class GachaColumnLayoutTests(unittest.TestCase):
         self.assertEqual(keys[1], [["special_a"]])
         self.assertEqual(set(keys[2][0]), {"weponbox_a", "rerun_wpn_a", "weaponbox_constant_a", "odd"})
 
-    def test_rerun_side_comes_from_env_and_defaults_to_right(self):
+    def test_rerun_side_comes_from_settings_and_defaults_to_right(self):
         view = _view(self.ALL_KINDS)
         cases = {"": "special", "right": "special", " LEFT ": "rerun", "middle": "special"}
         for raw, first in cases.items():
-            with self.subTest(raw=raw), mock.patch.dict(os.environ, {draw.GACHA_RERUN_SIDE_ENV: raw}):
+            with self.subTest(raw=raw), _endfield(gacha_rerun_side=raw):
                 self.assertEqual(draw.build_gacha_columns(view)[0].spec.key, first)
         self.assertEqual(draw.GACHA_RERUN_SIDE_DEFAULT, "right")
         with self.assertRaises(ValueError):
@@ -736,7 +741,7 @@ class GachaRenderTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("width:var(--gacha-width)", draw.GACHA_CSS)
         expected = {"right": ["special", "weapon", "rerun"], "left": ["rerun", "special", "weapon"]}
         for side, order in expected.items():
-            with self.subTest(side=side), mock.patch.dict(os.environ, {draw.GACHA_RERUN_SIDE_ENV: side}):
+            with self.subTest(side=side), _endfield(gacha_rerun_side=side):
                 pages, documents, evaluate, _ = await self._render(view)
                 self.assertGreater(len(pages), 1)
                 self.assertEqual(evaluate.await_args.kwargs["viewport"][0], draw.GACHA_CARD_WIDTH)
@@ -755,7 +760,7 @@ class GachaRenderTests(unittest.IsolatedAsyncioTestCase):
             _pool("weponbox_a#0", "限时", "weapon_limited", item_type="武器", sixes=1),
         ])
         for side in draw.GACHA_RERUN_SIDES:
-            with self.subTest(side=side), mock.patch.dict(os.environ, {draw.GACHA_RERUN_SIDE_ENV: side}):
+            with self.subTest(side=side), _endfield(gacha_rerun_side=side):
                 pages, documents, _, _ = await self._render(view)
                 self.assertEqual(len(pages), 1)
                 document = documents[0]
@@ -809,9 +814,9 @@ class GachaRenderTests(unittest.IsolatedAsyncioTestCase):
         v3 = mock.AsyncMock(return_value=(b"v3",))
         with mock.patch.object(cards_module, "_draw_gacha_analysis_cards_v1", v1), \
                 mock.patch.object(draw, "draw_gacha_analysis_cards", v3):
-            with mock.patch.dict(os.environ, {"ENDFIELD_GACHA_LAYOUT": "v1"}):
+            with _endfield(gacha_layout="v1"):
                 self.assertEqual(await cards_module.draw_gacha_analysis_cards(view, uid="u"), (b"v1",))
-            with mock.patch.dict(os.environ, {"ENDFIELD_GACHA_LAYOUT": ""}):
+            with _endfield(gacha_layout=""):
                 self.assertEqual(await cards_module.draw_gacha_analysis_cards(view, uid="u"), (b"v3",))
 
     async def test_real_browser_page_is_card_width_wide_and_within_limit(self):

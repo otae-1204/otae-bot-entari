@@ -26,7 +26,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PLUGIN_DIR = ROOT / "plugins" / "endfield"
 sys.path.insert(0, str(ROOT))
 
-import otae_bot.config.settings  # noqa: E402,F401  导入即把 .env 载入 os.environ
+from otae_bot.config.settings import ConfigFileMissing, load_config  # noqa: E402
 
 # 以合成包加载插件模块，避免执行 plugins/endfield/handlers.py（会拉起整个 bot 依赖）。
 _PACKAGE = "endfield_export_runtime"
@@ -223,9 +223,14 @@ async def run(args: argparse.Namespace) -> int:
         print(f"数据库不存在：{args.db}", file=sys.stderr)
         return 2
     try:
-        cipher = CredentialCipher.from_env()
+        load_config()  # entari.yml + .env of the working directory
+    except ConfigFileMissing:
+        print("找不到 entari.yml：请在仓库根目录运行。", file=sys.stderr)
+        return 2
+    try:
+        cipher = CredentialCipher.from_settings()
     except CredentialKeyError as exc:
-        print(f"{exc}（请在 .env 配置 ENDFIELD_CREDENTIAL_KEY）", file=sys.stderr)
+        print(f"{exc}（.env 填 ENDFIELD_CREDENTIAL_KEY，entari.yml 的 plugins.endfield.credential_key 引用它）", file=sys.stderr)
         return 2
 
     store = EndfieldStore(args.db)

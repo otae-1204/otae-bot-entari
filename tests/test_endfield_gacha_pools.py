@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import os
 import sys
+import types
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
+
+from otae_bot.config import settings
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,9 +19,15 @@ FIXTURE = ROOT / "tests" / "fixtures" / "endfield_gacha_pool_tables.json"
 
 
 def _load_pools():
-    name = "endfield_gacha_pools_for_test"
+    package = "endfield_gacha_pools_for_test"
+    name = f"{package}.gacha.pools"
     if name in sys.modules:
         return sys.modules[name]
+    if package not in sys.modules:
+        root = types.ModuleType(package)
+        root.__path__ = [str(ROOT / "plugins/endfield")]
+        sys.modules[package] = root
+    importlib.import_module(f"{package}.gacha")
     spec = importlib.util.spec_from_file_location(name, ROOT / "plugins/endfield/gacha/pools.py")
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
@@ -229,17 +237,12 @@ class PoolKindRegistryTests(unittest.TestCase):
         self.assertEqual(pools.kind_from_stream_key(""), (None, ""))
 
     def test_show_standard_pools_flag_defaults_to_true(self):
-        with mock.patch.dict(os.environ, {}, clear=False):
-            for key in pools.SHOW_STANDARD_ENV_KEYS:
-                os.environ.pop(key, None)
+        with settings.override({}):
             self.assertTrue(pools.show_standard_pools())
-        with mock.patch.dict(os.environ, {"ENDFIELD_GACHA_SHOW_STANDARD": "0"}):
-            self.assertFalse(pools.show_standard_pools())
-        with mock.patch.dict(os.environ, {"GACHA_SHOW_STANDARD": "false"}):
-            os.environ.pop("ENDFIELD_GACHA_SHOW_STANDARD", None)
-            self.assertFalse(pools.show_standard_pools())
-        with mock.patch.dict(os.environ, {"ENDFIELD_GACHA_SHOW_STANDARD": "1"}):
-            self.assertTrue(pools.show_standard_pools())
+        for raw, expected in (("0", False), ("false", False), (False, False), ("1", True), (True, True)):
+            with self.subTest(raw=raw), settings.override(
+                    {"plugins": {"plugins.endfield": {"gacha_show_standard": raw}}}):
+                self.assertEqual(pools.show_standard_pools(), expected)
 
 
 if __name__ == "__main__":

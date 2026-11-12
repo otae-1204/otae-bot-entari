@@ -618,7 +618,7 @@ class EndfieldAccountDetailRoutingTests(unittest.IsolatedAsyncioTestCase):
         return (
             mock.patch.object(endfield, "account_store", store),
             mock.patch.object(endfield, "is_group", return_value=group),
-            mock.patch.object(endfield.CredentialCipher, "from_env", return_value=mock.Mock()),
+            mock.patch.object(endfield.CredentialCipher, "from_settings", return_value=mock.Mock()),
             mock.patch.object(
                 endfield.official_client, "card_detail", mock.AsyncMock(return_value={"base": {"name": "甲"}})
             ),

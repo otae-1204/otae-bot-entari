@@ -6,8 +6,10 @@ from dataclasses import dataclass
 
 from Crypto.Cipher import AES
 
+from ..config import endfield_settings
 
-KEY_ENV_NAME = "ENDFIELD_CREDENTIAL_KEY"
+
+KEY_ENV_NAME = "ENDFIELD_CREDENTIAL_KEY"  # the .env name entari.yml references
 
 
 class CredentialKeyError(ValueError):
@@ -28,10 +30,10 @@ class CredentialCipher:
         self._key = bytes(key)
 
     @classmethod
-    def from_env(cls) -> "CredentialCipher":
-        value = os.getenv(KEY_ENV_NAME, "").strip()
+    def from_settings(cls) -> "CredentialCipher":
+        value = endfield_settings().credential_key.strip()
         if not value:
-            raise CredentialKeyError("未配置环境变量 ENDFIELD_CREDENTIAL_KEY，终末地账号绑定功能暂未开放。")
+            raise CredentialKeyError("未配置凭据密钥 ENDFIELD_CREDENTIAL_KEY（plugins.endfield.credential_key），终末地账号绑定功能暂未开放。")
         try:
             key = base64.b64decode(value, validate=True)
         except (ValueError, TypeError) as exc:

@@ -36,6 +36,7 @@ from plugins.endfield.account.challenge.draw import (
 )
 from plugins.endfield.account.client import EndfieldOfficialClient
 from plugins.endfield.account.challenge.i18n import build_challenge_locale
+from otae_bot.config import settings
 from otae_bot.infrastructure.http.client import HttpResource
 
 
@@ -669,7 +670,7 @@ class EndfieldChallengeTests(unittest.TestCase):
                         commands.parse_command("回响 野性旧 残酷"),
                         bot=SimpleNamespace(self_id="10000"),
                     )
-            cipher.from_env.assert_called_once_with()
+            cipher.from_settings.assert_called_once_with()
             matcher.finish.assert_awaited_once()
             message = matcher.finish.await_args.args[0]
             self.assertIn("“野性旧”", message)
@@ -1116,17 +1117,18 @@ class EndfieldGachaDeliveryTests(unittest.TestCase):
     BOT = SimpleNamespace(self_id="10001")
     EVENT = SimpleNamespace()
 
-    def _run(self, pngs, *, satori=None, send=None, env=None, max_nodes=None):
+    def _run(self, pngs, *, satori=None, send=None, forward_above=None, max_nodes=None):
         import plugins.endfield.handlers as handlers
 
         matcher = SimpleNamespace(finish=AsyncMock(), send=send or AsyncMock())
         satori = satori or AsyncMock()
         finish_pngs = AsyncMock()
-        environ = {"ENDFIELD_GACHA_FORWARD_ABOVE": ""} | (env or {})
+        endfield = {} if forward_above is None else {"gacha_forward_above": forward_above}
 
         async def run():
             with (
-                patch.dict("os.environ", environ),
+                settings.override({"plugins": {"plugins.endfield": endfield}}),
+                patch("otae_bot.config.model.logger"),
                 patch.object(handlers, "send_forward", satori),
                 patch.object(handlers, "_finish_pngs", finish_pngs),
                 patch.object(handlers, "_png_image", lambda png: handlers.make_image(url=f"file:///tmp/{png.decode()}.png")),
@@ -1184,14 +1186,14 @@ class EndfieldGachaDeliveryTests(unittest.TestCase):
         with self.assertRaises(type(STOP)):
             self._run(self._pages(4), satori=AsyncMock(side_effect=STOP))
 
-    def test_environment_switch(self):
-        _, satori, finish_pngs = self._run(self._pages(10), env={"ENDFIELD_GACHA_FORWARD_ABOVE": "0"})
+    def test_setting_switch(self):
+        _, satori, finish_pngs = self._run(self._pages(10), forward_above=0)
         finish_pngs.assert_awaited_once()
         satori.assert_not_awaited()
-        _, satori, finish_pngs = self._run(self._pages(5), env={"ENDFIELD_GACHA_FORWARD_ABOVE": "5"})
+        _, satori, finish_pngs = self._run(self._pages(5), forward_above="5")
         finish_pngs.assert_awaited_once()
         satori.assert_not_awaited()
-        _, satori, finish_pngs = self._run(self._pages(4), env={"ENDFIELD_GACHA_FORWARD_ABOVE": "abc"})
+        _, satori, finish_pngs = self._run(self._pages(4), forward_above="abc")
         finish_pngs.assert_not_awaited()
         satori.assert_awaited_once()
 

@@ -699,7 +699,7 @@ class CrossGameCommandTests(unittest.IsolatedAsyncioTestCase):
                 return arknights_client.AttendanceResult("success", "签到成功", ())
 
         client = _Client()
-        stub = type("_Cipher", (), {"from_env": classmethod(lambda cls: cipher)})
+        stub = type("_Cipher", (), {"from_settings": classmethod(lambda cls: cipher)})
         stack = contextlib.ExitStack()
         stack.enter_context(mock.patch.object(self.arknights, "_store_instance", lambda: store))
         stack.enter_context(
@@ -797,7 +797,7 @@ class CrossGameCommandTests(unittest.IsolatedAsyncioTestCase):
         endfield_client = mock.Mock(
             attendance=mock.AsyncMock(return_value=self.endfield_result("already", "今日已签到"))
         )
-        stub = type("_Cipher", (), {"from_env": classmethod(lambda cls: object())})
+        stub = type("_Cipher", (), {"from_settings": classmethod(lambda cls: object())})
         stack, client = self._arknights_runtime(card=_test_png("red"))
         with (
             stack,
@@ -834,7 +834,7 @@ class CrossGameCommandTests(unittest.IsolatedAsyncioTestCase):
 
         result = self.endfield_result("success", "签到成功", (), 3)
         client = mock.Mock(attendance=mock.AsyncMock(return_value=result))
-        stub = type("_Cipher", (), {"from_env": classmethod(lambda cls: object())})
+        stub = type("_Cipher", (), {"from_settings": classmethod(lambda cls: object())})
         stack = contextlib.ExitStack()
         stack.enter_context(mock.patch.object(self.endfield, "account_store", _Store()))
         stack.enter_context(mock.patch.object(self.endfield, "official_client", client))
@@ -963,7 +963,7 @@ class GameCapabilityWiringTests(unittest.IsolatedAsyncioTestCase):
                 return arknights_client.AttendanceResult("already", "今日已签到", ())
 
         client = _Client()
-        stub = type("_Cipher", (), {"from_env": classmethod(lambda cls: cipher)})
+        stub = type("_Cipher", (), {"from_settings": classmethod(lambda cls: cipher)})
         with (
             mock.patch.object(self.arknights, "_store_instance", lambda: store),
             mock.patch.object(self.arknights, "_client_instance", mock.AsyncMock(return_value=client)),
@@ -1008,7 +1008,7 @@ class GameCapabilityWiringTests(unittest.IsolatedAsyncioTestCase):
                 return arknights_client.AttendanceResult("success", "签到成功", ())
 
         client = _Client()
-        stub = type("_Cipher", (), {"from_env": classmethod(lambda cls: cipher)})
+        stub = type("_Cipher", (), {"from_settings": classmethod(lambda cls: cipher)})
         with (
             mock.patch.object(self.arknights, "_store_instance", lambda: store),
             mock.patch.object(self.arknights, "_client_instance", mock.AsyncMock(return_value=client)),
@@ -1052,7 +1052,7 @@ class GameCapabilityWiringTests(unittest.IsolatedAsyncioTestCase):
                 return AttendanceResult("success", "签到成功", (), 2)
 
         client = _Client()
-        stub = type("_Cipher", (), {"from_env": classmethod(lambda cls: object())})
+        stub = type("_Cipher", (), {"from_settings": classmethod(lambda cls: object())})
         with (
             mock.patch.object(self.endfield, "account_store", _Store()),
             mock.patch.object(self.endfield, "official_client", client),
@@ -1075,7 +1075,7 @@ class GameCapabilityWiringTests(unittest.IsolatedAsyncioTestCase):
 
         class _Cipher:
             @classmethod
-            def from_env(cls):
+            def from_settings(cls):
                 raise self.endfield.CredentialKeyError("未配置 ENDFIELD_CREDENTIAL_KEY")
 
         with mock.patch.object(self.endfield, "account_store", _Store()), mock.patch.object(
@@ -1093,7 +1093,7 @@ class GameCapabilityWiringTests(unittest.IsolatedAsyncioTestCase):
 
         class _Cipher:
             @classmethod
-            def from_env(cls):
+            def from_settings(cls):
                 raise AssertionError("an unbound user must not resolve the key")
 
         with (

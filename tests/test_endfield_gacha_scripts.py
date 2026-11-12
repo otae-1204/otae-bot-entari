@@ -64,7 +64,7 @@ class AggregateScriptConsistencyTests(unittest.TestCase):
         package = aggregate._PACKAGE
         loaded = {name for name in sys.modules if name.startswith(f"{package}.")}
         self.assertEqual(loaded, {f"{package}.account", f"{package}.account.store", f"{package}.account.crypto",
-                                  f"{package}.gacha", f"{package}.gacha.pools"})
+                                  f"{package}.config", f"{package}.gacha", f"{package}.gacha.pools"})
 
 
 if __name__ == "__main__":

@@ -22,7 +22,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import os
 import random
 import sys
 import tempfile
@@ -40,6 +39,7 @@ if str(ROOT) not in sys.path:
 
 from PIL import Image, ImageDraw  # noqa: E402
 
+from otae_bot.config import settings  # noqa: E402
 from otae_bot.infrastructure.rendering.browser import close_browser, evaluate_web_page  # noqa: E402
 from plugins.endfield.account.store import EndfieldRole, GachaRecord, SyncState  # noqa: E402
 from plugins.endfield.gacha import draw as gacha_draw  # noqa: E402
@@ -531,7 +531,7 @@ async def render_account(variant: Variant, output_dir: Path, assets: Path, keep_
         patch.object(gacha_draw, "_write_temp_html", capture),
         patch.object(gacha_draw, "GACHA_CARD_WIDTH", variant.width),
         patch.object(gacha_draw, "GACHA_PAGE_MAX_HEIGHT", variant.max_height),
-        patch.dict(os.environ, {gacha_draw.GACHA_RERUN_SIDE_ENV: variant.rerun_side}),
+        settings.override({"plugins": {"plugins.endfield": {"gacha_rerun_side": variant.rerun_side}}}),
     ):
         pngs = await cards.draw_gacha_analysis_cards(analysis, uid=analysis.role.masked_uid)
     elapsed = perf_counter() - started

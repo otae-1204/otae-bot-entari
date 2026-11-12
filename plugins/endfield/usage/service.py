@@ -359,7 +359,7 @@ class UsageStatsService:
         if time.monotonic() - self._auto_refresh_at < self.AUTO_REFRESH_DEBOUNCE_SECONDS:
             return False
         try:
-            cipher = CredentialCipher.from_env()
+            cipher = CredentialCipher.from_settings()
         except CredentialKeyError:
             return False
         self._auto_refresh_at = time.monotonic()

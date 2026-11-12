@@ -16,7 +16,6 @@ from __future__ import annotations
 import base64
 import html
 import mimetypes
-import os
 from dataclasses import dataclass, field, replace
 from functools import lru_cache, partial
 from itertools import accumulate
@@ -34,6 +33,7 @@ from otae_bot.config.root import PROJECT_ROOT
 
 from ..account.i18n import server_label
 from ..rendering import cards as _cards
+from ..config import endfield_settings
 from ..rendering.cards import (
     _draw_gacha_pool_banner,
     _pool_paid_total,
@@ -48,7 +48,6 @@ from .service import calculate_group_expectation, format_timestamp
 
 GACHA_CARD_WIDTH = 1600               # 抽卡专用宽度（CSS px，2× 截图 = 3200 px）；其它卡片不受影响
 GACHA_PAGE_MAX_HEIGHT = 4096          # 抽卡专用单页上限（CSS px）；其它卡片仍用 cards.CARD_MAX_HEIGHT
-GACHA_RERUN_SIDE_ENV = "ENDFIELD_GACHA_RERUN_SIDE"
 GACHA_RERUN_SIDES = ("right", "left")
 GACHA_RERUN_SIDE_DEFAULT = "right"    # 主栏位置不随“有没有重构记录”变化（见 docs/endfield_gacha_card_v3.md）
 SIDE_COLUMN_SHARE = 0.86              # 重构侧栏相对主栏（特许 / 武器）的宽度比例
@@ -149,12 +148,12 @@ def pool_kind(pool: PoolAnalysis) -> PoolKind:
 
 
 def gacha_rerun_side() -> str:
-    """重构侧栏放在哪一边：ENDFIELD_GACHA_RERUN_SIDE=right（默认）| left；无法识别时按默认处理。"""
-    raw = os.getenv(GACHA_RERUN_SIDE_ENV, "").strip().casefold()
+    """重构侧栏放在哪一边：plugins.endfield.gacha_rerun_side = right（默认）| left；无法识别时按默认处理。"""
+    raw = endfield_settings().gacha_rerun_side.strip().casefold()
     if raw in GACHA_RERUN_SIDES:
         return raw
     if raw:
-        logger.warning(f"[endfield-gacha] invalid {GACHA_RERUN_SIDE_ENV}={raw!r}, using {GACHA_RERUN_SIDE_DEFAULT}")
+        logger.warning(f"[endfield-gacha] invalid plugins.endfield.gacha_rerun_side={raw!r}, using {GACHA_RERUN_SIDE_DEFAULT}")
     return GACHA_RERUN_SIDE_DEFAULT
 
 

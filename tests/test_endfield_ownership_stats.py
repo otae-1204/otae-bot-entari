@@ -1138,7 +1138,7 @@ class OwnershipGroupAndCommandTests(unittest.TestCase):
                 "list_all_roles",
                 return_value=roles,
             ),
-            mock.patch.object(endfield_plugin.CredentialCipher, "from_env", return_value=cipher),
+            mock.patch.object(endfield_plugin.CredentialCipher, "from_settings", return_value=cipher),
             mock.patch.object(
                 endfield_plugin.ownership_stats_service,
                 "refresh_roles",

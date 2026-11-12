@@ -225,7 +225,7 @@ async def _finish_arknights_help(matcher) -> None:
 
 async def _handle_bind(matcher, user_id: str) -> None:
     # Resolve the key before prompting: a missing key must not start a dialog.
-    cipher = ArknightsCipher.from_env()
+    cipher = ArknightsCipher.from_settings()
     method = await _prompt_text(BIND_METHOD_PROMPT, timeout=90)
     if method is None:
         return await matcher.finish(CANCELLED_TEXT)
@@ -386,7 +386,7 @@ async def _handle_unbind(matcher, user_id: str, selector: str, *, reveal_uid: bo
 
 async def _handle_attendance(matcher, event: Event, user_id: str, selector: str, *, bot=None) -> None:
     group = is_group(event)
-    cipher = ArknightsCipher.from_env()
+    cipher = ArknightsCipher.from_settings()
     store = _store_instance()
     roles, resolution = store.resolve_roles(user_id, selector)
     if not roles:
@@ -444,7 +444,7 @@ async def _companion_attendance(user_id: str, *, group: bool) -> AttendanceResul
     try:
         # Resolve the key only once the user actually has roles here, so an
         # unbound user never sees a credential configuration error.
-        cipher = ArknightsCipher.from_env()
+        cipher = ArknightsCipher.from_settings()
     except CredentialKeyError as exc:
         return AttendanceResult(ok=False, text=str(exc))
     view = await sign_roles(store, await _client_instance(), cipher, roles)

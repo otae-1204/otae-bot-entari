@@ -12,7 +12,6 @@ import base64
 import html
 import hashlib
 import mimetypes
-import os
 import re
 import struct
 import tempfile
@@ -103,6 +102,7 @@ from ..providers.assets import (
 )
 from ..catalog.skill_metrics import fz_metric_replaces_generic, is_generic_fz_metric
 from ..paths import IMAGE_DIR as ASSET_DIR
+from ..config import endfield_settings
 
 
 OPERATOR_CARD_WIDTH = 1600
@@ -110,7 +110,6 @@ CARD_WIDTH = OPERATOR_CARD_WIDTH
 CARD_MIN_HEIGHT = 780
 CARD_MAX_HEIGHT = 6144
 GACHA_PAGE_ROW_BUDGETS = (55, 45, 35)
-GACHA_LAYOUT_ENV = "ENDFIELD_GACHA_LAYOUT"   # v3（默认）| v1
 OPERATOR_RAIL_HEIGHT = 880
 OPERATOR_ACCENT_LEFT = 440
 REMOTE_ASSET_NAMESPACE = "endfield-assets"
@@ -649,8 +648,8 @@ async def _draw_daily_card(selector: str, body: str, *, extra_css: str = "") -> 
 
 async def draw_gacha_analysis_cards(view: GachaAnalysis, *, uid: str) -> tuple[bytes, ...]:
     """抽卡分析图入口：默认 v3（1600 宽、重构侧栏三栏 / 无重构两栏、按实测高度分页，见 gacha/draw.py）；
-    ENDFIELD_GACHA_LAYOUT=v1 回到旧版两栏（v3 失败时也会自动回退到它）。"""
-    if os.getenv(GACHA_LAYOUT_ENV, "").strip().casefold() == "v1":
+    plugins.endfield.gacha_layout: v1 回到旧版两栏（v3 失败时也会自动回退到它）。"""
+    if endfield_settings().gacha_layout.strip().casefold() == "v1":
         return await _draw_gacha_analysis_cards_v1(view, uid=uid)
     # 延迟导入：gacha.draw 依赖本模块的工具函数与 v1 回退，放在模块顶层会循环导入。
     from ..gacha.draw import draw_gacha_analysis_cards as draw_gacha_analysis_cards_v3

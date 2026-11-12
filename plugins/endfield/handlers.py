@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import os
 import re
 import sys
 import tempfile
@@ -270,6 +269,7 @@ from .cold_start import (
 )
 from .calendar.akedata import AkeDataVersionCalendarSource, VersionCalendarError
 from .paths import HELP_IMAGE_PATH as ENDFIELD_HELP_IMAGE_PATH
+from .config import EndfieldSettings, endfield_settings
 from .attendance import (
     format_attendance_report,
     sign_roles as sign_attendance_roles,
@@ -298,9 +298,8 @@ archive_store = ArchiveSnapshotStore()
 collection_refresher = CollectionSnapshotRefresher(service, medal_store, archive_store)
 random_wiki_service = RandomWikiService(service, stage_service, lambda: archive_store.load_current_view())
 _FORWARD_SENDER_NAME = "Endfield"
-# 抽卡分析：超过 N 张图改为一条合并转发（每节点 1 张）；ENDFIELD_GACHA_FORWARD_ABOVE=0 关闭转发。
-GACHA_FORWARD_ABOVE_ENV = "ENDFIELD_GACHA_FORWARD_ABOVE"
-GACHA_FORWARD_ABOVE_DEFAULT = 3
+# 抽卡分析：超过 N 张图改为一条合并转发（每节点 1 张）；plugins.endfield.gacha_forward_above: 0 关闭转发。
+GACHA_FORWARD_ABOVE_DEFAULT = EndfieldSettings().gacha_forward_above
 GACHA_FALLBACK_BATCH = 3                # 合并转发不可用时，每条消息最多几张图
 FORWARD_MAX_NODES = 50                  # 单条合并转发的节点上限，超出拆成多条
 _GACHA_FORWARD_SENDER_NAME = "终末地抽卡分析"
@@ -810,7 +809,7 @@ async def _handle_ownership_stats(
     refresh = None
     if command.action == "ownership_refresh":
         try:
-            cipher = CredentialCipher.from_env()
+            cipher = CredentialCipher.from_settings()
             with cold_start_command(matcher):
                 refresh = await ownership_stats_service.refresh_roles(
                     roles,
@@ -905,7 +904,7 @@ async def _handle_usage_stats(
 
     if command.challenge_view == "usage_refresh":
         try:
-            cipher = CredentialCipher.from_env()
+            cipher = CredentialCipher.from_settings()
             with cold_start_command(matcher):
                 refresh = await usage_stats_service.refresh_roles(
                     roles,
@@ -1101,24 +1100,24 @@ async def _handle_personal_command(matcher, event: Event, command: ParsedEndfiel
 
     try:
         if command.action == "bind":
-            cipher = CredentialCipher.from_env()
+            cipher = CredentialCipher.from_settings()
             # The [message] log hides codes and tokens this user sends until the dialog ends.
             with sensitive_input(qq_user_id):
                 return await _handle_binding(matcher, qq_user_id, cipher)
         if command.action == "challenge":
-            cipher = CredentialCipher.from_env()
+            cipher = CredentialCipher.from_settings()
             return await _handle_challenge(matcher, event, qq_user_id, command, cipher, bot=bot)
         if command.action == "accounts":
-            cipher = CredentialCipher.from_env()
+            cipher = CredentialCipher.from_settings()
             return await _handle_accounts(matcher, qq_user_id, command, cipher, group=is_group(event))
         if command.action == "account_base":
-            cipher = CredentialCipher.from_env()
+            cipher = CredentialCipher.from_settings()
             return await _handle_account_base(matcher, qq_user_id, command, cipher, group=is_group(event))
         if command.action == "account_investment":
-            cipher = CredentialCipher.from_env()
+            cipher = CredentialCipher.from_settings()
             return await _handle_account_investment(matcher, qq_user_id, command, cipher, group=is_group(event))
         if command.action == "currency_log":
-            cipher = CredentialCipher.from_env()
+            cipher = CredentialCipher.from_settings()
             return await _handle_account_currency(matcher, qq_user_id, command, cipher, group=is_group(event))
         if command.action == "primary":
             role = account_store.set_primary(qq_user_id, command.account_selector)
@@ -1133,22 +1132,22 @@ async def _handle_personal_command(matcher, event: Event, command: ParsedEndfiel
                 f"已解除绑定角色：{role.nickname}（{role.role_id}）。" if role else "未找到指定账号，发送 /ef 账号 可查看有效编号。"
             )
         if command.action == "attendance":
-            cipher = CredentialCipher.from_env()
+            cipher = CredentialCipher.from_settings()
             return await _handle_attendance(matcher, event, qq_user_id, command, cipher, bot=bot)
         if command.action == "daily":
-            cipher = CredentialCipher.from_env()
+            cipher = CredentialCipher.from_settings()
             return await _handle_daily(matcher, qq_user_id, command, cipher, group=is_group(event))
         if command.action == "exploration":
-            cipher = CredentialCipher.from_env()
+            cipher = CredentialCipher.from_settings()
             return await _handle_exploration(matcher, qq_user_id, command, cipher, group=is_group(event))
         if command.action == "medal_missing":
-            cipher = CredentialCipher.from_env()
+            cipher = CredentialCipher.from_settings()
             return await _handle_medal_missing(matcher, qq_user_id, command, cipher, group=is_group(event))
         if command.action == "archive_progress":
-            cipher = CredentialCipher.from_env()
+            cipher = CredentialCipher.from_settings()
             return await _handle_archive_progress(matcher, qq_user_id, command, cipher, group=is_group(event))
         if command.action in {"gacha", "gacha_sync"}:
-            cipher = CredentialCipher.from_env()
+            cipher = CredentialCipher.from_settings()
             return await _handle_gacha(
                 matcher, qq_user_id, command, cipher, group=is_group(event), event=event, bot=bot,
             )
@@ -1558,14 +1557,7 @@ async def _send_forward_pngs(
 
 def _gacha_forward_above() -> int:
     """抽卡分析超过多少张图改为合并转发；0 = 关闭合并转发（回滚开关）。"""
-    raw = os.getenv(GACHA_FORWARD_ABOVE_ENV, "").strip()
-    if not raw:
-        return GACHA_FORWARD_ABOVE_DEFAULT
-    try:
-        return max(0, int(raw))
-    except ValueError:
-        logger.warning(f"[endfield-gacha] invalid {GACHA_FORWARD_ABOVE_ENV}={raw!r}, using {GACHA_FORWARD_ABOVE_DEFAULT}")
-        return GACHA_FORWARD_ABOVE_DEFAULT
+    return max(0, endfield_settings().gacha_forward_above)
 
 
 async def _finish_gacha_pngs(matcher, event, bot, pngs: tuple[bytes, ...]) -> None:
@@ -2516,7 +2508,7 @@ async def _companion_attendance(user_id: str, *, group: bool) -> AttendanceResul
     if not roles:
         return AttendanceResult(ok=False, text="尚未绑定终末地账号，请私聊使用 /zmd 绑定。")
     try:
-        cipher = CredentialCipher.from_env()
+        cipher = CredentialCipher.from_settings()
     except CredentialKeyError as exc:
         return AttendanceResult(ok=False, text=str(exc))
     view = await sign_attendance_roles(account_store, official_client, cipher, roles)
@@ -4342,7 +4334,7 @@ async def _warmup_asset_hotset(_bot=None) -> None:
 
 async def _refresh_due_ownership_snapshots() -> None:
     try:
-        cipher = CredentialCipher.from_env()
+        cipher = CredentialCipher.from_settings()
         await ownership_stats_service.refresh_due(cipher)
     except Exception as exc:
         logger.warning(
@@ -4393,7 +4385,7 @@ timer.add_job(
 
 async def _refresh_due_usage_snapshots() -> None:
     try:
-        cipher = CredentialCipher.from_env()
+        cipher = CredentialCipher.from_settings()
         await usage_stats_service.refresh_due(cipher)
     except Exception as exc:
         logger.warning(

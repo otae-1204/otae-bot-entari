@@ -1,11 +1,11 @@
 """AES-GCM credential storage for the Arknights Skland binding.
 
 The Arknights database is separate from the Endfield one, and so is its key:
-only ``ARKNIGHTS_CREDENTIAL_KEY`` is read.  ``ENDFIELD_CREDENTIAL_KEY`` is never
-used as a fallback, so the two games' secrets can be rotated or revoked
-independently and a missing Arknights key is reported instead of silently
-encrypting with another plugin's secret.  This module never generates or
-rewrites ``.env``.
+only ``plugins.arknights.credential_key`` (``ARKNIGHTS_CREDENTIAL_KEY`` in ``.env``)
+is read.  ``ENDFIELD_CREDENTIAL_KEY`` is never used as a fallback, so the two games'
+secrets can be rotated or revoked independently and a missing Arknights key is
+reported instead of silently encrypting with another plugin's secret.  This module
+never generates or rewrites ``.env``.
 """
 
 from __future__ import annotations
@@ -16,7 +16,9 @@ from dataclasses import dataclass
 
 from Crypto.Cipher import AES
 
-KEY_ENV_NAME = "ARKNIGHTS_CREDENTIAL_KEY"
+from .config import arknights_settings
+
+KEY_ENV_NAME = "ARKNIGHTS_CREDENTIAL_KEY"  # the .env name entari.yml references
 ASSOCIATED_DATA = b"arknights-account-token-v1"
 
 
@@ -42,11 +44,11 @@ class ArknightsCipher:
         self._key = bytes(key)
 
     @classmethod
-    def from_env(cls) -> ArknightsCipher:
-        value = os.getenv(KEY_ENV_NAME, "").strip()
+    def from_settings(cls) -> ArknightsCipher:
+        value = arknights_settings().credential_key.strip()
         if not value:
             raise CredentialKeyError(
-                f"未配置环境变量 {KEY_ENV_NAME}，明日方舟账号绑定与签到已禁用。"
+                f"未配置凭据密钥 {KEY_ENV_NAME}（plugins.arknights.credential_key），明日方舟账号绑定与签到已禁用。"
             )
         try:
             key = base64.b64decode(value, validate=True)

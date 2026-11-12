@@ -89,7 +89,7 @@ class BindingFlowTests(unittest.IsolatedAsyncioTestCase):
         command = commands_module.ParsedEndfieldCommand("bind")
         with mock.patch.object(endfield, "prompt", prompt), mock.patch.object(endfield, "is_group", return_value=False), \
              mock.patch.object(endfield, "event_user_id", return_value=USER), \
-             mock.patch.object(endfield.CredentialCipher, "from_env", return_value=mock.Mock()):
+             mock.patch.object(endfield.CredentialCipher, "from_settings", return_value=mock.Mock()):
             await endfield._handle_personal_command(self.matcher, event, command)
         self.assertEqual(answers, [])
         self.assertFalse(message_log.is_sensitive(USER))

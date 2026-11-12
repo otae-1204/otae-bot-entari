@@ -12,7 +12,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Iterator, Mapping
@@ -36,7 +35,6 @@ LEGACY_CHARACTER_POOL_TYPES = (
 )
 XHH_RERUN_POOL_TYPE = "E_CharacterGachaPoolType_Rerun"
 DEFAULT_CHARACTER_POOL_TYPES = (*LEGACY_CHARACTER_POOL_TYPES, XHH_RERUN_POOL_TYPE)
-SHOW_STANDARD_ENV_KEYS = ("ENDFIELD_GACHA_SHOW_STANDARD", "GACHA_SHOW_STANDARD")
 WEAPON_STREAM_ALL = "weapon:all"
 
 
@@ -362,9 +360,6 @@ def kind_from_stream_key(stream_key: str) -> tuple[PoolKind | None, str]:
 
 def show_standard_pools() -> bool:
     """基础寻访是否展示（纯视图开关，后端不过滤）。默认 True。"""
-    for key in SHOW_STANDARD_ENV_KEYS:
-        value = os.environ.get(key)
-        if value is None or not value.strip():
-            continue
-        return value.strip().casefold() not in {"0", "false", "no", "off"}
-    return True
+    from ..config import endfield_settings  # 延迟导入：本模块要能在精简的脚本环境里单独导入
+
+    return endfield_settings().gacha_show_standard

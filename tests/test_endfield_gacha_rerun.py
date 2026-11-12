@@ -29,6 +29,8 @@ def _load(name: str, relative_path: str):
 
 import importlib  # noqa: E402
 
+from otae_bot.config import settings
+
 if PACKAGE not in sys.modules:
     package = types.ModuleType(PACKAGE)
     package.__path__ = [str(ROOT / "plugins/endfield")]
@@ -468,10 +470,10 @@ class ExpectationAndCurrentPoolTests(unittest.TestCase):
         self.assertEqual(hidden.total, shown.total)
         self.assertEqual(len(hidden.pools), len(shown.pools))
         self.assertEqual((hidden.show_standard_pools, shown.show_standard_pools), (False, True))
-        with mock.patch.dict("os.environ", {"ENDFIELD_GACHA_SHOW_STANDARD": "0"}):
-            from_env = gacha_module.build_gacha_analysis(self.role, records, [])
-        self.assertFalse(from_env.show_standard_pools)
-        self.assertTrue(next(item for item in from_env.kind_summaries if item.key == "standard").hidden_by_default)
+        with settings.override({"plugins": {"plugins.endfield": {"gacha_show_standard": False}}}):
+            configured = gacha_module.build_gacha_analysis(self.role, records, [])
+        self.assertFalse(configured.show_standard_pools)
+        self.assertTrue(next(item for item in configured.kind_summaries if item.key == "standard").hidden_by_default)
 
     def test_unknown_enum_pool_keeps_records_but_no_rules(self):
         records = [

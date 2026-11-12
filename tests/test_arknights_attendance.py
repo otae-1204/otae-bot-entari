@@ -26,6 +26,8 @@ from unittest import mock
 import httpx
 from satori import ChannelType
 
+from otae_bot.config import settings
+
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = "arknights_account_for_test"
 
@@ -39,6 +41,13 @@ def _load(name: str, relative_path: str):
     assert spec.loader is not None
     spec.loader.exec_module(module)
     return module
+
+
+def _ak_key(value: str):
+    """Arknights key as configured; the Endfield key is set too, to prove it is never a fallback."""
+    endfield = base64.b64encode(b"f" * 32).decode()
+    return settings.override({"plugins": {"plugins.arknights": {"credential_key": value},
+                                          "plugins.endfield": {"credential_key": endfield}}})
 
 
 if PACKAGE not in sys.modules:
@@ -803,42 +812,28 @@ class ArknightsCipherTests(unittest.TestCase):
     def test_key_must_decode_to_exactly_32_bytes(self):
         with self.assertRaises(crypto.CredentialKeyError):
             crypto.ArknightsCipher(b"short")
-        with mock.patch.dict(
-            "os.environ",
-            {crypto.KEY_ENV_NAME: base64.b64encode(b"short").decode()},
-            clear=False,
-        ), self.assertRaises(crypto.CredentialKeyError) as caught:
-            crypto.ArknightsCipher.from_env()
+        with _ak_key(base64.b64encode(b"short").decode()), self.assertRaises(crypto.CredentialKeyError) as caught:
+            crypto.ArknightsCipher.from_settings()
         self.assertIn(crypto.KEY_ENV_NAME, str(caught.exception))
 
     def test_invalid_base64_names_the_offending_variable(self):
-        with mock.patch.dict(
-            "os.environ",
-            {crypto.KEY_ENV_NAME: "not base64!!"},
-            clear=False,
-        ), self.assertRaises(crypto.CredentialKeyError) as caught:
-            crypto.ArknightsCipher.from_env()
+        with _ak_key("not base64!!"), self.assertRaises(crypto.CredentialKeyError) as caught:
+            crypto.ArknightsCipher.from_settings()
         self.assertIn(crypto.KEY_ENV_NAME, str(caught.exception))
         self.assertIn("Base64", str(caught.exception))
 
     def test_the_endfield_key_is_never_a_fallback(self):
         endfield_key = base64.b64encode(b"f" * 32).decode()
         for arknights_key in ("", "   "):
-            with self.subTest(arknights_key=arknights_key), mock.patch.dict(
-                "os.environ",
-                {crypto.KEY_ENV_NAME: arknights_key, "ENDFIELD_CREDENTIAL_KEY": endfield_key},
-                clear=False,
-            ), self.assertRaises(crypto.CredentialKeyError) as caught:
-                crypto.ArknightsCipher.from_env()
+            with self.subTest(arknights_key=arknights_key), _ak_key(arknights_key), self.assertRaises(crypto.CredentialKeyError) as caught:
+                crypto.ArknightsCipher.from_settings()
             message = str(caught.exception)
             self.assertIn("ARKNIGHTS_CREDENTIAL_KEY", message)
             self.assertNotIn("ENDFIELD", message)
 
     def test_missing_key_message_is_actionable(self):
-        with mock.patch.dict(
-            "os.environ", {crypto.KEY_ENV_NAME: ""}, clear=False
-        ), self.assertRaises(crypto.CredentialKeyError) as caught:
-            crypto.ArknightsCipher.from_env()
+        with _ak_key(""), self.assertRaises(crypto.CredentialKeyError) as caught:
+            crypto.ArknightsCipher.from_settings()
         message = str(caught.exception)
         self.assertIn("未配置", message)
         self.assertIn("ARKNIGHTS_CREDENTIAL_KEY", message)
@@ -1550,7 +1545,7 @@ class ArknightsHandlerTests(unittest.IsolatedAsyncioTestCase):
             mock.patch.object(self.handlers, "prompt", prompt),
             mock.patch.object(self.handlers, "_store_instance", lambda: store),
             mock.patch.object(self.handlers, "_client_instance", mock.AsyncMock(return_value=client)),
-            mock.patch.object(self.handlers.ArknightsCipher, "from_env", return_value=cipher),
+            mock.patch.object(self.handlers.ArknightsCipher, "from_settings", return_value=cipher),
         ):
             await self.handlers._dispatch(matcher, _event(private=True), commands_module.parse_command("绑定"))
         self.assertEqual(answers, [])
@@ -1630,7 +1625,7 @@ class ArknightsHandlerTests(unittest.IsolatedAsyncioTestCase):
             raise RuntimeError("prompt broke")
 
         with mock.patch.object(self.handlers, "prompt", prompt), mock.patch.object(
-            self.handlers.ArknightsCipher, "from_env", return_value=crypto.ArknightsCipher(b"k" * 32)
+            self.handlers.ArknightsCipher, "from_settings", return_value=crypto.ArknightsCipher(b"k" * 32)
         ):
             matcher = _FakeMatcher()
             await self.handlers._dispatch(matcher, _event(private=True), commands_module.parse_command("绑定"))
@@ -1701,7 +1696,7 @@ class ArknightsHandlerTests(unittest.IsolatedAsyncioTestCase):
     def _patch_runtime(self, store, cipher, client, *, card=None):
         class _StubCipher:
             @classmethod
-            def from_env(cls):
+            def from_settings(cls):
                 return cipher
 
         stack = contextlib.ExitStack()
@@ -1850,11 +1845,7 @@ class ArknightsHandlerTests(unittest.IsolatedAsyncioTestCase):
     async def test_missing_key_message_reaches_the_user(self):
         endfield_key = base64.b64encode(b"f" * 32).decode()
         for text in ("绑定", "签到"):
-            with self.subTest(command=text), mock.patch.dict(
-                "os.environ",
-                {crypto.KEY_ENV_NAME: "", "ENDFIELD_CREDENTIAL_KEY": endfield_key},
-                clear=False,
-            ):
+            with self.subTest(command=text), _ak_key(""):
                 matcher = _FakeMatcher()
                 await self.handlers._dispatch(
                     matcher, _event(private=True), commands_module.parse_command(text)

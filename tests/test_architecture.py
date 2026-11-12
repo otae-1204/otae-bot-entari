@@ -407,7 +407,7 @@ async def check_attendance_dispatch():
     recorded = AsyncMock()
     session = group_session(user='test-root')
     with (patch.object(endfield, '_handle_attendance', recorded),
-          patch.object(endfield.CredentialCipher, 'from_env', return_value=object())):
+          patch.object(endfield.CredentialCipher, 'from_settings', return_value=object())):
         await run_command(session, '/ef 签到 1234')
     recorded.assert_awaited_once()
     assert recorded.await_args.kwargs['bot'] is session.account, recorded.await_args

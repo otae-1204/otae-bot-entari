@@ -22,6 +22,8 @@ import httpx
 import numpy as np
 from PIL import Image, ImageChops
 
+from otae_bot.config import settings
+
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = "endfield_account_for_test"
@@ -753,9 +755,15 @@ class EndfieldCredentialAndStoreTests(unittest.TestCase):
 
     def test_base64_key_requires_exactly_32_bytes(self):
         value = base64.b64encode(b"short").decode()
-        with mock.patch.dict("os.environ", {crypto.KEY_ENV_NAME: value}, clear=False):
+        with settings.override({"plugins": {"plugins.endfield": {"credential_key": value}}}):
             with self.assertRaises(crypto.CredentialKeyError):
-                crypto.CredentialCipher.from_env()
+                crypto.CredentialCipher.from_settings()
+        with settings.override({}), self.assertRaises(crypto.CredentialKeyError) as caught:
+            crypto.CredentialCipher.from_settings()
+        self.assertIn(crypto.KEY_ENV_NAME, str(caught.exception))
+        key = base64.b64encode(b"k" * 32).decode()
+        with settings.override({"plugins": {"plugins.endfield": {"credential_key": key}}}):
+            self.assertIsInstance(crypto.CredentialCipher.from_settings(), crypto.CredentialCipher)
 
     def test_binding_primary_switch_resolution_and_unbind(self):
         roles = [

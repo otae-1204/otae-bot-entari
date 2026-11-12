@@ -893,7 +893,7 @@ class EndfieldCommandParserTests(unittest.TestCase):
                     patch.object(handlers, "account_store", store), \
                     patch.object(handlers, "is_group", return_value=group), \
                     patch.object(handlers, "event_user_id", return_value="10001"), \
-                    patch.object(handlers.CredentialCipher, "from_env", return_value=Mock()):
+                    patch.object(handlers.CredentialCipher, "from_settings", return_value=Mock()):
                 asyncio.run(handlers._handle_personal_command(matcher, types.SimpleNamespace(), command))
             return matcher, downstream, store
 

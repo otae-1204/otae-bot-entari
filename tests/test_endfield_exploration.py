@@ -694,7 +694,7 @@ class ExplorationAsyncTests(unittest.IsolatedAsyncioTestCase):
             patch.object(handlers, "account_store", store),
             patch.object(handlers, "event_user_id", return_value="caller"),
             patch.object(handlers, "is_group", return_value=group),
-            patch.object(handlers.CredentialCipher, "from_env", return_value=Mock()),
+            patch.object(handlers.CredentialCipher, "from_settings", return_value=Mock()),
             patch.object(handlers.official_client, "card_detail", fetch),
             patch.object(
                 handlers.ownership_stats_service, "persist_detail", AsyncMock()
