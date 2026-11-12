@@ -17,7 +17,9 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
+
+from arclet.entari import Image, MessageChain
 
 from otae_bot.infrastructure.changelog import (
     KIND_LABELS,
@@ -31,6 +33,7 @@ from plugins.changelog import handlers as changelog_handlers
 from plugins.changelog import presentation as views
 from plugins.changelog import rendering as changelog_rendering
 from plugins.changelog.rendering import CARD_WIDTH, DEVICE_SCALE_FACTOR, page_html
+from tests.support.dispatch import run_scenarios
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA_FILE = ROOT / "plugins/changelog/changelog.json"
@@ -54,14 +57,6 @@ def _payload() -> dict:
 
 def _changelog():
     return load_changelog(DATA_FILE)
-
-
-class _Arg:
-    """最小 ArgVal 替身：handler 只经 get_rest 读它。"""
-
-    def __init__(self, rest: str):
-        self.result = (rest,) if rest else ()
-        self.available = bool(rest)
 
 
 class DataIntegrityTests(unittest.TestCase):
@@ -539,6 +534,20 @@ class ArtworkChoiceTests(unittest.TestCase):
         self.assertEqual(len(shots), 1)
 
 
+class _Session:
+    """最小会话替身：_reply 只调用 session.send。"""
+
+    def __init__(self, on_send=None):
+        self.sent: list[object] = []
+        self.on_send = on_send
+
+    async def send(self, message):
+        if self.on_send is not None:
+            self.on_send(message)
+        self.sent.append(message)
+        return []
+
+
 class DeliveryTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -556,17 +565,13 @@ class DeliveryTests(unittest.TestCase):
             events.append("render")
             return _png()
 
-        async def fake_send(session, message):
-            events.append("send")
-            self.assertIsInstance(message, list)
-            return []
-
-        with patch.object(changelog_handlers, "render_page", fake_render), patch.object(
-            changelog_handlers, "send", fake_send
-        ):
-            asyncio.run(changelog_handlers._reply(object(), self._reply()))
+        session = _Session(lambda message: events.append("send"))
+        with patch.object(changelog_handlers, "render_page", fake_render):
+            asyncio.run(changelog_handlers._reply(session, self._reply()))
 
         self.assertEqual(events, ["render", "send"])
+        self.assertIsInstance(session.sent[0], MessageChain)
+        self.assertIsInstance(session.sent[0][0], Image)
 
     def test_all_pages_render_before_the_first_send(self):
         order: list[str] = []
@@ -575,17 +580,12 @@ class DeliveryTests(unittest.TestCase):
             order.append("render")
             return _png()
 
-        async def fake_send(session, message):
-            order.append("send")
-            return []
-
         reply = views.ChangelogReply(
             ["a"], views.index_pages(self.changelog, page=1, page_size=5)
         )
-        with patch.object(changelog_handlers, "render_page", fake_render), patch.object(
-            changelog_handlers, "send", fake_send
-        ):
-            asyncio.run(changelog_handlers._reply(object(), reply))
+        session = _Session(lambda message: order.append("send"))
+        with patch.object(changelog_handlers, "render_page", fake_render):
+            asyncio.run(changelog_handlers._reply(session, reply))
 
         self.assertEqual(order.count("render"), len(reply.pages))
         self.assertLess(max(i for i, v in enumerate(order) if v == "render"),
@@ -595,19 +595,13 @@ class DeliveryTests(unittest.TestCase):
         async def broken_render(page):
             raise RuntimeError("render boom")
 
-        sent: list[str] = []
+        session = _Session()
+        with patch.object(changelog_handlers, "render_page", broken_render):
+            asyncio.run(changelog_handlers._reply(session, self._reply()))
 
-        async def fake_send(session, message):
-            sent.append(message)
-            return []
-
-        with patch.object(changelog_handlers, "render_page", broken_render), patch.object(
-            changelog_handlers, "send", fake_send
-        ):
-            asyncio.run(changelog_handlers._reply(object(), self._reply()))
-
-        self.assertTrue(sent)
-        joined = "\n".join(sent)
+        self.assertTrue(session.sent)
+        self.assertTrue(all(isinstance(message, str) for message in session.sent))
+        joined = "\n".join(session.sent)
         self.assertIn(self.changelog.latest.version, joined)
         self.assertIn(self.changelog.latest.title, joined)
 
@@ -615,13 +609,11 @@ class DeliveryTests(unittest.TestCase):
         async def cancelled_render(page):
             raise asyncio.CancelledError
 
-        send_mock = AsyncMock(return_value=[])
-        with patch.object(changelog_handlers, "render_page", cancelled_render), patch.object(
-            changelog_handlers, "send", send_mock
-        ):
+        session = _Session()
+        with patch.object(changelog_handlers, "render_page", cancelled_render):
             with self.assertRaises(asyncio.CancelledError):
-                asyncio.run(changelog_handlers._reply(object(), self._reply()))
-        send_mock.assert_not_awaited()
+                asyncio.run(changelog_handlers._reply(session, self._reply()))
+        self.assertEqual(session.sent, [])
 
     def test_chunks_never_split_a_line(self):
         text = "\n".join(["x" * 50] * 200)
@@ -630,46 +622,48 @@ class DeliveryTests(unittest.TestCase):
         self.assertEqual("\n".join(chunks), text)
 
 
+CHANGELOG_SCENARIOS = r"""
+import io
+from unittest.mock import AsyncMock, patch
+from PIL import Image as PILImage
+from otae_bot.infrastructure.changelog import ChangelogDataError
+
+buffer = io.BytesIO()
+PILImage.new('RGB', (1, 1), 'white').save(buffer, format='PNG')
+PNG = buffer.getvalue()
+changelog = plugin('plugins.changelog.handlers')
+
+
+async def main():
+    with patch.object(changelog, 'render_page', AsyncMock(return_value=PNG)) as render:
+        # 每个入口（四个指令名、各子命令、序号、版本号、日期、关键词、查无）都只回一张卡片
+        cases = ('/更新日志', '/更新 帮助', '/changelog 统计', '/版本 列表', '/更新日志 列表 2', '/更新日志 1',
+                 '/更新日志 2', '/更新日志 雷达', '/更新日志 v1.13.0', '/更新日志 2026-09', '/更新日志 不存在xyzzy')
+        for text in cases:
+            sent = await say(text)
+            assert len(sent) == 1 and sent[0].startswith('<img src="data:image/png;base64,'), (text, sent)
+        assert render.await_count == len(cases)
+    with patch.object(changelog, 'render_page', AsyncMock(side_effect=RuntimeError('no browser'))):
+        # 渲染失败回退为文本
+        sent = await say('/更新日志 绝不可能出现的关键词xyzzy')
+        assert len(sent) == 1 and '未查到' in sent[0], sent
+        latest = changelog.load_changelog().latest
+        sent = await say('/更新日志')
+        assert sent and latest.version in sent[0], sent
+    with patch.object(changelog, 'load_changelog', side_effect=ChangelogDataError('broken')):
+        assert await say('/更新日志') == ['更新日志暂不可用，请稍后再试。']
+    print('ALL-OK')
+
+run(main())
+"""
+
+
 class HandlerTests(unittest.TestCase):
-    def _run(self, rest: str):
-        sent: list[object] = []
-
-        async def fake_send(session, message):
-            sent.append(message)
-            return []
-
-        async def fake_render(page):
-            return _png()
-
-        with patch.object(changelog_handlers, "render_page", fake_render), patch.object(
-            changelog_handlers, "send", fake_send
-        ):
-            asyncio.run(changelog_handlers.handle_changelog(_Arg(rest), object()))
-        return sent
-
-    def test_every_documented_entry_point_replies(self):
-        cases = ("", "帮助", "统计", "列表", "列表 2", "1", "2", "雷达", "v1.13.0", "2026-09", "不存在xyzzy")
-        for rest in cases:
-            with self.subTest(rest=rest):
-                self.assertEqual(len(self._run(rest)), 1)
-
-    def test_unknown_keyword_falls_back_to_a_not_found_message(self):
-        async def broken_render(page):
-            raise RuntimeError("no browser")
-
-        sent: list[str] = []
-
-        async def fake_send(session, message):
-            sent.append(message)
-            return []
-
-        with patch.object(changelog_handlers, "render_page", broken_render), patch.object(
-            changelog_handlers, "send", fake_send
-        ):
-            asyncio.run(changelog_handlers.handle_changelog(_Arg("绝不可能出现的关键词xyzzy"), object()))
-
-        self.assertTrue(sent)
-        self.assertIn("未查到", "\n".join(sent))
+    def test_every_entry_point_through_the_real_event_path(self):
+        result = run_scenarios(CHANGELOG_SCENARIOS)
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, output[-6000:])
+        self.assertIn("ALL-OK", result.stdout)
 
     def test_version_query_returns_that_version_not_a_search_list(self):
         changelog = _changelog()

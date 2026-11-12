@@ -15,11 +15,14 @@ from __future__ import annotations
 
 import asyncio
 
-from arclet.entari import Session
+from arclet.alconna import Alconna, Args, MultiVar
+from arclet.entari import Image, MessageChain, Session, command
+from arclet.entari.command import Match
 from loguru import logger
+from nepattern import AnyString
 
-from otae_bot.compat.entari import ArgVal, Image, cmd as _cmd, get_rest, send
 from otae_bot.infrastructure.changelog import Changelog, ChangelogDataError, Release, load_changelog
+from otae_bot.messaging.inbound import get_rest
 
 from . import formatters, presentation as views
 from .rendering import render_page
@@ -46,7 +49,7 @@ _SUBCOMMANDS: dict[str, str] = {
 #: 允许的命令别名。
 ROOT_ALIASES = {"更新", "changelog", "版本"}
 
-changelog_cmd = _cmd("更新日志", aliases=ROOT_ALIASES, priority=5, block=True)
+changelog_cmd = Alconna(["更新日志", *ROOT_ALIASES], Args["rest;?", MultiVar(AnyString)])
 
 
 def _chunks(text: str, size: int = CHUNK_SIZE) -> list[str]:
@@ -73,7 +76,7 @@ async def _reply(session: Session, reply: list[str]) -> None:
             # 先把所有页渲染完再发，避免渲染失败留下半张图。
             images = [await render_page(page) for page in reply.pages]
             for png in images:
-                await send(session, [Image(raw=png)])
+                await session.send(MessageChain([Image.of(raw=png)]))
             return
         except asyncio.CancelledError:
             raise
@@ -82,7 +85,7 @@ async def _reply(session: Session, reply: list[str]) -> None:
                 "[changelog] card delivery fell back to text: {}", type(error).__name__
             )
     for chunk in _chunks("\n".join(reply)):
-        await send(session, chunk)
+        await session.send(chunk)
 
 
 def _release_number(changelog: Changelog, release: Release) -> int:
@@ -112,14 +115,14 @@ def _search(changelog: Changelog, query: str) -> views.ChangelogReply:
     return views.ChangelogReply(lines, pages)
 
 
-@changelog_cmd.handle()
-async def handle_changelog(rest: ArgVal, session: Session) -> None:
+@command.on(changelog_cmd)
+async def handle_changelog(rest: Match[tuple[str, ...]], session: Session) -> None:
     """``/更新日志`` 总入口：默认给最新版本。"""
     try:
         changelog = load_changelog()
     except ChangelogDataError as error:
         logger.warning("[changelog] data unavailable: {}", error)
-        await send(session, "更新日志暂不可用，请稍后再试。")
+        await session.send("更新日志暂不可用，请稍后再试。")
         return
 
     tokens = [token for token in (get_rest(rest) or "").split() if token]
