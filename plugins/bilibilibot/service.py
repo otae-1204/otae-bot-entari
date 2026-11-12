@@ -8,10 +8,11 @@ refreshing and listing, plus the chat link preview. Polling lives in
 from __future__ import annotations
 
 import tempfile
+from pathlib import Path
 from typing import Iterable
 
+from arclet.entari import Image
 from loguru import logger
-from otae_bot.compat.entari import make_image
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
 
 from .api import BiliAPIError, BiliApi
@@ -235,7 +236,7 @@ class BiliService:
             f.write(png)
             f.flush()
             schedule_temp_file_cleanup(f.name)
-            return make_image(path=f.name)
+            return Image.of(path=Path(f.name))
 
 
 def kind_names(kinds: Iterable[str]) -> list[str]:

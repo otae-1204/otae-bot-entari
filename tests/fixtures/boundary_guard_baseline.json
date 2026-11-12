@@ -9,7 +9,6 @@
 {"rule": "compat-import", "file": "plugins/bilibilibot/handlers.py", "snippet": "from otae_bot.compat.entari import Pred", "count": 1},
 {"rule": "compat-import", "file": "plugins/bilibilibot/handlers.py", "snippet": "from otae_bot.compat.entari import close_scheduled_jobs, listen_message, on_read", "count": 1},
 {"rule": "compat-import", "file": "plugins/bilibilibot/handlers.py", "snippet": "from otae_bot.compat.entari import timer", "count": 1},
-{"rule": "compat-import", "file": "plugins/bilibilibot/service.py", "snippet": "from otae_bot.compat.entari import make_image", "count": 1},
 {"rule": "compat-import", "file": "plugins/changelog/handlers.py", "snippet": "from otae_bot.compat.entari import ArgVal, Image, cmd as _cmd, get_rest, send", "count": 1},
 {"rule": "compat-import", "file": "plugins/endfield/announcements/runtime.py", "snippet": "from otae_bot.compat.entari import (", "count": 1},
 {"rule": "compat-import", "file": "plugins/endfield/handlers.py", "snippet": "from otae_bot.compat.entari import (", "count": 1},
