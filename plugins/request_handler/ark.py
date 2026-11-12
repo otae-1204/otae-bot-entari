@@ -47,9 +47,16 @@ def parse_ark_invite_raw(raw: str) -> dict | None:
     }
 
 
+# Extension elements that carry a QQ Ark card in ``data``.
+ARK_TAGS = frozenset({"onebot:json", "llonebot:ark"})
+
+
 def parse_ark_invite_segment(seg) -> dict | None:
-    """从 Satori/OneBot 消息段对象中解析 Ark 群邀请。"""
-    data = getattr(seg, "data", None)
-    if not isinstance(data, dict):
+    """从 ``onebot:json`` / ``llonebot:ark`` 扩展元素中解析 Ark 群邀请；其他元素返回 None。"""
+    if getattr(seg, "tag", None) not in ARK_TAGS:
         return None
-    return parse_ark_invite_raw(data.get("data", ""))
+    try:
+        data = seg.raw().attrs.get("data")
+    except Exception:
+        return None
+    return parse_ark_invite_raw(data) if isinstance(data, str) else None
