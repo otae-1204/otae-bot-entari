@@ -1,5 +1,7 @@
 # Grok Bot 应用接入
 
+> 配置已迁到 `entari.yml`（密钥仍在 `.env`）。本页出现的旧环境变量名与新键的对应见 README「配置」一节的对照表。
+
 `grok_bot` 插件连接 Cursor Grok Bot 云端电脑的 HTTP 网关。Windows 机器人
 通过 Tailscale 私网或 SSH 隧道访问该网关。使用登录账号里的 Grok Bot，
 无需配置 xAI 模型 API Key。网关为未公开的内部接口，应用升级后可能需要适配。

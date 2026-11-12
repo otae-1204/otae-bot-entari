@@ -29,10 +29,16 @@
 ## 测试与守卫
 
 - 全量：`.venv/bin/python -m pytest -q -p no:cacheprovider`（约 2–3 分钟）。
-- 守卫：`.venv/bin/python -m tests.support.boundary_guard --report` 查看清单；`--write` 重写基线 `tests/fixtures/boundary_guard_baseline.json`。基线只许缩小，不能靠 `--write` 放行新违规。规则 R1–R7 管协议边界，L1–L4 管分层。
+- 守卫：`.venv/bin/python -m tests.support.boundary_guard --report` 查看清单；`--write` 重写基线 `tests/fixtures/boundary_guard_baseline.json`。基线只许缩小，不能靠 `--write` 放行新违规。规则 R1–R7 管协议边界，R8 禁止在 `otae_bot/config/` 之外直接读环境变量，L1–L4 管分层。
 - 已知失败：`tests/test_hyw_retry.py`（与执行顺序有关，全量时 4 个用例 + 2 个子测试失败，单独跑通过）；`tests/test_changelog.py::DataIntegrityTests` 的 3 个（分支上有未被 `changelog.json` 收录的提交时失败）。
 - 不稳定：`tests/test_bilibili_poller.py::test_video_and_dynamic_targets_are_staggered_and_backed_off`；负载下也见过 `test_browser_render_queue` 与 `test_http_asset_broker` 的计时用例偶发失败。失败时单独重跑确认，并在提交说明里写明。
-- 启动冒烟：仓库根的 `entari.yml` 里 `basic.network` 只留一条指向 `127.0.0.1:1` 的 ws，然后 `timeout -s INT 25 .venv/bin/python bot.py`，应加载 21 个插件，除连接失败外无 ERROR/Traceback。
+- 启动冒烟：`cp entari.example.yml entari.yml`，把 `basic.network` 唯一一条的端口改成 `1`，然后 `timeout -s INT 25 .venv/bin/python bot.py`，应加载 21 个插件，除连接失败外无 ERROR/Traceback；跑完删掉 `entari.yml`（它不进 Git）。
+
+## 配置
+
+- `entari.yml`（不进 Git，模板 `entari.example.yml`）放全部设置；`.env` 只放密钥，经 `"${{ env.名字 :- }}"` 引用。旧部署用 `scripts/convert_config.py` 转换。
+- 插件设置是 `otae_bot.config.model.Settings` 子类，`plugin_settings("<目录名>", 模型)` 读取；核心设置在 `otae:` 段（`core_settings()`）。测试里用 `settings.override({...})`，不要改 `os.environ`。
+- `otae_bot/config/` 之外不读环境变量（守卫 R8）；新增配置项要写进 `entari.example.yml`（测试核对）。
 
 ## 提交与分支
 

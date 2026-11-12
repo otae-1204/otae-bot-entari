@@ -12,7 +12,7 @@ DEFAULT_LLM_MODEL = "deepseek-v4-flash"
 
 
 class SteamSettings(Settings):
-    """Steam 好友动态播报；API Key 是密钥，经 ${{ env.X :- }} 引用 .env"""
+    """Steam 好友动态播报；API Key 是密钥，经 ${{ env.名字 :- }} 引用 .env"""
 
     api_keys: str = field(default="", description="Steam Web API Key，多个用逗号分隔轮换（密钥）")
     api_key: str = field(default="", description="单个 Steam Web API Key；api_keys 为空时使用（密钥）")

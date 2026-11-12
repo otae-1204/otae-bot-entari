@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import dataclasses
 import os
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -142,3 +144,63 @@ class ValidateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ExampleFileTests(unittest.TestCase):
+    """entari.example.yml documents every setting with its default; .env.example has every secret it references."""
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def models(self):
+        from otae_bot.config.core import CoreSettings
+        from tests.test_convert_config import KeyTableTests  # noqa: F401  (imports every plugin model)
+        from plugins.arknights.config import ArknightsSettings
+        from plugins.bilibilibot.config import BiliSettings
+        from plugins.eft_helper.config import EftSettings
+        from plugins.endfield.config import EndfieldSettings
+        from plugins.grok_bot.config import GrokSettings
+        from plugins.hyw.config import HywSettings
+        from plugins.mcsm.config import McsmSettings
+        from plugins.minecraft_plugin.config import MinecraftSettings
+        from plugins.radar.config import RadarSettings
+        from plugins.steamInfo.config import SteamSettings
+        from plugins.tibo_radar.config import TiboRadarSettings
+
+        plugins = {"arknights": ArknightsSettings, "bilibilibot": BiliSettings, "eft_helper": EftSettings,
+                   "endfield": EndfieldSettings, "grok_bot": GrokSettings, "hyw": HywSettings, "mcsm": McsmSettings,
+                   "minecraft_plugin": MinecraftSettings, "radar": RadarSettings, "steamInfo": SteamSettings,
+                   "tibo_radar": TiboRadarSettings}
+        return CoreSettings, plugins
+
+    def test_every_setting_is_documented_with_its_default(self):
+        core, plugins = self.models()
+        text = (self.ROOT / "entari.example.yml").read_text(encoding="utf-8")
+        with loaded_config_file(text, "") as _, patch("otae_bot.config.model.logger") as log:
+            self.assertEqual(settings.core_settings(), core())
+            for name, model in plugins.items():
+                with self.subTest(plugin=name):
+                    self.assertIn(f"plugins.{name}", settings.loaded_config().plugin)
+                    self.assertEqual(settings.plugin_settings(name, model), model())
+        log.warning.assert_not_called()
+
+        def keys(model, indent):
+            for item in dataclasses.fields(model):
+                self.assertRegex(text, rf"(?m)^{' ' * indent}(# )?{item.name}:", f"{model.__name__}.{item.name}")
+                default = item.default_factory() if item.default_factory is not dataclasses.MISSING else None
+                if isinstance(default, Settings):
+                    keys(type(default), indent + 2)
+
+        keys(core, 2)
+        for model in plugins.values():
+            keys(model, 4)
+
+    def test_every_referenced_secret_is_in_env_example(self):
+        example = (self.ROOT / "entari.example.yml").read_text(encoding="utf-8")
+        env = (self.ROOT / ".env.example").read_text(encoding="utf-8")
+        referenced = set(re.findall(r"env\.([A-Z0-9_]+)", example))
+        documented = set(re.findall(r"(?m)^(?:# )?([A-Z][A-Z0-9_]+)=", env))
+        self.assertTrue(referenced)
+        self.assertEqual(sorted(referenced - documented), [])
+        for name in settings.PROCESS_ENV:
+            if name not in ("GOOGLE_API_KEY", "GEMINI_API_KEY", "HYW_FRONTIER_HOME", "HYW_OPENCODE_SESSION"):
+                self.assertIn(name, env)

@@ -1,5 +1,7 @@
 # RSSHub 自建部署手册
 
+> 配置已迁到 `entari.yml`（密钥仍在 `.env`）。本页出现的旧环境变量名与新键的对应见 README「配置」一节的对照表。
+
 > 面向运维：在服务器上部署一个私有 RSSHub 实例，供 otae Bot 的 bilibilibot 插件作为 B站数据的备用数据源。
 >
 > 相关代码：`plugins/bilibilibot/api/rsshub.py`、`plugins/bilibilibot/api/space.py`

@@ -7,7 +7,7 @@ from otae_bot.config.settings import plugin_settings
 
 
 class BiliSettings(Settings):
-    """B 站订阅推送；Cookie 类字段是密钥，经 ${{ env.X :- }} 引用 .env"""
+    """B 站订阅推送；Cookie 类字段是密钥，经 ${{ env.名字 :- }} 引用 .env"""
 
     sessdata: str = field(default="", description="Cookie SESSDATA（密钥）")
     buvid3: str = field(default="", description="Cookie buvid3（密钥）")

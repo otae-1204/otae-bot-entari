@@ -10,7 +10,7 @@ ones that invoke a test file as a plain script with a bare system interpreter:
   itself when no service-account credential is available.
 
 Checks:
-1. .env.example documents every HYW_* variable the plugin reads;
+1. docs/hyw_plugin.md documents every plugins.hyw setting;
 2. docs/hyw_plugin.md documents the service-account mode and its fixed rules;
 3. a live text + image round trip through the real command handler.
 """

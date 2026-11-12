@@ -8,8 +8,10 @@ build/
 venv/
 .repair_backup/
 
-# ── Environment ──
+# ── Environment / configuration (copy entari.example.yml / .env.example) ──
 .env
+entari.yml
+entari.schema.json
 .env.prod
 .env.local
 

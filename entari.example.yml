@@ -1,0 +1,189 @@
+# otae-bot 配置示例。复制为 entari.yml 再改（entari.yml 不进 Git）：
+#   Windows:  copy entari.example.yml entari.yml
+#   Linux:    cp entari.example.yml entari.yml
+# 旧部署（.env + configs/）请改用 scripts/convert_config.py 自动转换，见 README「配置」。
+#
+# 规则：
+# - 这里放全部结构化配置；.env 只放密钥（以及少数第三方代码直接读取的环境变量）。
+# - 密钥用 "${{ env.名字 :- }}" 引用 .env 里的同名变量（真实环境变量优先）。务必带引号；
+#   `:-` 让变量没设置时得到空串（插件提示「未配置」），不带时会把占位符原样当成值。
+# - 下面每一项都写着默认值；不需要改的可以删掉，删掉即用默认值。
+# - bot 启动时把本文件复制到 .runtime/entari.yml 再加载：Entari 退出时会改写它加载的
+#   文件，所以本文件永远不会被程序写回。改完重启 bot 生效。
+
+basic:
+  # Satori 连接，一个账号一条。下面是原生 Satori（如 LLBot / Ir 面板里配置的 Satori WebSocket）：
+  network:
+    - type: ws
+      host: "127.0.0.1"
+      port: 5500
+      path: ""
+      token: "${{ env.SATORI_TOKEN_1 :- }}"
+    # 第二个账号：同主机换端口即可
+    # - type: ws
+    #   host: "127.0.0.1"
+    #   port: 5501
+    #   path: ""
+    #   token: "${{ env.SATORI_TOKEN_2 :- }}"
+    # 远程主机走 wss、带路径：
+    # - type: ws
+    #   host: "bot.example.com"
+    #   port: 443
+    #   path: "/satori"
+    #   secure: true
+    #   token: "${{ env.SATORI_TOKEN_3 :- }}"
+  ignore_self_message: true
+  log:
+    level: INFO
+  # 指令前缀
+  prefix: ["/"]
+  # 机器人管理员：按平台分组；otae-bot 把所有平台下的 ID 都当作管理员（与平台无关）
+  superusers:
+    qq: []
+
+otae:
+  # 通用 LLM 配置（部署诊断等；HYW 选择 config_source: llm 时也用这一组）
+  llm:
+    api_key: "${{ env.LLM_API_KEY :- }}"   # API Key（密钥），填 "${{ env.LLM_API_KEY :- }}"
+    base_url: ""   # OpenAI 兼容接口基址；留空 = https://api.deepseek.com
+    model: ""   # 模型名；留空 = deepseek-v4-flash
+  # 素材通道（图片/图标/头像），见 docs/http_asset_lane.md；留空的项用内置默认值
+  http_asset:
+    # connect_timeout:   # 连接超时秒数（默认 4）
+    # read_timeout:   # 读超时秒数（默认 10）
+    # retries:   # 失败重试次数（默认 1）
+    # concurrency:   # 总并发（默认 8）
+    # breaker_threshold:   # 同一主机连续几次连接失败后熔断（默认 3；0 = 关闭）
+    # breaker_cooldown:   # 熔断冷却秒数（默认 300）
+    # render_budget:   # 每张卡素材准备总预算秒数（默认 25；0 = 不限时）
+    # proxy:   # 素材代理，如 http://127.0.0.1:7897（默认不走代理）
+    # proxy_hosts:   # 只让这些主机走素材代理，逗号分隔，支持 *.example.com
+    # proxy_mode:   # fallback（默认，直连失败才走代理）或 always
+    # direct_cooldown:   # fallback 下直连失败后多少秒内直接走代理（默认 300）
+    # trust_env:   # 素材客户端是否读取 HTTP(S)_PROXY / NO_PROXY（默认 false）
+    # host_rewrite:   # 主机改写，如 源主机=目标主机,源2=目标2（默认关闭）
+    # host_max_age:   # 按主机后缀的磁盘缓存新鲜期，如 hycdn.cn=604800；off = 全部 600s
+    # host_concurrency:   # 按主机后缀的并发上限，如 hycdn.cn=4,fz.wiki=2；off = 只受总并发限制
+    # hard_deadline:   # 后台续传超过多少秒仍未完成才取消（默认 180）
+    # queue_limit:   # 未完成下载超过多少个时丢弃新的预取（默认 2000）
+    # prefetch:   # 是否预取最近用过的素材（默认 true）
+    # prefetch_daily_mb:   # 预取每日流量上限 MB（默认 300，北京时间按天）
+  # 共享 HTTP 客户端的内存与磁盘缓存预算
+  http_cache:
+    api_mib: 8   # API 响应内存缓存 MiB
+    table_mib: 64   # 数据表内存缓存 MiB
+    i18n_mib: 64   # I18n 文本表常驻内存 MiB
+    asset_mib: 64   # 小图内存缓存 MiB
+    asset_large_entry_kib: 1024   # 超过这个体积 (KiB) 的图有磁盘副本时不进内存
+    public_image_path: "data/cache/public-images-v1.sqlite3"   # 公共图片磁盘缓存文件
+    public_image_mib: 256   # 公共图片磁盘缓存上限 MiB（0 = 不缓存）
+    public_table_path: "data/cache/akedata-tables-v1.sqlite3"   # 公共数据表磁盘缓存文件
+    public_table_mib: 256   # 公共数据表磁盘缓存上限 MiB（0 = 不缓存）
+  # 出图用的共享浏览器
+  browser:
+    concurrency: 2   # 同一浏览器同时渲染几张图（1–4；每多一张约多占 150–300 MB 内存）
+  help_cache_path: "data/cache/help-cards"   # 运行时帮助卡片缓存目录（相对仓库根）
+plugins:
+  # OneBot 11 接入（可选）：由进程内的 otae_bot/boundary 把 LLBot 的 OneBot 11 正向 WebSocket
+  # 转成 Satori，不经 LLBot 的 Satori 服务。不监听 TCP 端口（Linux 下只在
+  # .runtime/satori-server/ 建一个 unix socket），令牌每次启动随机生成。同一个 QQ 号只能接一种，
+  # 否则会收到两份事件。只用 OneBot 时把上面的 basic.network 改成 []。
+  # server:
+  #   adapters:
+  #     - "$path": otae_bot.boundary.onebot11:OneBotBoundaryAdapter
+  #       endpoint: "ws://127.0.0.1:3001"
+  #       access_token: "${{ env.ONEBOT_TOKEN_1 :- }}"
+  # 明日方舟（森空岛签到，/ak）
+  plugins.arknights:
+    credential_key: "${{ env.ARKNIGHTS_CREDENTIAL_KEY :- }}"   # 森空岛凭据加密密钥（密钥）：Base64 编码的 32 字节，填 "${{ env.ARKNIGHTS_CREDENTIAL_KEY :- }}"；留空时 /ak 绑定与签到禁用，不会回退到终末地的密钥
+  # B 站订阅推送；Cookie 类字段是密钥，经 ${{ env.名字 :- }} 引用 .env
+  plugins.bilibilibot:
+    sessdata: "${{ env.BILI_SESSDATA :- }}"   # Cookie SESSDATA（密钥）
+    buvid3: "${{ env.BILI_BUVID3 :- }}"   # Cookie buvid3（密钥）
+    dm_img_list: "${{ env.BILI_DM_IMG_LIST :- }}"   # 风控参数 dm_img_list（密钥）
+    dm_img_str: "${{ env.BILI_DM_IMG_STR :- }}"   # 风控参数 dm_img_str（密钥）
+    dm_cover_img_str: "${{ env.BILI_DM_COVER_IMG_STR :- }}"   # 风控参数 dm_cover_img_str（密钥）
+    rsshub_base_urls: ["https://rsshub.app", "https://rss.materium.io"]   # RSSHub 镜像列表，按顺序尝试
+    lottery_filter_uids: "*"   # 动态订阅跳过社交抽奖的账号：* = 所有账号；逗号分隔的 UID 收窄；留空关闭过滤
+    live_batch: true   # 直播状态走批量接口；false 回到逐个房间查询（回滚开关）
+  # 逃离塔科夫弹药查询
+  plugins.eft_helper:
+    use_proxy: false   # 请求 api.tarkov.dev 时是否走 HTTP_PROXY
+  # 明日方舟：终末地（/ef）
+  plugins.endfield:
+    credential_key: "${{ env.ENDFIELD_CREDENTIAL_KEY :- }}"   # 账号凭据加密密钥（密钥）：Base64 编码的 32 字节，填 "${{ env.ENDFIELD_CREDENTIAL_KEY :- }}"；留空时禁用账号绑定与凭据读取
+    gacha_layout: "v3"   # 抽卡分析版式：v3（三栏 + 按高度分页）或 v1（旧版两栏，回滚用）
+    gacha_forward_above: 3   # 抽卡分析图超过几张改为合并转发（0 = 关闭合并转发）
+    gacha_show_standard: true   # 是否展示基础寻访卡片（隐藏时仍计入总数）
+    gacha_rerun_side: "right"   # 重构侧栏放在哪一边：right 或 left
+  # Cursor Grok Bot 应用（/grok、/grokbot），经 Tailscale/SSH 私网网关直连；默认关闭，
+  plugins.grok_bot:
+    gateway_url: ""   # 网关基址，不带 /v1 或 /api；固定绕过全局代理
+    gateway_token: "${{ env.GROKBOT_GATEWAY_TOKEN :- }}"   # gateway.json 中的 token 原文（不含 Bearer 前缀；密钥）
+    agent_id: ""   # 可选：原 QQBOT UUID，仅供只读诊断；问答自动使用各会话独立 Bot
+    timeout: 300   # 输入提交和每轮接收的等待上限秒数（30–1800，分别计时）
+    max_pending: 8   # 等待提交或正在上传/提交的输入上限（1–32）
+    max_concurrent: 4   # 同时接收回复的会话数（1–16）
+    persona_file: ""   # 留空使用 plugins/grok_bot/persona.md（花园多惠）；也可填 UTF-8 文件路径
+  # HYW 搜索问答（/q、/hyw、/何意味），见 docs/hyw_plugin.md
+  plugins.hyw:
+    config_source: "hyw"   # 凭据来源：hyw = 本段；llm = 整组用 otae.llm；steam = 整组用 plugins.steamInfo 的 llm_*
+    api_key: "${{ env.HYW_API_KEY :- }}"   # API Key（密钥）
+    base_url: "https://openrouter.ai/api/v1"   # OpenAI 兼容接口基址
+    model: "gemini-3.8-flash"   # 模型名
+    credentials_file: ""   # Google 服务账号 JSON 路径（Vertex AI）；留空时看环境变量 GOOGLE_APPLICATION_CREDENTIALS
+    vertex_location: "global"   # 服务账号模式下的区域段
+    vertex_base_url: ""   # 覆盖 Vertex 基址；留空按 project_id 自动推导
+    proxy: ""   # 模型和用户图片下载代理；留空继承 HTTP(S)_PROXY，direct = 直连
+    search_proxy: ""   # 搜索/网页读取代理；留空沿用 proxy，direct = 直连
+    render: true   # 是否出卡片图
+    search_provider: "ddgs"   # 搜索：ddgs、jina 或 parallel
+    search_mode: "turbo"   # 搜索模式
+    reader_engine: "browser"   # 网页读取：browser 或 default
+    max_tool_images: 600   # 工具可取用的图片总数上限
+    max_reader_images: 30   # 网页读取保留的图片数上限
+    max_concurrent: 2   # 同时进行的问答数
+    timeout: 300   # 一次问答总超时秒数
+    request_timeout: 90   # 单次模型调用超时秒数；超时后至多再试 1 次，重试超时取 min(30, max(15, 本值/2))
+    reasoning_mode: "auto"   # 推理强度：auto（全程 medium）、high、medium、low
+    max_rounds: 10   # 每次提问的模型轮次上限（含最终作答；小于 1 回退 10）
+    render_timeout: 45   # 卡片绘制时限秒数；失败时改发纯文字答案
+    render_max_images: 16   # 送进卡片渲染的配图上限，按正文引用顺序保留前 N 张
+    render_max_edge: 1024   # 送渲染前配图最长边像素（64–1280）
+    home: "data/hyw-frontier"   # hyw-frontier 的数据目录
+  # MCSManager 面板管理
+  plugins.mcsm:
+    deploy_large_package_mb: 200   # 部署时超过多少 MB 的压缩包改走大包策略（远程直链安装）
+  # Minecraft 服务器状态与播报
+  plugins.minecraft_plugin:
+    broadcast_interval: 300   # 全局默认播报间隔秒数（各群可用命令单独设置）
+  # AI 智商雷达（/radar、/智商雷达）：只读消费 api.codexradar.com，全部可留空
+  plugins.radar:
+    base_url: "https://api.codexradar.com"   # 上游 API 基址；一般无需修改
+    default_benchmark: "deep-swe"   # 默认频道：deep-swe（代码修复）或 pompeii-adjacency（视觉恢复）；两者分数不可比
+    timeout: 20.0   # 单次请求超时秒数（下限 1.0）
+    table_timeout: 60.0   # /table 类命令的超时秒数（下限 1.0）
+    concurrency: 4   # 同时执行的雷达命令数上限（下限 1）
+    max_bytes: 12582912   # 单次响应字节上限（下限 1024）
+    max_table_bytes: 25165824   # /table 单次响应字节上限（下限 1024）
+    user_agent: ""   # 出网 User-Agent；留空使用内置的 otae-bot-radar/<版本> (+仓库地址)
+    proxy: ""   # 预留：共享 HTTP 层不挂代理，设置后不生效（只记一条警告，不记录取值）
+  # Steam 好友动态播报；API Key 是密钥，经 ${{ env.名字 :- }} 引用 .env
+  plugins.steamInfo:
+    api_keys: "${{ env.STEAM_API_KEYS :- }}"   # Steam Web API Key，多个用逗号分隔轮换（密钥）
+    api_key: "${{ env.STEAM_API_KEY :- }}"   # 单个 Steam Web API Key；api_keys 为空时使用（密钥）
+    request_interval: 120   # 轮询间隔秒数
+    disable_broadcast_on_startup: false   # 启动时不开启播报轮询
+    llm_api_key: "${{ env.STEAM_LLM_API_KEY :- }}"   # Steam 评价用 LLM 的 API Key（密钥）
+    llm_base_url: "https://api.deepseek.com"   # Steam 评价用 LLM 的接口基址
+    llm_model: "deepseek-v4-flash"   # Steam 评价用 LLM 的模型名
+  # Tibo 雷达（Codex 重置 / Tibo 动态订阅）；全部可留空
+  plugins.tibo_radar:
+    refresh_minutes: 10   # 采集周期分钟数（2–1440）
+    timeout_seconds: 15   # 单次请求超时秒数（3–60）
+    codexradar_enabled: true   # 是否采集 codexradar.com
+    subscription_batch: 20   # 群订阅每次最多推送条数（1–100）
+    subscription_max_pages: 1   # 群订阅每次最多推送页数（1–10）
+    codexradar_url: "https://codexradar.com/"   # codexradar 页面地址
+    feed_url: "https://codex-reset.com/api/feed?locale=zh"   # 动态 feed 接口
+    timeline_url: "https://codex-reset.com/api/timeline?locale=zh"   # 重置时间线接口

@@ -53,7 +53,7 @@ plugins/
     medals/                    奖章快照存储
     ownership/                 持有率聚合与渲染
     rendering/                 共享卡片、HTML、素材处理
-configs/                       原有插件 JSON 配置（configs/<插件>/config.json，按工作目录读取）
+entari.example.yml             配置模板（复制为 entari.yml，不进 Git）；密钥在 .env
 assets/                        原有共享资源
 data/                          运行数据（不入库）
 scripts/                       启动/部署/安装脚本、generate_changelog.py、migrate_platform.py 与 help_pages.json；
@@ -80,7 +80,7 @@ tests/                         功能回归、结构约束、真实插件加载�
 ## 兼容和数据路径
 
 - `python bot.py`、Windows 启动/部署脚本和 Satori 多端点配置继续可用。
-- `.env`、`data/`、JSON 配置和数据库仍按原先的工作目录规则读取；请在项目根目录启动。
+- `entari.yml`、`.env`、`data/` 和数据库按工作目录读取；请在项目根目录启动。
 - 源码附带资源统一通过 `otae_bot.config.root` 和 `plugins.endfield.paths` 定位，
   不随功能模块的目录深度变化。没有搬迁图片、字体、别名 JSON 或运行数据。
 - 旧的 `utils.*`、`configs.config`、`configs.path_config` 转发模块已删除，

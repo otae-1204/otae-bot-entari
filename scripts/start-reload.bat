@@ -27,14 +27,14 @@ if errorlevel 1 (
 )
 
 echo [INFO] Starting bot with hot reload...
-echo [INFO] Watching: bot.py plugins configs .env entari.yml
+echo [INFO] Watching: bot.py plugins .env entari.yml
 call ".venv\Scripts\activate.bat"
 
 ".venv\Scripts\watchfiles.exe" ^
   --target-type command ^
   --ignore-paths ".venv,__pycache__,data,assets\image\temp" ^
   ".\.venv\Scripts\python.exe -u bot.py" ^
-  bot.py plugins configs .env entari.yml
+  bot.py plugins .env entari.yml
 
 echo.
 echo [INFO] Bot stopped

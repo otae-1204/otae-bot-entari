@@ -27,7 +27,7 @@ if (-not $SkipCheck) {
 }
 
 if ($Prod) {
-    robocopy $ProjectDir $TargetDir /E /XD .git .venv __pycache__ .idea .vscode .claude .codex_preview /XF *.pyc .env .env.* /R:1 /W:1 | Out-Host
+    robocopy $ProjectDir $TargetDir /E /XD .git .venv __pycache__ .idea .vscode .claude .codex_preview /XF *.pyc .env .env.* entari.yml /R:1 /W:1 | Out-Host
     if ($LASTEXITCODE -gt 7) {
         exit $LASTEXITCODE
     }
