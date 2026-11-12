@@ -14,7 +14,7 @@ from urllib.parse import unquote, urljoin, urlsplit
 import httpx
 from PIL import Image as PILImage
 from PIL import ImageOps, UnidentifiedImageError
-from satori import ChannelType, File, Image
+from satori import File, Image
 from satori.model import Upload
 
 from otae_bot.infrastructure.http.tls import ashared_ssl_context
@@ -216,51 +216,26 @@ async def input_images(sources: tuple[str, ...], account=None) -> tuple[Attachme
     return tuple(result)
 
 
-async def send_llonebot_file(session, attachment: Attachment, name: str) -> None:
-    # LLOneBot's Satori <file> branch is a TODO. Its internal OneBot upload
-    # actions both upload and send the file, on this same adapter/account.
-    event = session.event
-    channel = getattr(event, "channel", None)
-    if getattr(channel, "type", None) in {ChannelType.DIRECT, "direct"}:
-        action, key = "upload_private_file", "user_id"
-        peer = getattr(getattr(event, "user", None), "id", "")
-    else:
-        action, key = "upload_group_file", "group_id"
-        peer = getattr(getattr(event, "guild", None), "id", "") or getattr(channel, "id", "")
-    if not str(peer).isascii() or not str(peer).isdigit() or int(peer) <= 0:
-        raise GrokError("未能获取当前会话接收目标，附件尚未转交发送。")
-    try:
-        result = await asyncio.wait_for(session.account.protocol.internal(
-            "onebot11/" + action, **{key: int(peer), "name": name,
-                                   "file": "base64://" + base64.b64encode(attachment.data).decode("ascii")},
-        ), 60)
-    except asyncio.CancelledError:
-        raise
-    except Exception:  # noqa: BLE001 - Do not retry an upload with an unknown outcome.
-        raise GrokError("LLOneBot 端未返回文件发送确认，请检查会话与适配器状态；本次未重复推送。") from None
-    if not isinstance(result, dict) or result.get("status") != "ok" or result.get("retcode") != 0:
-        raise GrokError("LLOneBot 上传或发送文件失败，请确认适配器是否已开启群文件与私聊文件能力。")
-
-
 async def send_attachment(session, attachment: Attachment, *, reply_to=True) -> None:
     if attachment.data is None:
         raise GrokError(attachment.error or "附件数据不可用，请前往 Grok Bot 客户端查阅。")
     name = filename(attachment.name, "image.jpg" if attachment.image else "attachment.bin")
-    if not attachment.image and str(getattr(session.account, "adapter", "") or "").casefold() == "llonebot":
-        await send_llonebot_file(session, attachment, name)
-        return
-    element_type = Image if attachment.image else File
-    try:
-        urls = await asyncio.wait_for(session.account.protocol.upload_create(
-            Upload(attachment.data, attachment.mime, name),
-        ), 60)
-        if not isinstance(urls, list) or not urls or not isinstance(urls[0], str) or not urls[0]:
-            raise ValueError("invalid upload receipt")
-        element = element_type.of(url=urls[0], name=name)
-    except asyncio.CancelledError:
-        raise
-    except Exception:  # noqa: BLE001 - Some QQ bridges support data URLs but not upload.create.
-        element = element_type.of(raw=attachment.data, mime=attachment.mime, name=name)
+    if attachment.image:
+        try:
+            urls = await asyncio.wait_for(session.account.protocol.upload_create(
+                Upload(attachment.data, attachment.mime, name),
+            ), 60)
+            if not isinstance(urls, list) or not urls or not isinstance(urls[0], str) or not urls[0]:
+                raise ValueError("invalid upload receipt")
+            element = Image.of(url=urls[0], name=name)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - Some QQ bridges support data URLs but not upload.create.
+            element = Image.of(raw=attachment.data, mime=attachment.mime, name=name)
+    else:
+        # The bytes travel inline: the adapter behind <file> uploads them itself, and
+        # an upload.create URL would point at a store the QQ side cannot read.
+        element = File.of(raw=attachment.data, mime=attachment.mime, name=name)
     try:
         # File-only messages work with QQ bridges that reject mixed file/text.
         from arclet.entari import MessageChain

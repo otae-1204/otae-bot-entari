@@ -10,10 +10,6 @@
 - 从 `resources/app.asar` 中读取 `dist/electron-main/main.cjs` 的参数声明和附件上传、
   下载调用；该文件 SHA-256：`c5189454e56820ef5108a37d9d0a8b27b906243d0f22bbe0cb202bc8f9bff708`。
 - 从 `dist/renderer/assets/index-B3DQqRUH.js` 核对发出消息的图片和文件结构。
-- QQ 文件接口核对了
-  [LLOneBot b18cbb3](https://github.com/LLOneBot/LuckyLilliaBot/tree/b18cbb38f6b7914db77e1ea11833e5f96fc8a1f6)
-  的 `src/satori/server.ts`、`src/satori/message.ts`、
-  `src/onebot11/action/go-cqhttp/UploadGroupFile.ts` 和 `UploadPrivateFile.ts`。
 
 未把安装包或客户端实现复制进本仓库。测试使用本项目构造的图片、文本和模拟响应。
 
@@ -64,14 +60,7 @@
 
 ## QQ 文件交付
 
-已核对的 LLOneBot 版本中，Satori `<file>` 的发送分支仍为 TODO，
-因此对 `account.adapter == "llonebot"` 使用同一 Satori 连接的内部接口：
-
-- 群：`internal/onebot11/upload_group_file`，参数 `group_id`、`name`、`file`。
-- 私聊：`internal/onebot11/upload_private_file`，参数 `user_id`、`name`、`file`。
-- `file` 使用 `base64://` 加原始字节的 Base64；适配器支持该格式。
-- 接收者取当前事件的群 ID 或私聊用户 ID，响应须为 `status="ok",retcode=0`。
-  这两个接口会上传并发送消息；超时后不再调用其他发送接口，避免重复交付。
-
-图片和其他适配器的文件使用 Satori：先 `upload.create`，不支持时使用内联数据；
+图片先 `upload.create`，不支持时使用内联数据。其他文件一律以标准 Satori
+`<file>` 发送，内容为 `data:` 内联数据、`title` 为文件名；接入层的适配器
+收到后自行上传到群文件或私聊。发送超时或失败时不再重试，避免重复交付。
 文件单独发送，不与正文或引用混排，并检查发送回执。

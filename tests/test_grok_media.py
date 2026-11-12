@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 from arclet.entari import MessageChain
 from PIL import Image as PILImage
-from satori import ChannelType, File, Image, MessageObject, Text
+from satori import File, Image, MessageObject, Text
 
 from otae_bot.group_features import GroupFeatureStore
 from plugins.grok_bot import conversations, gateway, handlers, media
@@ -236,49 +236,33 @@ class ImageTests(unittest.IsolatedAsyncioTestCase):
 
 
 class DeliveryTests(unittest.IsolatedAsyncioTestCase):
-    async def test_llonebot_files_use_same_account_upload_api_with_actual_bytes(self):
-        for private in (False, True):
-            with self.subTest(private=private):
-                target = session()
-                target.account.adapter = "llonebot"
-                target.account.protocol.internal = AsyncMock(return_value={"status": "ok", "retcode": 0, "data": {"file_id": "sent"}})
-                target.event = SimpleNamespace(channel=SimpleNamespace(type=ChannelType.DIRECT if private else ChannelType.TEXT, id="100"),
-                                               user=SimpleNamespace(id="200"), guild=None if private else SimpleNamespace(id="100"))
-                await media.send_attachment(target, Attachment("report.txt", data=b"report"))
-                call = target.account.protocol.internal.await_args
-                self.assertEqual(call.args[0], "onebot11/upload_private_file" if private else "onebot11/upload_group_file")
-                self.assertEqual(call.kwargs["user_id" if private else "group_id"], 200 if private else 100)
-                self.assertEqual(base64.b64decode(call.kwargs["file"].removeprefix("base64://")), b"report")
-                self.assertEqual(call.kwargs["name"], "report.txt")
-                target.send.assert_not_awaited()
-                target.account.protocol.upload_create.assert_not_awaited()
-                target.account.protocol.internal.side_effect = asyncio.TimeoutError("secret-token")
-                with self.assertRaises(GrokError) as caught:
-                    await media.send_attachment(target, Attachment("report.txt", data=b"report"))
-                self.assertNotIn("secret-token", str(caught.exception))
-                self.assertEqual(target.account.protocol.internal.await_count, 2)
-                target.send.assert_not_awaited()
-
-    async def test_real_image_and_file_bytes_are_uploaded_to_the_current_qq_bridge(self):
+    async def test_images_are_uploaded_and_files_go_inline_as_a_standard_file_element(self):
         current = session()
-        for is_image in (True, False):
-            item = Attachment("../report.pdf", mime="application/pdf", image=is_image, data=b"file bytes")
-            await media.send_attachment(current, item)
-            upload = current.account.protocol.upload_create.await_args.args[0]
-            self.assertEqual(upload.file, b"file bytes")
-            self.assertEqual(upload.name, "report.pdf")
-            element = current.send.await_args.args[0][0]
-            self.assertIsInstance(element, Image if is_image else File)
-            self.assertEqual(element.src, "internal:uploaded")
-            self.assertEqual(current.send.await_args.kwargs["reply_to"], is_image)
+        image = Attachment("../photo.png", mime="image/png", image=True, data=b"image bytes")
+        await media.send_attachment(current, image)
+        upload = current.account.protocol.upload_create.await_args.args[0]
+        self.assertEqual((upload.file, upload.name), (b"image bytes", "photo.png"))
+        element = current.send.await_args.args[0][0]
+        self.assertIsInstance(element, Image)
+        self.assertEqual(element.src, "internal:uploaded")
+        self.assertTrue(current.send.await_args.kwargs["reply_to"])
+
+        await media.send_attachment(current, Attachment("../report.pdf", mime="application/pdf", data=b"file bytes"))
+        current.account.protocol.upload_create.assert_awaited_once()
+        element = current.send.await_args.args[0][0]
+        self.assertIsInstance(element, File)
+        self.assertEqual(element.title, "report.pdf")
+        self.assertTrue(element.src.startswith("data:application/pdf;base64,"))
+        self.assertEqual(base64.b64decode(element.src.split(",", 1)[1]), b"file bytes")
+        self.assertFalse(current.send.await_args.kwargs["reply_to"])
 
     async def test_bridge_without_upload_create_gets_inline_media_not_a_windows_local_path(self):
         current = session()
         current.account.protocol.upload_create.side_effect = NotImplementedError
-        await media.send_attachment(current, Attachment("out.txt", mime="text/plain", data=b"hello"))
+        await media.send_attachment(current, Attachment("out.png", mime="image/png", image=True, data=b"hello"))
         element = current.send.await_args.args[0][0]
-        self.assertIsInstance(element, File)
-        self.assertTrue(element.src.startswith("data:text/plain;base64,"))
+        self.assertIsInstance(element, Image)
+        self.assertTrue(element.src.startswith("data:image/png;base64,"))
         self.assertEqual(base64.b64decode(element.src.split(",", 1)[1]), b"hello")
 
     async def test_reply_keeps_text_and_other_attachments_when_one_fails(self):
@@ -290,7 +274,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("bad.txt", str(sent[1]))
         self.assertIn("good.txt", str(sent[2]))
         self.assertIsInstance(sent[3][0], File)
-        self.assertEqual(current.account.protocol.upload_create.await_count, 1)
+        current.account.protocol.upload_create.assert_not_awaited()
 
     async def test_send_failure_is_redacted_and_does_not_resend_ambiguously(self):
         current = session()
