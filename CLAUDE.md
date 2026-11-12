@@ -20,7 +20,7 @@
 | 层 | 目录 | 不可以依赖 |
 |---|---|---|
 | 插件 | `plugins/<名字>/` | 其他插件、`otae_bot.boundary`、平台协议 |
-| 核心 | `otae_bot/{groups,hypergryph,command_usage,delivery,pipeline,accounts}` | `plugins`、`boundary` |
+| 核心 | `otae_bot/{groups,hypergryph,command_usage,delivery,pipeline,accounts,messaging}` | `plugins`、`boundary` |
 | 基础设施 | `otae_bot/{infrastructure,config}` | Entari（`config` 例外：只可用 `arclet.entari.config`）、satori、`plugins`、其他 `otae_bot` 包 |
 | 边界 | `otae_bot/boundary/` | `plugins`、核心包 |
 

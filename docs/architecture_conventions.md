@@ -19,7 +19,7 @@
 | 层 | 目录 | 可以依赖 | 不可以 |
 |---|---|---|---|
 | 插件 | `plugins/<名字>/` | Entari 公开接口、`otae_bot` 下除 `boundary` 之外的包 | 其他插件；`otae_bot.boundary`；任何平台协议〔守卫〕 |
-| 核心业务 | `otae_bot/groups`、`hypergryph`、`command_usage`、`delivery`、`pipeline`、`accounts` | Entari 公开接口、`infrastructure`、`config` | `plugins`；`boundary`〔守卫〕 |
+| 核心业务 | `otae_bot/groups`、`hypergryph`、`command_usage`、`delivery`、`pipeline`、`accounts`、`messaging` | Entari 公开接口、`infrastructure`、`config` | `plugins`；`boundary`〔守卫〕 |
 | 基础设施 | `otae_bot/infrastructure`、`config` | 标准库和第三方库；`config` 另可用 `arclet.entari.config`（Entari 的配置接口） | 其余 Entari；`plugins`；其他核心包〔守卫〕 |
 | 边界层 | `otae_bot/boundary` | satori-python 的适配器和服务端 | `plugins`；核心业务包 |
 

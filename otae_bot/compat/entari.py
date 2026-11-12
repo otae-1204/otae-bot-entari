@@ -42,6 +42,14 @@ from nepattern import AnyString
 from satori import ChannelType
 
 from otae_bot.accounts import runtime
+from otae_bot.messaging.inbound import (  # noqa: F401 - re-exported until callers migrate
+    event_chain,
+    event_plain_text,
+    event_user_id,
+    get_channel_id,
+    get_group_id,
+    is_group,
+)
 
 
 @dataclass
@@ -647,49 +655,5 @@ def get_user_id(event: Any) -> str:
     return str(getattr(user, "id", "") or "")
 
 
-def get_group_id(event: Any) -> str:
-    guild = getattr(event, "guild", None)
-    if guild and getattr(guild, "id", None):
-        return str(guild.id)
-    channel = getattr(event, "channel", None)
-    if channel and getattr(channel, "type", None) is not ChannelType.DIRECT:
-        return str(channel.id)
-    return ""
-
-
-def get_channel_id(event: Any) -> str:
-    channel = getattr(event, "channel", None)
-    return str(getattr(channel, "id", "") or "")
-
-
-def is_group(event: Any) -> bool:
-    return bool(get_group_id(event))
-
-
 def get_plaintext(event: Any) -> str:
     return event_plain_text(event)
-
-
-def event_user_id(event: Any) -> str:
-    user = getattr(event, "user", None)
-    return str(getattr(user, "id", "") or "")
-
-
-def event_chain(event: Any) -> MessageChain:
-    content = getattr(event, "content", None)
-    if content is not None:
-        return MessageChain(content)
-    message = getattr(event, "message", None)
-    if message is not None:
-        return MessageChain(getattr(message, "message", message))
-    return MessageChain()
-
-
-def event_plain_text(event: Any) -> str:
-    text_parts: list[str] = []
-    for seg in event_chain(event):
-        if isinstance(seg, Text):
-            text_parts.append(str(getattr(seg, "text", "") or ""))
-    if text_parts:
-        return "".join(text_parts)
-    return str(getattr(event, "content", "") or "")
