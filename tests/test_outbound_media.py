@@ -116,6 +116,11 @@ class OutboundMediaTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(content, f'看图 <img src="data:image/png;base64,{PNG_B64}"/>')
         self.log.warning.assert_not_called()
 
+    async def test_without_upload_feature_inline_data_is_not_even_decoded(self):
+        message = MessageChain([Image.of(raw=PNG)])
+        with mock.patch.object(outbound_media, "_decode", side_effect=AssertionError("decoded")):
+            self.assertIsNone(await outbound_media.prepare(self.account(), "g1", message))
+
     async def test_file_urls_become_data_urls_without_upload(self):
         account = self.account()
         with TemporaryDirectory() as directory:

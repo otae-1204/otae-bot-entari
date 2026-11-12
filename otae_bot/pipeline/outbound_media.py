@@ -85,10 +85,6 @@ def _walk(parent: MutableSequence[Any]) -> Iterator[tuple[MutableSequence[Any], 
             yield from _walk(children)
 
 
-def needs_preparing(message: MessageChain) -> bool:
-    return any(isinstance(el, MEDIA) and _local(el.src) for _, _, el in _walk(message))
-
-
 def _decode(src: str) -> _Payload:
     """Bytes of a ``data:`` or ``file:`` URL; raises ValueError/OSError if unreadable."""
     if src[:5].lower() == "data:":
@@ -195,12 +191,18 @@ async def _upload(account: Any, channel_id: str, slots: list[_Slot]) -> dict[_Pa
 
 async def prepare(account: Any, channel_id: str, message: MessageChain) -> MessageChain | None:
     """The message to send instead of ``message``, or None if nothing changes."""
-    if not needs_preparing(message):
-        return None
+    upload = supports_upload(account)
+    if not any(
+        isinstance(el, MEDIA) and _local(el.src) and (upload or el.src[:5].lower() == "file:")
+        for _, _, el in _walk(message)
+    ):
+        return None  # nothing to upload, nothing to read from disk: inline data stays as is
     prepared = copy.deepcopy(message)  # the caller may resend or cache its elements
     slots: list[_Slot] = []
     for parent, index, element in list(_walk(prepared)):
         if not (isinstance(element, MEDIA) and _local(element.src)):
+            continue
+        if not upload and element.src[:5].lower() == "data:":
             continue
         try:
             payload = await asyncio.to_thread(_decode, element.src) if element.src[:5].lower() == "file:" \
@@ -213,7 +215,7 @@ async def prepare(account: Any, channel_id: str, message: MessageChain) -> Messa
         slots.append(_Slot(parent, index, element, payload))
     if not slots:
         return None
-    urls = await _upload(account, channel_id, slots) if supports_upload(account) else {}
+    urls = await _upload(account, channel_id, slots) if upload else {}
     changed = False
     for slot in slots:
         url = urls.get(slot.payload)
