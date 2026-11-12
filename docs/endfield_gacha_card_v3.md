@@ -14,7 +14,7 @@
 | `plugins/endfield/rendering/cards.py` `draw_gacha_analysis_cards` | 入口与回滚开关：默认转发到 v3；`ENDFIELD_GACHA_LAYOUT=v1` 走旧版两栏（`_draw_gacha_analysis_cards_v1`） |
 | `otae_bot/infrastructure/rendering/browser.py` `evaluate_web_page` | 在共享浏览器线程里加载页面并执行测量脚本，与截图同一套请求路由 |
 | `plugins/endfield/handlers.py` `_finish_gacha_pngs` | 抽卡投递：≤3 张普通消息，>3 张合并转发，逐级回退 |
-| `otae_bot/adapters/onebot.py` `send_forward_images` | OneBot 合并转发；抽卡路径额外传节点名、`file://` 路径与 60 s 超时 |
+| `plugins/endfield/handlers.py` `_send_forward_pngs` | 合并转发；失败时逐张发普通图片消息，返回 `satori` / `images` |
 | `scripts/render_endfield_gacha_preview.py` | 合成账号预览与校验（见文末） |
 
 外壳 `_draw_neutral_card` 被签到、抽卡记录、奖章、档案等多张卡共用，**未改动**（仍是 1280 宽）；抽卡用自己的
@@ -151,13 +151,10 @@
 回退链与日志（`[endfield-gacha]`）：
 
 1. Satori `<message forward>` → `deliver mode=forward via=satori pages= bytes= elapsed=`
-2. 抛错或无 session → OneBot `send_group_forward_msg / send_private_forward_msg`：节点直接引用已写好的临时文件
-   （`file://`），HTTP 回退超时 60 s；日志 `satori forward element failed …` 与 `via=onebot`
-3. 仍失败 → 每条 ≤3 张分批发送，第一条带一句说明；日志 `merged forward unavailable, fallback=batches …` 与 `mode=batches`
+2. 抛错或无 session → 该段每页单独发一条普通图片消息，顺序不变；日志 `satori forward element failed, sending N pages as images …` 与 `via=images`
+3. 逐张发送也失败 → 剩余页每条 ≤3 张分批发送，第一条带一句说明；日志 `merged forward unavailable, fallback=batches …` 与 `mode=batches`
 
-`file://` 与 60 s 超时**只在抽卡路径生效**（`_send_forward_pngs(..., onebot_timeout=...)` 显式开启）；
-影拓 / 回响历史的规则不变：>2 页合并转发，失败时回复文字提示分页查看，OneBot 回退仍是 base64 + 10 s；
-`call_onebot_action` 的其他调用方默认超时仍是 10 s。
+影拓 / 回响历史：>2 页合并转发，转发失败时同样逐张发图；逐张发送也失败时回复文字提示分页查看。
 
 ## 配置与回滚
 

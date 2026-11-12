@@ -49,7 +49,6 @@
 {"rule": "onebot-http", "file": "otae_bot/adapters/onebot.py", "snippet": "own = str((client or {}).get(\"onebot_url\") or \"\").rstrip(\"/\")", "count": 1},
 {"rule": "onebot-http", "file": "otae_bot/adapters/onebot.py", "snippet": "token = _env(\"ONEBOT_ACCESS_TOKEN\", \"\") or client.get(\"token\")", "count": 1},
 {"rule": "onebot-http", "file": "otae_bot/adapters/onebot.py", "snippet": "token = client.get(\"onebot_token\")", "count": 1},
-{"rule": "onebot-http", "file": "plugins/endfield/handlers.py", "snippet": "from otae_bot.adapters.onebot import send_forward_images", "count": 1},
 {"rule": "onebot-http", "file": "plugins/hyw/messages.py", "snippet": "from otae_bot.adapters import onebot", "count": 1},
 {"rule": "onebot-http", "file": "plugins/request_handler/handlers.py", "snippet": "ONEBOT_ACCESS_TOKEN = str(_env(\"ONEBOT_ACCESS_TOKEN\", \"\") or \"\")", "count": 1},
 {"rule": "onebot-http", "file": "plugins/request_handler/handlers.py", "snippet": "ONEBOT_HTTP_URL = str(_env(\"ONEBOT_HTTP_URL\", \"\") or _env(\"LLONEBOT_HTTP_URL\", \"", "count": 1},

@@ -62,7 +62,6 @@ from otae_bot.adapters.entari import (
 )
 from otae_bot.adapters.message_log import sensitive_input
 from otae_bot.command_usage import describe_command
-from otae_bot.adapters.onebot import send_forward_images
 from otae_bot.infrastructure.rendering.help_runtime import cached_help_image
 from otae_bot.infrastructure.http.asset_policy import asset_render_budget
 from otae_bot.infrastructure.http.assets import broker as asset_broker
@@ -303,7 +302,6 @@ _FORWARD_SENDER_NAME = "Endfield"
 GACHA_FORWARD_ABOVE_ENV = "ENDFIELD_GACHA_FORWARD_ABOVE"
 GACHA_FORWARD_ABOVE_DEFAULT = 3
 GACHA_FALLBACK_BATCH = 3                # 合并转发不可用时，每条消息最多几张图
-GACHA_FORWARD_TIMEOUT_SECONDS = 60.0    # OneBot 回退（多页大图）的 HTTP 超时
 FORWARD_MAX_NODES = 50                  # 单条合并转发的节点上限，超出拆成多条
 _GACHA_FORWARD_SENDER_NAME = "终末地抽卡分析"
 # 成品图缓存（资料卡、配装、账号页、挑战页）。key 已含视图内容 digest、渲染版本
@@ -1515,7 +1513,7 @@ async def _finish_challenge_pages(matcher, event, bot, pngs: tuple[bytes, ...], 
     if len(pngs) <= 2:
         return await _finish_pngs(matcher, pngs)
     try:
-        await _send_forward_pngs(bot, event, pngs)
+        await _send_forward_pngs(matcher, bot, pngs)
     except _ExitException:
         raise
     except Exception as exc:
@@ -1525,26 +1523,18 @@ async def _finish_challenge_pages(matcher, event, bot, pngs: tuple[bytes, ...], 
 
 
 async def _send_forward_pngs(
+    matcher,
     bot,
-    event,
     pngs: tuple[bytes, ...],
     *,
     sender_name: str = _FORWARD_SENDER_NAME,
     log_tag: str = "endfield-challenge",
-    onebot_timeout: float | None = None,
 ) -> str:
-    """Send PNG pages as one merged forward; returns the path used (``satori`` / ``onebot``).
+    """Send PNG pages as one merged forward; returns the path used (``satori`` / ``images``).
 
-    Satori's standard ``<message forward>`` element is tried first: LLOneBot's
-    Satori encoder turns it into a native QQ merged forward, so no OneBot
-    action is needed.  Implementations that ignore ``forward`` would silently
-    fan the pages out as separate messages, so a raised error (or a missing
-    session) falls back to the OneBot ``send_*_forward_msg`` action.
-
-    ``onebot_timeout`` opts a caller into the large-forward fallback: nodes
-    reference the temp files already written for Satori (``file://``) instead
-    of base64, under ``sender_name`` and the given HTTP timeout.  Without it
-    the fallback is the original base64 action (challenge history).
+    The standard ``<message forward>`` element is tried first.  If it raises (or
+    there is no session), the pages go out as ordinary image messages, one per
+    message in the same order; an error from that propagates to the caller.
     """
     uin = str(getattr(bot, "self_id", "") or getattr(bot, "id", "") or "") or None
     images: list = []
@@ -1557,16 +1547,13 @@ async def _send_forward_pngs(
     except Exception as exc:
         logger.warning(
             f"[{log_tag}] satori forward element failed, "
-            f"falling back to OneBot action: {type(exc).__name__}: {exc}"
+            f"sending {len(pngs)} pages as images: {type(exc).__name__}: {exc}"
         )
-    if onebot_timeout is None:
-        await send_forward_images(bot, event, pngs)
-    else:
-        await send_forward_images(
-            bot, event, pngs, name=sender_name, timeout=onebot_timeout,
-            file_uris=[str(getattr(image, "src", "") or "") for image in images],
-        )
-    return "onebot"
+    if len(images) != len(pngs):
+        images = [_png_image(png) for png in pngs]
+    for image in images:
+        await matcher.send(ChainMsg([image]))
+    return "images"
 
 
 def _gacha_forward_above() -> int:
@@ -1584,7 +1571,7 @@ def _gacha_forward_above() -> int:
 async def _finish_gacha_pngs(matcher, event, bot, pngs: tuple[bytes, ...]) -> None:
     """抽卡分析投递：≤ 阈值与其他命令一样一条消息发出；超过阈值发 QQ 合并转发（每节点 1 张）。
 
-    回退链：Satori ``<message forward>`` → OneBot ``send_*_forward_msg`` → 每条 ≤3 张分批发送。
+    回退链：Satori ``<message forward>`` → 逐张普通图片消息 → 每条 ≤3 张分批发送（逐张发送也失败时）。
     抽卡没有分页命令，所以最后一级是分批而不是文字提示（影拓历史仍按原规则：>2 页转发，失败回文字）。
     """
     threshold = _gacha_forward_above()
@@ -1597,8 +1584,7 @@ async def _finish_gacha_pngs(matcher, event, bot, pngs: tuple[bytes, ...]) -> No
         for start in range(0, len(pngs), FORWARD_MAX_NODES):
             chunk = pngs[start:start + FORWARD_MAX_NODES]
             vias.append(await _send_forward_pngs(
-                bot, event, chunk, sender_name=_GACHA_FORWARD_SENDER_NAME, log_tag="endfield-gacha",
-                onebot_timeout=GACHA_FORWARD_TIMEOUT_SECONDS,
+                matcher, bot, chunk, sender_name=_GACHA_FORWARD_SENDER_NAME, log_tag="endfield-gacha",
             ))
             sent += len(chunk)
     except _ExitException:
