@@ -66,7 +66,7 @@ class BindingFlowTests(unittest.IsolatedAsyncioTestCase):
             send_phone_code=mock.AsyncMock(), token_by_phone_code=mock.AsyncMock(return_value=TOKEN),
             discover_roles=mock.AsyncMock(return_value=list(ROLES)),
         )
-        self.matcher = mock.Mock(send=mock.AsyncMock(), finish=mock.AsyncMock())
+        self.session = mock.Mock(send=mock.AsyncMock())
         self.prompts = []
         self.upload = mock.AsyncMock(return_value=CAPTCHA_LINK)
         for target in (
@@ -80,7 +80,8 @@ class BindingFlowTests(unittest.IsolatedAsyncioTestCase):
     async def run_binding(self, *answers):
         answers = list(answers)
 
-        async def prompt(message, timeout):
+        async def prompt(session, message, timeout):
+            self.assertIs(session, self.session)
             self.prompts.append((message, message_log.is_sensitive(USER)))
             answer = answers.pop(0)
             return None if answer is None else reply(answer)
@@ -90,10 +91,10 @@ class BindingFlowTests(unittest.IsolatedAsyncioTestCase):
         with mock.patch.object(endfield, "prompt", prompt), mock.patch.object(endfield, "is_group", return_value=False), \
              mock.patch.object(endfield, "event_user_id", return_value=USER), \
              mock.patch.object(endfield.CredentialCipher, "from_settings", return_value=mock.Mock()):
-            await endfield._handle_personal_command(self.matcher, event, command)
+            await endfield._handle_personal_command(self.session, event, command)
         self.assertEqual(answers, [])
         self.assertFalse(message_log.is_sensitive(USER))
-        return self.matcher.finish.await_args.args[0]
+        return self.session.send.await_args.args[0]
 
     def binding_logs(self):
         return [line for line in self.logs if line.startswith("[endfield-bind]")]
@@ -187,8 +188,7 @@ class BindingFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(GT, page)
         self.assertIn(CHALLENGE, page)
         self.assertNotIn(PHONE, page)
-        guide = self.matcher.send.await_args.args[0]
-        self.assertEqual(guide, f"{hypergryph_captcha.CAPTCHA_GUIDE}\n{CAPTCHA_LINK}")
+        self.assertIn(mock.call(f"{hypergryph_captcha.CAPTCHA_GUIDE}\n{CAPTCHA_LINK}"), self.session.send.await_args_list)
         self.assertTrue(all(sensitive for _, sensitive in self.prompts))
         self.assertEqual(self.steps(), ["start", "region", "method", "send_code", "captcha_required",
                                         "captcha_page_sent", "captcha_received", "code_sent", "verify",
@@ -214,7 +214,7 @@ class BindingFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(finished, hypergryph_captcha.CAPTCHA_UPLOAD_FAILED)
         self.assertIn("Token 绑定", finished)
         self.client.send_phone_code.assert_awaited_once()
-        self.matcher.send.assert_not_awaited()
+        self.assertEqual(self.session.send.await_args_list, [mock.call(hypergryph_captcha.CAPTCHA_UPLOAD_FAILED)])
         self.assertNotIn("code_sent", self.steps())
         self.assertIn(f"[endfield-bind] user={USER} step=abort at=captcha reason=upload", self.logs)
 
@@ -240,7 +240,7 @@ class BindingFlowTests(unittest.IsolatedAsyncioTestCase):
         with mock.patch.object(endfield, "_handle_xhh_import", xhh_import), \
              mock.patch.object(endfield, "is_group", return_value=False), \
              mock.patch.object(endfield, "event_user_id", return_value=USER):
-            await endfield._handle_personal_command(self.matcher, SimpleNamespace(),
+            await endfield._handle_personal_command(self.session, SimpleNamespace(),
                                                     commands_module.ParsedEndfieldCommand("gacha_import"))
         self.assertEqual(seen, [True])
         self.assertFalse(message_log.is_sensitive(USER))

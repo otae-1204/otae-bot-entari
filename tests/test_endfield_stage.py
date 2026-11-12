@@ -2134,27 +2134,27 @@ class EndfieldStageIntegrationTests(unittest.IsolatedAsyncioTestCase):
         await endfield._CARD_CACHE.clear()
 
     async def test_explicit_warfarin_stage_query_reports_unsupported(self):
-        matcher = AsyncMock()
+        session = AsyncMock()
         command = commands.ParsedEndfieldCommand(
             "query", scope="stage", query="罗丹", source="warfarin"
         )
-        await endfield._handle_command(matcher, None, command)
-        matcher.finish.assert_awaited_once()
-        message = matcher.finish.await_args.args[0]
+        await endfield._handle_command(session, None, command)
+        session.send.assert_awaited_once()
+        message = session.send.await_args.args[0]
         self.assertIn("Warfarin Wiki", message)
         self.assertIn("不支持", message)
         self.assertIn("AkeData", message)
 
     async def test_explicit_fz_stage_query_reports_akedata_only(self):
-        matcher = AsyncMock()
+        session = AsyncMock()
         command = commands.ParsedEndfieldCommand(
             "query", scope="stage", query="蚀影噪雷", source="fz"
         )
 
-        await endfield._handle_command(matcher, None, command)
+        await endfield._handle_command(session, None, command)
 
-        matcher.finish.assert_awaited_once()
-        message = matcher.finish.await_args.args[0]
+        session.send.assert_awaited_once()
+        message = session.send.await_args.args[0]
         self.assertIn("FZ Wiki", message)
         self.assertIn("不支持", message)
         self.assertIn("AkeData", message)

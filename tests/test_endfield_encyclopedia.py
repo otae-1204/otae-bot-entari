@@ -966,26 +966,26 @@ class EndfieldEncyclopediaArchiveTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await endfield._resolve_archive_entry_candidates("终末地物资"), [])
 
     async def test_missing_snapshot_sends_a_refresh_hint_for_the_explicit_scope(self):
-        matcher = AsyncMock()
+        session = AsyncMock()
         with patch.object(endfield.archive_store, "load_current_view", return_value=None):
             await endfield._handle_command(
-                matcher,
+                session,
                 None,
                 commands.ParsedEndfieldCommand("query", scope="archive_entry", query="终末地"),
             )
-        matcher.finish.assert_awaited_once()
-        self.assertIn("/ef 档案 刷新", matcher.finish.await_args.args[0])
+        session.send.assert_awaited_once()
+        self.assertIn("/ef 档案 刷新", session.send.await_args.args[0])
 
     async def test_missing_snapshot_is_silent_for_the_all_scope(self):
         _offline_public_sources(self)
-        matcher = AsyncMock()
+        session = AsyncMock()
         with patch.object(endfield.archive_store, "load_current_view", return_value=None):
             await endfield._handle_command(
-                matcher, None, commands.ParsedEndfieldCommand("query", scope="all", query="zzz")
+                session, None, commands.ParsedEndfieldCommand("query", scope="all", query="zzz")
             )
         # 全局检索不提档案刷新，照常给出普通的“未找到”回复。
-        matcher.finish.assert_awaited_once_with(commands.format_not_found("all", "zzz"))
-        self.assertNotIn("/ef 档案 刷新", matcher.finish.await_args.args[0])
+        session.send.assert_awaited_once_with(commands.format_not_found("all", "zzz"))
+        self.assertNotIn("/ef 档案 刷新", session.send.await_args.args[0])
 
     async def test_archive_card_renders_without_opening_an_ake_snapshot(self):
         drawer = AsyncMock(return_value=b"png")
@@ -1039,13 +1039,13 @@ class EndfieldEncyclopediaSourceTests(unittest.IsolatedAsyncioTestCase):
         _SnapshotFixture(self).start()
 
     async def _guard_message(self) -> str:
-        matcher = AsyncMock()
+        session = AsyncMock()
         collect = AsyncMock(side_effect=AssertionError("must be rejected before collecting"))
         with patch.object(endfield, "_collect_candidates", collect):
-            await endfield._handle_command(matcher, None, commands.parse_command("道具 xx --source fz"))
+            await endfield._handle_command(session, None, commands.parse_command("道具 xx --source fz"))
         collect.assert_not_awaited()
-        matcher.finish.assert_awaited_once()
-        return matcher.finish.await_args.args[0]
+        session.send.assert_awaited_once()
+        return session.send.await_args.args[0]
 
     async def test_explicit_unsupported_source_is_rejected_before_collecting(self):
         self.assertIn("AkeData", await self._guard_message())
@@ -1053,9 +1053,9 @@ class EndfieldEncyclopediaSourceTests(unittest.IsolatedAsyncioTestCase):
     async def test_bare_source_option_is_not_rejected_by_the_encyclopedia_guard(self):
         guard_message = await self._guard_message()
         wiki = _offline_public_sources(self)
-        matcher = AsyncMock()
-        await endfield._handle_command(matcher, None, commands.parse_command("xx --source fz"))
-        message = matcher.finish.await_args.args[0]
+        session = AsyncMock()
+        await endfield._handle_command(session, None, commands.parse_command("xx --source fz"))
+        message = session.send.await_args.args[0]
         self.assertNotEqual(message, guard_message)
         # 没被图鉴守卫拦下：确实按 --source fz 去收集了候选。
         self.assertTrue(any(mock.await_count for (_, source), mock in wiki.items() if source == "fz"))
@@ -1098,15 +1098,16 @@ class EndfieldEncyclopediaSourceTests(unittest.IsolatedAsyncioTestCase):
                 await endfield._collect_candidates("all", "q")
 
     async def test_akedata_incomplete_reaches_the_user_as_unavailable(self):
-        matcher = AsyncMock()
+        session = AsyncMock()
+        # 冷启动提示同样经 session.send 发出，这里只看最终回复。
         with patch.object(
             endfield,
             "_resolve_candidates_from_sources",
             AsyncMock(side_effect=AkeDataIncomplete("missing")),
-        ):
-            await endfield._handle_command(matcher, None, commands.parse_command("物品 苔藓样本"))
-        matcher.finish.assert_awaited_once()
-        self.assertIn("暂时不可用", matcher.finish.await_args.args[0])
+        ), patch.object(endfield, "notice_before_public_data", AsyncMock()):
+            await endfield._handle_command(session, None, commands.parse_command("物品 苔藓样本"))
+        session.send.assert_awaited_once()
+        self.assertIn("暂时不可用", session.send.await_args.args[0])
 
 
 # ------------------------------------------------------------------ §4.9 渲染

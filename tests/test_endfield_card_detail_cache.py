@@ -243,13 +243,13 @@ class CardDetailCleanupTests(_CacheTestCase):
         await self.fill(ROLE_A, ROLE_B)
         store = Mock()
         store.unbind.return_value = ROLE_A
-        matcher = AsyncMock()
+        session = AsyncMock()
         with (
             patch.object(handlers, "account_store", store),
             patch.object(handlers, "is_group", return_value=False),
             patch.object(handlers, "event_user_id", return_value="caller"),
         ):
-            await handlers._handle_personal_command(matcher, SimpleNamespace(), parse_command("解绑 1"))
+            await handlers._handle_personal_command(session, SimpleNamespace(), parse_command("解绑 1"))
         store.unbind.assert_called_once_with("caller", "1")
         fetch = AsyncMock(return_value=_detail("new"))
         with patch.object(handlers.official_client, "card_detail", fetch):

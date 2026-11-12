@@ -55,6 +55,22 @@ def _roster(potential: int = 1) -> dict:
     }
 
 
+class _RecordingSession:
+    def __init__(self):
+        self.sent = []
+
+    async def send(self, message):
+        self.sent.append(message)
+
+
+def _ownership_reply(handler, *args, **kwargs):
+    """Run one handler with a recording session and return its single reply."""
+    session = _RecordingSession()
+    asyncio.run(handler(session, *args, **kwargs))
+    assert len(session.sent) == 1, session.sent
+    return session.sent[0]
+
+
 class _RosterClient:
     """按调用顺序记录 token 与角色；``raise_for(token, call)`` 返回异常就抛出，否则回 op-a 花名册。"""
 
@@ -1063,31 +1079,22 @@ class OwnershipGroupAndCommandTests(unittest.TestCase):
         self.assertEqual(result, ("rendered", report))
 
     def test_command_permission_boundaries_and_private_group_error(self):
-        class Matcher:
-            async def finish(self, message=None):
-                return message
-
-        matcher = Matcher()
         private_event = SimpleNamespace(user=SimpleNamespace(id="user"))
-        message = asyncio.run(
-            endfield_plugin._handle_ownership_stats(
-                matcher,
-                private_event,
-                parse_command("持有率 群内"),
-                bot=object(),
-            )
+        message = _ownership_reply(
+            endfield_plugin._handle_ownership_stats,
+            private_event,
+            parse_command("持有率 群内"),
+            bot=object(),
         )
         self.assertIn("私聊", message)
 
         global_refresh = parse_command("持有率 刷新 全局")
         with mock.patch.object(endfield_plugin.Config, "SUPERUSERS", []):
-            denied = asyncio.run(
-                endfield_plugin._handle_ownership_stats(
-                    matcher,
-                    private_event,
-                    global_refresh,
-                    bot=object(),
-                )
+            denied = _ownership_reply(
+                endfield_plugin._handle_ownership_stats,
+                private_event,
+                global_refresh,
+                bot=object(),
             )
         # 全局刷新只放行机器人管理员（SUPERUSERS），群管理员不够。
         self.assertIn("权限不足", denied)
@@ -1100,21 +1107,15 @@ class OwnershipGroupAndCommandTests(unittest.TestCase):
             member=SimpleNamespace(roles=[]),
         )
         with mock.patch.object(endfield_plugin.Config, "SUPERUSERS", []):
-            denied = asyncio.run(
-                endfield_plugin._handle_ownership_stats(
-                    matcher,
-                    group_event,
-                    parse_command("持有率 刷新 群内"),
-                    bot=object(),
-                )
+            denied = _ownership_reply(
+                endfield_plugin._handle_ownership_stats,
+                group_event,
+                parse_command("持有率 刷新 群内"),
+                bot=object(),
             )
         self.assertIn("群管理员", denied)
 
     def test_refresh_returns_text_without_building_or_rendering_report(self):
-        class Matcher:
-            async def finish(self, message=None):
-                return message
-
         event = SimpleNamespace(user=SimpleNamespace(id="superuser"))
         roles = [SimpleNamespace(role_id="role", server_id="1")]
         cipher = CredentialCipher(b"z" * 32)
@@ -1154,13 +1155,11 @@ class OwnershipGroupAndCommandTests(unittest.TestCase):
                 mock.AsyncMock(),
             ) as renderer,
         ):
-            result = asyncio.run(
-                endfield_plugin._handle_ownership_stats(
-                    Matcher(),
-                    event,
-                    parse_command("持有率 刷新 全局"),
-                    bot=object(),
-                )
+            result = _ownership_reply(
+                endfield_plugin._handle_ownership_stats,
+                event,
+                parse_command("持有率 刷新 全局"),
+                bot=object(),
             )
 
         self.assertTrue(result.startswith("全局"), result)
@@ -1224,10 +1223,6 @@ class OwnershipGroupAndCommandTests(unittest.TestCase):
         self.assertNotIn("未核对", result)
 
     def test_group_view_uses_live_member_filter_and_never_global_roles(self):
-        class Matcher:
-            async def finish(self, message=None):
-                return message
-
         class Bot:
             def guild_member_list(self, guild_id):
                 async def members():
@@ -1259,13 +1254,11 @@ class OwnershipGroupAndCommandTests(unittest.TestCase):
                 mock.AsyncMock(return_value="rendered"),
             ) as renderer,
         ):
-            result = asyncio.run(
-                endfield_plugin._handle_ownership_stats(
-                    Matcher(),
-                    event,
-                    parse_command("持有率"),
-                    bot=Bot(),
-                )
+            result = _ownership_reply(
+                endfield_plugin._handle_ownership_stats,
+                event,
+                parse_command("持有率"),
+                bot=Bot(),
             )
 
         self.assertEqual(result, "rendered")

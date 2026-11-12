@@ -392,7 +392,7 @@ def test_challenge_dispatch_sends_every_usage_view_to_usage_handler():
 
     routed = []
 
-    async def fake_usage_stats(matcher, event, command, *, bot=None):
+    async def fake_usage_stats(session, event, command, *, bot=None):
         routed.append(command.challenge_view)
 
     original = handlers._handle_usage_stats

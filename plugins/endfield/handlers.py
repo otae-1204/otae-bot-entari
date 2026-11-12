@@ -15,7 +15,8 @@ from time import perf_counter
 
 import aiohttp
 from arclet.alconna import Alconna, Args, MultiVar
-from arclet.entari import At, Cleanup, Event, Text, listen
+from arclet.entari import At, Cleanup, Event, Image, MessageChain, Session, Text, command, listen
+from arclet.entari.command import Match
 from arclet.letoderea import ExitState
 from loguru import logger
 from nepattern import AnyString
@@ -43,22 +44,11 @@ from otae_bot.hypergryph.captcha import (
     upload_captcha_page,
 )
 from otae_bot.infrastructure.cache import AsyncTTLCache, CacheStats
-from otae_bot.compat.entari import (
-    ArgVal,
-    ChainMsg,
-    event_chain,
-    event_user_id,
-    get_bot,
-    get_group_id,
-    is_group,
-    make_image,
-    on_alconna,
-    on_ready,
-    prompt,
-    prompt_silently,
-    send_forward,
-    timer,
-)
+from otae_bot.accounts.ready import get_bot, on_ready
+from otae_bot.messaging.forward import send_forward
+from otae_bot.messaging.inbound import event_chain, event_user_id, get_group_id, is_group
+from otae_bot.messaging.prompts import prompt, prompt_silently
+from otae_bot.scheduling.jobs import timer
 from otae_bot.pipeline.message_log import sensitive_input
 from otae_bot.command_usage import describe_command
 from otae_bot.infrastructure.rendering.help_runtime import cached_help_image
@@ -462,126 +452,120 @@ _FZ_WHOLE_VIEW_FALLBACK_KINDS: frozenset[str] = frozenset(
 )
 
 
-endfield_cmd = on_alconna(
-    Alconna(list(ROOT_ALIASES), Args["rest;?", MultiVar(AnyString)]),
-    priority=5,
-    block=True,
-)
+endfield_cmd = Alconna(list(ROOT_ALIASES), Args["rest;?", MultiVar(AnyString)])
 
 # 指令统计：/终末地 /ef /zmd 合并显示为 /ef；不是登记子命令的第一个词按资料查询计。
 describe_command(ROOT_ALIASES, display="/ef", subcommands=usage_subcommand_labels(), default_sub="资料查询")
 
-endfield_operator_shortcut = on_alconna(
-    Alconna(["efop", "efoperator", "终末地干员"], Args["rest;?", MultiVar(AnyString)]),
-    priority=5,
-    block=True,
-)
-endfield_weapon_shortcut = on_alconna(
-    Alconna(["efwp", "efweapon", "终末地武器"], Args["rest;?", MultiVar(AnyString)]),
-    priority=5,
-    block=True,
-)
-endfield_equipment_shortcut = on_alconna(
-    Alconna(["efeq", "efequipment", "终末地装备"], Args["rest;?", MultiVar(AnyString)]),
-    priority=5,
-    block=True,
-)
-endfield_search_shortcut = on_alconna(
-    Alconna(["efs", "efsearch", "终末地搜索"], Args["rest;?", MultiVar(AnyString)]),
-    priority=5,
-    block=True,
-)
+endfield_operator_shortcut = Alconna(["efop", "efoperator", "终末地干员"], Args["rest;?", MultiVar(AnyString)])
+endfield_weapon_shortcut = Alconna(["efwp", "efweapon", "终末地武器"], Args["rest;?", MultiVar(AnyString)])
+endfield_equipment_shortcut = Alconna(["efeq", "efequipment", "终末地装备"], Args["rest;?", MultiVar(AnyString)])
+endfield_search_shortcut = Alconna(["efs", "efsearch", "终末地搜索"], Args["rest;?", MultiVar(AnyString)])
 
 
-@endfield_cmd.handle()
-async def handle_endfield(event: Event, rest: ArgVal, bot=None):
+@command.on(endfield_cmd)
+async def handle_endfield(session: Session, rest: Match[tuple[str, ...]]):
     command_rest = _rest(rest)
     command = parse_command(command_rest)
     if command.action == "challenge":
         command = parse_command(strip_message_mentions(command_rest))
-    await _handle_command(endfield_cmd, event, command, bot=bot)
+    await _handle_command(session, session.event, command, bot=session.account)
 
 
-@endfield_operator_shortcut.handle()
-async def handle_endfield_operator_shortcut(event: Event, rest: ArgVal):
-    await _handle_command(endfield_operator_shortcut, event, parse_shortcut_command("efop", _rest(rest)))
+@command.on(endfield_operator_shortcut)
+async def handle_endfield_operator_shortcut(session: Session, rest: Match[tuple[str, ...]]):
+    await _handle_command(session, session.event, parse_shortcut_command("efop", _rest(rest)))
 
 
-@endfield_weapon_shortcut.handle()
-async def handle_endfield_weapon_shortcut(event: Event, rest: ArgVal):
-    await _handle_command(endfield_weapon_shortcut, event, parse_shortcut_command("efwp", _rest(rest)))
+@command.on(endfield_weapon_shortcut)
+async def handle_endfield_weapon_shortcut(session: Session, rest: Match[tuple[str, ...]]):
+    await _handle_command(session, session.event, parse_shortcut_command("efwp", _rest(rest)))
 
 
-@endfield_equipment_shortcut.handle()
-async def handle_endfield_equipment_shortcut(event: Event, rest: ArgVal):
-    await _handle_command(endfield_equipment_shortcut, event, parse_shortcut_command("efeq", _rest(rest)))
+@command.on(endfield_equipment_shortcut)
+async def handle_endfield_equipment_shortcut(session: Session, rest: Match[tuple[str, ...]]):
+    await _handle_command(session, session.event, parse_shortcut_command("efeq", _rest(rest)))
 
 
-@endfield_search_shortcut.handle()
-async def handle_endfield_search_shortcut(event: Event, rest: ArgVal):
-    await _handle_command(endfield_search_shortcut, event, parse_shortcut_command("efs", _rest(rest)))
+@command.on(endfield_search_shortcut)
+async def handle_endfield_search_shortcut(session: Session, rest: Match[tuple[str, ...]]):
+    await _handle_command(session, session.event, parse_shortcut_command("efs", _rest(rest)))
 
 
-async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand, bot=None) -> None:
+async def _handle_command(session, event: Event, command: ParsedEndfieldCommand, bot=None) -> None:
     if command.error:
-        return await matcher.finish(format_error(command.error))
+        await session.send(format_error(command.error))
+        return
     if command.action == "help":
-        return await _finish_endfield_help(matcher)
+        return await _finish_endfield_help(session)
     if command.action == "source":
-        return await matcher.finish(format_source())
+        await session.send(format_source())
+        return
     if command.action == "announcements":
-        return await matcher.finish(await announcement_runtime.command(event, command.args, bot))
+        await session.send(await announcement_runtime.command(event, command.args, bot))
+        return
     if command.action == "random_wiki":
-        return await _handle_random_wiki(matcher)
+        return await _handle_random_wiki(session)
     if command.action == "calendar":
-        with cold_start_command(matcher):
+        with cold_start_command(session):
             await notice_default_ake_public()
             try:
                 png = await _render_current_version_calendar()
-                return await _finish_png(matcher, png)
+                return await _finish_png(session, png)
             except ExitState:
                 raise
             except (VersionCalendarError, WarfarinAPIError, StageDataIncomplete) as exc:
                 logger.error(f"[endfield] version calendar unavailable: {exc}")
-                return await matcher.finish("版本日历数据暂不可用，请稍后再试。")
+                await session.send("版本日历数据暂不可用，请稍后再试。")
+                return
             except Exception:
                 logger.exception("[endfield] version calendar render failed")
-                return await matcher.finish("版本日历图生成失败，请稍后再试。")
+                await session.send("版本日历图生成失败，请稍后再试。")
+                return
     if command.action == "dev":
         if not dev_visible_for_user(str(event_user_id(event)), Config.SUPERUSERS):
-            return await matcher.finish(format_unknown())
-        return await matcher.finish(await _handle_dev_command(command))
+            await session.send(format_unknown())
+            return
+        await session.send(await _handle_dev_command(command))
+        return
     if command.action == "alias":
         if not dev_visible_for_user(str(event_user_id(event)), Config.SUPERUSERS):
-            return await matcher.finish(format_unknown())
-        return await matcher.finish(await _handle_alias_command(command))
+            await session.send(format_unknown())
+            return
+        await session.send(await _handle_alias_command(command))
+        return
     if command.action == "quick_calc":
-        return await matcher.finish(
+        await session.send(
             format_status_quick_calc(command.status_name, command.status_level, command.arts_strength)
         )
+        return
     if command.action in {"medal_view", "medal_refresh"}:
-        return await _handle_medal(matcher, command)
+        return await _handle_medal(session, command)
     if command.action in {"archive_view", "archive_refresh"}:
-        return await _handle_archive(matcher, command)
+        return await _handle_archive(session, command)
     if command.action in {"ownership_stats", "ownership_refresh"}:
-        return await _handle_ownership_stats(matcher, event, command, bot=bot)
+        return await _handle_ownership_stats(session, event, command, bot=bot)
     if command.action in {"bind", "accounts", "account_base", "account_investment", "currency_log", "primary", "unbind", "attendance", "daily", "exploration", "gacha", "gacha_history", "gacha_sync", "gacha_import", "medal_missing", "archive_progress", "challenge"}:
-        return await _handle_personal_command(matcher, event, command, bot=bot)
+        return await _handle_personal_command(session, event, command, bot=bot)
     if command.action == "loadout":
-        return await _handle_loadout(matcher, command)
+        return await _handle_loadout(session, command)
     if command.action not in {"query", "search"}:
-        return await matcher.finish(format_unknown())
+        await session.send(format_unknown())
+        return
     if command.scope == "stage" and command.source and command.source != "akedata":
-        return await matcher.finish(f"{source_label(command.source)} 暂不支持关卡资料，关卡数据仅支持 AkeData。")
+        await session.send(f"{source_label(command.source)} 暂不支持关卡资料，关卡数据仅支持 AkeData。")
+        return
     if (
         command.scope in ENCYCLOPEDIA_SCOPES
         and command.source
         and command.source not in source_order(command.scope)
     ):
-        return await matcher.finish("该类资料仅由 AkeData 提供。")
+        await session.send("该类资料仅由 AkeData 提供。")
+        return
     if command.scope == "archive_entry" and archive_store.load_current_view() is None:
         # 显式档案范围且没有快照：直接回文案，不抛异常、不走「资料暂时不可用」。
-        return await matcher.finish("档案数据尚未构建，请先发送 /ef 档案 刷新。")
+        await session.send("档案数据尚未构建，请先发送 /ef 档案 刷新。")
+        return
     if not command.query:
         if command.action == "query" and command.scope in {"operator", "weapon", "equipment"}:
             command = ParsedEndfieldCommand(
@@ -608,11 +592,11 @@ async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand,
                 rarity=command.rarity,
             )
         else:
-            return await _finish_endfield_help(matcher)
+            return await _finish_endfield_help(session)
 
     started = perf_counter()
     try:
-        with cold_start_command(matcher):
+        with cold_start_command(session):
             if command.scope != "archive_entry":
                 await notice_before_public_data(
                     source=command.source or "",
@@ -623,7 +607,8 @@ async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand,
             candidates = await _collect_candidates(command.scope, command.query, command.source, command.rarity)
             fallback = await _item_scope_fallback(command, candidates)
             if fallback == "medal":
-                return await matcher.finish("奖章查询请使用 /ef 奖章 指令。")
+                await session.send("奖章查询请使用 /ef 奖章 指令。")
+                return
             if fallback is not None:
                 candidates = fallback
             candidate_seconds = perf_counter() - candidate_started
@@ -633,135 +618,157 @@ async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand,
                     f"[endfield] perf action=search scope={command.scope} "
                     f"candidate={candidate_seconds:.3f}s total={perf_counter() - started:.3f}s"
                 )
-                return await matcher.finish(
+                await session.send(
                     format_candidates(candidates, title=title, scope=command.scope, query=command.query)
                 )
+                return
 
             selected, ambiguous = choose_candidate(candidates)
             if ambiguous:
                 options = candidate_options(ambiguous, query=command.query)
                 if not options:
-                    return await matcher.finish(format_not_found(command.scope, command.query))
-                answer = await prompt_silently(format_candidates(options, interactive=True), timeout=60)
+                    await session.send(format_not_found(command.scope, command.query))
+                    return
+                answer = await prompt_silently(session, format_candidates(options, interactive=True), timeout=60)
                 if answer is None:
-                    return await matcher.finish()
+                    return
                 text = answer.extract_plain_text() if hasattr(answer, "extract_plain_text") else str(answer or "")
                 text = text.strip()
                 if text.casefold() in {"取消", "cancel", "q", "quit"}:
-                    return await matcher.finish("已取消候选选择。")
+                    await session.send("已取消候选选择。")
+                    return
                 selection = parse_candidate_selection(text, len(options))
                 if selection is None:
-                    return await matcher.finish(f"序号输入有误，请输入 1–{len(options)}。")
+                    await session.send(f"序号输入有误，请输入 1–{len(options)}。")
+                    return
                 selected = options[selection]
             if selected is None:
-                return await matcher.finish(format_not_found(command.scope, command.query))
+                await session.send(format_not_found(command.scope, command.query))
+                return
 
             render_started = perf_counter()
             pngs = await _render_candidate(selected, command.source)
             render_seconds = perf_counter() - render_started
             if pngs is None:
-                return await matcher.finish(format_not_found(selected.kind, command.query))
+                await session.send(format_not_found(selected.kind, command.query))
+                return
             logger.info(
                 f"[endfield] perf action=query scope={command.scope} kind={selected.kind} "
                 f"candidate={candidate_seconds:.3f}s render={render_seconds:.3f}s "
                 f"pages={len(pngs)} total_before_send={perf_counter() - started:.3f}s"
             )
             try:
-                return await _finish_pngs(matcher, pngs)
+                return await _finish_pngs(session, pngs)
             except ExitState:
                 raise
             except Exception as exc:
                 logger.exception(f"[endfield] send failed for {selected.kind} {command.query}: {exc}")
-                return await matcher.finish("图片发送失败，请稍后再试。")
+                await session.send("图片发送失败，请稍后再试。")
+                return
     except ExitState:
         raise
     except WarfarinAPIError as exc:
         logger.warning(f"[endfield] data API failed for {command.scope} {command.query}: {exc}")
         if command.scope == "stage":
-            return await matcher.finish("关卡数据源暂时响应异常，请稍后再试。")
-        return await matcher.finish("数据源暂时响应异常，请稍后再试。")
+            await session.send("关卡数据源暂时响应异常，请稍后再试。")
+            return
+        await session.send("数据源暂时响应异常，请稍后再试。")
+        return
     except (StageVariantNotFound, StageDataIncomplete) as exc:
-        return await matcher.finish(str(exc))
+        await session.send(str(exc))
+        return
     except PropEffectIncomplete as exc:
         logger.warning(f"[endfield] prop effect incomplete for {command.scope} {command.query}: {exc}")
-        return await matcher.finish("该道具效果数值暂未收录。")
+        await session.send("该道具效果数值暂未收录。")
+        return
     except AkeDataIncomplete as exc:
         logger.warning(f"[endfield] AKE data incomplete for {command.scope} {command.query}: {exc}")
-        return await matcher.finish("该资料暂时不可用，请稍后再试。")
+        await session.send("该资料暂时不可用，请稍后再试。")
+        return
     except Exception as exc:
         logger.exception(f"[endfield] card failed for {command.scope} {command.query}: {exc}")
-        return await matcher.finish("卡片图片生成失败，请稍后再试。")
+        await session.send("卡片图片生成失败，请稍后再试。")
+        return
 
 
-async def _handle_medal(matcher, command: ParsedEndfieldCommand) -> None:
+async def _handle_medal(session, command: ParsedEndfieldCommand) -> None:
     """F1：查看蚀刻章统计/新增；刷新时重抓 AKEData 数据 + 上一版本基线（源和源对比）。"""
     if command.action == "medal_refresh":
-        await matcher.send("正在同步 AKEData 蚀刻章最新数据…")
+        await session.send("正在同步 AKEData 蚀刻章最新数据…")
         try:
             await collection_refresher.refresh("medal")
         except SnapshotPersistenceError as exc:
             logger.exception(f"[endfield] medal snapshot persistence failed: {exc}")
-            return await matcher.finish("蚀刻章本地快照保存失败，请稍后再试。")
+            await session.send("蚀刻章本地快照保存失败，请稍后再试。")
+            return
         except Exception as exc:
             logger.warning(f"[endfield] medal refresh failed: {exc}")
-            return await matcher.finish("AKEData 奖章数据源响应异常，请稍后再试。")
+            await session.send("AKEData 奖章数据源响应异常，请稍后再试。")
+            return
     else:
         await collection_refresher.ensure_fresh()
 
     current = medal_store.load_current_view()
     if current is None:
-        return await matcher.finish("本地暂无蚀刻章数据快照，请稍后查询，或发送 /ef 奖章 刷新 重试。")
+        await session.send("本地暂无蚀刻章数据快照，请稍后查询，或发送 /ef 奖章 刷新 重试。")
+        return
     baseline = medal_store.load_baseline_view()
     try:
         diff = service.build_medal_diff(current, baseline)
         if command.action == "medal_view":
-            with cold_start_command(matcher):
+            with cold_start_command(session):
                 pngs = await draw_medal_stats_card(diff)
         else:
             pngs = await draw_medal_stats_card(diff)
     except WarfarinAPIError as exc:
         logger.warning(f"[endfield] medal card data failed: {exc}")
-        return await matcher.finish("数据源暂时响应异常，请稍后再试。")
+        await session.send("数据源暂时响应异常，请稍后再试。")
+        return
     except Exception as exc:
         logger.exception(f"[endfield] medal card failed: {exc}")
-        return await matcher.finish("蚀刻章统计卡生成失败，请稍后再试。")
-    return await _finish_pngs(matcher, pngs)
+        await session.send("蚀刻章统计卡生成失败，请稍后再试。")
+        return
+    return await _finish_pngs(session, pngs)
 
 
-async def _handle_archive(matcher, command: ParsedEndfieldCommand) -> None:
+async def _handle_archive(session, command: ParsedEndfieldCommand) -> None:
     """档案库版本统计/新增；刷新时重抓 AKEData 档案表 + 上一版本基线（源和源对比）。"""
     if command.action == "archive_refresh":
-        await matcher.send("正在同步 AKEData 档案库最新数据…")
+        await session.send("正在同步 AKEData 档案库最新数据…")
         try:
             await collection_refresher.refresh("archive")
         except SnapshotPersistenceError as exc:
             logger.exception(f"[endfield] archive snapshot persistence failed: {exc}")
-            return await matcher.finish("档案库本地快照保存失败，请稍后再试。")
+            await session.send("档案库本地快照保存失败，请稍后再试。")
+            return
         except Exception as exc:
             logger.warning(f"[endfield] archive refresh failed: {exc}")
-            return await matcher.finish("AKEData 档案数据源响应异常，请稍后再试。")
+            await session.send("AKEData 档案数据源响应异常，请稍后再试。")
+            return
     else:
         await collection_refresher.ensure_fresh()
 
     current = archive_store.load_current_view()
     if current is None:
-        return await matcher.finish("本地暂无档案库数据快照，请稍后查询，或发送 /ef 档案 刷新 重试。")
+        await session.send("本地暂无档案库数据快照，请稍后查询，或发送 /ef 档案 刷新 重试。")
+        return
     baseline = archive_store.load_baseline_view()
     try:
         diff = service.build_archive_diff(current, baseline)
         if command.action == "archive_view":
-            with cold_start_command(matcher):
+            with cold_start_command(session):
                 pngs = await draw_archive_stats_card(diff)
         else:
             pngs = await draw_archive_stats_card(diff)
     except Exception as exc:
         logger.exception(f"[endfield] archive card failed: {exc}")
-        return await matcher.finish("档案库统计卡生成失败，请稍后再试。")
-    return await _finish_pngs(matcher, pngs)
+        await session.send("档案库统计卡生成失败，请稍后再试。")
+        return
+    return await _finish_pngs(session, pngs)
 
 
 async def _handle_ownership_stats(
-    matcher,
+    session,
     event: Event,
     command: ParsedEndfieldCommand,
     *,
@@ -772,7 +779,8 @@ async def _handle_ownership_stats(
     if scope == "auto":
         scope = "group" if group_chat else "global"
     if scope == "group" and not group_chat:
-        return await matcher.finish("私聊环境不支持群内统计，请使用 /ef 持有率 全局。")
+        await session.send("私聊环境不支持群内统计，请使用 /ef 持有率 全局。")
+        return
 
     user_id = str(event_user_id(event))
     active_bot = bot
@@ -780,18 +788,21 @@ async def _handle_ownership_stats(
         try:
             active_bot = get_bot()
         except RuntimeError:
-            return await matcher.finish("群成员列表获取失败，请稍后再试。")
+            await session.send("群成员列表获取失败，请稍后再试。")
+            return
 
     if command.action == "ownership_refresh":
         if scope == "global":
             if not _is_endfield_superuser(user_id):
-                return await matcher.finish("权限不足：仅机器人管理员可刷新全局持有率快照。")
+                await session.send("权限不足：仅机器人管理员可刷新全局持有率快照。")
+                return
         else:
             guild_id = get_group_id(event)
             if not _is_endfield_superuser(user_id) and not await is_group_manager(
                 active_bot, event, guild_id, user_id
             ):
-                return await matcher.finish("权限不足：仅群主、群管理员或机器人管理员可刷新本群持有率快照。")
+                await session.send("权限不足：仅群主、群管理员或机器人管理员可刷新本群持有率快照。")
+                return
 
     if scope == "group":
         try:
@@ -801,7 +812,8 @@ async def _handle_ownership_stats(
                 "[endfield-ownership] group member listing failed "
                 f"standard_error_type={exc.standard_error_type}"
             )
-            return await matcher.finish("获取本群成员列表失败，已终止统计任务。")
+            await session.send("获取本群成员列表失败，已终止统计任务。")
+            return
         roles = account_store.list_all_roles(member_ids)
     else:
         roles = account_store.list_all_roles()
@@ -810,7 +822,7 @@ async def _handle_ownership_stats(
     if command.action == "ownership_refresh":
         try:
             cipher = CredentialCipher.from_settings()
-            with cold_start_command(matcher):
+            with cold_start_command(session):
                 refresh = await ownership_stats_service.refresh_roles(
                     roles,
                     cipher,
@@ -818,24 +830,29 @@ async def _handle_ownership_stats(
                     trigger=f"manual-{scope}",
                 )
         except CredentialKeyError as exc:
-            return await matcher.finish(str(exc))
-        return await matcher.finish(_format_ownership_refresh_result(scope, refresh))
+            await session.send(str(exc))
+            return
+        await session.send(_format_ownership_refresh_result(scope, refresh))
+        return
 
     report = ownership_stats_service.build_report(scope, roles, refresh=refresh)
     try:
-        with cold_start_command(matcher):
+        with cold_start_command(session):
             rendered = await render_ownership_stats(report)
     except OwnershipStatsRendererUnavailable:
-        return await matcher.finish("持有率数据已统计完成，但渲染展示模块暂未就绪。")
+        await session.send("持有率数据已统计完成，但渲染展示模块暂未就绪。")
+        return
     if isinstance(rendered, bytes):
-        return await _finish_png(matcher, rendered)
+        return await _finish_png(session, rendered)
     if isinstance(rendered, (list, tuple)) and all(isinstance(item, bytes) for item in rendered):
-        return await _finish_pngs(matcher, tuple(rendered))
-    return await matcher.finish(rendered)
+        return await _finish_pngs(session, tuple(rendered))
+    if isinstance(rendered, (list, tuple)):
+        rendered = MessageChain(rendered)
+    await session.send(rendered if isinstance(rendered, MessageChain) else str(rendered))
 
 
 async def _handle_usage_stats(
-    matcher,
+    session,
     event: Event,
     command: ParsedEndfieldCommand,
     *,
@@ -847,7 +864,8 @@ async def _handle_usage_stats(
     if scope == "auto":
         scope = "group" if group_chat else "global"
     if scope == "group" and not group_chat:
-        return await matcher.finish("私聊环境不支持群内统计，请使用 /ef 影拓 使用率 全局。")
+        await session.send("私聊环境不支持群内统计，请使用 /ef 影拓 使用率 全局。")
+        return
 
     family = USAGE_FAMILY_WAR_ECHO if command.challenge_kind == "war_echo" else USAGE_FAMILY_MONUMENT
     # 统一刷新入口不带玩法前缀，两族一起刷，文案也不能只说一边。
@@ -857,30 +875,36 @@ async def _handle_usage_stats(
     active_bot = bot
     mentions = _challenge_mention_targets(event, bot)
     if len(mentions) > 1:
-        return await matcher.finish("单次查询仅支持 @ 一位群友。")
+        await session.send("单次查询仅支持 @ 一位群友。")
+        return
     if mentions and not group_chat:
-        return await matcher.finish("通过 @群友 查询使用率仅限在群聊中使用。")
+        await session.send("通过 @群友 查询使用率仅限在群聊中使用。")
+        return
     if mentions and command.challenge_view == "usage_refresh":
-        return await matcher.finish("刷新只能对统计范围做，@群友 仅用于查看。")
+        await session.send("刷新只能对统计范围做，@群友 仅用于查看。")
+        return
     subject_label = "个人统计" if mentions else ""
     if scope == "group" and active_bot is None:
         try:
             active_bot = get_bot()
         except RuntimeError:
-            return await matcher.finish("群成员列表获取失败，请稍后再试。")
+            await session.send("群成员列表获取失败，请稍后再试。")
+            return
 
     if command.challenge_view == "usage_refresh":
         if scope == "global":
             if not _is_endfield_superuser(user_id):
-                return await matcher.finish(f"权限不足：仅机器人管理员可刷新全局{family_label}使用率快照。")
+                await session.send(f"权限不足：仅机器人管理员可刷新全局{family_label}使用率快照。")
+                return
         else:
             guild_id = get_group_id(event)
             if not _is_endfield_superuser(user_id) and not await is_group_manager(
                 active_bot, event, guild_id, user_id
             ):
-                return await matcher.finish(
+                await session.send(
                     f"权限不足：仅群主、群管理员或机器人管理员可刷新本群{family_label}使用率快照。"
                 )
+                return
 
     if scope == "group":
         try:
@@ -890,7 +914,8 @@ async def _handle_usage_stats(
                 "[endfield-usage] group member listing failed "
                 f"standard_error_type={exc.standard_error_type}"
             )
-            return await matcher.finish("获取本群成员列表失败，已终止统计任务。")
+            await session.send("获取本群成员列表失败，已终止统计任务。")
+            return
         roles = account_store.list_all_roles(member_ids)
     else:
         roles = account_store.list_all_roles()
@@ -898,14 +923,16 @@ async def _handle_usage_stats(
         # @群友:只看这个人绑定的角色，其余人不下场。
         roles = account_store.list_all_roles(list(mentions))
         if not roles:
-            return await matcher.finish("该群友暂未绑定终末地账号，无法查询使用率。")
+            await session.send("该群友暂未绑定终末地账号，无法查询使用率。")
+            return
     if not roles:
-        return await matcher.finish("统计范围内还没有绑定终末地账号的成员。")
+        await session.send("统计范围内还没有绑定终末地账号的成员。")
+        return
 
     if command.challenge_view == "usage_refresh":
         try:
             cipher = CredentialCipher.from_settings()
-            with cold_start_command(matcher):
+            with cold_start_command(session):
                 refresh = await usage_stats_service.refresh_roles(
                     roles,
                     cipher,
@@ -913,11 +940,13 @@ async def _handle_usage_stats(
                     trigger=f"manual-{scope}",
                 )
         except CredentialKeyError as exc:
-            return await matcher.finish(str(exc))
-        return await matcher.finish(_format_usage_refresh_result(scope, refresh, family_label))
+            await session.send(str(exc))
+            return
+        await session.send(_format_usage_refresh_result(scope, refresh, family_label))
+        return
 
     try:
-        with cold_start_command(matcher):
+        with cold_start_command(session):
             locale = await _usage_challenge_locale()
             if command.challenge_view == "usage_history":
                 history = await asyncio.to_thread(
@@ -947,27 +976,31 @@ async def _handle_usage_stats(
                 else:
                     pngs = await draw_usage_overview(report)
     except UsageResolutionError as exc:
-        return await matcher.finish(str(exc))
+        await session.send(str(exc))
+        return
     except UsageUnavailableError:
         family_cmd = "影拓" if family == USAGE_FAMILY_MONUMENT else "回响"
         started = usage_stats_service.request_background_refresh(
             roles, trigger=f"auto-{scope}"
         )
         if started:
-            return await matcher.finish(
+            await session.send(
                 f"统计范围内还没有{family_label}挑战记录，已开始后台抓取"
                 f"（每批 {usage_stats_service.batch_size} 个角色，约 1 分钟）。"
                 f"稍后再发一次 /ef {family_cmd} 使用率；群管理也可以发 "
                 f"/ef 使用率 刷新 立刻补一批。"
             )
-        return await matcher.finish(
+            return
+        await session.send(
             f"统计范围内还没有{family_label}挑战记录，请先让群友发一次 /ef {family_cmd}，"
             f"或由群管理发送 /ef 使用率 刷新。"
         )
+        return
     except Exception as exc:
         logger.exception(f"[endfield-usage] report failed: {exc}")
-        return await matcher.finish("使用率统计失败，请稍后再试。")
-    return await _finish_pngs(matcher, pngs)
+        await session.send("使用率统计失败，请稍后再试。")
+        return
+    return await _finish_pngs(session, pngs)
 
 
 def _format_usage_refresh_result(
@@ -1023,28 +1056,33 @@ def _format_ownership_refresh_result(scope: str, refresh: OwnershipRefreshResult
 
 
 async def _handle_medal_missing(
-    matcher, qq_user_id: str, command: ParsedEndfieldCommand, cipher: CredentialCipher, *, group: bool
+    session, qq_user_id: str, command: ParsedEndfieldCommand, cipher: CredentialCipher, *, group: bool
 ) -> None:
     """F2：查询绑定账号未获得/未升满/未镀层的蚀刻章。"""
     role = account_store.resolve_role(qq_user_id, command.account_selector)
     if role is None:
-        return await matcher.finish("未找到对应的终末地账号，请先私聊发送 /ef 绑定 进行添加。")
+        await session.send("未找到对应的终末地账号，请先私聊发送 /ef 绑定 进行添加。")
+        return
     await collection_refresher.ensure_fresh()
     snapshot = medal_store.load_current_view()
     if snapshot is None:
-        return await matcher.finish("本地暂无蚀刻章数据快照，请稍后查询，或发送 /ef 奖章 刷新 重试。")
+        await session.send("本地暂无蚀刻章数据快照，请稍后查询，或发送 /ef 奖章 刷新 重试。")
+        return
     try:
         async with ROLE_TASKS.claim(role):
             token = account_store.decrypt_token(role, cipher)
             raw_progress = await official_client.endfield_card_detail(token, role)
     except EndfieldAPIError as exc:
         logger.warning(f"[endfield-medal] player progress API failed: {exc}")
-        return await matcher.finish("奖章进度查询失败，请稍后再试。")
+        await session.send("奖章进度查询失败，请稍后再试。")
+        return
     except CredentialKeyError as exc:
-        return await matcher.finish(str(exc))
+        await session.send(str(exc))
+        return
     except Exception as exc:
         logger.exception(f"[endfield-medal] progress query failed: {exc}")
-        return await matcher.finish("奖章进度查询异常，请稍后再试。")
+        await session.send("奖章进度查询异常，请稍后再试。")
+        return
     view = service.build_medal_missing_view(
         raw_progress, snapshot,
         nickname=role.nickname, uid=role.masked_uid, server_name=server_label(role.server_name or role.server_id),
@@ -1053,33 +1091,39 @@ async def _handle_medal_missing(
         pngs = await draw_medal_missing_card(view)
     except Exception as exc:
         logger.exception(f"[endfield-medal] missing card failed: {exc}")
-        return await matcher.finish("缺章统计图生成失败，请稍后再试。")
-    return await _finish_pngs(matcher, pngs)
+        await session.send("缺章统计图生成失败，请稍后再试。")
+        return
+    return await _finish_pngs(session, pngs)
 
 
 async def _handle_archive_progress(
-    matcher, qq_user_id: str, command: ParsedEndfieldCommand, cipher: CredentialCipher, *, group: bool
+    session, qq_user_id: str, command: ParsedEndfieldCommand, cipher: CredentialCipher, *, group: bool
 ) -> None:
     """查询绑定账号的档案收集进度。森空岛只给 docNum 总数、无逐条明细，仅展示已获得/总数。"""
     role = account_store.resolve_role(qq_user_id, command.account_selector)
     if role is None:
-        return await matcher.finish("未找到对应的终末地账号，请先私聊发送 /ef 绑定 进行添加。")
+        await session.send("未找到对应的终末地账号，请先私聊发送 /ef 绑定 进行添加。")
+        return
     await collection_refresher.ensure_fresh()
     snapshot = archive_store.load_current_view()
     if snapshot is None:
-        return await matcher.finish("本地暂无档案库数据快照，请稍后查询，或发送 /ef 档案 刷新 重试。")
+        await session.send("本地暂无档案库数据快照，请稍后查询，或发送 /ef 档案 刷新 重试。")
+        return
     try:
         async with ROLE_TASKS.claim(role):
             token = account_store.decrypt_token(role, cipher)
             raw_detail = await official_client.endfield_card_detail(token, role)
     except EndfieldAPIError as exc:
         logger.warning(f"[endfield-archive] player progress API failed: {exc}")
-        return await matcher.finish("档案进度查询失败，请稍后再试。")
+        await session.send("档案进度查询失败，请稍后再试。")
+        return
     except CredentialKeyError as exc:
-        return await matcher.finish(str(exc))
+        await session.send(str(exc))
+        return
     except Exception as exc:
         logger.exception(f"[endfield-archive] progress query failed: {exc}")
-        return await matcher.finish("档案进度查询异常，请稍后再试。")
+        await session.send("档案进度查询异常，请稍后再试。")
+        return
     view = service.build_archive_progress_view(
         raw_detail, snapshot,
         nickname=role.nickname, uid=role.masked_uid, server_name=server_label(role.server_name or role.server_id),
@@ -1088,14 +1132,16 @@ async def _handle_archive_progress(
         pngs = await draw_archive_progress_card(view)
     except Exception as exc:
         logger.exception(f"[endfield-archive] progress card failed: {exc}")
-        return await matcher.finish("档案进度图生成失败，请稍后再试。")
-    return await _finish_pngs(matcher, pngs)
+        await session.send("档案进度图生成失败，请稍后再试。")
+        return
+    return await _finish_pngs(session, pngs)
 
 
-async def _handle_personal_command(matcher, event: Event, command: ParsedEndfieldCommand, bot=None) -> None:
+async def _handle_personal_command(session, event: Event, command: ParsedEndfieldCommand, bot=None) -> None:
     private_only = {"bind", "primary", "unbind", "gacha_import"}
     if command.action in private_only and is_group(event):
-        return await matcher.finish("该功能涉及个人隐私凭证或手机号，请在私聊中发起。")
+        await session.send("该功能涉及个人隐私凭证或手机号，请在私聊中发起。")
+        return
     qq_user_id = str(event_user_id(event))
 
     try:
@@ -1103,69 +1149,75 @@ async def _handle_personal_command(matcher, event: Event, command: ParsedEndfiel
             cipher = CredentialCipher.from_settings()
             # The [message] log hides codes and tokens this user sends until the dialog ends.
             with sensitive_input(qq_user_id):
-                return await _handle_binding(matcher, qq_user_id, cipher)
+                return await _handle_binding(session, qq_user_id, cipher)
         if command.action == "challenge":
             cipher = CredentialCipher.from_settings()
-            return await _handle_challenge(matcher, event, qq_user_id, command, cipher, bot=bot)
+            return await _handle_challenge(session, event, qq_user_id, command, cipher, bot=bot)
         if command.action == "accounts":
             cipher = CredentialCipher.from_settings()
-            return await _handle_accounts(matcher, qq_user_id, command, cipher, group=is_group(event))
+            return await _handle_accounts(session, qq_user_id, command, cipher, group=is_group(event))
         if command.action == "account_base":
             cipher = CredentialCipher.from_settings()
-            return await _handle_account_base(matcher, qq_user_id, command, cipher, group=is_group(event))
+            return await _handle_account_base(session, qq_user_id, command, cipher, group=is_group(event))
         if command.action == "account_investment":
             cipher = CredentialCipher.from_settings()
-            return await _handle_account_investment(matcher, qq_user_id, command, cipher, group=is_group(event))
+            return await _handle_account_investment(session, qq_user_id, command, cipher, group=is_group(event))
         if command.action == "currency_log":
             cipher = CredentialCipher.from_settings()
-            return await _handle_account_currency(matcher, qq_user_id, command, cipher, group=is_group(event))
+            return await _handle_account_currency(session, qq_user_id, command, cipher, group=is_group(event))
         if command.action == "primary":
             role = account_store.set_primary(qq_user_id, command.account_selector)
-            return await matcher.finish(
+            await session.send(
                 f"已将 {role.nickname}（{role.role_id}）设为默认主账号。" if role else "未找到指定账号，发送 /ef 账号 可查看有效编号。"
             )
+            return
         if command.action == "unbind":
             role = account_store.unbind(qq_user_id, command.account_selector)
             if role is not None:
                 await _forget_card_detail(role)
-            return await matcher.finish(
+            await session.send(
                 f"已解除绑定角色：{role.nickname}（{role.role_id}）。" if role else "未找到指定账号，发送 /ef 账号 可查看有效编号。"
             )
+            return
         if command.action == "attendance":
             cipher = CredentialCipher.from_settings()
-            return await _handle_attendance(matcher, event, qq_user_id, command, cipher, bot=bot)
+            return await _handle_attendance(session, event, qq_user_id, command, cipher, bot=bot)
         if command.action == "daily":
             cipher = CredentialCipher.from_settings()
-            return await _handle_daily(matcher, qq_user_id, command, cipher, group=is_group(event))
+            return await _handle_daily(session, qq_user_id, command, cipher, group=is_group(event))
         if command.action == "exploration":
             cipher = CredentialCipher.from_settings()
-            return await _handle_exploration(matcher, qq_user_id, command, cipher, group=is_group(event))
+            return await _handle_exploration(session, qq_user_id, command, cipher, group=is_group(event))
         if command.action == "medal_missing":
             cipher = CredentialCipher.from_settings()
-            return await _handle_medal_missing(matcher, qq_user_id, command, cipher, group=is_group(event))
+            return await _handle_medal_missing(session, qq_user_id, command, cipher, group=is_group(event))
         if command.action == "archive_progress":
             cipher = CredentialCipher.from_settings()
-            return await _handle_archive_progress(matcher, qq_user_id, command, cipher, group=is_group(event))
+            return await _handle_archive_progress(session, qq_user_id, command, cipher, group=is_group(event))
         if command.action in {"gacha", "gacha_sync"}:
             cipher = CredentialCipher.from_settings()
             return await _handle_gacha(
-                matcher, qq_user_id, command, cipher, group=is_group(event), event=event, bot=bot,
+                session, qq_user_id, command, cipher, group=is_group(event), event=event, bot=bot,
             )
         if command.action == "gacha_import":
             with sensitive_input(qq_user_id):
-                return await _handle_xhh_import(matcher, qq_user_id, command)
+                return await _handle_xhh_import(session, qq_user_id, command)
         if command.action == "gacha_history":
-            return await _handle_gacha_history(matcher, qq_user_id, command, group=is_group(event))
+            return await _handle_gacha_history(session, qq_user_id, command, group=is_group(event))
     except TaskAlreadyRunning:
-        return await matcher.finish("当前任务正在处理中，请稍候。")
+        await session.send("当前任务正在处理中，请稍候。")
+        return
     except CredentialKeyError as exc:
-        return await matcher.finish(str(exc))
+        await session.send(str(exc))
+        return
     except EndfieldAPIError as exc:
         logger.warning(f"[endfield-account] official API request failed: operation={exc.operation} code={exc.code}")
-        return await matcher.finish(str(exc))
+        await session.send(str(exc))
+        return
     except InvestmentDataUnavailable as exc:
         logger.warning(f"[endfield-investment] AKEData unavailable: {exc}")
-        return await matcher.finish("角色养成数据源暂时响应异常，请稍后再试。")
+        await session.send("角色养成数据源暂时响应异常，请稍后再试。")
+        return
     except ChallengeAmbiguousError as exc:
         if command.action == "challenge":
             monument = command.challenge_kind == "monument"
@@ -1178,15 +1230,20 @@ async def _handle_personal_command(matcher, event: Event, command: ParsedEndfiel
             label = _challenge_monument_difficulty_label if monument else _challenge_difficulty_label
             difficulty = label(command.challenge_difficulty) if command.challenge_difficulty else ""
             example = " ".join(item for item in (head, scope, candidate, difficulty) if item)
-            return await matcher.finish(f"{exc}\n参考格式：/ef {example}")
-        return await matcher.finish(str(exc))
+            await session.send(f"{exc}\n参考格式：/ef {example}")
+            return
+        await session.send(str(exc))
+        return
     except ChallengeResolutionError as exc:
-        return await matcher.finish(str(exc))
+        await session.send(str(exc))
+        return
     except XhhAPIError as exc:
-        return await matcher.finish(str(exc))
+        await session.send(str(exc))
+        return
     except aiohttp.ClientConnectionError:
         logger.warning(f"[endfield-account] message connection interrupted: action={command.action}")
-        return await matcher.finish("网络连接中断，请重新发送指令。")
+        await session.send("网络连接中断，请重新发送指令。")
+        return
     except ExitState:
         raise
     except Exception as exc:
@@ -1194,7 +1251,8 @@ async def _handle_personal_command(matcher, event: Event, command: ParsedEndfiel
             f"[endfield-account] action failed: action={command.action} "
             f"error_type={type(exc).__module__}.{type(exc).__name__}"
         )
-        return await matcher.finish("账号服务暂时响应异常，请稍后再试。")
+        await session.send("账号服务暂时响应异常，请稍后再试。")
+        return
 
 
 def _challenge_mention_targets(event: Event, bot=None) -> tuple[str, ...]:
@@ -1225,7 +1283,7 @@ def _challenge_mention_targets(event: Event, bot=None) -> tuple[str, ...]:
 
 
 async def _handle_challenge(
-    matcher,
+    session,
     event: Event,
     qq_user_id: str,
     command: ParsedEndfieldCommand,
@@ -1235,19 +1293,23 @@ async def _handle_challenge(
 ) -> None:
     """Render one personal challenge query without prompting in group chats."""
     if command.challenge_view in {"usage", "usage_history", "usage_refresh"}:
-        return await _handle_usage_stats(matcher, event, command, bot=bot)
+        return await _handle_usage_stats(session, event, command, bot=bot)
     mentioned_users = _challenge_mention_targets(event, bot)
     if mentioned_users and not is_group(event):
-        return await matcher.finish("通过 @群友 查询他人挑战数据仅限在群聊中使用。")
+        await session.send("通过 @群友 查询他人挑战数据仅限在群聊中使用。")
+        return
     if len(mentioned_users) > 1:
-        return await matcher.finish("单次查询仅支持 @ 一位群友。")
+        await session.send("单次查询仅支持 @ 一位群友。")
+        return
 
     target_user_id = mentioned_users[0] if mentioned_users else qq_user_id
     roles = account_store.list_roles(target_user_id)
     if not roles:
         if mentioned_users:
-            return await matcher.finish("所选群友暂未绑定终末地账号。")
-        return await matcher.finish("尚未绑定终末地账号，请先私聊发送 /ef 绑定 进行添加。")
+            await session.send("所选群友暂未绑定终末地账号。")
+            return
+        await session.send("尚未绑定终末地账号，请先私聊发送 /ef 绑定 进行添加。")
+        return
     # Mention queries deliberately use the target user's primary account.  An
     # account selector remains meaningful only for the command sender's own
     # bindings, so it cannot expose a target user's secondary account by index.
@@ -1267,14 +1329,17 @@ async def _handle_challenge(
                 uid = candidate.masked_uid if group_chat else candidate.role_id
                 lines.append(f"{index}. {candidate.nickname}（UID {uid}）")
             lines.append("参考格式：/ef 影拓 账号 1")
-            return await matcher.finish("\n".join(lines))
+            await session.send("\n".join(lines))
+            return
         else:
-            return await matcher.finish("未找到指定账号，发送 /ef 账号 可查看有效编号。")
+            await session.send("未找到指定账号，发送 /ef 账号 可查看有效编号。")
+            return
 
     token = account_store.decrypt_token(role, cipher)
     provider, _raw_token = decode_account_credential(token)
     if provider == ACCOUNT_PROVIDER_SKPORT or is_asia_role(role):
-        return await matcher.finish("影拓丰碑与战争回响目前仅支持国服角色，亚服暂未接入。")
+        await session.send("影拓丰碑与战争回响目前仅支持国服角色，亚服暂未接入。")
+        return
 
     group_chat = is_group(event)
     identity = ChallengeIdentity(
@@ -1284,10 +1349,10 @@ async def _handle_challenge(
         updated_at=datetime.now().strftime("%Y-%m-%d %H:%M"),
     )
     variant = "b"
-    with cold_start_command(matcher):
+    with cold_start_command(session):
         await notice_default_ake_public()
         return await _render_challenge_cards(
-            matcher,
+            session,
             event,
             command,
             bot,
@@ -1300,7 +1365,7 @@ async def _handle_challenge(
 
 
 async def _render_challenge_cards(
-    matcher,
+    session,
     event,
     command,
     bot,
@@ -1384,7 +1449,7 @@ async def _render_challenge_cards(
                     else draw_monument_overview(identity, payload, variant=variant)
                 ),
             )
-            return await _finish_pngs(matcher, pngs)
+            return await _finish_pngs(session, pngs)
         pages = payload.history_pages() if payload.has_records else ()
         if command.challenge_view == "history":
             if not pages:
@@ -1392,26 +1457,27 @@ async def _render_challenge_cards(
                     "monument", "history", "all", "", 0,
                     lambda: _one_page(draw_challenge_empty(identity, "影拓丰碑", query="暂无历史主题", variant=variant)),
                 )
-                return await _finish_pngs(matcher, pngs)
+                return await _finish_pngs(session, pngs)
             if command.all_history:
                 rendered = await cached_pages(
                     "monument", "history", "all", "", 0,
                     lambda: draw_monument_history_pages(identity, pages, variant=variant),
                 )
-                return await _finish_challenge_pages(matcher, event, bot, rendered, "/ef 影拓 历史 第N页")
+                return await _finish_challenge_pages(session, event, bot, rendered, "/ef 影拓 历史 第N页")
             if command.page > len(pages):
-                return await matcher.finish(f"影拓历史记录共 {len(pages)} 页，请输入 1–{len(pages)} 范围内的页码。")
+                await session.send(f"影拓历史记录共 {len(pages)} 页，请输入 1–{len(pages)} 范围内的页码。")
+                return
             rendered = await cached_pages(
                 "monument", "history", "", "", command.page,
                 lambda: _one_page(draw_monument_history(identity, pages[command.page - 1], page=command.page, page_count=len(pages), variant=variant)),
             )
-            return await _finish_pngs(matcher, rendered)
+            return await _finish_pngs(session, rendered)
         group, dungeon = resolve_monument_detail(payload, command.challenge_terms, command.challenge_difficulty or "hard")
         rendered = await cached_pages(
             "monument", "detail", " ".join(command.challenge_terms), command.challenge_difficulty or "hard", 0,
             lambda: _one_page(draw_monument_detail(identity, group, dungeon, variant=variant)),
         )
-        return await _finish_pngs(matcher, rendered)
+        return await _finish_pngs(session, rendered)
 
     raw, locale = await asyncio.gather(load_data("war_echo"), load_locale())
     payload = parse_war_echoes(raw, locale)
@@ -1433,7 +1499,7 @@ async def _render_challenge_cards(
                 if not payload.has_records else draw_war_overview(identity, payload, variant=variant)
             ),
         )
-        return await _finish_pngs(matcher, pngs)
+        return await _finish_pngs(session, pngs)
     pages = payload.history_pages() if payload.has_records else ()
     if command.challenge_view == "history":
         if not pages:
@@ -1441,7 +1507,7 @@ async def _render_challenge_cards(
                 "war_echo", "history", "all", "", 0,
                 lambda: _one_page(draw_challenge_empty(identity, "战争回响", query="暂无历史赛季", variant=variant)),
             )
-            return await _finish_pngs(matcher, rendered)
+            return await _finish_pngs(session, rendered)
         if command.all_history:
             rendered = await cached_pages(
                 "war_echo", "history", "all", "", 0,
@@ -1452,21 +1518,22 @@ async def _render_challenge_cards(
                     variant=variant,
                 ),
             )
-            return await _finish_challenge_pages(matcher, event, bot, rendered, "/ef 回响 历史 第N页")
+            return await _finish_challenge_pages(session, event, bot, rendered, "/ef 回响 历史 第N页")
         if command.page > len(pages):
-            return await matcher.finish(f"战争回响历史记录共 {len(pages)} 页，请输入 1–{len(pages)} 范围内的页码。")
+            await session.send(f"战争回响历史记录共 {len(pages)} 页，请输入 1–{len(pages)} 范围内的页码。")
+            return
         season = pages[command.page - 1][0]
         rendered = await cached_pages(
             "war_echo", "history", "", "", command.page,
             lambda: _one_page(draw_war_history(identity, season, page=command.page, page_count=len(pages), achievements=payload.achievements, variant=variant)),
         )
-        return await _finish_pngs(matcher, rendered)
+        return await _finish_pngs(session, rendered)
     season, week, war_group, dungeon = resolve_war_detail(payload, command.challenge_terms, command.challenge_difficulty or "cruel")
     rendered = await cached_pages(
         "war_echo", "detail", " ".join(command.challenge_terms), command.challenge_difficulty or "cruel", 0,
         lambda: _one_page(draw_war_detail(identity, season, week, war_group, dungeon, variant=variant)),
     )
-    return await _finish_pngs(matcher, rendered)
+    return await _finish_pngs(session, rendered)
 
 
 async def _usage_challenge_locale():
@@ -1508,21 +1575,21 @@ def _challenge_account_candidates(roles: list[EndfieldRole], selector: str) -> l
     return matches
 
 
-async def _finish_challenge_pages(matcher, event, bot, pngs: tuple[bytes, ...], page_hint: str) -> None:
+async def _finish_challenge_pages(session, event, bot, pngs: tuple[bytes, ...], page_hint: str) -> None:
     if len(pngs) <= 2:
-        return await _finish_pngs(matcher, pngs)
+        return await _finish_pngs(session, pngs)
     try:
-        await _send_forward_pngs(matcher, bot, pngs)
+        await _send_forward_pngs(session, bot, pngs)
     except ExitState:
         raise
     except Exception as exc:
         logger.warning(f"[endfield-challenge] merged forward unavailable: {type(exc).__name__}")
-        return await matcher.finish(f"历史记录共 {len(pngs)} 页，当前环境暂不支持合并转发，请通过 {page_hint} 分页浏览。")
-    return await matcher.finish()
+        await session.send(f"历史记录共 {len(pngs)} 页，当前环境暂不支持合并转发，请通过 {page_hint} 分页浏览。")
+        return
 
 
 async def _send_forward_pngs(
-    matcher,
+    session,
     bot,
     pngs: tuple[bytes, ...],
     *,
@@ -1539,7 +1606,7 @@ async def _send_forward_pngs(
     images: list = []
     try:
         images = [_png_image(png) for png in pngs]
-        await send_forward(images, name=sender_name, uin=uin)
+        await send_forward(session, images, name=sender_name, uin=uin)
         return "satori"
     except ExitState:
         raise
@@ -1551,7 +1618,7 @@ async def _send_forward_pngs(
     if len(images) != len(pngs):
         images = [_png_image(png) for png in pngs]
     for image in images:
-        await matcher.send(ChainMsg([image]))
+        await session.send(MessageChain([image]))
     return "images"
 
 
@@ -1560,7 +1627,7 @@ def _gacha_forward_above() -> int:
     return max(0, endfield_settings().gacha_forward_above)
 
 
-async def _finish_gacha_pngs(matcher, event, bot, pngs: tuple[bytes, ...]) -> None:
+async def _finish_gacha_pngs(session, event, bot, pngs: tuple[bytes, ...]) -> None:
     """抽卡分析投递：≤ 阈值与其他命令一样一条消息发出；超过阈值发 QQ 合并转发（每节点 1 张）。
 
     回退链：Satori ``<message forward>`` → 逐张普通图片消息 → 每条 ≤3 张分批发送（逐张发送也失败时）。
@@ -1568,7 +1635,7 @@ async def _finish_gacha_pngs(matcher, event, bot, pngs: tuple[bytes, ...]) -> No
     """
     threshold = _gacha_forward_above()
     if not threshold or len(pngs) <= threshold:
-        return await _finish_pngs(matcher, pngs)
+        return await _finish_pngs(session, pngs)
     started = perf_counter()
     sent = 0
     vias: list[str] = []
@@ -1576,7 +1643,7 @@ async def _finish_gacha_pngs(matcher, event, bot, pngs: tuple[bytes, ...]) -> No
         for start in range(0, len(pngs), FORWARD_MAX_NODES):
             chunk = pngs[start:start + FORWARD_MAX_NODES]
             vias.append(await _send_forward_pngs(
-                matcher, bot, chunk, sender_name=_GACHA_FORWARD_SENDER_NAME, log_tag="endfield-gacha",
+                session, bot, chunk, sender_name=_GACHA_FORWARD_SENDER_NAME, log_tag="endfield-gacha",
             ))
             sent += len(chunk)
     except ExitState:
@@ -1591,7 +1658,7 @@ async def _finish_gacha_pngs(matcher, event, bot, pngs: tuple[bytes, ...]) -> No
             f"[endfield-gacha] deliver mode=forward via={'+'.join(vias)} pages={len(pngs)} forwards={len(vias)} "
             f"bytes={sum(map(len, pngs))} elapsed={perf_counter() - started:.2f}s"
         )
-        return await matcher.finish()
+        return
     remaining = pngs[sent:]
     batches = [remaining[index:index + GACHA_FALLBACK_BATCH] for index in range(0, len(remaining), GACHA_FALLBACK_BATCH)]
     notice = (
@@ -1600,12 +1667,11 @@ async def _finish_gacha_pngs(matcher, event, bot, pngs: tuple[bytes, ...]) -> No
     )
     for index, batch in enumerate(batches):
         prefix = [Text(notice)] if index == 0 else []
-        await matcher.send(ChainMsg([*prefix, *(_png_image(png) for png in batch)]))
+        await session.send(MessageChain([*prefix, *(_png_image(png) for png in batch)]))
     logger.info(
         f"[endfield-gacha] deliver mode=batches pages={len(pngs)} forwarded={sent} batches={len(batches)} "
         f"elapsed={perf_counter() - started:.2f}s"
     )
-    return await matcher.finish()
 
 
 async def _one_page(page) -> tuple[bytes, ...]:
@@ -1634,8 +1700,8 @@ def _binding_log(qq_user_id: str, step: str, **fields) -> None:
     logger.info(f"[endfield-bind] user={qq_user_id} step={step}{details}")
 
 
-async def _prompt_binding(message: str, *, timeout: int, stage: str) -> str:
-    answer = await prompt(message, timeout=timeout)
+async def _prompt_binding(session: Session, message: str, *, timeout: int, stage: str) -> str:
+    answer = await prompt(session, message, timeout=timeout)
     if answer is None:
         raise _BindingStopped(stage, "timeout")
     text = answer.extract_plain_text() if hasattr(answer, "extract_plain_text") else str(answer or "")
@@ -1645,20 +1711,22 @@ async def _prompt_binding(message: str, *, timeout: int, stage: str) -> str:
     return text
 
 
-async def _handle_binding(matcher, qq_user_id: str, cipher: CredentialCipher) -> None:
+async def _handle_binding(session, qq_user_id: str, cipher: CredentialCipher) -> None:
     _binding_log(qq_user_id, "start")
     try:
-        return await _run_binding(matcher, qq_user_id, cipher)
+        return await _run_binding(session, qq_user_id, cipher)
     except _BindingStopped as stopped:
         _binding_log(qq_user_id, stopped.reason, at=stopped.stage)
-        return await matcher.finish(_BINDING_STOPPED[stopped.reason])
+        await session.send(_BINDING_STOPPED[stopped.reason])
+        return
     except EndfieldAPIError as exc:
         _binding_log(qq_user_id, "failed", operation=exc.operation, code=exc.code)
         raise
 
 
-async def _run_binding(matcher, qq_user_id: str, cipher: CredentialCipher) -> None:
+async def _run_binding(session, qq_user_id: str, cipher: CredentialCipher) -> None:
     region = await _prompt_binding(
+        session,
         "请选择服务器分区：\n1. 国服（森空岛，支持 Token 与短信验证，二维码暂未开放）\n"
         "2. 亚服（SKPORT，当前支持 Token）\n"
         "回复数字 1 或 2，如需放弃请回复“取消”。",
@@ -1672,11 +1740,12 @@ async def _run_binding(matcher, qq_user_id: str, cipher: CredentialCipher) -> No
         provider = ACCOUNT_PROVIDER_SKPORT
     else:
         _binding_log(qq_user_id, "abort", at="region", reason="unrecognized")
-        return await matcher.finish("无法识别所选服务器，绑定流程已终止。")
+        await session.send("无法识别所选服务器，绑定流程已终止。")
+        return
     _binding_log(qq_user_id, "region", provider=provider)
 
     if provider == ACCOUNT_PROVIDER_SKPORT:
-        await matcher.send(
+        await session.send(
             "请在浏览器登录 SKPORT（https://www.skport.com/）后访问：\n"
             "https://web-api.skport.com/cookie_store/account_token\n"
             "页面将返回类似以下示例内容（仅为格式示意，切勿直接发送范例 Token）：\n"
@@ -1689,12 +1758,13 @@ async def _run_binding(matcher, qq_user_id: str, cipher: CredentialCipher) -> No
             "请妥善保管凭证，切勿在群聊或公共渠道公开。"
         )
         raw_account_token = await _prompt_binding(
+            session,
             "请发送 content 对应的 Token 字符串，如需放弃请回复“取消”。", timeout=150, stage="token"
         )
         account_token = encode_account_credential(raw_account_token, provider)
         _binding_log(qq_user_id, "token_received", provider=provider)
     else:
-        account_token = await _bind_cn_account_token(matcher, qq_user_id)
+        account_token = await _bind_cn_account_token(session, qq_user_id)
         if account_token is None:
             return None
 
@@ -1703,11 +1773,12 @@ async def _run_binding(matcher, qq_user_id: str, cipher: CredentialCipher) -> No
         roles = [role for role in roles if is_asia_role(role)]
     _binding_log(qq_user_id, "roles", count=len(roles))
     if not roles:
-        return await matcher.finish(
+        await session.send(
             "该 Gryphline 通行证下未检索到终末地亚服角色。" if provider == ACCOUNT_PROVIDER_SKPORT
             else "该鹰角网络通行证下未检索到终末地角色。"
         )
-    selected = await _select_binding_roles(roles, qq_user_id)
+        return
+    selected = await _select_binding_roles(session, roles, qq_user_id)
     previous_roles = account_store.list_roles(qq_user_id)
     previous_keys = {(role.role_id, role.server_id) for role in previous_roles}
     bound_roles = account_store.bind_roles(qq_user_id, account_token, selected, cipher)
@@ -1734,15 +1805,16 @@ async def _run_binding(matcher, qq_user_id: str, cipher: CredentialCipher) -> No
             f"error_type={type(exc).__module__}.{type(exc).__name__}"
         )
     _binding_log(qq_user_id, "done", provider=provider, added=added_count, updated=updated_count, total=len(bound_roles))
-    return await matcher.finish(
+    await session.send(
         summary + "\n" + "\n".join(
             f"- {role.nickname} · {server_label(role.server_name or role.server_id)} · UID {role.role_id}" for role in selected
         )
     )
 
 
-async def _bind_cn_account_token(matcher, qq_user_id: str) -> str | None:
+async def _bind_cn_account_token(session, qq_user_id: str) -> str | None:
     method = await _prompt_binding(
+        session,
         "请选择绑定授权途径：\n1. Token 授权绑定\n2. 手机短信验证码绑定\n"
         "二维码扫码绑定暂未开放。\n"
         "支持追加绑定多个鹰角账号，已绑定的角色数据不会被覆盖。\n回复数字 1 或 2，如需放弃请回复“取消”。",
@@ -1752,45 +1824,45 @@ async def _bind_cn_account_token(matcher, qq_user_id: str) -> str | None:
     normalized = method.casefold()
     if normalized in {"1", "token", "t"}:
         _binding_log(qq_user_id, "method", method="token")
-        await matcher.send(
+        await session.send(
             "请在浏览器中登录森空岛并访问：\nhttps://web-api.skland.com/account/info/hg\n"
             "复制页面响应中 data.content 对应的完整字符串并发送。请妥善保管凭据，切勿向他人公开。"
         )
-        account_token = await _prompt_binding("请发送 data.content 内容，如需放弃请回复“取消”。", timeout=150, stage="token")
+        account_token = await _prompt_binding(session, "请发送 data.content 内容，如需放弃请回复“取消”。", timeout=150, stage="token")
         _binding_log(qq_user_id, "token_received", provider=ACCOUNT_PROVIDER_CN)
     elif normalized in {"2", "短信", "手机", "sms"}:
         _binding_log(qq_user_id, "method", method="sms")
-        phone = await _prompt_binding("请输入鹰角网络账号对应的 11 位手机号，如需放弃请回复“取消”。", timeout=90, stage="phone")
+        phone = await _prompt_binding(session, "请输入鹰角网络账号对应的 11 位手机号，如需放弃请回复“取消”。", timeout=90, stage="phone")
         if not re.fullmatch(r"1\d{10}", phone):
             _binding_log(qq_user_id, "abort", at="phone", reason="format")
-            await matcher.finish("手机号格式不符合标准，绑定流程已终止。")
+            await session.send("手机号格式不符合标准，绑定流程已终止。")
             return None
         _binding_log(qq_user_id, "send_code")
-        if not await _send_cn_phone_code(matcher, qq_user_id, phone):
+        if not await _send_cn_phone_code(session, qq_user_id, phone):
             return None
         _binding_log(qq_user_id, "code_sent")
-        code = await _prompt_binding("短信验证码已下发，请输入收到的验证码，如需放弃请回复“取消”。", timeout=120, stage="code")
+        code = await _prompt_binding(session, "短信验证码已下发，请输入收到的验证码，如需放弃请回复“取消”。", timeout=120, stage="code")
         if not re.fullmatch(r"\d{4,8}", code):
             _binding_log(qq_user_id, "abort", at="code", reason="format")
-            await matcher.finish("验证码格式输入有误，绑定流程已终止。")
+            await session.send("验证码格式输入有误，绑定流程已终止。")
             return None
         _binding_log(qq_user_id, "verify")
         account_token = await official_client.token_by_phone_code(phone, code)
         _binding_log(qq_user_id, "verified")
     # 暂时禁用二维码绑定，保留以下代码以便后续恢复：
     # elif normalized in {"3", "二维码", "扫码", "qr", "qrcode"}:
-    #     account_token = await _bind_cn_qr_account(matcher)
+    #     account_token = await _bind_cn_qr_account(session)
     #     if account_token is None:
     #         return None
     else:
         qr = normalized in {"3", "二维码", "扫码", "qr", "qrcode"}
         _binding_log(qq_user_id, "abort", at="method", reason="qr" if qr else "unrecognized")
-        await matcher.finish("二维码扫码暂未开放，请回复 1 或 2 选择其他方式。" if qr else "无法识别所选绑定方式，流程已终止。")
+        await session.send("二维码扫码暂未开放，请回复 1 或 2 选择其他方式。" if qr else "无法识别所选绑定方式，流程已终止。")
         return None
     return encode_account_credential(account_token, ACCOUNT_PROVIDER_CN)
 
 
-async def _send_cn_phone_code(matcher, qq_user_id: str, phone: str) -> bool:
+async def _send_cn_phone_code(session, qq_user_id: str, phone: str) -> bool:
     """Send the SMS code; when Hypergryph asks for a GeeTest check, let the user solve it first."""
     captcha = None
     for attempt in range(1, CAPTCHA_ROUNDS + 2):
@@ -1801,25 +1873,26 @@ async def _send_cn_phone_code(matcher, qq_user_id: str, phone: str) -> bool:
             _binding_log(qq_user_id, "captcha_required", attempt=attempt)
             if attempt > CAPTCHA_ROUNDS:
                 break
-            captcha = await _solve_cn_captcha(matcher, qq_user_id, required)
+            captcha = await _solve_cn_captcha(session, qq_user_id, required)
             if captcha is None:
                 return False
     _binding_log(qq_user_id, "abort", at="captcha", reason="rounds")
-    await matcher.finish(CAPTCHA_GIVE_UP)
+    await session.send(CAPTCHA_GIVE_UP)
     return False
 
 
-async def _solve_cn_captcha(matcher, qq_user_id: str, required: HypergryphCaptchaRequired) -> dict[str, str] | None:
+async def _solve_cn_captcha(session, qq_user_id: str, required: HypergryphCaptchaRequired) -> dict[str, str] | None:
     html = render_geetest_html(gt=required.gt, challenge=required.challenge, new_captcha=required.new_captcha)
     try:
         link = await upload_captcha_page(html)
     except CaptchaPageUploadError:
         _binding_log(qq_user_id, "abort", at="captcha", reason="upload")
-        await matcher.finish(CAPTCHA_UPLOAD_FAILED)
+        await session.send(CAPTCHA_UPLOAD_FAILED)
         return None
     _binding_log(qq_user_id, "captcha_page_sent")
-    await matcher.send(f"{CAPTCHA_GUIDE}\n{link}")
+    await session.send(f"{CAPTCHA_GUIDE}\n{link}")
     paste = await _prompt_binding(
+        session,
         "请发送验证页面显示的一整行结果，如需放弃请回复“取消”。",
         timeout=CAPTCHA_TIMEOUT_SECONDS,
         stage="captcha",
@@ -1828,21 +1901,21 @@ async def _solve_cn_captcha(matcher, qq_user_id: str, required: HypergryphCaptch
         captcha = parse_captcha_paste(paste)
     except CaptchaPasteError as exc:
         _binding_log(qq_user_id, "abort", at="captcha", reason="format")
-        await matcher.finish(f"{exc}绑定流程已终止。")
+        await session.send(f"{exc}绑定流程已终止。")
         return None
     _binding_log(qq_user_id, "captcha_received")
     return captcha
 
 
 # 暂时注释二维码绑定实现；恢复时一并取消本段注释。
-# async def _bind_cn_qr_account(matcher) -> str | None:
+# async def _bind_cn_qr_account(session) -> str | None:
 #     ticket = await official_client.create_qr_login()
 #     qr_png = _render_qr_png(ticket.scan_url)
-#     await matcher.send(
+#     await session.send(
 #         "请使用森空岛或《明日方舟：终末地》App 扫描下方二维码并确认登录。"
 #         "二维码有效期较短，请勿转发给他人。"
 #     )
-#     await matcher.send(ChainMsg([make_image(raw=qr_png)]))
+#     await session.send(MessageChain([Image.of(raw=qr_png)]))
 #
 #     loop = asyncio.get_running_loop()
 #     deadline = loop.time() + 150
@@ -1852,14 +1925,14 @@ async def _solve_cn_captcha(matcher, qq_user_id: str, required: HypergryphCaptch
 #         if status.state == "confirmed":
 #             return await official_client.token_by_scan_code(status.scan_code)
 #         if status.state == "scanned" and not scan_notice_sent:
-#             await matcher.send("扫码成功，请在手机上确认登录。")
+#             await session.send("扫码成功，请在手机上确认登录。")
 #             scan_notice_sent = True
 #         if status.state == "expired":
-#             await matcher.finish("二维码已过期，请重新执行绑定命令。")
+#             await session.send("二维码已过期，请重新执行绑定命令。")
 #             return None
 #         await asyncio.sleep(min(2, max(0, deadline - loop.time())))
 #
-#     await matcher.finish("等待扫码确认超时，请重新执行绑定命令。")
+#     await session.send("等待扫码确认超时，请重新执行绑定命令。")
 #     return None
 #
 #
@@ -1898,7 +1971,7 @@ def parse_binding_selection(answer: str, roles: list[RoleCandidate]) -> list[Rol
     return [role for index, role in enumerate(roles) if index in picked]
 
 
-async def _select_binding_roles(roles: list[RoleCandidate], qq_user_id: str) -> list[RoleCandidate]:
+async def _select_binding_roles(session: Session, roles: list[RoleCandidate], qq_user_id: str) -> list[RoleCandidate]:
     if len(roles) == 1:
         _binding_log(qq_user_id, "select", selected=1, total=1)
         return roles
@@ -1911,7 +1984,7 @@ async def _select_binding_roles(roles: list[RoleCandidate], qq_user_id: str) -> 
         "也可回复“全部”；回复“取消”退出：\n" + listing
     )
     for attempt in range(1, BINDING_SELECT_ATTEMPTS + 1):
-        selected = parse_binding_selection(await _prompt_binding(message, timeout=120, stage="select"), roles)
+        selected = parse_binding_selection(await _prompt_binding(session, message, timeout=120, stage="select"), roles)
         if selected:
             _binding_log(qq_user_id, "select", selected=len(selected), total=len(roles), attempt=attempt)
             return selected
@@ -1921,33 +1994,37 @@ async def _select_binding_roles(roles: list[RoleCandidate], qq_user_id: str) -> 
 
 
 async def _handle_accounts(
-    matcher, qq_user_id: str, command: ParsedEndfieldCommand, cipher: CredentialCipher, *, group: bool
+    session, qq_user_id: str, command: ParsedEndfieldCommand, cipher: CredentialCipher, *, group: bool
 ) -> None:
     roles = account_store.list_roles(qq_user_id)
     if not roles:
-        return await matcher.finish("尚未绑定终末地账号，请先私聊发送 /ef 绑定 进行添加。")
+        await session.send("尚未绑定终末地账号，请先私聊发送 /ef 绑定 进行添加。")
+        return
     if command.account_selector:
         role = account_store.resolve_role(qq_user_id, command.account_selector)
         if role is None:
-            return await matcher.finish("未找到指定账号，发送 /ef 账号 可查看有效编号。")
-        return await _render_account_detail(matcher, role, cipher, group=group)
+            await session.send("未找到指定账号，发送 /ef 账号 可查看有效编号。")
+            return
+        return await _render_account_detail(session, role, cipher, group=group)
     if len(roles) == 1:
-        return await _render_account_detail(matcher, roles[0], cipher, group=group)
+        return await _render_account_detail(session, roles[0], cipher, group=group)
 
     answer = await prompt_silently(
-        _format_accounts(roles, reveal_uid=not group, detail_hint=True), timeout=60
+        session, _format_accounts(roles, reveal_uid=not group, detail_hint=True), timeout=60
     )
     if answer is None:
-        return await matcher.finish()
+        return
     text = answer.extract_plain_text() if hasattr(answer, "extract_plain_text") else str(answer or "")
     text = text.strip()
     if not text or text.casefold() in {"取消", "cancel", "q", "quit"}:
-        return await matcher.finish("已取消账号查询。")
+        await session.send("已取消账号查询。")
+        return
     selection = parse_candidate_selection(text, len(roles))
     role = roles[selection] if selection is not None else account_store.resolve_role(qq_user_id, text)
     if role is None:
-        return await matcher.finish(f"序号输入有误，请输入 1–{len(roles)}。")
-    return await _render_account_detail(matcher, role, cipher, group=group)
+        await session.send(f"序号输入有误，请输入 1–{len(roles)}。")
+        return
+    return await _render_account_detail(session, role, cipher, group=group)
 
 
 _background_tasks: set[asyncio.Task] = set()
@@ -2002,9 +2079,9 @@ async def _card_detail_with_snapshot(token: str, role: EndfieldRole) -> dict:
 
 
 async def _render_account_detail(
-    matcher, role: EndfieldRole, cipher: CredentialCipher, *, group: bool
+    session, role: EndfieldRole, cipher: CredentialCipher, *, group: bool
 ) -> None:
-    with cold_start_command(matcher):
+    with cold_start_command(session):
         token = account_store.decrypt_token(role, cipher)
         await notice_default_ake_public()
         async def load_currency_balances() -> dict[int, int]:
@@ -2048,11 +2125,11 @@ async def _render_account_detail(
             "detail", role, group, view, lambda: draw_account_detail_cards(view),
             data_seconds=perf_counter() - data_started,
         )
-        return await _finish_pngs(matcher, pages)
+        return await _finish_pngs(session, pages)
 
 
 async def _handle_account_investment(
-    matcher,
+    session,
     qq_user_id: str,
     command: ParsedEndfieldCommand,
     cipher: CredentialCipher,
@@ -2061,33 +2138,37 @@ async def _handle_account_investment(
 ) -> None:
     roles = account_store.list_roles(qq_user_id)
     if not roles:
-        return await matcher.finish("尚未绑定终末地账号，请先私聊发送 /ef 绑定 进行添加。")
+        await session.send("尚未绑定终末地账号，请先私聊发送 /ef 绑定 进行添加。")
+        return
     if command.account_selector:
         role = account_store.resolve_role(qq_user_id, command.account_selector)
         if role is None:
-            return await matcher.finish("未找到指定账号，发送 /ef 账号 可查看有效编号。")
-        return await _render_account_investment(matcher, role, cipher, group=group)
+            await session.send("未找到指定账号，发送 /ef 账号 可查看有效编号。")
+            return
+        return await _render_account_investment(session, role, cipher, group=group)
     if len(roles) == 1:
-        return await _render_account_investment(matcher, roles[0], cipher, group=group)
+        return await _render_account_investment(session, roles[0], cipher, group=group)
 
     answer = await prompt_silently(
-        _format_accounts(roles, reveal_uid=not group, detail_hint=True), timeout=60
+        session, _format_accounts(roles, reveal_uid=not group, detail_hint=True), timeout=60
     )
     if answer is None:
-        return await matcher.finish()
+        return
     text = answer.extract_plain_text() if hasattr(answer, "extract_plain_text") else str(answer or "")
     text = text.strip()
     if not text or text.casefold() in {"取消", "cancel", "q", "quit"}:
-        return await matcher.finish("已取消账号养成统计查询。")
+        await session.send("已取消账号养成统计查询。")
+        return
     selection = parse_candidate_selection(text, len(roles))
     role = roles[selection] if selection is not None else account_store.resolve_role(qq_user_id, text)
     if role is None:
-        return await matcher.finish(f"序号输入有误，请输入 1–{len(roles)}。")
-    return await _render_account_investment(matcher, role, cipher, group=group)
+        await session.send(f"序号输入有误，请输入 1–{len(roles)}。")
+        return
+    return await _render_account_investment(session, role, cipher, group=group)
 
 
 async def _render_account_investment(
-    matcher,
+    session,
     role: EndfieldRole,
     cipher: CredentialCipher,
     *,
@@ -2096,9 +2177,10 @@ async def _render_account_investment(
     token = account_store.decrypt_token(role, cipher)
     provider, _raw_token = decode_account_credential(token)
     if provider == ACCOUNT_PROVIDER_SKPORT or is_asia_role(role):
-        return await matcher.finish("养成统计功能目前仅支持国服角色，亚服暂未接入。")
+        await session.send("养成统计功能目前仅支持国服角色，亚服暂未接入。")
+        return
 
-    with cold_start_command(matcher):
+    with cold_start_command(session):
         await notice_default_ake_public()
         async def load_name_map():
             try:
@@ -2125,11 +2207,11 @@ async def _render_account_investment(
             "investment", role, group, view, lambda: draw_account_investment_cards(view),
             data_seconds=perf_counter() - data_started,
         )
-        return await _finish_pngs(matcher, pages)
+        return await _finish_pngs(session, pages)
 
 
 async def _handle_account_currency(
-    matcher,
+    session,
     qq_user_id: str,
     command: ParsedEndfieldCommand,
     cipher: CredentialCipher,
@@ -2138,33 +2220,37 @@ async def _handle_account_currency(
 ) -> None:
     roles = account_store.list_roles(qq_user_id)
     if not roles:
-        return await matcher.finish("尚未绑定终末地账号，请先私聊发送 /ef 绑定 进行添加。")
+        await session.send("尚未绑定终末地账号，请先私聊发送 /ef 绑定 进行添加。")
+        return
     if command.account_selector:
         role = account_store.resolve_role(qq_user_id, command.account_selector)
         if role is None:
-            return await matcher.finish("未找到指定账号，发送 /ef 账号 可查看有效编号。")
-        return await _render_account_currency(matcher, role, command, cipher, group=group)
+            await session.send("未找到指定账号，发送 /ef 账号 可查看有效编号。")
+            return
+        return await _render_account_currency(session, role, command, cipher, group=group)
     if len(roles) == 1:
-        return await _render_account_currency(matcher, roles[0], command, cipher, group=group)
+        return await _render_account_currency(session, roles[0], command, cipher, group=group)
 
     answer = await prompt_silently(
-        _format_accounts(roles, reveal_uid=not group, detail_hint=True), timeout=60
+        session, _format_accounts(roles, reveal_uid=not group, detail_hint=True), timeout=60
     )
     if answer is None:
-        return await matcher.finish()
+        return
     text = answer.extract_plain_text() if hasattr(answer, "extract_plain_text") else str(answer or "")
     text = text.strip()
     if not text or text.casefold() in {"取消", "cancel", "q", "quit"}:
-        return await matcher.finish("已取消资源流水查询。")
+        await session.send("已取消资源流水查询。")
+        return
     selection = parse_candidate_selection(text, len(roles))
     role = roles[selection] if selection is not None else account_store.resolve_role(qq_user_id, text)
     if role is None:
-        return await matcher.finish(f"序号输入有误，请输入 1–{len(roles)}。")
-    return await _render_account_currency(matcher, role, command, cipher, group=group)
+        await session.send(f"序号输入有误，请输入 1–{len(roles)}。")
+        return
+    return await _render_account_currency(session, role, command, cipher, group=group)
 
 
 async def _render_account_currency(
-    matcher,
+    session,
     role: EndfieldRole,
     command: ParsedEndfieldCommand,
     cipher: CredentialCipher,
@@ -2174,7 +2260,8 @@ async def _render_account_currency(
     token = account_store.decrypt_token(role, cipher)
     provider, _raw_token = decode_account_credential(token)
     if provider == ACCOUNT_PROVIDER_SKPORT or is_asia_role(role):
-        return await matcher.finish("资源流水查询目前仅支持国服角色，亚服暂未接入。")
+        await session.send("资源流水查询目前仅支持国服角色，亚服暂未接入。")
+        return
 
     try:
         start, end = resolve_query_dates(
@@ -2188,7 +2275,8 @@ async def _render_account_currency(
             else currency_date_bounds(start, end)
         )
     except ValueError as exc:
-        return await matcher.finish(str(exc))
+        await session.send(str(exc))
+        return
 
     currency_types = command.currency_types or CURRENCY_TYPES
     # Every query refreshes the complete official history for all resources.
@@ -2246,7 +2334,7 @@ async def _render_account_currency(
             change_type=command.change_type,
             period_label=period_label,
         )
-        return await _finish_pngs(matcher, cards)
+        return await _finish_pngs(session, cards)
     except ExitState:
         raise
     except Exception:
@@ -2261,12 +2349,13 @@ async def _render_account_currency(
         )
         chunks = split_report(report)
         for chunk in chunks[:-1]:
-            await matcher.send(chunk)
-        return await matcher.finish(chunks[-1])
+            await session.send(chunk)
+        await session.send(chunks[-1])
+        return
 
 
 async def _handle_account_base(
-    matcher,
+    session,
     qq_user_id: str,
     command: ParsedEndfieldCommand,
     cipher: CredentialCipher,
@@ -2275,39 +2364,43 @@ async def _handle_account_base(
 ) -> None:
     roles = account_store.list_roles(qq_user_id)
     if not roles:
-        return await matcher.finish("尚未绑定终末地账号，请先私聊发送 /ef 绑定 进行添加。")
+        await session.send("尚未绑定终末地账号，请先私聊发送 /ef 绑定 进行添加。")
+        return
     if command.account_selector:
         role = account_store.resolve_role(qq_user_id, command.account_selector)
         if role is None:
-            return await matcher.finish("未找到指定账号，发送 /ef 账号 可查看有效编号。")
-        return await _render_account_base(matcher, role, cipher, group=group)
+            await session.send("未找到指定账号，发送 /ef 账号 可查看有效编号。")
+            return
+        return await _render_account_base(session, role, cipher, group=group)
     if len(roles) == 1:
-        return await _render_account_base(matcher, roles[0], cipher, group=group)
+        return await _render_account_base(session, roles[0], cipher, group=group)
 
     answer = await prompt_silently(
-        _format_accounts(roles, reveal_uid=not group, detail_hint=True), timeout=60
+        session, _format_accounts(roles, reveal_uid=not group, detail_hint=True), timeout=60
     )
     if answer is None:
-        return await matcher.finish()
+        return
     text = answer.extract_plain_text() if hasattr(answer, "extract_plain_text") else str(answer or "")
     text = text.strip()
     if not text or text.casefold() in {"取消", "cancel", "q", "quit"}:
-        return await matcher.finish("已取消账号查询。")
+        await session.send("已取消账号查询。")
+        return
     selection = parse_candidate_selection(text, len(roles))
     role = roles[selection] if selection is not None else account_store.resolve_role(qq_user_id, text)
     if role is None:
-        return await matcher.finish(f"序号输入有误，请输入 1–{len(roles)}。")
-    return await _render_account_base(matcher, role, cipher, group=group)
+        await session.send(f"序号输入有误，请输入 1–{len(roles)}。")
+        return
+    return await _render_account_base(session, role, cipher, group=group)
 
 
 async def _render_account_base(
-    matcher,
+    session,
     role: EndfieldRole,
     cipher: CredentialCipher,
     *,
     group: bool,
 ) -> None:
-    with cold_start_command(matcher):
+    with cold_start_command(session):
         token = account_store.decrypt_token(role, cipher)
         await notice_default_ake_public()
 
@@ -2339,21 +2432,23 @@ async def _render_account_base(
             return (await draw_account_base_card(view),)
 
         return await _finish_pngs(
-            matcher,
+            session,
             await _render_account_pages("base", role, group, view, render, data_seconds=data_seconds),
         )
 
 
 async def _handle_exploration(
-    matcher, qq_user_id: str, command: ParsedEndfieldCommand, cipher: CredentialCipher, *, group: bool
+    session, qq_user_id: str, command: ParsedEndfieldCommand, cipher: CredentialCipher, *, group: bool
 ) -> None:
     # Resolve only the caller's roles. An empty selector uses their primary account.
     role = account_store.resolve_role(qq_user_id, command.account_selector)
     if role is None:
         if command.account_selector:
-            return await matcher.finish("未找到对应账号，请发送 /ef 账号 查看编号，再使用 /ef 探索 <编号>。")
-        return await matcher.finish("尚未绑定终末地账号，请先私聊发送 /ef 绑定。")
-    with cold_start_command(matcher):
+            await session.send("未找到对应账号，请发送 /ef 账号 查看编号，再使用 /ef 探索 <编号>。")
+            return
+        await session.send("尚未绑定终末地账号，请先私聊发送 /ef 绑定。")
+        return
+    with cold_start_command(session):
         token = account_store.decrypt_token(role, cipher)
         # A cold version lookup can take a while; overlap it with the account fetch.
         data_started = perf_counter()
@@ -2373,7 +2468,7 @@ async def _handle_exploration(
             return await draw_exploration_cards(view)
 
         return await _finish_pngs(
-            matcher,
+            session,
             await _render_account_pages(
                 "exploration", role, group, view, render, data_seconds=data_seconds
             ),
@@ -2445,7 +2540,7 @@ async def _render_account_pages(
 
 
 async def _handle_attendance(
-    matcher,
+    session,
     event: Event,
     qq_user_id: str,
     command: ParsedEndfieldCommand,
@@ -2455,7 +2550,8 @@ async def _handle_attendance(
 ) -> None:
     roles = account_store.resolve_roles(qq_user_id, command.account_selector)
     if not roles:
-        return await matcher.finish("未找到对应的终末地账号，请先私聊发送 /ef 绑定 进行添加。")
+        await session.send("未找到对应的终末地账号，请先私聊发送 /ef 绑定 进行添加。")
+        return
     view = await sign_attendance_roles(account_store, official_client, cipher, roles)
     outcomes = [
         signed_outcome(
@@ -2473,8 +2569,7 @@ async def _handle_attendance(
             enabled=lambda feature: feature_store.is_enabled(scope, feature),
         )
     )
-    await deliver(matcher.send, await build_delivery(outcomes))
-    return await matcher.finish()
+    await deliver(session.send, await build_delivery(outcomes))
 
 
 async def _attendance_png(view: AttendanceCardView) -> bytes | None:
@@ -2530,7 +2625,7 @@ register_attendance_capability(
 
 
 async def _handle_daily(
-    matcher,
+    session,
     qq_user_id: str,
     command: ParsedEndfieldCommand,
     cipher: CredentialCipher,
@@ -2540,7 +2635,8 @@ async def _handle_daily(
     """日常仪表盘：逐账号读取森空岛 card/detail，展示理智/活跃度/每周事务/通行证。"""
     roles = account_store.resolve_roles(qq_user_id, command.account_selector)
     if not roles:
-        return await matcher.finish("未找到对应的终末地账号，请先私聊发送 /ef 绑定 进行添加。")
+        await session.send("未找到对应的终末地账号，请先私聊发送 /ef 绑定 进行添加。")
+        return
 
     async def load(role: EndfieldRole) -> DailyAccountView:
         try:
@@ -2576,16 +2672,17 @@ async def _handle_daily(
     png = await draw_daily_dashboard_card(
         DailyDashboardView(accounts, format_timestamp(int(__import__("time").time())))
     )
-    return await _finish_png(matcher, png)
+    return await _finish_png(session, png)
 
 
 async def _handle_gacha(
-    matcher, qq_user_id: str, command: ParsedEndfieldCommand, cipher: CredentialCipher, *, group: bool,
+    session, qq_user_id: str, command: ParsedEndfieldCommand, cipher: CredentialCipher, *, group: bool,
     event=None, bot=None,
 ) -> None:
     role = account_store.resolve_role(qq_user_id, command.account_selector)
     if role is None:
-        return await matcher.finish("未找到对应的终末地账号，请先私聊发送 /ef 绑定 进行添加。")
+        await session.send("未找到对应的终末地账号，请先私聊发送 /ef 绑定 进行添加。")
+        return
     gacha_service = EndfieldGachaService(account_store, official_client, cipher)
     states = account_store.list_sync_states(role)
     effective_full = command.full or not states
@@ -2598,7 +2695,8 @@ async def _handle_gacha(
         failed = f"，{len(result.failed)} 个卡池拉取失败" if result.failed else ""
         mode = "近 90 天全量窗口" if effective_full else "增量"
         suffix = "；本地已同步记录将持续保留" if effective_full else ""
-        return await matcher.finish(f"{role.nickname} 抽卡记录{mode}同步完毕：新增收录 {result.inserted} 条{failed}{suffix}。")
+        await session.send(f"{role.nickname} 抽卡记录{mode}同步完毕：新增收录 {result.inserted} 条{failed}{suffix}。")
+        return
     records = account_store.list_gacha_records(role, limit=100000)
     xhh_import = account_store.get_xhh_gacha_import(role)
     xhh_names = [item.item_name for item in xhh_import.six_stars] if xhh_import else []
@@ -2615,17 +2713,19 @@ async def _handle_gacha(
         role, metadata, pool_rules, xhh_metadata, keepsake_metadata, pool_banners,
     )
     pngs = await draw_gacha_analysis_cards(analysis, uid=role.masked_uid)
-    return await _finish_gacha_pngs(matcher, event, bot, pngs)
+    return await _finish_gacha_pngs(session, event, bot, pngs)
 
 
-async def _handle_gacha_history(matcher, qq_user_id: str, command: ParsedEndfieldCommand, *, group: bool) -> None:
+async def _handle_gacha_history(session, qq_user_id: str, command: ParsedEndfieldCommand, *, group: bool) -> None:
     role = account_store.resolve_role(qq_user_id, command.account_selector)
     if role is None:
-        return await matcher.finish("未找到对应的终末地账号，请先私聊发送 /ef 绑定 进行添加。")
+        await session.send("未找到对应的终末地账号，请先私聊发送 /ef 绑定 进行添加。")
+        return
     total = account_store.count_gacha_records(role, command.pool_filter)
     total_pages = max(1, (total + 19) // 20)
     if command.page > total_pages and total:
-        return await matcher.finish(f"页码超出有效范围，当前记录共 {total_pages} 页。")
+        await session.send(f"页码超出有效范围，当前记录共 {total_pages} 页。")
+        return
     records = account_store.list_gacha_records(
         role, page=command.page, page_size=20, pool_filter=command.pool_filter
     )
@@ -2645,35 +2745,41 @@ async def _handle_gacha_history(matcher, qq_user_id: str, command: ParsedEndfiel
             for item in records
         ],
     )
-    return await _finish_png(matcher, await draw_gacha_history_card(view))
+    return await _finish_png(session, await draw_gacha_history_card(view))
 
 
-async def _handle_xhh_import(matcher, qq_user_id: str, command: ParsedEndfieldCommand) -> None:
+async def _handle_xhh_import(session, qq_user_id: str, command: ParsedEndfieldCommand) -> None:
     role = account_store.resolve_role(qq_user_id, command.account_selector)
     if role is None:
-        return await matcher.finish("未找到对应的终末地账号，请先私聊发送 /ef 绑定 进行添加。")
-    phone = await _prompt_text("请输入小黑盒账号绑定的 11 位手机号，如需放弃请回复“取消”。", timeout=90)
+        await session.send("未找到对应的终末地账号，请先私聊发送 /ef 绑定 进行添加。")
+        return
+    phone = await _prompt_text(session, "请输入小黑盒账号绑定的 11 位手机号，如需放弃请回复“取消”。", timeout=90)
     if phone is None:
-        return await matcher.finish("导入流程已取消或等待超时。")
+        await session.send("导入流程已取消或等待超时。")
+        return
     if not re.fullmatch(r"1\d{10}", phone):
-        return await matcher.finish("手机号格式不符合规范，导入已取消。")
+        await session.send("手机号格式不符合规范，导入已取消。")
+        return
 
-    session: XhhLoginSession | None = None
+    xhh_session: XhhLoginSession | None = None
     try:
         async with ROLE_TASKS.claim(role):
-            session = await XhhLoginSession.start(phone)
+            xhh_session = await XhhLoginSession.start(phone)
             code = await _prompt_text(
-                "小黑盒短信验证码已发送，请输入验证码，如需放弃请回复“取消”。", timeout=120
+                session, "小黑盒短信验证码已发送，请输入验证码，如需放弃请回复“取消”。", timeout=120
             )
             if code is None:
-                return await matcher.finish("导入流程已取消或等待超时。")
+                await session.send("导入流程已取消或等待超时。")
+                return
             if not re.fullmatch(r"\d{4,8}", code):
-                return await matcher.finish("验证码格式输入有误，导入已取消。")
-            imported = await session.login_and_fetch(code)
+                await session.send("验证码格式输入有误，导入已取消。")
+                return
+            imported = await xhh_session.login_and_fetch(code)
             if imported.source_uid != role.role_id:
-                return await matcher.finish(
+                await session.send(
                     f"小黑盒绑定的终末地 UID 与当前所选账号不一致，请切换对应账号后再试。当前账号 UID：{role.masked_uid}。"
                 )
+                return
             candidate_names = [item.item_name for item in imported.six_stars]
             xhh_metadata = await gacha_asset_cache.prepare_names(candidate_names)
             unresolved_names = {
@@ -2682,16 +2788,17 @@ async def _handle_xhh_import(matcher, qq_user_id: str, command: ParsedEndfieldCo
                 if "".join(item.item_name.split()).casefold() not in xhh_metadata
             }
             if unresolved_names:
-                return await matcher.finish(
+                await session.send(
                     "FZ Wiki 星级数据暂未覆盖本次小黑盒记录，为避免星级误判已终止导入，请稍后再试。"
                 )
+                return
             imported = filter_xhh_import_six_stars(imported, xhh_metadata)
             account_store.replace_xhh_gacha_import(role, imported)
     finally:
-        if session is not None:
-            await session.close()
+        if xhh_session is not None:
+            await xhh_session.close()
 
-    return await matcher.finish(
+    await session.send(
         f"{role.nickname} 小黑盒历史抽卡统计导入成功：涵盖 {len(imported.pools)} 个卡池，"
         f"累计 {imported.total_count} 抽，共包含 {len(imported.six_stars)} 条六星记录。\n"
         "发送 /ef 抽卡 即可查阅合并统计后的分析卡片；逐抽明细页仍以官方接口记录为准。"
@@ -2712,8 +2819,8 @@ def _format_accounts(roles: list[EndfieldRole], *, reveal_uid: bool, detail_hint
     return "\n".join(lines)
 
 
-async def _prompt_text(message: str, *, timeout: int) -> str | None:
-    answer = await prompt(message, timeout=timeout)
+async def _prompt_text(session: Session, message: str, *, timeout: int) -> str | None:
+    answer = await prompt(session, message, timeout=timeout)
     if answer is None:
         return None
     text = answer.extract_plain_text() if hasattr(answer, "extract_plain_text") else str(answer or "")
@@ -2723,34 +2830,39 @@ async def _prompt_text(message: str, *, timeout: int) -> str | None:
     return text
 
 
-async def _handle_loadout(matcher, command: ParsedEndfieldCommand) -> None:
+async def _handle_loadout(session, command: ParsedEndfieldCommand) -> None:
     try:
         if command.query:
             spec, error = parse_loadout_spec(command.query, command.enhance)
         else:
-            spec, error = await _prompt_loadout_spec(command.enhance)
+            spec, error = await _prompt_loadout_spec(session, command.enhance)
         if error or spec is None:
-            return await matcher.finish(f"配装参数有误：{error or '已取消操作'}。")
+            await session.send(f"配装参数有误：{error or '已取消操作'}。")
+            return
 
-        with cold_start_command(matcher):
+        with cold_start_command(session):
             await notice_default_ake_public()
             resolved: list[tuple[EndfieldCandidate, tuple[tuple[int, int], ...]]] = []
             for index, item in enumerate(spec.items):
                 candidate_kind = "operator" if index == 0 else "gear"
-                candidate = await _resolve_loadout_candidate(candidate_kind, item.name)
+                candidate = await _resolve_loadout_candidate(session, candidate_kind, item.name)
                 if candidate is None:
                     label = "干员" if index == 0 else "武器或装备"
-                    return await matcher.finish(f"未匹配到目标{label}：{item.name}。")
+                    await session.send(f"未匹配到目标{label}：{item.name}。")
+                    return
                 if item.forge_levels and candidate.kind != "equipment":
-                    return await matcher.finish(f"仅装备支持设定词条锻造等级：{item.name}。")
+                    await session.send(f"仅装备支持设定词条锻造等级：{item.name}。")
+                    return
                 resolved.append((candidate, item.forge_levels))
 
             operators = [item for item, _ in resolved if item.kind == "operator"]
             weapons = [item for item, _ in resolved if item.kind == "weapon"]
             if len(operators) != 1:
-                return await matcher.finish("配装指令必须且仅可指定一位干员。")
+                await session.send("配装指令必须且仅可指定一位干员。")
+                return
             if len(weapons) > 1:
-                return await matcher.finish("配装指令最多仅可携带一把武器。")
+                await session.send("配装指令最多仅可携带一把武器。")
+                return
             operator = operators[0]
             weapon_title = weapons[0].key if weapons else await service.get_recommended_weapon_title(operator.key)
             equipment = [
@@ -2776,15 +2888,17 @@ async def _handle_loadout(matcher, command: ParsedEndfieldCommand) -> None:
                 f"[endfield] perf action=loadout data={data_seconds:.3f}s "
                 f"draw={perf_counter() - started - data_seconds:.3f}s"
             )
-            return await _finish_png(matcher, png)
+            return await _finish_png(session, png)
     except ExitState:
         raise
     except (WarfarinAPIError, ValueError) as exc:
         logger.warning(f"[endfield] loadout rejected: {exc}")
-        return await matcher.finish(f"配装计算异常：{exc}")
+        await session.send(f"配装计算异常：{exc}")
+        return
     except Exception as exc:
         logger.exception(f"[endfield] loadout failed: {exc}")
-        return await matcher.finish("配装图生成失败，请稍后再试。")
+        await session.send("配装图生成失败，请稍后再试。")
+        return
 
 
 class _IncompleteLoadoutImage(Exception):
@@ -2813,8 +2927,9 @@ async def _render_loadout_view(view: LoadoutView) -> bytes:
     return png
 
 
-async def _prompt_loadout_spec(default_enhance: int) -> tuple[ParsedLoadoutSpec | None, str]:
+async def _prompt_loadout_spec(session: Session, default_enhance: int) -> tuple[ParsedLoadoutSpec | None, str]:
     answer = await prompt(
+        session,
         "请输入干员名称及可选的武器、装备名称（空格分隔，武器与装备位置不限）。\n"
         "单独自定义词条可在对应装备后追加（如：词条2锻造2）。",
         timeout=90,
@@ -2828,7 +2943,7 @@ async def _prompt_loadout_spec(default_enhance: int) -> tuple[ParsedLoadoutSpec 
     return parse_loadout_spec(text, default_enhance)
 
 
-async def _resolve_loadout_candidate(kind: str, query: str) -> EndfieldCandidate | None:
+async def _resolve_loadout_candidate(session: Session, kind: str, query: str) -> EndfieldCandidate | None:
     def title_candidate(item):
         if item is not None and item.source == "akedata":
             prefix = {"operator": "干员", "weapon": "武器", "equipment": "装备"}[item.kind]
@@ -2855,7 +2970,7 @@ async def _resolve_loadout_candidate(kind: str, query: str) -> EndfieldCandidate
     options = options[:8]
     lines = [f"“{query}”匹配到多个候选结果，请引用本条消息并回复对应编号："]
     lines.extend(f"{index}. {item.display_name}" for index, item in enumerate(options, 1))
-    answer = await prompt("\n".join(lines), timeout=60)
+    answer = await prompt(session, "\n".join(lines), timeout=60)
     if answer is None:
         return None
     text = answer.extract_plain_text() if hasattr(answer, "extract_plain_text") else str(answer or "")
@@ -3614,8 +3729,8 @@ async def _resolve_equipment_candidates_fz(
     return candidates
 
 
-async def _handle_random_wiki(matcher) -> None:
-    with cold_start_command(matcher):
+async def _handle_random_wiki(session) -> None:
+    with cold_start_command(session):
         await notice_default_ake_public()
         async for candidate in random_wiki_service.candidates():
             # Keep the boundary even if the service or renderer registry changes.
@@ -3634,13 +3749,14 @@ async def _handle_random_wiki(matcher) -> None:
             if not pngs:
                 continue
             try:
-                return await _finish_pngs(matcher, pngs)
+                return await _finish_pngs(session, pngs)
             except ExitState:
                 raise
             except Exception:  # noqa: BLE001 - Transport failure must stop random selection.
                 logger.exception("[endfield] random Wiki send failed")
-                return await matcher.finish("图片发送失败，请稍后再试。")
-    return await matcher.finish("公开 Wiki 资料暂时不可用，请稍后再试。")
+                await session.send("图片发送失败，请稍后再试。")
+                return
+    await session.send("公开 Wiki 资料暂时不可用，请稍后再试。")
 
 
 async def _render_candidate(
@@ -3866,8 +3982,8 @@ async def _render_stage_catalog(key: str, source: str = "") -> tuple[bytes, ...]
     )
 
 
-async def _finish_png(matcher, png: bytes) -> None:
-    return await _finish_pngs(matcher, (png,))
+async def _finish_png(session, png: bytes) -> None:
+    return await _finish_pngs(session, (png,))
 
 
 async def _render_current_version_calendar() -> bytes:
@@ -3898,16 +4014,17 @@ async def _render_current_version_calendar() -> bytes:
     )
 
 
-async def _finish_endfield_help(matcher) -> None:
+async def _finish_endfield_help(session) -> None:
     # 按页面比例随机挑插画并运行时渲染；渲染不可用时回退到仓库里的静态帮助图。
     image = await cached_help_image("endfield") or ENDFIELD_HELP_IMAGE_PATH
     if image and Path(image).is_file():
-        return await matcher.finish(ChainMsg([make_image(path=image)]))
-    return await matcher.finish(format_help())
+        await session.send(MessageChain([Image.of(path=Path(image))]))
+        return
+    await session.send(format_help())
 
 
-async def _finish_pngs(matcher, pngs: tuple[bytes, ...]) -> None:
-    await matcher.finish(ChainMsg([_png_image(png) for png in pngs]))
+async def _finish_pngs(session, pngs: tuple[bytes, ...]) -> None:
+    await session.send(MessageChain([_png_image(png) for png in pngs]))
 
 
 def _png_image(png: bytes):
@@ -3920,7 +4037,7 @@ def _png_image(png: bytes):
         file.write(png)
         file.flush()
         schedule_temp_file_cleanup(file.name)
-        return make_image(path=file.name)
+        return Image.of(path=Path(file.name))
 
 
 async def _handle_dev_command(command: ParsedEndfieldCommand) -> str:
@@ -4269,7 +4386,7 @@ def _parse_equipment_attribute_key(key: str) -> tuple[tuple[EquipmentAttributeFi
     return tuple(filters), rarity_filter or "gold"
 
 
-def _rest(match: ArgVal) -> str:
+def _rest(match: Match) -> str:
     if not match.available:
         return ""
     value = match.result

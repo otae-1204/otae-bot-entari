@@ -12,8 +12,8 @@ from plugins.endfield.catalog import commands as commands_module
 
 class EndfieldCalendarCommandTests(unittest.IsolatedAsyncioTestCase):
     async def test_calendar_finish_stop_is_propagated_without_failure_reply(self):
-        matcher = mock.AsyncMock()
-        matcher.finish.side_effect = ExitState.stop
+        session = mock.AsyncMock()
+        session.send.side_effect = ExitState.stop
         command = commands_module.parse_command("日历")
 
         with mock.patch.object(
@@ -22,15 +22,15 @@ class EndfieldCalendarCommandTests(unittest.IsolatedAsyncioTestCase):
             new=mock.AsyncMock(return_value=b"\x89PNG\r\n\x1a\n"),
         ):
             with self.assertRaises(ExitState):
-                await endfield._handle_command(matcher, None, command)
+                await endfield._handle_command(session, None, command)
 
-        matcher.finish.assert_awaited_once()
+        session.send.assert_awaited_once()
 
 
 class EndfieldCurrencyLogCommandTests(unittest.IsolatedAsyncioTestCase):
     async def test_currency_finish_stop_is_propagated_without_fallback_error(self):
-        matcher = mock.AsyncMock()
-        matcher.finish.side_effect = ExitState.stop
+        session = mock.AsyncMock()
+        session.send.side_effect = ExitState.stop
         role = mock.Mock(masked_uid="****1234", nickname="测试角色", role_id="role")
         command = commands_module.ParsedEndfieldCommand("currency_log")
         empty_logs = {1: (), 2: (), 3: ()}
@@ -47,11 +47,11 @@ class EndfieldCurrencyLogCommandTests(unittest.IsolatedAsyncioTestCase):
         ):
             with self.assertRaises(ExitState):
                 await endfield._render_account_currency(
-                    matcher,
+                    session,
                     role,
                     command,
                     mock.Mock(),
                     group=True,
                 )
 
-        matcher.finish.assert_awaited_once()
+        session.send.assert_awaited_once()

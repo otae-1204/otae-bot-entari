@@ -584,7 +584,6 @@ class _FakeMatcher:
 
     def __init__(self, *, fail_sends: int = 0):
         self.sent: list = []
-        self.finished: list = []
         self.fail_sends = fail_sends
 
     async def send(self, message=None):
@@ -592,12 +591,6 @@ class _FakeMatcher:
             self.fail_sends -= 1
             raise RuntimeError("message connection interrupted")
         self.sent.append(message)
-
-    async def finish(self, message=None):
-        if message is not None:
-            self.sent.append(message)
-        self.finished.append(message)
-
 
 BOT = SimpleNamespace(platform="qq", self_id="test-bot")
 
@@ -860,7 +853,6 @@ class CrossGameCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(arknights_calls, [("7", True)])
         self.assertEqual(self.features.asked, ["arknights"])
         self.assertEqual(len(matcher.sent), 1)
-        self.assertEqual(matcher.finished, [None])
         top, bottom, size = _rows(self.images[0])
         self.assertEqual((top, bottom, size), (BLUE, RED, (32, 48)))
 

@@ -109,7 +109,7 @@ class EndfieldCommandParserTests(unittest.TestCase):
         import plugins.endfield.handlers as handlers
 
         candidate = handlers.EndfieldCandidate("operator", "chen-qianyu", "陈千语", 100)
-        matcher = AsyncMock()
+        session = AsyncMock()
         render = AsyncMock(return_value=(b"png",))
         fake_logger = Mock()
         with patch.object(handlers, "notice_before_public_data", AsyncMock()), \
@@ -118,12 +118,12 @@ class EndfieldCommandParserTests(unittest.TestCase):
                 patch.object(handlers, "_render_candidate", render), \
                 patch.object(handlers, "_finish_pngs", AsyncMock(side_effect=RuntimeError("upload refused"))), \
                 patch.object(handlers, "logger", fake_logger):
-            asyncio.run(handlers._handle_command(matcher, None, handlers.parse_command("干员 陈千语")))
+            asyncio.run(handlers._handle_command(session, None, handlers.parse_command("干员 陈千语")))
 
         # 卡片已渲染成功，失败发生在发送阶段：回复要说“发送失败”，不能混同为“生成失败”。
         render.assert_awaited_once()
-        matcher.finish.assert_awaited_once()
-        message = matcher.finish.await_args.args[0]
+        session.send.assert_awaited_once()
+        message = session.send.await_args.args[0]
         self.assertIn("发送失败", message)
         self.assertNotIn("生成失败", message)
         fake_logger.exception.assert_called_once()
@@ -844,11 +844,11 @@ class EndfieldCommandParserTests(unittest.TestCase):
         source = (ROOT / "plugins/endfield/handlers.py").read_text(encoding="utf-8")
 
         self.assertIn('if command.action == "help":', source)
-        self.assertIn("return await _finish_endfield_help(matcher)", source)
+        self.assertIn("return await _finish_endfield_help(session)", source)
         self.assertIn("from .paths import HELP_IMAGE_PATH as ENDFIELD_HELP_IMAGE_PATH", source)
         paths_source = (ROOT / "plugins/endfield/paths.py").read_text(encoding="utf-8")
         self.assertIn('"assets" / "image" / "help" / "endfield.png"', paths_source)
-        self.assertIn("return await matcher.finish(format_help())", source)
+        self.assertIn("await session.send(format_help())", source)
 
     def test_endfield_help_image_and_spec_cover_account_features(self):
         from otae_bot.infrastructure.rendering import help_cards
@@ -881,7 +881,7 @@ class EndfieldCommandParserTests(unittest.TestCase):
         import plugins.endfield.handlers as handlers
 
         def run(command, *, group: bool):
-            matcher = AsyncMock()
+            session = AsyncMock()
             downstream = {
                 "_handle_xhh_import": AsyncMock(),
                 "_handle_binding": AsyncMock(),
@@ -894,24 +894,24 @@ class EndfieldCommandParserTests(unittest.TestCase):
                     patch.object(handlers, "is_group", return_value=group), \
                     patch.object(handlers, "event_user_id", return_value="10001"), \
                     patch.object(handlers.CredentialCipher, "from_settings", return_value=Mock()):
-                asyncio.run(handlers._handle_personal_command(matcher, types.SimpleNamespace(), command))
-            return matcher, downstream, store
+                asyncio.run(handlers._handle_personal_command(session, types.SimpleNamespace(), command))
+            return session, downstream, store
 
         # 群聊里这些命令在询问手机号/凭据之前就被拦下，下游流程一个都不进入。
         for text in ("抽卡导入", "绑定", "主账号 1", "解绑 1"):
             with self.subTest(text=text):
                 command = handlers.parse_command(text)
                 self.assertIn(command.action, {"gacha_import", "bind", "primary", "unbind"})
-                matcher, downstream, store = run(command, group=True)
-                matcher.finish.assert_awaited_once()
-                self.assertIn("私聊", matcher.finish.await_args.args[0])
+                session, downstream, store = run(command, group=True)
+                session.send.assert_awaited_once()
+                self.assertIn("私聊", session.send.await_args.args[0])
                 for fake in downstream.values():
                     fake.assert_not_awaited()
                 store.set_primary.assert_not_called()
                 store.unbind.assert_not_called()
 
         # 私聊时同一条命令照常进入小黑盒导入流程。
-        matcher, downstream, _ = run(handlers.parse_command("抽卡导入"), group=False)
+        session, downstream, _ = run(handlers.parse_command("抽卡导入"), group=False)
         downstream["_handle_xhh_import"].assert_awaited_once()
 
 

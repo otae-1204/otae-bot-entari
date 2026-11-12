@@ -689,7 +689,7 @@ class ExplorationAsyncTests(unittest.IsolatedAsyncioTestCase):
         )
         render = AsyncMock(return_value=(b"page1", b"page2"))
         send = AsyncMock()
-        matcher = AsyncMock()
+        session = AsyncMock()
         with (
             patch.object(handlers, "account_store", store),
             patch.object(handlers, "event_user_id", return_value="caller"),
@@ -711,9 +711,9 @@ class ExplorationAsyncTests(unittest.IsolatedAsyncioTestCase):
                 if index and between is not None:
                     between()
                 await handlers._handle_command(
-                    matcher, SimpleNamespace(), parse_command(text)
+                    session, SimpleNamespace(), parse_command(text)
                 )
-        return matcher, store, fetch, render, send
+        return session, store, fetch, render, send
 
     async def test_full_dispatch_uses_primary_account_and_one_detail_fetch(self):
         _, store, fetch, render, send = await self.run_command()
@@ -736,18 +736,18 @@ class ExplorationAsyncTests(unittest.IsolatedAsyncioTestCase):
             ("探索 不属于我的账号", self.roles, "编号"),
         ):
             with self.subTest(text=text):
-                matcher, _, fetch, render, send = await self.run_command(
+                session, _, fetch, render, send = await self.run_command(
                     text, roles=roles
                 )
-                self.assertIn(keyword, matcher.finish.await_args.args[0])
+                self.assertIn(keyword, session.send.await_args.args[0])
                 fetch.assert_not_awaited()
                 render.assert_not_awaited()
                 send.assert_not_awaited()
 
     async def test_api_failure_returns_existing_error_path(self):
         error = EndfieldAPIError("查询终末地档案", message="凭据失效")
-        matcher, _, _, render, send = await self.run_command(error=error)
-        self.assertIn("凭据失效", matcher.finish.await_args.args[0])
+        session, _, _, render, send = await self.run_command(error=error)
+        self.assertIn("凭据失效", session.send.await_args.args[0])
         render.assert_not_awaited()
         send.assert_not_awaited()
 

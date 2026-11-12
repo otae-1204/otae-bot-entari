@@ -556,8 +556,8 @@ class CollectionLifecycleTest(unittest.IsolatedAsyncioTestCase):
                 patch.object(handlers, f"draw_{kind}_stats_card", AsyncMock(return_value=(b"png",))),
                 patch.object(handlers, "_finish_pngs", AsyncMock()) as finish,
             ):
-                matcher = SimpleNamespace(send=AsyncMock(), finish=AsyncMock())
-                await getattr(handlers, f"_handle_{kind}")(matcher, parse_command(text))
+                session = SimpleNamespace(send=AsyncMock())
+                await getattr(handlers, f"_handle_{kind}")(session, parse_command(text))
                 ensure.assert_awaited_once()
                 build.assert_called_once_with(updated, None)
                 finish.assert_awaited_once()
@@ -590,9 +590,9 @@ class CollectionLifecycleTest(unittest.IsolatedAsyncioTestCase):
                 patch.object(handlers, f"draw_{action}_card", AsyncMock(return_value=(b"png",))),
                 patch.object(handlers, "_finish_pngs", AsyncMock()),
             ):
-                matcher = SimpleNamespace(send=AsyncMock(), finish=AsyncMock())
+                session = SimpleNamespace(send=AsyncMock())
                 await getattr(handlers, f"_handle_{action}")(
-                    matcher, "user", parse_command(text), None, group=False,
+                    session, "user", parse_command(text), None, group=False,
                 )
                 ensure.assert_awaited_once()
                 detail.assert_awaited_once()
@@ -605,9 +605,9 @@ class CollectionLifecycleTest(unittest.IsolatedAsyncioTestCase):
                 patch.object(handlers.account_store, "resolve_role", return_value=None),
                 patch.object(handlers.collection_refresher, "ensure_fresh", AsyncMock()) as ensure,
             ):
-                matcher = SimpleNamespace(finish=AsyncMock())
+                session = SimpleNamespace(send=AsyncMock())
                 await getattr(handlers, f"_handle_{action}")(
-                    matcher, "unbound", parse_command(text), None, group=False,
+                    session, "unbound", parse_command(text), None, group=False,
                 )
                 ensure.assert_not_awaited()
 
@@ -651,8 +651,8 @@ class CollectionLifecycleTest(unittest.IsolatedAsyncioTestCase):
                 patch.object(handlers.collection_refresher, "ensure_fresh", AsyncMock()) as ensure,
                 patch.object(store, "load_current_view", return_value=None),
             ):
-                matcher = SimpleNamespace(send=AsyncMock(), finish=AsyncMock())
-                await getattr(handlers, f"_handle_{kind}")(matcher, parse_command(text))
+                session = SimpleNamespace(send=AsyncMock())
+                await getattr(handlers, f"_handle_{kind}")(session, parse_command(text))
                 refresh.assert_awaited_once_with(kind)
                 ensure.assert_not_awaited()
-                self.assertIn("稍后查询", matcher.finish.call_args.args[0])
+                self.assertIn("稍后查询", session.send.call_args.args[0])

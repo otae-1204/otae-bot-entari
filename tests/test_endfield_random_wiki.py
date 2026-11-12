@@ -373,7 +373,7 @@ class RandomWikiSelectionTests(unittest.IsolatedAsyncioTestCase):
 
 class RandomWikiHandlerTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        self.matcher = Mock(finish=AsyncMock())
+        self.session = Mock(send=AsyncMock())
         self.patches = {}
         for name in (
             "notice_default_ake_public",
@@ -400,7 +400,7 @@ class RandomWikiHandlerTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(endfield.random_wiki_service, "candidates", candidates):
             await endfield._handle_command(
-                self.matcher, object(), parse_command("随机")
+                self.session, object(), parse_command("随机")
             )
 
     async def test_routes_without_account_access_and_sends_one_entry_only(self):
@@ -408,7 +408,7 @@ class RandomWikiHandlerTests(unittest.IsolatedAsyncioTestCase):
         await self.run_command([selected, candidate("weapon")])
         self.assertEqual(self.yielded, [selected])
         self.patches["_render_candidate"].assert_awaited_once_with(selected)
-        self.patches["_finish_pngs"].assert_awaited_once_with(self.matcher, (b"card",))
+        self.patches["_finish_pngs"].assert_awaited_once_with(self.session, (b"card",))
         self.patches["_handle_personal_command"].assert_not_awaited()
 
     async def test_private_or_unknown_entries_never_reach_any_renderer(self):
@@ -422,7 +422,7 @@ class RandomWikiHandlerTests(unittest.IsolatedAsyncioTestCase):
         )
         self.patches["_render_candidate"].assert_not_awaited()
         self.patches["_finish_pngs"].assert_not_awaited()
-        self.assertIn("公开 Wiki 资料暂时不可用", self.matcher.finish.call_args.args[0])
+        self.assertIn("公开 Wiki 资料暂时不可用", self.session.send.call_args.args[0])
 
     async def test_render_failure_and_empty_card_try_another_public_entry(self):
         self.patches["_render_candidate"].side_effect = [
@@ -432,7 +432,7 @@ class RandomWikiHandlerTests(unittest.IsolatedAsyncioTestCase):
         ]
         await self.run_command([candidate(), candidate("weapon"), candidate("stage")])
         self.patches["_finish_pngs"].assert_awaited_once_with(
-            self.matcher, (b"page1", b"page2")
+            self.session, (b"page1", b"page2")
         )
 
     async def test_send_failure_does_not_select_or_send_another_entry(self):
@@ -440,14 +440,14 @@ class RandomWikiHandlerTests(unittest.IsolatedAsyncioTestCase):
         await self.run_command([candidate(), candidate("weapon")])
         self.assertEqual(len(self.yielded), 1)
         self.patches["_finish_pngs"].assert_awaited_once()
-        self.matcher.finish.assert_awaited_once_with("图片发送失败，请稍后再试。")
+        self.session.send.assert_awaited_once_with("图片发送失败，请稍后再试。")
 
     async def test_finish_exit_signal_is_not_treated_as_a_failure(self):
-        self.patches["_finish_pngs"].side_effect = STOP  # what matcher.finish() raises
+        self.patches["_finish_pngs"].side_effect = STOP  # a STOP raised while sending
         with self.assertRaises(endfield.ExitState):
             await self.run_command([candidate(), candidate("weapon")])
         self.assertEqual(len(self.yielded), 1)
-        self.matcher.finish.assert_not_awaited()
+        self.session.send.assert_not_awaited()
 
     async def test_render_cancellation_is_not_swallowed(self):
         self.patches["_render_candidate"].side_effect = asyncio.CancelledError
@@ -458,7 +458,7 @@ class RandomWikiHandlerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_empty_pool_has_actionable_reply_without_binding_prompt(self):
         await self.run_command([])
-        self.matcher.finish.assert_awaited_once_with(
+        self.session.send.assert_awaited_once_with(
             "公开 Wiki 资料暂时不可用，请稍后再试。"
         )
         self.patches["_handle_personal_command"].assert_not_awaited()

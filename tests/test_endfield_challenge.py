@@ -430,14 +430,14 @@ class EndfieldChallengeTests(unittest.TestCase):
         import plugins.endfield.handlers as endfield_plugin
 
         async def run():
-            matcher = SimpleNamespace(finish=AsyncMock())
+            session = SimpleNamespace(send=AsyncMock())
             event = SimpleNamespace(
                 content=MessageChain([Text("/ef 回响 "), At("1231")]),
                 guild=SimpleNamespace(id="group-1"),
             )
             with patch.object(endfield_plugin.account_store, "list_roles", return_value=[]) as list_roles:
                 await endfield_plugin._handle_challenge(
-                    matcher,
+                    session,
                     event,
                     "sender",
                     commands.parse_command("回响"),
@@ -445,8 +445,8 @@ class EndfieldChallengeTests(unittest.TestCase):
                     bot=SimpleNamespace(self_id="10000"),
                 )
             list_roles.assert_called_once_with("1231")
-            matcher.finish.assert_awaited_once()
-            self.assertIn("未绑定", matcher.finish.await_args.args[0])
+            session.send.assert_awaited_once()
+            self.assertIn("未绑定", session.send.await_args.args[0])
 
         asyncio.run(run())
 
@@ -455,7 +455,7 @@ class EndfieldChallengeTests(unittest.TestCase):
         import plugins.endfield.handlers as endfield_plugin
 
         async def run():
-            matcher = SimpleNamespace(finish=AsyncMock())
+            session = SimpleNamespace(send=AsyncMock())
             event = SimpleNamespace(
                 content=MessageChain([Text("/ef 影拓 "), At("1231")]),
                 guild=SimpleNamespace(id="group-1"),
@@ -475,7 +475,7 @@ class EndfieldChallengeTests(unittest.TestCase):
                     ):
                         with self.assertRaisesRegex(RuntimeError, "stop-after-selection"):
                             await endfield_plugin._handle_challenge(
-                                matcher,
+                                session,
                                 event,
                                 "sender",
                                 commands.parse_command("影拓 账号 1"),
@@ -655,7 +655,7 @@ class EndfieldChallengeTests(unittest.TestCase):
         import plugins.endfield.handlers as endfield_plugin
 
         async def run():
-            matcher = SimpleNamespace(finish=AsyncMock())
+            session = SimpleNamespace(send=AsyncMock())
             event = SimpleNamespace(user=SimpleNamespace(id="1000"), guild=SimpleNamespace(id="group-1"))
             error = challenge.ChallengeAmbiguousError(
                 "野性旧",
@@ -665,14 +665,14 @@ class EndfieldChallengeTests(unittest.TestCase):
             with patch.object(endfield_plugin, "CredentialCipher") as cipher:
                 with patch.object(endfield_plugin, "_handle_challenge", AsyncMock(side_effect=error)):
                     await endfield_plugin._handle_personal_command(
-                        matcher,
+                        session,
                         event,
                         commands.parse_command("回响 野性旧 残酷"),
                         bot=SimpleNamespace(self_id="10000"),
                     )
             cipher.from_settings.assert_called_once_with()
-            matcher.finish.assert_awaited_once()
-            message = matcher.finish.await_args.args[0]
+            session.send.assert_awaited_once()
+            message = session.send.await_args.args[0]
             self.assertIn("“野性旧”", message)
             self.assertIn("野性旧事·改、野性旧事", message)
             # 给出的示例命令必须能直接解析到首候选（赛季+轮换+名称+难度）。
@@ -1073,41 +1073,42 @@ class EndfieldForwardSendTests(unittest.TestCase):
         import plugins.endfield.handlers as endfield_plugin
 
         send_forward = AsyncMock()
-        matcher = SimpleNamespace(send=AsyncMock())
+        session = SimpleNamespace(send=AsyncMock())
 
         async def run():
             with patch.object(endfield_plugin, "send_forward", send_forward):
                 with patch.object(endfield_plugin, "_png_image", lambda png: png):
                     return await endfield_plugin._send_forward_pngs(
-                        matcher,
+                        session,
                         SimpleNamespace(self_id="10001"),
                         (b"page-1", b"page-2", b"page-3"),
                     )
 
         self.assertEqual(asyncio.run(run()), "satori")
-        matcher.send.assert_not_awaited()
-        self.assertEqual(send_forward.await_args.args[0], [b"page-1", b"page-2", b"page-3"])
+        session.send.assert_not_awaited()
+        self.assertIs(send_forward.await_args.args[0], session)
+        self.assertEqual(send_forward.await_args.args[1], [b"page-1", b"page-2", b"page-3"])
         self.assertEqual(send_forward.await_args.kwargs["uin"], "10001")
 
     def test_forward_failure_sends_each_page_as_an_image_message_in_order(self):
         import plugins.endfield.handlers as endfield_plugin
 
         send_forward = AsyncMock(side_effect=RuntimeError("no session"))
-        matcher = SimpleNamespace(send=AsyncMock())
+        session = SimpleNamespace(send=AsyncMock())
         pages = (b"page-1", b"page-2", b"page-3")
 
         def image(png):
-            return endfield_plugin.make_image(url=f"file:///tmp/{png.decode()}.png")
+            return endfield_plugin.Image(src=f"file:///tmp/{png.decode()}.png")
 
         async def run():
             with patch.object(endfield_plugin, "send_forward", send_forward):
                 with patch.object(endfield_plugin, "_png_image", image):
                     return await endfield_plugin._send_forward_pngs(
-                        matcher, SimpleNamespace(self_id="10001"), pages,
+                        session, SimpleNamespace(self_id="10001"), pages,
                     )
 
         self.assertEqual(asyncio.run(run()), "images")
-        self.assertEqual([[item.src for item in call.args[0]] for call in matcher.send.await_args_list],
+        self.assertEqual([[item.src for item in call.args[0]] for call in session.send.await_args_list],
                          [["file:///tmp/page-1.png"], ["file:///tmp/page-2.png"], ["file:///tmp/page-3.png"]])
 
 
@@ -1120,7 +1121,7 @@ class EndfieldGachaDeliveryTests(unittest.TestCase):
     def _run(self, pngs, *, satori=None, send=None, forward_above=None, max_nodes=None):
         import plugins.endfield.handlers as handlers
 
-        matcher = SimpleNamespace(finish=AsyncMock(), send=send or AsyncMock())
+        session = SimpleNamespace(send=send or AsyncMock())
         satori = satori or AsyncMock()
         finish_pngs = AsyncMock()
         endfield = {} if forward_above is None else {"gacha_forward_above": forward_above}
@@ -1131,54 +1132,52 @@ class EndfieldGachaDeliveryTests(unittest.TestCase):
                 patch("otae_bot.config.model.logger"),
                 patch.object(handlers, "send_forward", satori),
                 patch.object(handlers, "_finish_pngs", finish_pngs),
-                patch.object(handlers, "_png_image", lambda png: handlers.make_image(url=f"file:///tmp/{png.decode()}.png")),
+                patch.object(handlers, "_png_image", lambda png: handlers.Image(src=f"file:///tmp/{png.decode()}.png")),
                 patch.object(handlers, "FORWARD_MAX_NODES", max_nodes or handlers.FORWARD_MAX_NODES),
             ):
-                await handlers._finish_gacha_pngs(matcher, self.EVENT, self.BOT, pngs)
+                await handlers._finish_gacha_pngs(session, self.EVENT, self.BOT, pngs)
 
         asyncio.run(run())
-        return matcher, satori, finish_pngs
+        return session, satori, finish_pngs
 
     @staticmethod
     def _pages(count: int) -> tuple[bytes, ...]:
         return tuple(f"p{index}".encode() for index in range(1, count + 1))
 
     def test_three_pages_are_sent_as_one_normal_message(self):
-        matcher, satori, finish_pngs = self._run(self._pages(3))
-        finish_pngs.assert_awaited_once_with(matcher, self._pages(3))
+        session, satori, finish_pngs = self._run(self._pages(3))
+        finish_pngs.assert_awaited_once_with(session, self._pages(3))
         satori.assert_not_awaited()
 
     def test_four_pages_become_one_forward_with_one_image_per_node(self):
-        matcher, satori, finish_pngs = self._run(self._pages(4))
+        session, satori, finish_pngs = self._run(self._pages(4))
         finish_pngs.assert_not_awaited()
         satori.assert_awaited_once()
-        nodes = satori.await_args.args[0]
+        self.assertIs(satori.await_args.args[0], session)
+        nodes = satori.await_args.args[1]
         self.assertEqual([node.src for node in nodes], [f"file:///tmp/p{index}.png" for index in range(1, 5)])
         self.assertEqual(satori.await_args.kwargs, {"name": "终末地抽卡分析", "uin": "10001"})
-        matcher.finish.assert_awaited_once_with()
-        matcher.send.assert_not_awaited()
+        session.send.assert_not_awaited()
 
     def test_satori_failure_sends_each_page_as_an_image_message(self):
-        matcher, satori, _ = self._run(self._pages(5), satori=AsyncMock(side_effect=RuntimeError("no forward")))
+        session, satori, _ = self._run(self._pages(5), satori=AsyncMock(side_effect=RuntimeError("no forward")))
         satori.assert_awaited_once()
-        self.assertEqual([[item.src for item in call.args[0]] for call in matcher.send.await_args_list],
+        self.assertEqual([[item.src for item in call.args[0]] for call in session.send.await_args_list],
                          [[f"file:///tmp/p{index}.png"] for index in range(1, 6)])
-        matcher.finish.assert_awaited_once_with()
 
     def test_forward_and_image_messages_failing_send_batches_of_three(self):
         send = AsyncMock(side_effect=[RuntimeError("no images"), None, None])
-        matcher, _, finish_pngs = self._run(
+        session, _, finish_pngs = self._run(
             self._pages(4), satori=AsyncMock(side_effect=RuntimeError("no forward")), send=send,
         )
         finish_pngs.assert_not_awaited()
-        self.assertEqual(matcher.send.await_count, 3)
-        first, second = (call.args[0] for call in matcher.send.await_args_list[1:])
+        self.assertEqual(session.send.await_count, 3)
+        first, second = (call.args[0] for call in session.send.await_args_list[1:])
         self.assertIn("共 4 页", str(first))
         self.assertIn("分 2 条", str(first))
         self.assertEqual([getattr(item, "src", "") for item in first][1:],
                          ["file:///tmp/p1.png", "file:///tmp/p2.png", "file:///tmp/p3.png"])
         self.assertEqual([item.src for item in second], ["file:///tmp/p4.png"])
-        matcher.finish.assert_awaited_once_with()
 
     def test_exit_exception_from_forward_is_not_swallowed(self):
         from arclet.letoderea import STOP
@@ -1198,24 +1197,22 @@ class EndfieldGachaDeliveryTests(unittest.TestCase):
         satori.assert_awaited_once()
 
     def test_forward_is_split_above_node_limit(self):
-        matcher, satori, _ = self._run(self._pages(5), max_nodes=2)
-        self.assertEqual([len(call.args[0]) for call in satori.await_args_list], [2, 2, 1])
-        matcher.finish.assert_awaited_once_with()
+        session, satori, _ = self._run(self._pages(5), max_nodes=2)
+        self.assertEqual([len(call.args[1]) for call in satori.await_args_list], [2, 2, 1])
 
     def test_partial_forward_failure_sends_only_that_chunk_as_images(self):
         satori = AsyncMock(side_effect=[None, RuntimeError("second chunk failed"), None])
-        matcher, _, _ = self._run(self._pages(5), satori=satori, max_nodes=2)
+        session, _, _ = self._run(self._pages(5), satori=satori, max_nodes=2)
         self.assertEqual(satori.await_count, 3)
-        self.assertEqual([[item.src for item in call.args[0]] for call in matcher.send.await_args_list],
+        self.assertEqual([[item.src for item in call.args[0]] for call in session.send.await_args_list],
                          [["file:///tmp/p3.png"], ["file:///tmp/p4.png"]])
-        matcher.finish.assert_awaited_once_with()
 
     def test_gacha_handler_receives_event_and_bot(self):
         import plugins.endfield.handlers as handlers
 
         source = (Path(handlers.__file__)).read_text(encoding="utf-8")
-        self.assertIn("matcher, qq_user_id, command, cipher, group=is_group(event), event=event, bot=bot,", source)
-        self.assertIn("return await _finish_gacha_pngs(matcher, event, bot, pngs)", source)
+        self.assertIn("session, qq_user_id, command, cipher, group=is_group(event), event=event, bot=bot,", source)
+        self.assertIn("return await _finish_gacha_pngs(session, event, bot, pngs)", source)
 
     def test_challenge_history_rule(self):
         import plugins.endfield.handlers as handlers
@@ -1223,27 +1220,28 @@ class EndfieldGachaDeliveryTests(unittest.TestCase):
         finish_pngs = AsyncMock()
         satori = AsyncMock(side_effect=RuntimeError("no forward"))
 
-        async def run(matcher, pngs):
+        async def run(session, pngs):
             with (
                 patch.object(handlers, "_finish_pngs", finish_pngs),
                 patch.object(handlers, "send_forward", satori),
-                patch.object(handlers, "_png_image", lambda png: handlers.make_image(url=f"file:///tmp/{png.decode()}.png")),
+                patch.object(handlers, "_png_image", lambda png: handlers.Image(src=f"file:///tmp/{png.decode()}.png")),
             ):
-                await handlers._finish_challenge_pages(matcher, self.EVENT, self.BOT, pngs, "/ef 影拓 历史 第N页")
+                await handlers._finish_challenge_pages(session, self.EVENT, self.BOT, pngs, "/ef 影拓 历史 第N页")
 
-        matcher = SimpleNamespace(finish=AsyncMock(), send=AsyncMock())
-        asyncio.run(run(matcher, (b"1", b"2")))
+        session = SimpleNamespace(send=AsyncMock())
+        asyncio.run(run(session, (b"1", b"2")))
         finish_pngs.assert_awaited_once()
         satori.assert_not_awaited()
-        asyncio.run(run(matcher, (b"1", b"2", b"3")))
+        asyncio.run(run(session, (b"1", b"2", b"3")))
         self.assertEqual(satori.await_args.kwargs["name"], "Endfield")
-        self.assertEqual([[item.src for item in call.args[0]] for call in matcher.send.await_args_list],
+        self.assertEqual([[item.src for item in call.args[0]] for call in session.send.await_args_list],
                          [[f"file:///tmp/{index}.png"] for index in (1, 2, 3)])
-        matcher.finish.assert_awaited_once_with()
 
-        matcher = SimpleNamespace(finish=AsyncMock(), send=AsyncMock(side_effect=RuntimeError("no images")))
-        asyncio.run(run(matcher, (b"1", b"2", b"3")))
-        notice = matcher.finish.await_args.args[0]
+        # 逐张图片也发不出去：改发文字提示（这条走同一个会话发送）。
+        session = SimpleNamespace(send=AsyncMock(side_effect=[RuntimeError("no images"), None]))
+        asyncio.run(run(session, (b"1", b"2", b"3")))
+        self.assertEqual(session.send.await_count, 2)
+        notice = session.send.await_args.args[0]
         self.assertIn("合并转发", notice)
         self.assertIn("/ef 影拓 历史 第N页", notice)
 

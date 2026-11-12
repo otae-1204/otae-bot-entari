@@ -637,7 +637,7 @@ class EndfieldAccountDetailRoutingTests(unittest.IsolatedAsyncioTestCase):
             group=group, roles=roles
         )
         command = commands_module.ParsedEndfieldCommand("accounts", account_selector=selector)
-        matcher = mock.AsyncMock()
+        session = mock.AsyncMock()
         prompt = mock.AsyncMock(return_value=reply)
         with store_patch, group_patch, cipher_patch, detail_patch as detail, currency_patch as currency, draw_patch as draw, finish_patch:
             # AKE 公开数据（名称表、冷启动提示）会真实联网，与路由无关。
@@ -645,12 +645,12 @@ class EndfieldAccountDetailRoutingTests(unittest.IsolatedAsyncioTestCase):
                 endfield, "fetch_account_detail_name_map", mock.AsyncMock(return_value=None)
             ), mock.patch.object(endfield, "notice_default_ake_public", mock.AsyncMock()):
                 await endfield._handle_accounts(
-                    matcher, "qq", command, mock.Mock(), group=group
+                    session, "qq", command, mock.Mock(), group=group
                 )
-        return matcher, prompt, detail, currency, draw, store
+        return session, prompt, detail, currency, draw, store
 
     async def test_single_account_renders_detail_without_prompting(self):
-        matcher, prompt, detail, currency, draw, _ = await self.run_accounts(group=False, roles=self.roles[:1])
+        session, prompt, detail, currency, draw, _ = await self.run_accounts(group=False, roles=self.roles[:1])
         prompt.assert_not_awaited()
         detail.assert_awaited_once()
         currency.assert_awaited_once()
@@ -665,7 +665,7 @@ class EndfieldAccountDetailRoutingTests(unittest.IsolatedAsyncioTestCase):
     async def test_multiple_accounts_prompt_with_detail_hint(self):
         _, prompt, detail, _, _, _ = await self.run_accounts(group=False, roles=self.roles)
         prompt.assert_awaited_once()
-        listing = prompt.await_args.args[0]
+        listing = prompt.await_args.args[1]
         self.assertIn("回复", listing)
         self.assertIn("编号", listing)
         self.assertIn("详情", listing)
@@ -675,7 +675,7 @@ class EndfieldAccountDetailRoutingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_group_listing_hides_full_uid(self):
         _, prompt, _, _, _, _ = await self.run_accounts(group=True, roles=self.roles)
-        listing = prompt.await_args.args[0]
+        listing = prompt.await_args.args[1]
         self.assertIn("****1209", listing)
         self.assertNotIn("1770431209", listing)
 
@@ -698,17 +698,17 @@ class EndfieldAccountDetailRoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(detail.await_args.args[1].nickname, "乙")
 
     async def test_unknown_selector_reports_guidance(self):
-        matcher, _, detail, _, _, _ = await self.run_accounts(group=False, roles=self.roles, selector="丙")
-        matcher.finish.assert_awaited_once()
-        message = matcher.finish.await_args.args[0]
+        session, _, detail, _, _, _ = await self.run_accounts(group=False, roles=self.roles, selector="丙")
+        session.send.assert_awaited_once()
+        message = session.send.await_args.args[0]
         self.assertIn("未找到", message)
         self.assertIn("/ef 账号", message)
         detail.assert_not_awaited()
 
     async def test_missing_binding_reports_bind_hint(self):
-        matcher, _, detail, _, _, _ = await self.run_accounts(group=False, roles=[])
-        matcher.finish.assert_awaited_once()
-        message = matcher.finish.await_args.args[0]
+        session, _, detail, _, _, _ = await self.run_accounts(group=False, roles=[])
+        session.send.assert_awaited_once()
+        message = session.send.await_args.args[0]
         self.assertIn("尚未绑定", message)
         self.assertIn("/ef 绑定", message)
         detail.assert_not_awaited()
@@ -716,8 +716,8 @@ class EndfieldAccountDetailRoutingTests(unittest.IsolatedAsyncioTestCase):
     async def test_cancelled_reply_stops_without_rendering(self):
         reply = mock.Mock()
         reply.extract_plain_text.return_value = "取消"
-        matcher, _, detail, _, _, _ = await self.run_accounts(group=False, roles=self.roles, reply=reply)
-        matcher.finish.assert_awaited_once_with("已取消账号查询。")
+        session, _, detail, _, _, _ = await self.run_accounts(group=False, roles=self.roles, reply=reply)
+        session.send.assert_awaited_once_with("已取消账号查询。")
         detail.assert_not_awaited()
 
     async def test_detail_fetch_claims_the_role_task_lock(self):
