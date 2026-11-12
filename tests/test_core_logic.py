@@ -24,7 +24,6 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tests.support.loaders import _load_bili_new_module, _load_module  # noqa: E402
-from otae_bot.delivery import Target  # noqa: E402
 
 logging.disable(logging.CRITICAL)
 
@@ -176,16 +175,6 @@ def _image_file_path(segment) -> Path:
 
 
 class CoreLogicTests(unittest.TestCase):
-    def test_entari_notice_hook_listens_to_notice_events(self):
-        entari_native = _load_module("entari_native_notice_for_test", "otae_bot/compat/entari.py")
-
-        message_hook = entari_native.listen_message()
-        notice_hook = entari_native.listen_notice()
-
-        self.assertIs(message_hook.event_type, entari_native.MessageCreatedEvent)
-        self.assertIs(notice_hook.event_type, entari_native.NoticeEvent)
-        self.assertTrue(callable(notice_hook.finish))
-
     def test_entari_on_ready_clears_account_on_disconnect(self):
         entari_native = _load_module("accounts_ready_for_test", "otae_bot/accounts/ready.py")
         captured = []
@@ -218,98 +207,6 @@ class CoreLogicTests(unittest.TestCase):
             account=Account(),
         )))
         self.assertIsNone(entari_native.runtime.get_account())
-
-    def test_entari_handler_resolves_injected_async_provider(self):
-        entari_native = _load_module(
-            "entari_native_inject_for_test", "otae_bot/compat/entari.py"
-        )
-
-        event = types.SimpleNamespace(guild=types.SimpleNamespace(id="10001"))
-        session = types.SimpleNamespace(event=event)
-        account = types.SimpleNamespace(self_id="20002")
-        calls = []
-
-        async def get_target(event, bot):
-            calls.append((event, bot))
-            return Target.group("10001")
-
-        async def handler(target=entari_native.inject(get_target)):
-            return target
-
-        result = asyncio.run(
-            entari_native._call_handler(handler, None, session, account, None)
-        )
-
-        self.assertIsInstance(result, Target)
-        self.assertEqual(result.guild_id, "10001")
-        self.assertEqual(calls, [(event, account)])
-
-    def test_entari_concurrent_private_prompt_keeps_original_session(self):
-        entari_native = _load_module(
-            "entari_native_session_context_for_test", "otae_bot/compat/entari.py"
-        )
-        captured = []
-
-        def fake_on(_alconna):
-            def decorator(func):
-                captured.append(func)
-                return func
-
-            return decorator
-
-        class FakeSession:
-            def __init__(self, kind):
-                self.event = types.SimpleNamespace(kind=kind)
-                self.sent = []
-                self.prompts = []
-                self.stopped = False
-
-            async def send(self, message):
-                self.sent.append(str(message))
-
-            async def prompt(self, message, timeout):
-                self.prompts.append((message, timeout))
-                return "private answer"
-
-            def stop(self):
-                self.stopped = True
-
-        async def exercise():
-            matcher = entari_native.Matcher(object())
-            private_ready = asyncio.Event()
-            group_active = asyncio.Event()
-            private_done = asyncio.Event()
-
-            with patch.object(entari_native.command, "on", side_effect=fake_on):
-                @matcher.handle()
-                async def handler(event):
-                    if event.kind == "private":
-                        private_ready.set()
-                        await group_active.wait()
-                        answer = await entari_native.prompt("private prompt", timeout=90)
-                        await matcher.send(f"reply:{answer}")
-                        private_done.set()
-                        return
-                    await private_ready.wait()
-                    group_active.set()
-                    await private_done.wait()
-                    await matcher.send("group reply")
-
-            private_session = FakeSession("private")
-            group_session = FakeSession("group")
-            account = types.SimpleNamespace(self_id="bot")
-            await asyncio.gather(
-                captured[0](private_session, account, None),
-                captured[0](group_session, account, None),
-            )
-            return private_session, group_session
-
-        private_session, group_session = asyncio.run(exercise())
-
-        self.assertEqual(private_session.prompts, [("private prompt", 90)])
-        self.assertEqual(private_session.sent, ["reply:private answer"])
-        self.assertEqual(group_session.prompts, [])
-        self.assertEqual(group_session.sent, ["group reply"])
 
     def test_entari_prompt_retries_early_connection_disconnect_once(self):
         prompts = _load_module("messaging_prompts_retry_for_test", "otae_bot/messaging/prompts.py")

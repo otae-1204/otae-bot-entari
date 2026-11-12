@@ -56,7 +56,7 @@ class ArchitectureTests(unittest.TestCase):
                 if isinstance(node, ast.ImportFrom):
                     module = node.module or ""
                     self.assertFalse(
-                        module.startswith(("arclet.entari", "otae_bot.compat", "otae_bot.accounts", "otae_bot.pipeline"))
+                        module.startswith(("arclet.entari", "otae_bot.accounts", "otae_bot.messaging", "otae_bot.pipeline"))
                         or "rendering" in module.split("."),
                         (path, module),
                     )
@@ -121,30 +121,15 @@ class ArchitectureTests(unittest.TestCase):
                     application.main()
         lock.close.assert_called_once_with()
 
-    def test_every_way_the_bot_stops_a_handler_is_an_entari_exit_state(self):
-        # Handlers re-raise ``except ExitState`` before ``except Exception``; every
-        # stop/finish helper must raise something that clause recognises.
-        import asyncio
-        from arclet.alconna import Alconna
+    def test_session_stop_is_an_entari_exit_state(self):
+        # Handlers re-raise ``except ExitState`` before ``except Exception``; the only
+        # way handlers stop early, ``Session.stop()``, must raise something that clause recognises.
         from arclet.entari import Session
         from arclet.letoderea import ExitState
-        from otae_bot.compat import entari
 
         session = object.__new__(Session)
-        stops = {
-            "Session.stop": lambda: session.stop(),
-            "stop_session": entari.stop_session,
-            "finish": lambda: asyncio.run(entari.finish(session)),
-            "Matcher.finish": lambda: asyncio.run(entari.Matcher(Alconna("x")).finish()),
-            "on_event.finish": lambda: asyncio.run(entari._EventHook().finish()),
-        }
-        token = entari._CURRENT_SESSION.set(session)
-        try:
-            for name, stop in stops.items():
-                with self.subTest(name), self.assertRaises(ExitState):
-                    stop()
-        finally:
-            entari._CURRENT_SESSION.reset(token)
+        with self.assertRaises(ExitState):
+            session.stop()
 
     def test_scheduler_uses_the_scope_registering_imported_service_methods(self):
         from otae_bot.scheduling import jobs
