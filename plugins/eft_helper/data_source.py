@@ -1,12 +1,12 @@
 from otae_bot.infrastructure.storage.database import SQLiteHelper
 from otae_bot.config.paths import SQL_PATH, IMAGE_PATH
 from .entity import Ammo
-from otae_bot.config.settings import Plugin_Config, SYSTEM_PROXY
+from otae_bot.config.settings import system_proxy
+from .config import eft_settings
 import httpx
 
 sql = SQLiteHelper("ammo.db", SQL_PATH+"eft_helper/")
 
-config = Plugin_Config("eft_helper")
 
 # 口径映射
 caliber_mapping = {
@@ -164,7 +164,7 @@ class DataSource:
         """
         headers = {"Content-Type": "application/json"}
         try:
-            proxies_dict = SYSTEM_PROXY.get("http") if config.plugin_content.get("use_proxy") else None
+            proxies_dict = system_proxy()["http"] if eft_settings().use_proxy else None
 
             async with httpx.AsyncClient(proxies=proxies_dict) as client:
                 response = await client.post('https://api.tarkov.dev/graphql', json={'query': query_cn}, headers=headers, timeout=30)

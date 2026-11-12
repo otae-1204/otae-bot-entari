@@ -1,11 +1,9 @@
-from otae_bot.config.settings import Plugin_Config
 from otae_bot.config.paths import IMAGE_PATH
 from plugins.eft_helper.entity import Ammo
 from pil_utils import BuildImage
 from io import BytesIO
 
 img_path = IMAGE_PATH + "eft_helper/"
-config = Plugin_Config("eft_helper")
 
 async def draw_bullet_rough(ammo_data: list[Ammo]) -> dict:
     """

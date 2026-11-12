@@ -13,8 +13,9 @@ from arclet.entari.event.base import GuildMemberAddedEvent
 from otae_bot.compat.entari import ChainMsg
 from otae_bot.compat.entari import timer
 
-from otae_bot.config.settings import Config, MC_BROADCAST_INTERVAL
+from otae_bot.config.settings import Config
 from otae_bot.delivery import Target, deliver
+from .config import minecraft_settings
 from .data_source import PlayerGameTimeManager
 from .ping import ping
 from .broadcast_utils import (
@@ -25,6 +26,8 @@ from .broadcast_utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+MC_BROADCAST_INTERVAL = minecraft_settings().broadcast_interval
 
 superuser = str(Config.SUPERUSERS[0]) if Config.SUPERUSERS else "2461673400"
 

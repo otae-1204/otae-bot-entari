@@ -16,7 +16,8 @@ from otae_bot.compat.entari import cmd as _cmd, get_rest, get_bot
 from otae_bot.infrastructure.rendering.executor import run_image_render
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
 
-from otae_bot.config.settings import Config, MC_BROADCAST_INTERVAL
+from otae_bot.config.settings import Config
+from plugins.minecraft_plugin.config import minecraft_settings
 from plugins.minecraft_plugin.data_source import MinecraftDataManager, BroadcastManager
 from plugins.minecraft_plugin.draw import draw_server_info, draw_server_list, draw_server_players, draw_player_leaderboard
 from plugins.minecraft_plugin.broadcast import (
@@ -25,6 +26,8 @@ from plugins.minecraft_plugin.broadcast import (
 )
 from plugins.minecraft_plugin.ping import ping
 from otae_bot.compat.entari import on_alconna
+
+MC_BROADCAST_INTERVAL = minecraft_settings().broadcast_interval
 
 
 
