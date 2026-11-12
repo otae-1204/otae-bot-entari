@@ -14,6 +14,7 @@ from satori import ChannelType, Event, Guild, Login, Member, MessageObject, User
 
 from plugins.request_handler import handlers
 from plugins.request_handler.ark import parse_ark_invite_segment
+from tests.support.dispatch import run_scenarios
 
 ARK = json.dumps({"meta": {"news": {
     "title": "测试群",
@@ -51,25 +52,6 @@ class ArkTests(unittest.TestCase):
             with self.subTest(content=content):
                 self.assertIsNone(parse_ark_invite_segment(_elements(content)[0]))
 
-    async def _notify(self, content):
-        account = _account()
-        sent = account.protocol.send_private_message
-        event = SimpleNamespace(message=SimpleNamespace(message=_elements(content)), content=None)
-        with patch.object(handlers, "superuser", "42"), patch.object(handlers.ark_invite, "finish", AsyncMock()):
-            self.assertTrue(await handlers._is_ark_group_invite(event))
-            await handlers.handle_ark_group_invite(event, account)
-        return account, sent
-
-    def test_ark_card_only_notifies_the_superuser(self):
-        import asyncio
-
-        account, sent = asyncio.run(self._notify(f"<onebot:json data={quoteattr(ARK)}/>"))
-        sent.assert_awaited_once()
-        self.assertEqual(sent.await_args.args[0], "42")
-        self.assertIn("收到群邀请卡片消息", str(sent.await_args.args[1]))
-        self.assertEqual(handlers._pending, {})
-        account.guild_approve.assert_not_awaited()
-
 
 class RequestEventTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -86,7 +68,7 @@ class RequestEventTests(unittest.IsolatedAsyncioTestCase):
         await handlers.handle_friend_request(session, account)
         account.friend_approve.assert_awaited_once_with(request_id="flag-1", approve=True, comment="")
 
-    async def test_guild_and_member_requests_wait_for_the_superuser_and_use_standard_approve(self):
+    async def test_guild_and_member_requests_wait_for_the_superuser(self):
         cases = [
             (GuildRequestEvent, dict(user=User("7", "张三"), guild=Guild("100", "测试群")), "guild_approve"),
             (GuildMemberRequestEvent, dict(user=User("8", "李四"), guild=Guild("100", "测试群"), member=Member(User("8"))),
@@ -107,13 +89,7 @@ class RequestEventTests(unittest.IsolatedAsyncioTestCase):
                         message=SimpleNamespace(message=_elements("同意" if decision else "拒绝")), content=None,
                     )
                     self.assertTrue(handlers._is_superuser_reply(account, reply))
-                    send = AsyncMock()
-                    with patch.object(handlers.approve_handler, "send", send), \
-                            patch.object(handlers.approve_handler, "finish", AsyncMock()):
-                        await handlers.handle_approve_reply(reply, account)
-                    getattr(account, api).assert_awaited_once_with(request_id="flag-2", approve=decision, comment="")
-                    self.assertEqual(send.await_args.args[0], f"已{'同意' if decision else '拒绝'}加入 测试群。")
-                    self.assertEqual(handlers._pending, {})
+                    # 审批与回执走真实派发，见 RequestDispatchTests
 
     async def test_superuser_is_notified_privately_and_a_failed_notice_drops_the_request(self):
         account = _account()
@@ -135,6 +111,82 @@ class RequestEventTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("listen(GuildRequestEvent, priority=5)(handle_guild_request)", source)
         self.assertIn("listen(GuildMemberRequestEvent, priority=5)(handle_guild_request)", source)
         self.assertNotIn("__class__.__name__", source)
+
+
+DISPATCH_SCENARIOS = r'''
+import json
+from xml.sax.saxutils import quoteattr
+
+handlers = plugin('plugins.request_handler.handlers')
+handlers.superuser = '42'
+account = default_account
+for api in ('friend.approve', 'guild.approve', 'guild.member.approve'):
+    account.protocol.answers[api] = {}
+
+ARK = json.dumps({"meta": {"news": {
+    "title": "测试群",
+    "jumpUrl": "https://qun.qq.com/qunpro/robot/qunshare?groupcode=100&senderuin=7&msgseq=9&邀请你加入群聊",
+}}}, ensure_ascii=False)
+
+
+def calls(name):
+    return [params for action, params in account.protocol.calls if action == name]
+
+
+async def request(kind, flag, **fields):
+    origin = Event(kind, datetime.now(timezone.utc), Login(user=User('test-bot'), platform='qq'),
+                   message=MessageObject(flag, ''), **fields)
+    await app.handle_event(account, origin)
+
+
+async def main():
+    # 好友申请：自动同意，用事件里的请求 ID
+    await request('friend-request', 'flag-1', user=User('7', '张三'))
+    assert calls('friend.approve') == [{'message_id': 'flag-1', 'approve': True, 'comment': ''}], calls('friend.approve')
+
+    # 群邀请：私聊通知超级用户；超级用户私聊回「同意」才审批，并在私聊里回执
+    await request('guild-request', 'flag-2', user=User('7', '张三'), guild=Guild('300', '测试群'))
+    notice = account.protocol.sent[-1]
+    assert notice[0] == 'private:42' and '群号：300' in notice[1] and '邀请人：张三' in notice[1], notice
+    assert 'test-bot:flag-2' in handlers._pending
+
+    # 群里说「同意」、别人私聊说「同意」、超级用户私聊说别的：都不算
+    assert await say('同意', user='42') == []
+    assert await say('同意', user='8', private=True) == []
+    assert await say('你好', user='42', private=True) == []
+    assert calls('guild.approve') == [] and 'test-bot:flag-2' in handlers._pending
+
+    assert await say('同意', user='42', private=True) == ['已同意加入 测试群。']
+    assert calls('guild.approve') == [{'message_id': 'flag-2', 'approve': True, 'comment': ''}], calls('guild.approve')
+    assert handlers._pending == {}
+
+    # 入群申请：拒绝走 guild.member.approve
+    await request('guild-member-request', 'flag-3', user=User('8', '李四'), guild=Guild('300', '测试群'))
+    assert await say('拒绝', user='42', private=True) == ['已拒绝加入 测试群。']
+    assert calls('guild.member.approve') == [{'message_id': 'flag-3', 'approve': False, 'comment': ''}]
+    assert handlers._pending == {}
+
+    # 没有待审批时超级用户的「同意」不回应
+    assert await say('同意', user='42', private=True) == []
+
+    # Ark 群邀请卡片：只私聊通知超级用户，不在原处回复，也不产生待审批
+    before = len(account.protocol.sent)
+    assert await say(f'<onebot:json data={quoteattr(ARK)}/>', user='7') == ['收到群邀请卡片消息：\n群名：测试群\n群号：100\n邀请人：7\n\n'
+        '该卡片不是 QQ 系统的入群请求，无法自动通过；请在 QQ 里使用“邀请 bot 加入群聊”的系统入口邀请。']
+    assert account.protocol.sent[-1][0] == 'private:42' and len(account.protocol.sent) == before + 1
+    assert handlers._pending == {}
+    print('ALL-OK')
+
+run(main())
+'''
+
+
+class RequestDispatchTests(unittest.TestCase):
+    def test_requests_and_replies_through_the_real_event_path(self):
+        result = run_scenarios(DISPATCH_SCENARIOS)
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, output[-6000:])
+        self.assertIn("ALL-OK", result.stdout)
 
 
 if __name__ == "__main__":

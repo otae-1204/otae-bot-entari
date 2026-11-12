@@ -3,21 +3,13 @@
 import asyncio
 from typing import Dict
 
-from arclet.entari import Account as Bot, Event, Session, listen
+from arclet.entari import Account as Bot, Event, MessageChain, MessageCreatedEvent, Session, Text, listen
 from arclet.entari.event.base import FriendRequestEvent, GuildMemberRequestEvent, GuildRequestEvent
 from loguru import logger
 
-from otae_bot.compat.entari import (
-    ChainMsg,
-    Pred,
-    event_chain,
-    event_plain_text,
-    event_user_id,
-    is_group,
-    listen_message,
-)
 from otae_bot.config.settings import Config
 from otae_bot.delivery import Target, deliver
+from otae_bot.messaging.inbound import event_chain, event_plain_text, event_user_id, is_group
 from plugins.request_handler.ark import parse_ark_invite_segment
 from plugins.request_handler.text import entity_label, parse_decision, select_invite_reply, text_or_empty
 
@@ -110,13 +102,12 @@ async def _is_ark_group_invite(event: Event) -> bool:
         return False
 
 
-ark_invite = listen_message(rule=Pred(_is_ark_group_invite), priority=5, block=True)
-
-
-@ark_invite.handle()
-async def handle_ark_group_invite(event: Event, bot: Bot):
+@listen(MessageCreatedEvent)
+async def handle_ark_group_invite(session: Session, bot: Bot):
+    event = session.event
+    if not await _is_ark_group_invite(event):
+        return
     if not superuser:
-        await ark_invite.finish()
         return
 
     for seg in event_chain(event):
@@ -131,8 +122,6 @@ async def handle_ark_group_invite(event: Event, bot: Bot):
 
         await _notify_ark_invite(bot, guild_name, inviter_name, info)
         break
-
-    await ark_invite.finish()
 
 
 # 通用：通知超级用户
@@ -150,7 +139,7 @@ async def _notify_superuser(bot: Bot, guild_name: str, user_name: str, key: str,
             "",
             "请回复「同意」加入群聊，或回复「拒绝」忽略此邀请。",
         ])
-        (await deliver(Target.private(superuser), ChainMsg.text("\n".join(lines)), account=bot)).raise_for_failure()
+        (await deliver(Target.private(superuser), MessageChain([Text("\n".join(lines))]), account=bot)).raise_for_failure()
         logger.info(f"群邀请已转发给超级用户: {guild_name}")
     except Exception as e:
         logger.error(f"通知超级用户失败: {e}")
@@ -161,14 +150,14 @@ async def _notify_superuser(bot: Bot, guild_name: str, user_name: str, key: str,
 async def _notify_ark_invite(bot: Bot, guild_name: str, user_name: str, info: dict):
     """Ark 群卡片不是可审批请求，只通知超级用户手动处理。"""
     try:
-        (await deliver(Target.private(superuser), ChainMsg.text(
+        (await deliver(Target.private(superuser), MessageChain([Text(
             f"收到群邀请卡片消息：\n"
             f"群名：{guild_name}\n"
             f"群号：{text_or_empty(info.get('group_code')) or '未知'}\n"
             f"邀请人：{user_name}\n\n"
             f"该卡片不是 QQ 系统的入群请求，无法自动通过；"
             f"请在 QQ 里使用“邀请 bot 加入群聊”的系统入口邀请。"
-        ), account=bot)).raise_for_failure()
+        )]), account=bot)).raise_for_failure()
         logger.info(f"群邀请卡片已转发给超级用户（不可自动审批）: {guild_name}")
     except Exception as e:
         logger.error(f"通知超级用户失败: {e}")
@@ -187,11 +176,11 @@ def _is_superuser_reply(account: Bot, event: Event) -> bool:
     ) is not None
 
 
-approve_handler = listen_message(rule=Pred(_is_superuser_reply), priority=4, block=True)
-
-
-@approve_handler.handle()
-async def handle_approve_reply(event: Event, bot: Bot):
+@listen(MessageCreatedEvent)
+async def handle_approve_reply(session: Session, bot: Bot):
+    event = session.event
+    if not _is_superuser_reply(bot, event):
+        return
     text = event_plain_text(event).strip()
     decision = parse_decision(text)
     if decision is None:
@@ -213,14 +202,12 @@ async def handle_approve_reply(event: Event, bot: Bot):
         try:
             label = text_or_empty(info.get("guild_name"), info.get("guild_id")) or "该群"
             await _decide(bot, key, info, decision)
-            await approve_handler.send(f"已{'同意' if decision else '拒绝'}加入 {label}。")
+            await session.send(f"已{'同意' if decision else '拒绝'}加入 {label}。")
         except Exception as e:
-            await approve_handler.send(f"操作执行失败：{e}")
+            await session.send(f"操作执行失败：{e}")
             logger.error(f"群邀请审批失败: {e}")
         finally:
             del _pending[key]
-
-    await approve_handler.finish()
 
 
 async def _decide(bot: Bot, key: str, info: dict, approve: bool):
