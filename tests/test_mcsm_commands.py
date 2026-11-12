@@ -183,5 +183,21 @@ class EftHelperRegistrationTests(unittest.TestCase):
         )
 
 
+class DeployLlmConfigTests(unittest.TestCase):
+    def test_general_llm_falls_back_field_by_field_to_the_steam_group(self):
+        from otae_bot.config import settings
+        from plugins.mcsm.deploy import llm_config
+
+        with settings.override({}):
+            self.assertIsNone(llm_config())
+        steam = {"llm_api_key": "steam-key", "llm_base_url": "https://steam.test", "llm_model": "steam-model"}
+        with settings.override({"plugins": {"plugins.steamInfo": steam}}):
+            self.assertEqual(llm_config(), {"api_key": "steam-key", "base_url": "https://steam.test",
+                                            "model": "steam-model"})
+        with settings.override({"otae": {"llm": {"api_key": "general", "model": "m"}},
+                                "plugins": {"plugins.steamInfo": steam}}):
+            self.assertEqual(llm_config(), {"api_key": "general", "base_url": "https://steam.test", "model": "m"})
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -2227,7 +2227,7 @@ remotePort = {{ $v.Second }}
         self.assertIn("refresh_qflash_archive", source)
         self.assertIn("async def _refresh_qflash_download", source)
         self.assertIn("async def _retry_large_qflash_remote_install", source)
-        self.assertIn('os.getenv("MCSM_DEPLOY_LARGE_PACKAGE_MB", "200")', source)
+        self.assertIn("mcsm_settings().deploy_large_package_mb", source)
         self.assertIn("await preflight_qflash_archive(selected)", source)
         self.assertIn("fresh = await _refresh_qflash_download(options.url, selected, summary)", source)
         self.assertIn("qflash_download_url_candidates", source)

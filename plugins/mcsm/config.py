@@ -1,12 +1,21 @@
-"""MCSM 插件配置."""
+"""MCSM 插件配置：entari.yml 的 ``plugins: plugins.mcsm:`` 段。
 
-from typing import List
+面板地址与 API Key 是各群用命令绑定的运行时数据（data/，见 store.py），不在这里。
+"""
 
-from otae_bot.config.settings import _env
+from __future__ import annotations
+
+from otae_bot.config.model import Settings, field
+from otae_bot.config.settings import plugin_settings
 
 
-class Config:
-    """MCSM 插件配置，读取自 .env 全局配置."""
-    mcsm_panel_url: str = _env("MCSM_PANEL_URL", "http://127.0.0.1:23333")
-    mcsm_api_key: str = _env("MCSM_API_KEY", "")
-    mcsm_group_whitelist: List[str] = [str(g) for g in _env("MCSM_GROUP_WHITELIST", [])]
+class McsmSettings(Settings):
+    """MCSManager 面板管理"""
+
+    deploy_large_package_mb: int = field(
+        default=200, description="部署时超过多少 MB 的压缩包改走大包策略（远程直链安装）"
+    )
+
+
+def mcsm_settings() -> McsmSettings:
+    return plugin_settings("mcsm", McsmSettings)

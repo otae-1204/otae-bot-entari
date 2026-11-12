@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio as _asyncio
-import os
 import re
 import shlex
 import tempfile
@@ -32,6 +31,7 @@ from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_clea
 from otae_bot.config.settings import Config as GlobalConfig
 
 from plugins.mcsm.client import MCSMClient, OPERATION_NAMES, STATUS_MAP, STATUS_EMOJI
+from plugins.mcsm.config import mcsm_settings
 from plugins.mcsm.client import redact_sensitive_text as redact_mcsm_sensitive_text
 from plugins.mcsm.deploy import (
     DeployOptions,
@@ -550,12 +550,7 @@ async def _resolve_deploy_download(options: DeployOptions, summary: dict[str, An
 
 
 def _large_package_threshold_bytes() -> int:
-    raw = os.getenv("MCSM_DEPLOY_LARGE_PACKAGE_MB", "200")
-    try:
-        mb = int(str(raw).strip())
-    except ValueError:
-        mb = 200
-    return max(1, mb) * 1024 * 1024
+    return max(1, mcsm_settings().deploy_large_package_mb) * 1024 * 1024
 
 
 def _is_large_qflash_archive(item: QFlashArchive | None) -> bool:

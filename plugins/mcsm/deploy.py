@@ -17,7 +17,7 @@ from urllib.parse import urlsplit
 import httpx
 from loguru import logger
 
-from otae_bot.config.settings import _env
+from otae_bot.config.settings import llm_profile
 from otae_bot.infrastructure.http.tls import ashared_ssl_context
 
 try:
@@ -905,13 +905,15 @@ async def wait_for_deploy_start_command(
 
 
 def llm_config() -> Optional[dict[str, str]]:
-    api_key = str(_env("LLM_API_KEY", "") or _env("STEAM_LLM_API_KEY", "") or "")
+    """The general LLM (otae.llm), each field falling back to the Steam plugin's llm_* group."""
+    general, steam = llm_profile("llm"), llm_profile("steam")
+    api_key = general.api_key or steam.api_key
     if not api_key:
         return None
     return {
         "api_key": api_key,
-        "base_url": str(_env("LLM_BASE_URL", "") or _env("STEAM_LLM_BASE_URL", "https://api.deepseek.com") or "https://api.deepseek.com"),
-        "model": str(_env("LLM_MODEL", "") or _env("STEAM_LLM_MODEL", "deepseek-v4-flash") or "deepseek-v4-flash"),
+        "base_url": general.base_url or steam.base_url or "https://api.deepseek.com",
+        "model": general.model or steam.model or "deepseek-v4-flash",
     }
 
 
