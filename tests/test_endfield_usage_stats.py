@@ -8,6 +8,8 @@ import time
 
 import pytest
 
+import plugins.endfield.account.challenge.handlers as challenge_handlers
+import plugins.endfield.usage.handlers as usage_handlers
 from plugins.endfield.account.challenge.models import (
     ChallengeMember,
     ChallengeRecord,
@@ -395,8 +397,8 @@ def test_challenge_dispatch_sends_every_usage_view_to_usage_handler():
     async def fake_usage_stats(session, event, command, *, bot=None):
         routed.append(command.challenge_view)
 
-    original = handlers._handle_usage_stats
-    handlers._handle_usage_stats = fake_usage_stats
+    original = challenge_handlers._handle_usage_stats
+    challenge_handlers._handle_usage_stats = fake_usage_stats
     try:
         for text in (
             "影拓 使用率",
@@ -406,12 +408,12 @@ def test_challenge_dispatch_sends_every_usage_view_to_usage_handler():
             command = parse_command(text)
             assert command.error == "", (text, command.error)
             asyncio.run(
-                handlers._handle_challenge(
+                challenge_handlers._handle_challenge(
                     object(), object(), "10001", command, object()
                 )
             )
     finally:
-        handlers._handle_usage_stats = original
+        challenge_handlers._handle_usage_stats = original
 
     assert routed == ["usage", "usage_history", "usage_refresh"]
 

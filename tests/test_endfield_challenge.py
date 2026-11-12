@@ -10,6 +10,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import plugins.endfield.account.challenge.handlers as challenge_handlers
+import plugins.endfield.usage.handlers as usage_handlers
 import plugins.endfield.gacha.handlers as gacha_handlers
 import plugins.endfield.rendering.cards as endfield_draw
 from plugins.endfield.catalog import commands
@@ -419,7 +421,7 @@ class EndfieldChallengeTests(unittest.TestCase):
             )
         )
         self.assertEqual(
-            endfield_plugin._challenge_mention_targets(
+            usage_handlers._challenge_mention_targets(
                 event,
                 SimpleNamespace(self_id="10000"),
             ),
@@ -437,7 +439,7 @@ class EndfieldChallengeTests(unittest.TestCase):
                 guild=SimpleNamespace(id="group-1"),
             )
             with patch.object(endfield_plugin.account_store, "list_roles", return_value=[]) as list_roles:
-                await endfield_plugin._handle_challenge(
+                await challenge_handlers._handle_challenge(
                     session,
                     event,
                     "sender",
@@ -475,7 +477,7 @@ class EndfieldChallengeTests(unittest.TestCase):
                         side_effect=RuntimeError("stop-after-selection"),
                     ):
                         with self.assertRaisesRegex(RuntimeError, "stop-after-selection"):
-                            await endfield_plugin._handle_challenge(
+                            await challenge_handlers._handle_challenge(
                                 session,
                                 event,
                                 "sender",
@@ -620,11 +622,11 @@ class EndfieldChallengeTests(unittest.TestCase):
             drawn = {name: AsyncMock(return_value=b"png") for name in ("draw_war_overview", "draw_war_history", "draw_war_detail")}
             with (
                 patch.object(handlers.official_client, "war_echoes", AsyncMock(return_value=_war_illusion_fixture())),
-                patch.object(handlers, "get_challenge_locale", AsyncMock(return_value=None)),
-                patch.object(handlers, "_finish_pngs", AsyncMock()),
-                patch.multiple(handlers, **drawn),
+                patch.object(challenge_handlers, "get_challenge_locale", AsyncMock(return_value=None)),
+                patch.object(challenge_handlers, "_finish_pngs", AsyncMock()),
+                patch.multiple(challenge_handlers, **drawn),
             ):
-                await handlers._render_challenge_cards(
+                await challenge_handlers._render_challenge_cards(
                     SimpleNamespace(), SimpleNamespace(), commands.parse_command(text), None,
                     SimpleNamespace(role_id=f"echo-season-route {text}", server_id="1"), "test-only",
                     ChallengeIdentity("测试", "官服", "1"), False, "b",
@@ -1227,11 +1229,11 @@ class EndfieldGachaDeliveryTests(unittest.TestCase):
 
         async def run(session, pngs):
             with (
-                patch.object(handlers, "_finish_pngs", finish_pngs),
+                patch.object(challenge_handlers, "_finish_pngs", finish_pngs),
                 patch.object(replies, "send_forward", satori),
                 patch.object(replies, "_png_image", lambda png: replies.Image(src=f"file:///tmp/{png.decode()}.png")),
             ):
-                await handlers._finish_challenge_pages(session, self.EVENT, self.BOT, pngs, "/ef 影拓 历史 第N页")
+                await challenge_handlers._finish_challenge_pages(session, self.EVENT, self.BOT, pngs, "/ef 影拓 历史 第N页")
 
         session = SimpleNamespace(send=AsyncMock())
         asyncio.run(run(session, (b"1", b"2")))

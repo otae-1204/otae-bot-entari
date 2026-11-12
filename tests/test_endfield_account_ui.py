@@ -722,7 +722,7 @@ class EndfieldAccountDetailRoutingTests(unittest.IsolatedAsyncioTestCase):
         detail.assert_not_awaited()
 
     async def test_detail_fetch_claims_the_role_task_lock(self):
-        with mock.patch.object(endfield.ROLE_TASKS, "claim") as claim:
+        with mock.patch.object(account_handlers.ROLE_TASKS, "claim") as claim:
             await self.run_accounts(group=False, roles=self.roles[:1])
         claim.assert_called_once_with(self.roles[0])
 

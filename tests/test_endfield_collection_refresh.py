@@ -11,7 +11,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from plugins.endfield import cold_start, handlers
+from plugins.endfield import cold_start, handlers, state as state_module
+import plugins.endfield.archives.handlers as archive_handlers
+import plugins.endfield.medals.handlers as medal_handlers
 from plugins.endfield.archives.store import ArchiveSnapshotStore
 from plugins.endfield.catalog.commands import parse_command
 from plugins.endfield.catalog.models import (
@@ -537,9 +539,9 @@ class PinnedProviderTest(unittest.IsolatedAsyncioTestCase):
 
 class CollectionLifecycleTest(unittest.IsolatedAsyncioTestCase):
     async def test_public_queries_read_snapshot_after_ensuring_freshness(self):
-        for kind, text, store in (
-            ("medal", "奖章", handlers.medal_store),
-            ("archive", "档案", handlers.archive_store),
+        for kind, text, store, module in (
+            ("medal", "奖章", state_module.medal_store, medal_handlers),
+            ("archive", "档案", state_module.archive_store, archive_handlers),
         ):
             state = SimpleNamespace(current=None)
             updated = SimpleNamespace(version="new")
@@ -549,15 +551,15 @@ class CollectionLifecycleTest(unittest.IsolatedAsyncioTestCase):
 
             with (
                 self.subTest(kind=kind),
-                patch.object(handlers.collection_refresher, "ensure_fresh", AsyncMock(side_effect=refresh)) as ensure,
+                patch.object(state_module.collection_refresher, "ensure_fresh", AsyncMock(side_effect=refresh)) as ensure,
                 patch.object(store, "load_current_view", side_effect=lambda state=state: state.current),
                 patch.object(store, "load_baseline_view", return_value=None),
-                patch.object(handlers.service, f"build_{kind}_diff") as build,
-                patch.object(handlers, f"draw_{kind}_stats_card", AsyncMock(return_value=(b"png",))),
-                patch.object(handlers, "_finish_pngs", AsyncMock()) as finish,
+                patch.object(state_module.service, f"build_{kind}_diff") as build,
+                patch.object(module, f"draw_{kind}_stats_card", AsyncMock(return_value=(b"png",))),
+                patch.object(module, "_finish_pngs", AsyncMock()) as finish,
             ):
                 session = SimpleNamespace(send=AsyncMock())
-                await getattr(handlers, f"_handle_{kind}")(session, parse_command(text))
+                await getattr(module, f"_handle_{kind}")(session, parse_command(text))
                 ensure.assert_awaited_once()
                 build.assert_called_once_with(updated, None)
                 finish.assert_awaited_once()
@@ -568,9 +570,9 @@ class CollectionLifecycleTest(unittest.IsolatedAsyncioTestCase):
             yield
 
         role = SimpleNamespace(nickname="test", masked_uid="123", server_name="官服", server_id="1")
-        for action, text, store in (
-            ("medal_missing", "奖章 缺章", handlers.medal_store),
-            ("archive_progress", "档案 收集", handlers.archive_store),
+        for action, text, store, module in (
+            ("medal_missing", "奖章 缺章", state_module.medal_store, medal_handlers),
+            ("archive_progress", "档案 收集", state_module.archive_store, archive_handlers),
         ):
             state = SimpleNamespace(current=None)
             updated = SimpleNamespace(version="new")
@@ -580,18 +582,18 @@ class CollectionLifecycleTest(unittest.IsolatedAsyncioTestCase):
 
             with (
                 self.subTest(action=action),
-                patch.object(handlers.collection_refresher, "ensure_fresh", AsyncMock(side_effect=refresh)) as ensure,
+                patch.object(state_module.collection_refresher, "ensure_fresh", AsyncMock(side_effect=refresh)) as ensure,
                 patch.object(store, "load_current_view", side_effect=lambda state=state: state.current),
-                patch.object(handlers.account_store, "resolve_role", return_value=role),
-                patch.object(handlers.account_store, "decrypt_token", return_value="token"),
-                patch.object(handlers.ROLE_TASKS, "claim", side_effect=claim),
-                patch.object(handlers.official_client, "endfield_card_detail", AsyncMock(return_value={})) as detail,
-                patch.object(handlers.service, f"build_{action}_view") as build,
-                patch.object(handlers, f"draw_{action}_card", AsyncMock(return_value=(b"png",))),
-                patch.object(handlers, "_finish_pngs", AsyncMock()),
+                patch.object(state_module.account_store, "resolve_role", return_value=role),
+                patch.object(state_module.account_store, "decrypt_token", return_value="token"),
+                patch.object(module.ROLE_TASKS, "claim", side_effect=claim),
+                patch.object(state_module.official_client, "endfield_card_detail", AsyncMock(return_value={})) as detail,
+                patch.object(state_module.service, f"build_{action}_view") as build,
+                patch.object(module, f"draw_{action}_card", AsyncMock(return_value=(b"png",))),
+                patch.object(module, "_finish_pngs", AsyncMock()),
             ):
                 session = SimpleNamespace(send=AsyncMock())
-                await getattr(handlers, f"_handle_{action}")(
+                await getattr(module, f"_handle_{action}")(
                     session, "user", parse_command(text), None, group=False,
                 )
                 ensure.assert_awaited_once()
@@ -603,7 +605,7 @@ class CollectionLifecycleTest(unittest.IsolatedAsyncioTestCase):
             with (
                 self.subTest(action=action),
                 patch.object(handlers.account_store, "resolve_role", return_value=None),
-                patch.object(handlers.collection_refresher, "ensure_fresh", AsyncMock()) as ensure,
+                patch.object(medal_handlers.collection_refresher, "ensure_fresh", AsyncMock()) as ensure,
             ):
                 session = SimpleNamespace(send=AsyncMock())
                 await getattr(handlers, f"_handle_{action}")(
@@ -642,13 +644,13 @@ class CollectionLifecycleTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_manual_commands_use_shared_refresher(self):
         for kind, text, store in (
-            ("medal", "奖章 刷新", handlers.medal_store),
+            ("medal", "奖章 刷新", medal_handlers.medal_store),
             ("archive", "档案 刷新", handlers.archive_store),
         ):
             with (
                 self.subTest(kind=kind),
-                patch.object(handlers.collection_refresher, "refresh", AsyncMock()) as refresh,
-                patch.object(handlers.collection_refresher, "ensure_fresh", AsyncMock()) as ensure,
+                patch.object(medal_handlers.collection_refresher, "refresh", AsyncMock()) as refresh,
+                patch.object(medal_handlers.collection_refresher, "ensure_fresh", AsyncMock()) as ensure,
                 patch.object(store, "load_current_view", return_value=None),
             ):
                 session = SimpleNamespace(send=AsyncMock())

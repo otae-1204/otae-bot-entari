@@ -4164,6 +4164,7 @@ ef_catalog = plugin('plugins.endfield.catalog.handlers')
 ef_account = plugin('plugins.endfield.account.handlers')
 ef_binding = plugin('plugins.endfield.account.binding')
 ef_gacha = plugin('plugins.endfield.gacha.handlers')
+ef_ownership = plugin('plugins.endfield.ownership.handlers')
 CIPHER = CredentialCipher(b'k' * 32)
 PNG = b'\x89PNG\r\n\x1a\n-endfield-test'
 CN_ROLE = RoleCandidate('b1', '1095714689', '1', '甲', 'China')
@@ -4327,7 +4328,7 @@ async def main():
 
     # 持有率：私聊不能看群内；群里普通成员不能刷新
     assert await say('/ef 持有率 群内', private=True) == ['私聊环境不支持群内统计，请使用 /ef 持有率 全局。']
-    with patch.object(ef, 'is_group_manager', AsyncMock(return_value=False)):
+    with patch.object(ef_ownership, 'is_group_manager', AsyncMock(return_value=False)):
         assert await say('/ef 持有率 刷新') == ['权限不足：仅群主、群管理员或机器人管理员可刷新本群持有率快照。']
 
     # 个人功能：群里拒绝绑定类操作；未配置密钥

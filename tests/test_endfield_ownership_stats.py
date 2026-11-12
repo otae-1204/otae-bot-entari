@@ -9,6 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+import plugins.endfield.ownership.handlers as ownership_handlers
 import plugins.endfield.handlers as endfield_plugin
 from loguru import logger
 from satori.model import IterablePageResult, PageResult
@@ -1081,7 +1082,7 @@ class OwnershipGroupAndCommandTests(unittest.TestCase):
     def test_command_permission_boundaries_and_private_group_error(self):
         private_event = SimpleNamespace(user=SimpleNamespace(id="user"))
         message = _ownership_reply(
-            endfield_plugin._handle_ownership_stats,
+            ownership_handlers._handle_ownership_stats,
             private_event,
             parse_command("持有率 群内"),
             bot=object(),
@@ -1091,7 +1092,7 @@ class OwnershipGroupAndCommandTests(unittest.TestCase):
         global_refresh = parse_command("持有率 刷新 全局")
         with mock.patch.object(endfield_plugin.Config, "SUPERUSERS", []):
             denied = _ownership_reply(
-                endfield_plugin._handle_ownership_stats,
+                ownership_handlers._handle_ownership_stats,
                 private_event,
                 global_refresh,
                 bot=object(),
@@ -1108,7 +1109,7 @@ class OwnershipGroupAndCommandTests(unittest.TestCase):
         )
         with mock.patch.object(endfield_plugin.Config, "SUPERUSERS", []):
             denied = _ownership_reply(
-                endfield_plugin._handle_ownership_stats,
+                ownership_handlers._handle_ownership_stats,
                 group_event,
                 parse_command("持有率 刷新 群内"),
                 bot=object(),
@@ -1150,13 +1151,13 @@ class OwnershipGroupAndCommandTests(unittest.TestCase):
                 "build_report",
             ) as build_report,
             mock.patch.object(
-                endfield_plugin,
+                ownership_handlers,
                 "render_ownership_stats",
                 mock.AsyncMock(),
             ) as renderer,
         ):
             result = _ownership_reply(
-                endfield_plugin._handle_ownership_stats,
+                ownership_handlers._handle_ownership_stats,
                 event,
                 parse_command("持有率 刷新 全局"),
                 bot=object(),
@@ -1192,7 +1193,7 @@ class OwnershipGroupAndCommandTests(unittest.TestCase):
             stop_reason="官方社区接口连续返回 405，已保护性停止剩余刷新",
         )
 
-        result = endfield_plugin._format_ownership_refresh_result("global", refresh)
+        result = ownership_handlers._format_ownership_refresh_result("global", refresh)
 
         self.assertIn("失败 3", result)
         self.assertIn("跳过 202", result)
@@ -1216,7 +1217,7 @@ class OwnershipGroupAndCommandTests(unittest.TestCase):
             catalog_error="RuntimeError: 目录检查失败",
         )
 
-        result = endfield_plugin._format_ownership_refresh_result("global", refresh)
+        result = ownership_handlers._format_ownership_refresh_result("global", refresh)
 
         self.assertIn("失败（RuntimeError: 目录检查失败）", result)
         self.assertNotIn("无变动", result)
@@ -1249,13 +1250,13 @@ class OwnershipGroupAndCommandTests(unittest.TestCase):
                 return_value=report,
             ) as build_report,
             mock.patch.object(
-                endfield_plugin,
+                ownership_handlers,
                 "render_ownership_stats",
                 mock.AsyncMock(return_value="rendered"),
             ) as renderer,
         ):
             result = _ownership_reply(
-                endfield_plugin._handle_ownership_stats,
+                ownership_handlers._handle_ownership_stats,
                 event,
                 parse_command("持有率"),
                 bot=Bot(),
