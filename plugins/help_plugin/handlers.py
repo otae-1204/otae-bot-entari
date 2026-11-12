@@ -14,9 +14,7 @@ from otae_bot.infrastructure.rendering.help_runtime import cached_help_image
 HELP_IMAGE_DIR = Path(IMAGE_PATH) / "help"
 HYW_HELP = "HYW 搜索问答：\n/q <问题> —— 搜索并回答，支持附带图片\n/q <追问> —— 引用自己之前的回答即可继续追问\n/q 帮助 —— 查看详细说明\n/q 清空 —— 清空当前会话历史\n别名：/hyw、/何意味；管理员需先配置 HYW_* 模型参数。"
 TEXT_TOPICS = {name: HYW_HELP for name in ("hyw", "q", "何意味")}
-GROK_HELP = "Grok Bot 问答：\n/grok <问题> —— 发送文本或附带图片提问，支持引用消息提问\n/grok 帮助 —— 查看详细使用说明\n别名：/grokbot；各群与各私聊会话相互独立，默认采用花园多惠人设。\n功能默认关闭，群内需 SuperUser 执行 /功能 开启 grok（管理员与群主可关闭）；私聊需 SuperUser 使用 /grok 开启；管理员需先配置 GROKBOT_* 参数。"
-TEXT_TOPICS.update({name: GROK_HELP for name in ("grok", "grokbot", "grok_bot")})
-GROUP_FEATURE_HELP = "本群插件开关：\n/功能 列表 —— 查看本群插件启用状态\n/功能 开启 <插件名> —— 在本群启用指定插件\n/功能 关闭 <插件名> —— 在本群禁用指定插件\n支持插件原名及别名（如 ef、steam、bili、mc、tibo 等）。\n仅 SuperUser、本群管理员或群主可操作，设置仅对当前群生效且持久保存。Grok Bot 默认关闭，仅限 SuperUser 开启，管理员与群主可关闭。"
+GROUP_FEATURE_HELP = "本群插件开关：\n/功能 列表 —— 查看本群插件启用状态\n/功能 开启 <插件名> —— 在本群启用指定插件\n/功能 关闭 <插件名> —— 在本群禁用指定插件\n支持插件原名及别名（如 ef、steam、bili、mc、tibo 等）。\n仅 SuperUser、本群管理员或群主可操作，设置仅对当前群生效且持久保存。"
 TEXT_TOPICS.update({name: GROUP_FEATURE_HELP for name in ("功能", "插件", "plugin")})
 CHANGELOG_HELP = "更新日志查询：\n/更新日志 —— 查看最新版本更新说明\n/更新日志 列表 —— 查看版本目录列表（每页 12 项）\n/更新日志 <版本号/序号/关键词> —— 查询指定版本的更新条目（如 /更新日志 v1.14.0、/更新日志 2）\n/更新日志 统计 —— 查看版本与提交汇总数据\n别名：/更新、/changelog、/版本；版本按阶段划分，每项条目均对应仓库真实提交。"
 TEXT_TOPICS.update({name: CHANGELOG_HELP for name in ("更新", "更新日志", "changelog", "版本")})

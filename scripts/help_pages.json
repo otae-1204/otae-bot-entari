@@ -53,7 +53,6 @@
             "heading": "AI 问答与雷达",
             "items": [
               "/q <问题>  HYW 搜索与大模型问答",
-              "/grok <问题>  Grok Bot 多模态对话",
               "/radar  AI 智商雷达榜单与对比"
             ]
           }

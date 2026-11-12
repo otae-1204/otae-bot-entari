@@ -27,7 +27,7 @@ from plugins.usage_stats.presentation import build_card
 COMMANDS = [  # (指令, 子命令, 插件, 权重, 平均耗时 ms)
     ("/ef", "持有率", "endfield", 120, 2100), ("/q", "", "hyw", 95, 8400), ("/ef", "抽卡", "endfield", 85, 3600),
     ("/ef", "影拓", "endfield", 64, 2400), ("/radar", "", "radar", 50, 1200), ("/ak", "签到", "arknights", 45, 4000),
-    ("/help", "", "help_plugin", 38, 300), ("/grok", "", "grok_bot", 34, 11200), ("/tibo", "", "tibo_radar", 26, 900),
+    ("/help", "", "help_plugin", 38, 300), ("/steam", "", "steamInfo", 34, 1500), ("/tibo", "", "tibo_radar", 26, 900),
     ("/更新日志", "", "changelog", 16, 400), ("/ef", "资料查询", "endfield", 70, 1800), ("/bili", "", "bilibilibot", 12, 700),
 ]
 NAMES = ["夜岚", "晨星", "小佩丽卡", "不吃香菜", "Shenger", "惠", "路过的博士", "管理员", "Ash", "白昼"]

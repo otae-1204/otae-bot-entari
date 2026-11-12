@@ -66,7 +66,7 @@
 
 1. **固定三层：**
    - `handlers.py`：只做解析参数、调用 service、回复。要薄。
-   - `service.py`：业务逻辑。新代码必须不 import Entari、不接触消息元素，可以脱离 bot 单独测试；已有代码改到时再迁。现状：21 个插件中只有 4 个（bilibilibot、endfield、radar、tibo_radar）拆出了 `service.py`（共 15 个文件），其中 `bilibilibot/service.py` 仍直接用到 Entari 的图片元素，其余插件的业务逻辑多半还在 `handlers.py` 里。
+   - `service.py`：业务逻辑。新代码必须不 import Entari、不接触消息元素，可以脱离 bot 单独测试；已有代码改到时再迁。现状：20 个插件中只有 4 个（bilibilibot、endfield、radar、tibo_radar）拆出了 `service.py`（共 15 个文件），其中 `bilibilibot/service.py` 仍直接用到 Entari 的图片元素，其余插件的业务逻辑多半还在 `handlers.py` 里。
    - `store.py` / `draw.py`：存储和渲染。
 2. **回复用会话，推送用投递服务。** 指令处理函数里用 `session.send`；定时任务和后台任务里的主动消息一律走 `otae_bot.delivery.deliver`，不自己选账号、不直接调协议发送接口。
 3. **群功能开关和指令统计是自动的。** 插件不需要、也不应该自己判断「本群是否开启」。

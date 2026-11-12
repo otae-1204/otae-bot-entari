@@ -96,7 +96,6 @@ async def main():
         # 文字主题原样按字符串发送（与以前一样经 Satori XML 解析）
         sent = await say('/h q')
         assert len(sent) == 1 and sent[0].startswith('HYW 搜索问答') and '</问题>' in sent[0], sent
-        assert (await say('/help grok'))[0].startswith('Grok Bot 问答')
         assert (await say('/help 功能'))[0].startswith('本群插件开关')
         assert (await say('/help 更新日志'))[0].startswith('更新日志查询')
         assert (await say('/help 签到'))[0].startswith('签到：')
