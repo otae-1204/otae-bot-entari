@@ -858,7 +858,7 @@ class EndfieldCommandParserTests(unittest.TestCase):
         entries = {item.command: item for section in help_cards.iter_sections(page) for item in section.items}
 
         with Image.open(ROOT / "assets/image/help/endfield.png") as image:
-            # 由 scripts/render_help_cards.py 渲染：宽度固定，高度随正文生长。
+            # 由 scripts/render/render_help_cards.py 渲染：宽度固定，高度随正文生长。
             self.assertEqual(image.width, theme.page_width)
             self.assertGreaterEqual(image.height, 761)
             self.assertLessEqual(image.height, theme.max_height)

@@ -2,7 +2,7 @@
 
 Page text lives in ``scripts/help_pages.json``; artworks and their crop focus live in
 ``assets/image/help/art/gallery.json``. Adding art or pages is a data change: edit the two
-JSON files, then run ``scripts/render_help_cards.py --write``. See ``docs/help_cards.md``.
+JSON files, then run ``scripts/render/render_help_cards.py --write``. See ``docs/help_cards.md``.
 
 Layout: blue title banner, then a card whose backdrop is the artwork (blurred), a frosted
 panel with the commands, and a sharp "standee" window showing the same artwork. Artwork is

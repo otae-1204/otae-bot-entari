@@ -13,7 +13,7 @@
 
 数据与仓库提交历史的对齐由 ``scripts/generate_changelog.py --check`` 强制：
 每个非合并提交恰好出现在一个版本的一条更新里，不重不漏。
-仓库没有打 tag，版本号按提交时间段划定，划分表见 ``scripts/_regroup_changelog.py``。
+仓库没有打 tag，版本号按提交时间段划定，划分表见 ``scripts/ops/_regroup_changelog.py``。
 """
 
 from .handlers import *  # noqa: F401,F403

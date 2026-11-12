@@ -21,7 +21,7 @@
 New-Item -ItemType Directory -Force .runtime | Out-Null
 git clone https://github.com/microruri/Endfield-Studio.git .runtime/Endfield-Studio-src
 git -C .runtime/Endfield-Studio-src checkout 4dede2ebc40ffce87d89434159b0b6cefa28cab9
-git -C .runtime/Endfield-Studio-src apply ../../scripts/patches/endfield-studio-live-v3.patch
+git -C .runtime/Endfield-Studio-src apply ../../scripts/endfield/patches/endfield-studio-live-v3.patch
 
 git clone --branch akef_temp https://github.com/Escartem/AnimeStudio.git .runtime/AnimeStudio-akef
 git -C .runtime/AnimeStudio-akef checkout e69f93d7d13e78947cfab9f252701e37c445eb85
@@ -46,7 +46,7 @@ dotnet run --project $endfieldCli -c Release -- -g $game -t manifest-assets-yaml
 ## 3. 只提取目标 UI Bundle
 
 ```powershell
-python scripts/extract_endfield_ui_bundles.py `
+python scripts/endfield/extract_endfield_ui_bundles.py `
   --game-root $game `
   --bundle-json "$meta\blc_groups\Bundle.json" `
   --bundle-json "$meta\blc_groups\InitBundle.json" `
@@ -59,7 +59,7 @@ python scripts/extract_endfield_ui_bundles.py `
 先预估数量和空间可加 `--dry-run`。也可以用一个或多个 `--pattern` 替换默认范围，例如只提取名片：
 
 ```powershell
-python scripts/extract_endfield_ui_bundles.py `
+python scripts/endfield/extract_endfield_ui_bundles.py `
   --game-root $game `
   --bundle-json "$meta\blc_groups\Bundle.json" `
   --bundle-json "$meta\blc_groups\InitBundle.json" `
@@ -71,7 +71,7 @@ python scripts/extract_endfield_ui_bundles.py `
 要提取完整 UI icon 集（包括名称中带 `icon` 的全部纹理、全局 `btn_*`/`mark_*`/`logo_*`/`badge_*`/`symbol_*` 等图标式命名，以及好友名片、主线和 HUD 中使用 `deco_*` 命名的纹理），使用：
 
 ```powershell
-python scripts/extract_endfield_ui_bundles.py `
+python scripts/endfield/extract_endfield_ui_bundles.py `
   --game-root $game `
   --bundle-json "$meta\blc_groups\Bundle.json" `
   --bundle-json "$meta\blc_groups\InitBundle.json" `
@@ -85,7 +85,7 @@ python scripts/extract_endfield_ui_bundles.py `
 ## 4. 导出 PNG
 
 ```powershell
-./scripts/export_endfield_ui_images.ps1 `
+./scripts/endfield/export_endfield_ui_images.ps1 `
   -RawRoot '.runtime\endfield-ui-study-pack\raw' `
   -OutputRoot '.runtime\endfield-ui-study-pack\png'
 ```
@@ -100,7 +100,7 @@ png/assets/beyond/arts/ui/sprites/friend/businesscardbg/business_card_topic_chr_
 完整图标集可生成可搜索的离线目录和 CSV 清单：
 
 ```powershell
-python scripts/build_endfield_icon_catalog.py `
+python scripts/endfield/build_endfield_icon_catalog.py `
   --input '.runtime\endfield-all-icons\png' `
   --output '.runtime\endfield-all-icons\icon_catalog.html'
 ```

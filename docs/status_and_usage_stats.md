@@ -60,8 +60,8 @@ CPU / 内存 / 磁盘用 `psutil` 和 `shutil.disk_usage`。不发网络请求�
 ## 预览
 
 ```
-python scripts/preview_usage_stats.py    # 合成数据：本群 7 天、全局 30 天、单插件、空数据
-python scripts/preview_status.py         # 本机真实采集 + 合成的今日指令、任务与告警：公开版、详细版
+python scripts/preview/preview_usage_stats.py    # 合成数据：本群 7 天、全局 30 天、单插件、空数据
+python scripts/preview/preview_status.py         # 本机真实采集 + 合成的今日指令、任务与告警：公开版、详细版
 ```
 
 输出在 `output/usage-stats/` 和 `output/status/`，不连 QQ，也不碰 `data/` 下的真实统计库。

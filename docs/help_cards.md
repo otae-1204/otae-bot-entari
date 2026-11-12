@@ -9,7 +9,7 @@
 | `assets/image/help/art/` | 插画原图和 `gallery.json`（插画登记表） |
 | `otae_bot/infrastructure/rendering/art_frame.py` | **同模板卡片共用**：主题 `HelpTheme`、图库、按比例选图、外框 HTML/CSS |
 | `otae_bot/infrastructure/rendering/help_cards.py` | 读取上面两份数据，生成帮助页的面板内容、校验排版、写入 spec 哈希 |
-| `scripts/render_help_cards.py` | 命令行：出图、校验、写入正式资源、检查是否过期 |
+| `scripts/render/render_help_cards.py` | 命令行：出图、校验、写入正式资源、检查是否过期 |
 | `otae_bot/infrastructure/rendering/help_runtime.py` | 运行时按比例挑插画、出图并缓存到 `data/cache/help-cards/` |
 | `otae_bot/infrastructure/rendering/help_images.py` | 比例与可见度的几何计算 |
 | `assets/image/help/<file>.png` | 每页的静态回退图（无浏览器时使用） |
@@ -107,10 +107,10 @@
 在项目根目录运行（需要已安装 Playwright Chromium，或本机的 Chrome/Edge）：
 
 ```powershell
-.venv/Scripts/python.exe scripts/render_help_cards.py --stress          # 全部页面出图到 data/help/previews 并校验
-.venv/Scripts/python.exe scripts/render_help_cards.py --page endfield   # 只出某几页，可重复
-.venv/Scripts/python.exe scripts/render_help_cards.py --write           # 校验全部通过后写入 assets/image/help
-.venv/Scripts/python.exe scripts/render_help_cards.py --check           # 不开浏览器，只列出过期、缺失或多余的图片
+.venv/Scripts/python.exe scripts/render/render_help_cards.py --stress          # 全部页面出图到 data/help/previews 并校验
+.venv/Scripts/python.exe scripts/render/render_help_cards.py --page endfield   # 只出某几页，可重复
+.venv/Scripts/python.exe scripts/render/render_help_cards.py --write           # 校验全部通过后写入 assets/image/help
+.venv/Scripts/python.exe scripts/render/render_help_cards.py --check           # 不开浏览器，只列出过期、缺失或多余的图片
 ```
 
 `data/help/previews/` 保存每张图的 HTML、PNG 和 `validation.json`，这些预览和校验产物不纳入 Git；通过 `--write` 发布的正式图片仍位于 `assets/image/help/`。校验在浏览器实际排版后进行，检查：

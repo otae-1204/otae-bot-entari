@@ -109,9 +109,9 @@ F1/F2 详情每条显示 **描述**（深色）+ **获取条件**（浅色），
 可复现预览（只用公开图标和合成玩家进度，不读账号凭据，不修改 bot 快照）：
 
 ```bash
-python scripts/render_endfield_medal_wall_preview.py
+python scripts/render/render_endfield_medal_wall_preview.py
 # 或传入已有的公开元数据快照：
-python scripts/render_endfield_medal_wall_preview.py --snapshot /path/to/medal_snapshot.json
+python scripts/render/render_endfield_medal_wall_preview.py --snapshot /path/to/medal_snapshot.json
 ```
 
 输出至 `output/medal-wall-preview/`：满墙、零散三格空、连续中间四格空、末尾三格空、仅三枚、单枚、全空、缺图、长昵称九种 PNG 和 HTML，包含有复杂装饰边角的镀层章。全空沿用当前行为：隐藏奖章墙，显示紧凑标题。预览账号标注“演示数据”，不能作为真实账号查询结果。

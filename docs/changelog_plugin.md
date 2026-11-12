@@ -28,7 +28,7 @@
 划分原则是让每个版本对应一件用户能感知到的事（一个插件上线、一次卡片改版、
 一批修复），而不是按提交数或等长时间切分。
 
-> `scripts/_regroup_changelog.py` 里的 `VERSIONS` 表是最初一次性重组的产物
+> `scripts/ops/_regroup_changelog.py` 里的 `VERSIONS` 表是最初一次性重组的产物
 > （把按日期聚合的 schema 1 数据改成按版本聚合的 schema 2）。**不要再跑它**：
 > 它只接受 schema 1，对现在的数据会直接拒绝执行，因为重跑会按版本窗口重新
 > 贴标签、把每条更新的 `date` 改成窗口结束日。新增版本直接改 JSON。
@@ -122,11 +122,11 @@ python -m unittest tests.test_changelog            # 数据 / 文本 / 卡片
 但不发消息、不连网络：
 
 ```
-python scripts/preview_changelog.py                      # 全部类型
-python scripts/preview_changelog.py --only stats         # 只渲染一类
-python scripts/preview_changelog.py --only index --page 2
-python scripts/preview_changelog.py --only version --version v1.13
-python scripts/preview_changelog.py --only search --keyword 雷达
+python scripts/preview/preview_changelog.py                      # 全部类型
+python scripts/preview/preview_changelog.py --only stats         # 只渲染一类
+python scripts/preview/preview_changelog.py --only index --page 2
+python scripts/preview/preview_changelog.py --only version --version v1.13
+python scripts/preview/preview_changelog.py --only search --keyword 雷达
 ```
 
 输出在 `output/`，文件名 `cl-<类型>.png`（多页时带 `-01`、`-02` 后缀），

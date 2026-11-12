@@ -289,9 +289,9 @@ Bot 数量限制，不能仅凭状态码认定为 Token 错误。
 仍建议先停止机器人，避免与正在写入的绑定同时修改：
 
 ```powershell
-python -X utf8 scripts/repair_grok_binding.py                       # 只读列出全部绑定
-python -X utf8 scripts/repair_grok_binding.py --peer 123456         # 预演，不写盘
-python -X utf8 scripts/repair_grok_binding.py --peer 123456 --yes   # 执行
+python -X utf8 scripts/ops/repair_grok_binding.py                       # 只读列出全部绑定
+python -X utf8 scripts/ops/repair_grok_binding.py --peer 123456         # 预演，不写盘
+python -X utf8 scripts/ops/repair_grok_binding.py --peer 123456 --yes   # 执行
 ```
 
 `--peer` 是群号或私聊用户号，多账号平台再用 `--kind`、`--platform`、`--self-id`

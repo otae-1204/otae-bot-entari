@@ -49,7 +49,7 @@ from .draw_x import AMBER, CYAN, GREEN, CardSection, event_sections, render_card
 ## 本地预览（不启动 bot）
 
 ```bash
-.venv/Scripts/python.exe scripts/preview_tibo_x_all.py
+.venv/Scripts/python.exe scripts/preview/preview_tibo_x_all.py
 ```
 
 一次渲染五张卡到 `output/`：
@@ -60,7 +60,7 @@ from .draw_x import AMBER, CYAN, GREEN, CardSection, event_sections, render_card
 - `tibo_x_history.png` — `/tibo 历史`
 - `tibo_x_feed.png` — `/tibo 动态`（3 条示例 + 分页标记）
 
-单看动态卡可运行 `scripts/preview_tibo_xfeed.py`（6 条示例）。
+单看动态卡可运行 `scripts/preview/preview_tibo_xfeed.py`（6 条示例）。
 
 ## 单元测试
 
@@ -75,7 +75,7 @@ from .draw_x import AMBER, CYAN, GREEN, CardSection, event_sections, render_card
 - 新增 `plugins/tibo_radar/draw_x.py` — 统一 X 设计渲染器（通用卡 + 重导出 `render_xfeed`）
 - 新增 `plugins/tibo_radar/draw_xfeed.py` — X 时间线动态卡渲染器
 - 修改 `plugins/tibo_radar/handlers.py` — 全部命令切换到 draw_x，帮助文案更新
-- 新增 `scripts/preview_tibo_x_all.py` / `scripts/preview_tibo_xfeed.py` — 预览脚本
+- 新增 `scripts/preview/preview_tibo_x_all.py` / `scripts/preview/preview_tibo_xfeed.py` — 预览脚本
 - 修改 `tests/test_tibo_radar.py` — 新增两个渲染测试
 
 `draw.py` 与 `draw_v2.py` 保留未动，回退只需改导入。

@@ -65,7 +65,7 @@ def test_excessive_roster_falls_back_before_rendering_partial_result():
 
 def test_offline_preview_never_opens_dotenv():
     # Audit the subprocess rather than assuming imports are free of side effects.
-    script = ROOT / "scripts/render_arknights_attendance_preview.py"
+    script = ROOT / "scripts/render/render_arknights_attendance_preview.py"
     harness = """import os, runpy, sys
 script, output = sys.argv[1:]
 def guard(event, args):

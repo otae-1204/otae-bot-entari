@@ -89,11 +89,11 @@
 使用与自动推送相同的渲染入口生成本地预览：
 
 ```powershell
-.\.venv\Scripts\python.exe scripts/preview_endfield_announcements.py
+.\.venv\Scripts\python.exe scripts/preview/preview_endfield_announcements.py
 # 使用保存的官网详情 JSON，在指定历史时刻回放开始提醒：
-.\.venv\Scripts\python.exe scripts/preview_endfield_announcements.py --file bulletin.json --at 2026-10-01T11:00 --phase start
+.\.venv\Scripts\python.exe scripts/preview/preview_endfield_announcements.py --file bulletin.json --at 2026-10-01T11:00 --phase start
 # 回放恰好在 12:00 开启的活动：
-.\.venv\Scripts\python.exe scripts/preview_endfield_announcements.py --file bulletin.json --at 2026-10-01T12:00 --phase started
+.\.venv\Scripts\python.exe scripts/preview/preview_endfield_announcements.py --file bulletin.json --at 2026-10-01T12:00 --phase started
 ```
 
 默认输出 `data/endfield/announcements/previews/activity-digest.png`，预览产物不纳入 Git。旧版纯文本消息演示保存在同目录的 `legacy-text/`，仅用于回看早期效果。`--file` 可重复指定；未指定时只读获取官网公告。`--limit` 只限制本地预览的活动数量，不改变群推送的合并范围。预览脚本不连接机器人、不发送消息，也不修改订阅数据。
@@ -114,7 +114,7 @@ Windows / Python 3.13 相关回归为 **249 passed、3 skipped、47 subtests pas
 第二行预置的是模拟回执，不表示官号实际在这一时刻发过“山团团”开启动态。公告预告与到点开启属于不同阶段，不会互相删除。
 
 ```powershell
-.\.venv\Scripts\python.exe scripts/replay_endfield_announcements.py --file data/endfield/announcements/research/2026-08-01_to_2026-10-01/article-2653.json --file data/endfield/announcements/research/2026-08-01_to_2026-10-01/article-5987.json --at 2026-10-01T12:00
+.\.venv\Scripts\python.exe scripts/preview/replay_endfield_announcements.py --file data/endfield/announcements/research/2026-08-01_to_2026-10-01/article-2653.json --file data/endfield/announcements/research/2026-08-01_to_2026-10-01/article-5987.json --at 2026-10-01T12:00
 ```
 
 `--file` 接受官网详情 JSON，可重复指定；`--at` 应选择至少两项活动同时开启的时刻。脚本输出 PNG 和 `business-preview.json` 至 `data/endfield/announcements/previews/pr-2026-10-01/`，不改动正式订阅或发送记录。

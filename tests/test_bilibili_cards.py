@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def _load_preview_script():
     spec = importlib.util.spec_from_file_location(
-        "preview_bilibili_cards_for_test", ROOT / "scripts/preview_bilibili_cards.py"
+        "preview_bilibili_cards_for_test", ROOT / "scripts/preview/preview_bilibili_cards.py"
     )
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -201,7 +201,7 @@ def test_documentation_figure_is_reproducible_by_the_preview_script(tmp_path):
 
     The figure is generated, so a hand-edited or stale copy would silently
     disagree with the card renderer. Regenerate with:
-        python scripts/preview_bilibili_cards.py --write-doc-figure
+        python scripts/preview/preview_bilibili_cards.py --write-doc-figure
     Card timestamps use the host timezone; the committed figure is rendered at
     UTC+8 like the production host, so the check pins TZ to match.
     """
@@ -229,12 +229,12 @@ def test_documentation_figure_is_reproducible_by_the_preview_script(tmp_path):
     committed = Image.open(preview.DOC_FIGURE).convert("RGB")
     assert generated.size == committed.size, (
         "documentation figure size differs; regenerate it with "
-        "scripts/preview_bilibili_cards.py --write-doc-figure"
+        "scripts/preview/preview_bilibili_cards.py --write-doc-figure"
     )
     difference = ImageChops.difference(generated, committed)
     assert difference.getbbox() is None, (
         "documentation figure differs from the preview script output; regenerate it "
-        "with scripts/preview_bilibili_cards.py --write-doc-figure"
+        "with scripts/preview/preview_bilibili_cards.py --write-doc-figure"
     )
 
 

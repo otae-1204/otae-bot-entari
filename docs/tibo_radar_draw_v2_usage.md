@@ -32,7 +32,7 @@ from .draw_v2 import AMBER, CYAN, GREEN, CardSection, event_sections, post_secti
 仓库中提供了预览脚本，用示例数据渲染一张总览卡：
 
 ```bash
-.venv/Scripts/python.exe scripts/preview_tibo_radar_v2.py
+.venv/Scripts/python.exe scripts/preview/preview_tibo_radar_v2.py
 ```
 
 输出文件为 `output/tibo_radar_v2_preview.png`。如需调整样式（配色、字号、面板间距等），改完 `draw_v2.py` 后重新运行该脚本即可快速核对效果。

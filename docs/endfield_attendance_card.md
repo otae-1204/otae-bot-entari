@@ -94,7 +94,7 @@ AKEData 道具 ID，最终降级为“签到奖励”。当前森空岛使用签
 ## 本地预览
 
 ```powershell
-.venv/Scripts/python.exe scripts/render_endfield_attendance_preview.py --stress
+.venv/Scripts/python.exe scripts/render/render_endfield_attendance_preview.py --stress
 ```
 
 生成 `output/attendance-card/` 下的 PNG、HTML 和 `validation.json`。
@@ -111,7 +111,7 @@ AKEData 道具 ID，最终降级为“签到奖励”。当前森空岛使用签
 额外验证全部道具时，将上表 8 张森空岛原图按原文件名保存至 `--icon-dir`，然后运行：
 
 ```powershell
-.venv/Scripts/python.exe scripts/render_endfield_attendance_preview.py --stress --all-rewards
+.venv/Scripts/python.exe scripts/render/render_endfield_attendance_preview.py --stress --all-rewards
 ```
 
 增加 `all-rewards`（8 类道具）与 `all-22-variants`（22 个配置）两个显示压力场景，

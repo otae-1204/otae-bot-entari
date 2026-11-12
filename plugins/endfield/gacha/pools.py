@@ -1,6 +1,6 @@
 """终末地抽卡池类型注册表。
 
-叶子模块：只依赖标准库（loguru 可选），`scripts/aggregate_endfield_gacha_stats.py` 等轻量脚本
+叶子模块：只依赖标准库（loguru 可选），`scripts/endfield/aggregate_endfield_gacha_stats.py` 等轻量脚本
 可以单独加载。所有"这是什么池"的判定都集中在这里，识别优先级固定为：
 
     AKE 池表 type / poolId 前缀  →  官方接口枚举  →  名称启发式  →  兜底（unknown 或遗留默认）

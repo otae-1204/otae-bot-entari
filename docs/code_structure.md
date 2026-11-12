@@ -57,7 +57,10 @@ plugins/
 configs/                       原有插件 JSON 配置（configs/<插件>/config.json，按工作目录读取）
 assets/                        原有共享资源
 data/                          运行数据（不入库）
-scripts/                       原有运维、导出、预览工具
+scripts/                       启动/部署/安装脚本、generate_changelog.py、migrate_platform.py 与 help_pages.json；
+  preview/  render/            卡片预览与离线出图（render_help_cards.py 生成 assets/image/help）
+  endfield/                    终末地数据导出、聚合、校验、基准与解包工具
+  ops/                         一次性修复、冒烟与排障脚本
 tests/                         功能回归、结构约束、真实插件加载检查
 ```
 

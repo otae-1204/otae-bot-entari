@@ -1186,7 +1186,7 @@ class EndfieldEncyclopediaRenderTests(unittest.IsolatedAsyncioTestCase):
 
 class EndfieldEncyclopediaReportTests(unittest.TestCase):
     def test_report_encyclopedia_makes_no_request(self):
-        from scripts import inspect_endfield_akedata
+        from scripts.endfield import inspect_endfield_akedata
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -1212,7 +1212,7 @@ class EndfieldEncyclopediaReportTests(unittest.TestCase):
         self.assertIn("UseItemTable", output)
 
     def test_report_refuses_to_print_a_half_report(self):
-        from scripts import inspect_endfield_akedata
+        from scripts.endfield import inspect_endfield_akedata
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -1228,7 +1228,7 @@ class EndfieldEncyclopediaReportTests(unittest.TestCase):
 
 
 class EndfieldEncyclopediaHelpTests(unittest.TestCase):
-    """帮助图由 `scripts/render_help_cards.py` 从 `help_pages.json` 出图。
+    """帮助图由 `scripts/render/render_help_cards.py` 从 `help_pages.json` 出图。
 
     实施文档 §4.0 写的是独立脚本 `render_endfield_help.py` 与 1075/RGBA；仓库在
     那之后合并了通用的 help_cards 框架（宽度 1325，`finalize_png` 固定转 RGB），
@@ -1241,7 +1241,7 @@ class EndfieldEncyclopediaHelpTests(unittest.TestCase):
         from otae_bot.infrastructure.rendering import help_cards
 
         theme = help_cards.HelpTheme()
-        self.assertTrue(HELP_IMAGE.is_file(), "帮助图缺失，请跑 scripts/render_help_cards.py --write")
+        self.assertTrue(HELP_IMAGE.is_file(), "帮助图缺失，请跑 scripts/render/render_help_cards.py --write")
         with Image.open(HELP_IMAGE) as image:
             self.assertEqual(image.width, theme.page_width)
             self.assertGreaterEqual(image.height, 761)

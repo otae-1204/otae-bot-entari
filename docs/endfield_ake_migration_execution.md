@@ -91,12 +91,12 @@
 
 ```bash
 .venv/bin/python -m pytest -q
-.venv/bin/python scripts/inspect_endfield_akedata.py
+.venv/bin/python scripts/endfield/inspect_endfield_akedata.py
 # 将下面的版本目录换为录制脚本输出的实际目录。
-.venv/bin/python scripts/verify_endfield_akedata.py 'output/endfield-ake-migration/public/1.5.3@9885010-4' --report output/endfield-ake-migration/replay.json
-.venv/bin/python scripts/benchmark_endfield_ake_migration.py --output output/endfield-ake-migration/retest
-.venv/bin/python scripts/benchmark_endfield_ake_migration.py --metadata-only --output output/endfield-ake-migration/metadata-retest
-.venv/bin/python scripts/check_endfield_public_cache.py --table --output output/endfield-ake-migration/table-process-retest.json
+.venv/bin/python scripts/endfield/verify_endfield_akedata.py 'output/endfield-ake-migration/public/1.5.3@9885010-4' --report output/endfield-ake-migration/replay.json
+.venv/bin/python scripts/endfield/benchmark_endfield_ake_migration.py --output output/endfield-ake-migration/retest
+.venv/bin/python scripts/endfield/benchmark_endfield_ake_migration.py --metadata-only --output output/endfield-ake-migration/metadata-retest
+.venv/bin/python scripts/endfield/check_endfield_public_cache.py --table --output output/endfield-ake-migration/table-process-retest.json
 ```
 
 迁移及后续修复现已合入 `main`，原 `refactor/project-architecture` 分支已清理。后续从 `main` 拉取，按原方式由管理员重启自己的实例才能生效。个别资料可以继续显式指定 FZ/Warfarin；若需要整体回滚，应对本次迁移提交执行 `git revert`，保留架构和上一轮缓存优化，不使用破坏性 reset。没有更改账号数据库 schema，新增的公共缓存可丢弃，不影响账号数据。

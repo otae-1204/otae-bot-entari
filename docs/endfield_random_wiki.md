@@ -75,7 +75,7 @@
 机器人回复的 PNG 与 `result.json`，不启动 QQ 连接，也不提供用户身份或账号凭据：
 
 ```powershell
-.\.venv\Scripts\python.exe scripts/preview_endfield_random_wiki.py
+.\.venv\Scripts\python.exe scripts/preview/preview_endfield_random_wiki.py
 ```
 
 默认输出到 `data/endfield/random-wiki/previews/<时间戳>/`。

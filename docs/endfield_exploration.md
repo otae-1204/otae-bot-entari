@@ -83,7 +83,7 @@ data.detail.domain[]
 | `plugins/endfield/catalog/commands.py` | 子命令、别名及文字帮助 |
 | `plugins/endfield/handlers.py` | 当前用户账号选择、取数、图片缓存及发送 |
 | `scripts/help_pages.json` | 帮助卡片中的探索入口 |
-| `scripts/preview_endfield_exploration.py` | 文件样例、缩略图获取及布局检查 |
+| `scripts/preview/preview_endfield_exploration.py` | 文件样例、缩略图获取及布局检查 |
 
 视图解析只读取本地素材清单，不访问网络、不注册机器人事件。命令复用 `_card_detail_with_snapshot()` 和角色任务锁，因此同角色并发请求及接口失败沿用账号查询现有处理。该调用也沿用已有的持有率快照更新行为，没有新增探索数据库。
 
@@ -122,9 +122,9 @@ data.detail.domain[]
 ```powershell
 $env:PYTHONUTF8 = '1'
 .\.venv\Scripts\python.exe -m pytest -q tests/test_endfield_exploration.py tests/test_endfield_daily.py tests/test_endfield_account.py tests/test_endfield_account_ui.py tests/test_architecture.py tests/test_group_features.py tests/test_help_cards.py tests/test_help_plugin.py
-.\.venv\Scripts\python.exe scripts/preview_endfield_exploration.py --stress
+.\.venv\Scripts\python.exe scripts/preview/preview_endfield_exploration.py --stress
 # 收集度格的其它进度画法：edge、arc、chip、spine
-.\.venv\Scripts\python.exe scripts/preview_endfield_exploration.py --stress --progress chip --output data/endfield/exploration/previews-chip
+.\.venv\Scripts\python.exe scripts/preview/preview_endfield_exploration.py --stress --progress chip --output data/endfield/exploration/previews-chip
 ```
 
 新增测试覆盖命令别名、主账号和指定账号、群聊脱敏、完整命令分发、单次档案请求、接口错误、未绑定与无效账号、六列对应关系、新地区、缺失／零值／异常计数、旧字段按 ID 合并、重复区域、大地区倒序与组内原序、北京时间、HTML 转义、分页完整性和图片缓存隔离。另用 `domain_1` / `domain_2`、英文或裸 ID 名称和真实 `levelId` 模拟线上响应，验证中文名、主题色和离线立体图标。版本测试另覆盖标签提取、查询失败、冷请求不早于 HTTP 超时被截断，以及版本变化后重新出图。
@@ -145,7 +145,7 @@ $env:PYTHONUTF8 = '1'
 也可传入自行保存的脱敏详情文件：
 
 ```powershell
-.\.venv\Scripts\python.exe scripts/preview_endfield_exploration.py --file data/endfield/exploration/research/detail-redacted.json
+.\.venv\Scripts\python.exe scripts/preview/preview_endfield_exploration.py --file data/endfield/exploration/research/detail-redacted.json
 ```
 
 预览脚本不读取绑定凭据，不启动机器人，不发送消息；文件预览会覆盖昵称并省略 UID。统计值来自本地文件，版本标签通过公开 manifest 查询。已收录的立体图标和六类列头图标直接读取本地素材；未知地区才联网尝试平面地图回退。脚本使用正式解析和绘图函数，另用浏览器检查文字溢出、画布高度、破图及外部请求。导出的 HTML 内嵌全部已加载图片，打开时无需额外访问图片源。
@@ -153,7 +153,7 @@ $env:PYTHONUTF8 = '1'
 帮助图片更新方式：
 
 ```powershell
-.\.venv\Scripts\python.exe scripts/render_help_cards.py --page endfield --output-dir data/endfield/exploration/previews/help --write
+.\.venv\Scripts\python.exe scripts/render/render_help_cards.py --page endfield --output-dir data/endfield/exploration/previews/help --write
 ```
 
 ## 本次验证与待验收项

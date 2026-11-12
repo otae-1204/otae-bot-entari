@@ -130,8 +130,8 @@ PrtsPage (3)          三大页签：document=中枢档案 / multi_media=音像�
 | 处理 | `plugins/endfield/handlers.py`：`_handle_archive`（F1）/`_handle_archive_progress`（F2，走个人命令路径） |
 | 渲染 | `plugins/endfield/rendering/cards.py`：`draw_archive_stats_card`（预览上限 `ARCHIVE_PREVIEW_LIMIT`）/ `draw_archive_progress_card` |
 | 单测 | `tests/test_endfield_archive.py`（无网络，含分类采样、缺图降级、预览总数与分页回归） |
-| 检查脚本 | `scripts/inspect_endfield_archive.py`（实拉表结构/计数/版本 diff，缓存在 `output/endfield-archive-inspect/`） |
-| 预览脚本 | `scripts/render_endfield_archive_preview.py`（读取缓存表，获取公开图标，输出统计卡与使用演示数字的个人进度卡；不改运行快照） |
+| 检查脚本 | `scripts/endfield/inspect_endfield_archive.py`（实拉表结构/计数/版本 diff，缓存在 `output/endfield-archive-inspect/`） |
+| 预览脚本 | `scripts/render/render_endfield_archive_preview.py`（读取缓存表，获取公开图标，输出统计卡与使用演示数字的个人进度卡；不改运行快照） |
 
 ## 渲染备注
 
@@ -158,5 +158,5 @@ PrtsPage (3)          三大页签：document=中枢档案 / multi_media=音像�
   无版本基线时，统计卡新增总数显示「—」，与已确认新增 0 条区分。
 - 旧快照不含 `icon_url` 时，执行 `/ef 档案 刷新` 更新一次即可补齐图标。
 - 本次 `CARD_RENDER_VERSION` 已更新为 `endfield-card-v50`；以后改版式继续递增。
-- 复现当前预览：`.venv\Scripts\python.exe scripts/render_endfield_archive_preview.py`。
+- 复现当前预览：`.venv\Scripts\python.exe scripts/render/render_endfield_archive_preview.py`。
   默认读取 1.5 / 1.4 缓存表；可用 `--current` / `--previous` 指定其他已有缓存版本。

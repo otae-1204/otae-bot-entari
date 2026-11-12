@@ -218,7 +218,7 @@ sign      = md5( hmac_sha256( sign_token, canonical ) )
 ## 离线预览
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\render_arknights_attendance_preview.py
+.\.venv\Scripts\python.exe scripts\render\render_arknights_attendance_preview.py
 ```
 
 使用合成账号（虚构昵称与 UID）在 `output/arknights-attendance/` 生成
@@ -229,7 +229,7 @@ HTML、PNG 与 `validation.json`，覆盖单角色、混合结果、长文本、
 
 ```powershell
 git fetch upstream
-.\.venv\Scripts\python.exe scripts/render_arknights_attendance_preview.py --zmd-reference --zmd-ref upstream/main
+.\.venv\Scripts\python.exe scripts/render/render_arknights_attendance_preview.py --zmd-reference --zmd-ref upstream/main
 ```
 
 `zmd-reference-source.txt` 会记录实际使用的提交 SHA；不指定 `--zmd-ref` 时使用工作区源码。

@@ -118,9 +118,9 @@ DailyDashboardView（纯数据）
 ## 7. 本地预览（无需登录/QQ）
 
 ```powershell
-.venv/Scripts/python.exe scripts/render_endfield_daily_preview.py --stress
+.venv/Scripts/python.exe scripts/render/render_endfield_daily_preview.py --stress
 # 可选：用本地图片覆盖第一个样本账号的头像
-.venv/Scripts/python.exe scripts/render_endfield_daily_preview.py --avatar path/to/avatar.png
+.venv/Scripts/python.exe scripts/render/render_endfield_daily_preview.py --avatar path/to/avatar.png
 ```
 
 脚本使用 synthetic package 绕开 bot 启动，不读取绑定账号或凭据。

@@ -43,7 +43,7 @@
   - 把时间换算为横向百分比。
   - 生成栏目、日期轴、活动条和页头页尾 HTML。
   - 下载 AkeData 素材并交给 Chromium 截图。
-- `scripts/render_endfield_version_calendar.py`
+- `scripts/render/render_endfield_version_calendar.py`
   - 本地预览入口。
 
 ## 官方日历发现
@@ -108,7 +108,7 @@ AkeData 提供游戏配置事实，但不会提供官方宣传图的视觉编排
 5. 生成预览：
 
    ```powershell
-   .\.venv\Scripts\python.exe scripts\render_endfield_version_calendar.py
+   .\.venv\Scripts\python.exe scripts\render\render_endfield_version_calendar.py
    ```
 
    加 `--generated` 可单独检查 AkeData 降级版。

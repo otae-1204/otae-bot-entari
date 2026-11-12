@@ -9,7 +9,7 @@
 卡片布局改动后请重新生成该图，而不是手工编辑：
 
 ```powershell
-.\.venv\Scripts\python.exe scripts/preview_bilibili_cards.py --write-doc-figure
+.\.venv\Scripts\python.exe scripts/preview/preview_bilibili_cards.py --write-doc-figure
 ```
 
 `tests/test_bilibili_cards.py` 会逐像素校验本图与脚本输出一致，因此忘记重新生成会导致测试失败。
@@ -49,7 +49,7 @@
 在项目根目录运行，不启动 bot、不访问 B 站、不发送群消息：
 
 ```powershell
-.\.venv\Scripts\python.exe scripts/preview_bilibili_cards.py
+.\.venv\Scripts\python.exe scripts/preview/preview_bilibili_cards.py
 ```
 
 输出到 `output/bilibili-cards/`（不纳入 Git）：

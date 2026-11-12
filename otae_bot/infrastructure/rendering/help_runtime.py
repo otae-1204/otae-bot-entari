@@ -29,7 +29,7 @@ from otae_bot.paths import PROJECT_ROOT
 CACHE_PATH_ENV = "OTAE_HELP_CACHE_PATH"
 DEFAULT_CACHE_PATH = "data/cache/help-cards"
 
-#: Matches the offline pipeline in ``scripts/render_help_cards.py``.
+#: Matches the offline pipeline in ``scripts/render/render_help_cards.py``.
 DEVICE_SCALE_FACTOR = 1
 VIEWPORT_HEIGHT = 900
 

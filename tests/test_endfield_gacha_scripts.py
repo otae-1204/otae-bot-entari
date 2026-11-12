@@ -22,7 +22,7 @@ def _load_script(name: str, relative_path: str):
     return module
 
 
-aggregate = _load_script("endfield_aggregate_script_for_test", "scripts/aggregate_endfield_gacha_stats.py")
+aggregate = _load_script("endfield_aggregate_script_for_test", "scripts/endfield/aggregate_endfield_gacha_stats.py")
 pools = aggregate.pools_module
 GachaRecord = aggregate.GachaRecord
 

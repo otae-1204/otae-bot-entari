@@ -87,10 +87,10 @@
 
 ```bash
 # 获取一次公开只读快照并渲染
-.venv/bin/python scripts/preview_ai_radar_matrix.py --live
+.venv/bin/python scripts/preview/preview_ai_radar_matrix.py --live
 
 # 调整样式后复用保存的同一快照
-.venv/bin/python scripts/preview_ai_radar_matrix.py
+.venv/bin/python scripts/preview/preview_ai_radar_matrix.py
 ```
 
 输出在 `output/ai-radar/`，保留用户的 `demo.png`：

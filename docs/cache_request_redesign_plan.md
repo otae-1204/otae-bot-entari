@@ -107,7 +107,7 @@ thread-local）：`otae_bot/infrastructure/rendering/browser.py` 改用 Playwrig
   抽卡 v3、影拓丰碑历史、回响历史）与顺带的关卡目录、百科目录、奖章统计、缺章、档案统计都已改；v1 抽卡
   回退路径不动。同一档预算的各页现在同时渲染，所以某档超高时那一档的每页都会画一次（串行时第一页超高
   就停）；四个按 `side_effect` 列表数调用的分页测试改成按页内容判定超高，回响历史的「串行」断言改为「并行」。
-- `scripts/preview_endfield_exploration.py` 改用同步的 `_launch_candidates` 自己起 sync 浏览器。Playwright
+- `scripts/preview/preview_endfield_exploration.py` 改用同步的 `_launch_candidates` 自己起 sync 浏览器。Playwright
   版本约束不动：`setNetworkInterceptionPatterns` 1.37 起才在驱动端过滤，更老的版本 pattern 照样对，只是
   省不掉往返。
 
@@ -148,7 +148,7 @@ AssetBroker、Playwright 与前三期的缓存语义都没动。与方案 / brie
 - **走缓存的入口**：`_card_detail_with_snapshot`（账号详情、养成、基建、探索）与 `/ef 日常`，两者共用同一份
   条目，所以「账号 → 日常」第二次也不再请求。奖章缺章与档案进度走 `endfield_card_detail`（完整响应、形状不同、
   频率低），持有率定时刷新 `_background_card_detail`（`background=True` 的排队语义）都**不读不写**这个缓存。
-  `scripts/benchmark_endfield_account_cache.py` patch 掉了 `_card_detail_with_snapshot`，测不到本期收益。
+  `scripts/endfield/benchmark_endfield_account_cache.py` patch 掉了 `_card_detail_with_snapshot`，测不到本期收益。
 - **命中时跳过快照与预取**：持有率快照写入与 `prefetch_detail_assets` 只在真正发了请求的那一次做（并发合并的
   等待方也不做）。代价：`/ef 日常` 先取到（日常本来就不写快照）、60 s 内再查 `/ef 账号` 时，这次不写持有率快照；
   快照由下一次未命中或持有率定时刷新补上。
@@ -508,9 +508,9 @@ hycdn 经代理时不预取（Q4）。
 
 ```bash
 python -m pytest -q tests/test_http_client.py tests/test_http_disk_cache.py tests/test_http_assets.py tests/test_endfield_cold_start.py tests/test_cache_lifecycle.py
-python scripts/check_endfield_public_cache.py --output output/public-cache-check.json
-python scripts/benchmark_endfield_account_cache.py --baseline ../otae-before --runs 3 --output output/p1-account.json
-python scripts/benchmark_endfield_queries.py --mode live --cases operator_card,loadout,mixed --output output/p1-public.json
+python scripts/endfield/check_endfield_public_cache.py --output output/public-cache-check.json
+python scripts/endfield/benchmark_endfield_account_cache.py --baseline ../otae-before --runs 3 --output output/p1-account.json
+python scripts/endfield/benchmark_endfield_queries.py --mode live --cases operator_card,loadout,mixed --output output/p1-public.json
 ```
 
 通过标准：账号状态「重复查询」在 60 s 之外（`benchmark_endfield_account_cache.py --warm-gap 90`，

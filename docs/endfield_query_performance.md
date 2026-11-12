@@ -166,10 +166,10 @@ git switch main
 git pull --ff-only origin main
 git worktree add --detach ../otae-endfield-before 877a3165021858f6d834ff5a5c984b4999d854d6
 
-python scripts/benchmark_endfield_queries.py --repo ../otae-endfield-before --mode record --output output/endfield-performance/before-live.json
-python scripts/benchmark_endfield_queries.py --mode live --output output/endfield-performance/after-live.json
-python scripts/benchmark_endfield_queries.py --repo ../otae-endfield-before --mode replay --output output/endfield-performance/before-replay.json
-python scripts/benchmark_endfield_queries.py --mode replay --output output/endfield-performance/after-replay.json
+python scripts/endfield/benchmark_endfield_queries.py --repo ../otae-endfield-before --mode record --output output/endfield-performance/before-live.json
+python scripts/endfield/benchmark_endfield_queries.py --mode live --output output/endfield-performance/after-live.json
+python scripts/endfield/benchmark_endfield_queries.py --repo ../otae-endfield-before --mode replay --output output/endfield-performance/before-replay.json
+python scripts/endfield/benchmark_endfield_queries.py --mode replay --output output/endfield-performance/after-replay.json
 
 python -m pytest -q tests/test_endfield_query_optimization.py
 python -m pytest -q --junitxml=output/endfield-performance/tests.xml

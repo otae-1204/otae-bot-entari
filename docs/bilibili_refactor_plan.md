@@ -856,7 +856,7 @@ B站订阅结果
 ### 阶段 7：拆分 `client.py`（约 1 天）
 
 - 按第 5.1 节拆成 `api/*`；`client.py` 只保留兼容性的重新导出，确认没有引用后删除。
-- 同步更新 `scripts/preview_bilibili_cards.py`，以及测试里的 `_load_bili_new_module("client")` 调用。
+- 同步更新 `scripts/preview/preview_bilibili_cards.py`，以及测试里的 `_load_bili_new_module("client")` 调用。
 - **验收**：`rg "bilibilibot.client|bili_client" tests scripts plugins` 的结果只剩有意保留的引用。
 
 ---

@@ -4,8 +4,8 @@
 
 | 脚本 | 用途 | 是否需要凭据密钥 | 是否联网 |
 |---|---|---|---|
-| `scripts/export_endfield_gacha_history.py` | 批量导出**已授权用户**的完整寻访历史到 JSON | 需要 `ENDFIELD_CREDENTIAL_KEY` | 是（调官方接口） |
-| `scripts/aggregate_endfield_gacha_stats.py` | 聚合已授权用户的**实测出率**并与官方概率公示对比 | 不需要 | 否（只读本地库） |
+| `scripts/endfield/export_endfield_gacha_history.py` | 批量导出**已授权用户**的完整寻访历史到 JSON | 需要 `ENDFIELD_CREDENTIAL_KEY` | 是（调官方接口） |
+| `scripts/endfield/aggregate_endfield_gacha_stats.py` | 聚合已授权用户的**实测出率**并与官方概率公示对比 | 不需要 | 否（只读本地库） |
 
 ## 关于数据范围（重要）
 
@@ -34,10 +34,10 @@
 
 ```powershell
 # 导出全部已授权用户
-.\.venv\Scripts\python.exe scripts\export_endfield_gacha_history.py
+.\.venv\Scripts\python.exe scripts\endfield\export_endfield_gacha_history.py
 
 # 只导出指定 QQ（可重复 --qq）
-.\.venv\Scripts\python.exe scripts\export_endfield_gacha_history.py --qq 2461673400 --qq 2490675469
+.\.venv\Scripts\python.exe scripts\endfield\export_endfield_gacha_history.py --qq 2461673400 --qq 2490675469
 ```
 
 ### 参数
@@ -73,13 +73,13 @@
 只读本地库（`gacha_records` + 小黑盒导入 `xhh_gacha_*`），跨全部角色合并，按**角色池 / 武器池**分别统计，输出匿名聚合。不需要联网，也不解密任何凭据。
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\aggregate_endfield_gacha_stats.py
+.\.venv\Scripts\python.exe scripts\endfield\aggregate_endfield_gacha_stats.py
 ```
 
 Windows 终端若显示中文乱码，先切 UTF-8 代码页（不影响写出的 JSON，文件始终是 UTF-8）：
 
 ```powershell
-chcp 65001 > $null; .\.venv\Scripts\python.exe scripts\aggregate_endfield_gacha_stats.py
+chcp 65001 > $null; .\.venv\Scripts\python.exe scripts\endfield\aggregate_endfield_gacha_stats.py
 ```
 
 ### 参数

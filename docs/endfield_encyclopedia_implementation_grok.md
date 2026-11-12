@@ -51,7 +51,7 @@ python -m unittest tests.test_endfield_encyclopedia tests.test_endfield tests.te
 
 ## 2. 第 0 期
 
-`scripts/inspect_endfield_akedata.py` 增加 `--report encyclopedia`。默认下载行为不变。报告模式只读已经落下的 JSON，不发新的表请求，打印：
+`scripts/endfield/inspect_endfield_akedata.py` 增加 `--report encyclopedia`。默认下载行为不变。报告模式只读已经落下的 JSON，不发新的表请求，打印：
 
 | 输出 | 填到 |
 | --- | --- |

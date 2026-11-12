@@ -9,7 +9,7 @@
 重启或重载插件后，`/radar` 与 `/radar 帮助` 显示导航卡；现有查询命令直接返回图片。无需增加配置项或安装前端依赖。渲染或图片发送报错时自动发送原有文本；取消操作不触发补发。多页结果先完成整组渲染，再依次发送。
 
 ```bash
-.venv/bin/python scripts/preview_ai_radar.py
+.venv/bin/python scripts/preview/preview_ai_radar.py
 ```
 
 Windows 使用 `.venv\Scripts\python.exe`。与项目其他 HTML 卡片一样，需要已安装 Playwright Chromium；安装方式见 README。
@@ -91,13 +91,13 @@ Windows 使用 `.venv\Scripts\python.exe`。与项目其他 HTML 卡片一样，
 - `plugins/radar/assets/card.css`：共用桌面 / 手机样式，无第三方 CSS / JS 依赖。
 - `plugins/radar/rendering.py`：内嵌本地 MiSans 字体、CSP、共享浏览器截图与临时文件清理。
 - `plugins/radar/handlers.py`：接入图片回复，保留文本回退；并发闸门与超时覆盖查询、渲染和发送。
-- `scripts/preview_ai_radar.py`：离线预览、图集和浏览器布局检查。
+- `scripts/preview/preview_ai_radar.py`：离线预览、图集和浏览器布局检查。
 - `tests/test_radar_rendering.py`：混合 IQ 来源、连续制得分、缺失与 0、档位对齐、分页、时间坐标、注入、发送回退、取消、并发与真实 PNG 渲染。
 
 ```bash
 .venv/bin/pytest tests/test_radar.py tests/test_radar_rendering.py tests/test_architecture.py -q
-.venv/bin/ruff check plugins/radar/presentation.py plugins/radar/rendering.py plugins/radar/handlers.py scripts/preview_ai_radar.py tests/test_radar_rendering.py
-.venv/bin/python scripts/preview_ai_radar.py
+.venv/bin/ruff check plugins/radar/presentation.py plugins/radar/rendering.py plugins/radar/handlers.py scripts/preview/preview_ai_radar.py tests/test_radar_rendering.py
+.venv/bin/python scripts/preview/preview_ai_radar.py
 ```
 
 浏览器验证报告在 `output/ai-radar/validation.json`：逐页检查 1080 px 与 390 px 布局、元素溢出、字体加载、缺图、最高高度与外部请求。渲染资产全在本地，CSP 禁止外部连接与脚本执行。

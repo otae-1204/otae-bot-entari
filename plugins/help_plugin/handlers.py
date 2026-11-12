@@ -23,7 +23,7 @@ TEXT_TOPICS.update({name: SIGNIN_HELP for name in ("签到", "checkin")})
 # 子指令 → 图片文件名（不含扩展名）映射
 # 每个目标都必须有对应的 assets/image/help/<name>.png，否则该主题无法解析；
 # tests/test_help_plugin.py 会校验这张表与磁盘一致，避免登记了却没有图。
-# assets/image/help/<name>.png 由 scripts/render_help_cards.py 生成，作为无浏览器时的静态回退；
+# assets/image/help/<name>.png 由 scripts/render/render_help_cards.py 生成，作为无浏览器时的静态回退；
 # 实际发送的插画按页面底板比例从 gallery.json 里随机挑一张，运行时渲染并缓存（见 help_runtime）。
 TOPIC_MAP: dict[str, str] = {
     "main":      "main",

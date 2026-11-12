@@ -89,8 +89,8 @@ Steam 帮助中的 `__plugin_meta__`。这些既有问题未混入结构重构�
 python -m pytest -q tests/test_architecture.py
 python -m pytest -q tests
 python -m compileall -q bot.py otae_bot plugins scripts tests
-python scripts/export_endfield_gacha_history.py --help
-python scripts/aggregate_endfield_gacha_stats.py --help
+python scripts/endfield/export_endfield_gacha_history.py --help
+python scripts/endfield/aggregate_endfield_gacha_stats.py --help
 git diff --check
 ```
 

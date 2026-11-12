@@ -1,7 +1,7 @@
 from pathlib import Path
 import unittest
 
-from scripts.extract_endfield_ui_bundles import (
+from scripts.endfield.extract_endfield_ui_bundles import (
     ALL_ICON_PATTERNS,
     bundle_file_matches,
     chacha20_xor,

@@ -15,7 +15,7 @@
 | `otae_bot/infrastructure/rendering/browser.py` `evaluate_web_page` | 在共享浏览器线程里加载页面并执行测量脚本，与截图同一套请求路由 |
 | `plugins/endfield/handlers.py` `_finish_gacha_pngs` | 抽卡投递：≤3 张普通消息，>3 张合并转发，逐级回退 |
 | `plugins/endfield/handlers.py` `_send_forward_pngs` | 合并转发；失败时逐张发普通图片消息，返回 `satori` / `images` |
-| `scripts/render_endfield_gacha_preview.py` | 合成账号预览与校验（见文末） |
+| `scripts/render/render_endfield_gacha_preview.py` | 合成账号预览与校验（见文末） |
 
 外壳 `_draw_neutral_card` 被签到、抽卡记录、奖章、档案等多张卡共用，**未改动**（仍是 1280 宽）；抽卡用自己的
 `_draw_gacha_shell`，token 与它一致，宽度 `GACHA_CARD_WIDTH = 1600`（CSS 变量 `--gacha-width`，由 `_document`
@@ -176,9 +176,9 @@
 ## 预览与校验
 
 ```bash
-python scripts/render_endfield_gacha_preview.py --output-dir output/gacha-preview [--accounts normal stress] [--keep-html]
+python scripts/render/render_endfield_gacha_preview.py --output-dir output/gacha-preview [--accounts normal stress] [--keep-html]
 # 两种排法 + 候选宽度对比（同一份 validation.json）
-python scripts/render_endfield_gacha_preview.py --output-dir output/gacha-preview --prefix gacha-wide \
+python scripts/render/render_endfield_gacha_preview.py --output-dir output/gacha-preview --prefix gacha-wide \
     --both-sides normal no-rerun --candidate-widths 1600 1760 1920 1920x5120
 ```
 

@@ -53,7 +53,7 @@ class Clock:
 
 
 def load_repair_script():
-    path = Path(__file__).resolve().parents[1] / "scripts" / "repair_grok_binding.py"
+    path = Path(__file__).resolve().parents[1] / "scripts" / "ops" / "repair_grok_binding.py"
     spec = importlib.util.spec_from_file_location("repair_grok_binding", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -403,7 +403,7 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         self.store.put(SCOPE.key, None, str(uuid4()))
         self.store.put("other", str(uuid4()), str(uuid4()))
         installation = self.store.snapshot()["installation"]
-        # scripts/repair_grok_binding.py replaces the file while the bot keeps running.
+        # scripts/ops/repair_grok_binding.py replaces the file while the bot keeps running.
         payload = json.loads(self.path.read_text(encoding="utf-8"))
         del payload["bindings"][SCOPE.key]
         replacement = self.path.with_name("sessions.json.new")

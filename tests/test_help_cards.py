@@ -27,7 +27,7 @@ from otae_bot.infrastructure.rendering import (  # noqa: E402
 )
 from otae_bot.infrastructure.rendering.help_images import cover_visibility, image_ratio  # noqa: E402
 
-RERENDER = "run: python scripts/render_help_cards.py --write"
+RERENDER = "run: python scripts/render/render_help_cards.py --write"
 
 
 def _page(**overrides) -> dict:

@@ -1,6 +1,6 @@
 # 森空岛终末地公开数据独立查询
 
-独立脚本：`scripts/query_skland_endfield.py`。
+独立脚本：`scripts/endfield/query_skland_endfield.py`。
 
 脚本复用现有 `.runtime/skland_reverse/session_sensitive.json`，自动刷新签名上下文，查询终末地个人详情、战争回响、危机合约和影拓丰碑，并生成原始 JSON、脱敏 JSON 与 Markdown 摘要。
 
@@ -17,7 +17,7 @@ GET /api/v1/user/search?keyword=<昵称>&kind=1&pageNumber=1&pageSize=20
 从精确昵称结果中取得内部用户 ID，再执行：
 
 ```powershell
-python scripts\query_skland_endfield.py `
+python scripts\endfield\query_skland_endfield.py `
   --user-id <INTERNAL_USER_ID> `
   --label target
 ```
@@ -27,7 +27,7 @@ python scripts\query_skland_endfield.py `
 ## 已知角色时直接查询
 
 ```powershell
-python scripts\query_skland_endfield.py `
+python scripts\endfield\query_skland_endfield.py `
   --role-id <ROLE_ID> `
   --server-id 1 `
   --label target
