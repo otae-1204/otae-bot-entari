@@ -97,7 +97,7 @@ _SUBCOMMANDS: dict[str, str] = {
     "help": "help",
 }
 
-_config = RadarConfig.from_env()
+_config = RadarConfig.from_settings()
 _client = RadarClient(_config)
 _service = RadarService(_client, _config)
 

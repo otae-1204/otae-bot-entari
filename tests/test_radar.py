@@ -1100,22 +1100,26 @@ class SchemaDriftTests(unittest.TestCase):
 
 
 class ConfigContractTests(unittest.TestCase):
-    """配置契约：`.env.example` 必须覆盖 config.py 读的每个 `RADAR_*` 键。
+    """配置契约：entari.yml 的 plugins.radar 段经 RadarSettings 映射到 RadarConfig。"""
 
-    `tests/test_hyw_evidence.py` 的覆盖断言只认 `HYW|GOOGLE` 前缀，管不到 radar，
-    所以这里自己兜一条 —— 否则新增键忘了写进模板时没有任何测试会红。
-    """
+    def test_settings_map_to_config_with_floors(self):
+        from otae_bot.config import settings
+        from plugins.radar.config import RadarConfig, RadarSettings
 
-    def test_every_radar_env_var_is_documented(self):
-        import re
-
-        template = (ROOT / ".env.example").read_text(encoding="utf-8")
-        source = (ROOT / "plugins" / "radar" / "config.py").read_text(encoding="utf-8")
-        documented = set(re.findall(r"^(RADAR_[A-Z0-9_]+)=", template, flags=re.MULTILINE))
-        read = set(re.findall(r'_env_(?:str|int|float)\(\s*"(RADAR_[A-Z0-9_]+)"', source))
-        self.assertTrue(read, "no RADAR_* env reads found — the regex or config.py moved")
-        self.assertEqual(sorted(read - documented), [], "not documented in .env.example")
-        self.assertEqual(sorted(documented - read), [], "documented but never read")
+        with settings.override({}):
+            self.assertEqual(RadarConfig.from_settings(), _RadarConfig())
+        with settings.override({"plugins": {"plugins.radar": {
+            "base_url": "https://mirror.test/", "timeout": "0.2", "table_timeout": 90, "concurrency": 0,
+            "max_bytes": 10, "max_table_bytes": 4096, "user_agent": "", "default_benchmark": "pompeii-adjacency",
+        }}}):
+            config = RadarConfig.from_settings()
+        self.assertEqual(
+            (config.base_url, config.timeout, config.table_timeout, config.concurrency, config.max_bytes,
+             config.table_max_bytes, config.default_benchmark),
+            ("https://mirror.test", 1.0, 90.0, 1, 1024, 4096, "pompeii-adjacency"),
+        )
+        self.assertIn("otae-bot-radar/", config.user_agent)
+        self.assertEqual(RadarSettings().base_url, _RadarConfig().base_url)
 
     def test_defaults_match_the_documented_contract(self):
         config = _RadarConfig()

@@ -1,14 +1,11 @@
 """AI 智商雷达插件的配置层。
 
-配置全部来自 ``RADAR_*`` 环境变量；默认值即「不配置也能跑」的一套只读参数。
-
-数值型配置一律走 :func:`_env_int` / :func:`_env_float`：本仓库的 ``.env`` 加载器会把
-``"0"`` 这类值经 ``json.loads`` 变成 int ``0``，用真值判断会把合法的 0 当成未设置
-（``plugins/hyw/config.py`` 的同名函数就是这个坑的修复写法）。
+配置来自 entari.yml 的 ``plugins: plugins.radar:`` 段（:class:`RadarSettings`）；默认值即
+「不配置也能跑」的一套只读参数。:meth:`RadarConfig.from_settings` 再做下限钳制。
 
 **注意**：本模块的 dataclass 都是 ``slots=True``，所以类属性取到的是 slot 描述符而不是
 默认值（``RadarConfig.base_url`` 不是字符串）。默认值因此放在模块级常量里，供
-``from_env`` 显式引用。
+``from_settings`` 显式引用。
 """
 
 from __future__ import annotations
@@ -17,7 +14,8 @@ from dataclasses import dataclass
 
 from loguru import logger
 
-from otae_bot.config.settings import _env
+from otae_bot.config.model import Settings, field
+from otae_bot.config.settings import plugin_settings
 
 PLUGIN_VERSION = "1.0.0"
 PROJECT_URL = "https://github.com/otae-1204/otae-bot-entari"
@@ -40,36 +38,21 @@ EFFORT_TIERS: tuple[str, ...] = ("low", "medium", "high", "xhigh", "max", "ultra
 _warned: set[str] = set()
 
 
-def _env_int(name: str, default: int) -> int:
-    """读整数配置；缺失或不可解析时回默认值。
+class RadarSettings(Settings):
+    """AI 智商雷达（/radar、/智商雷达）：只读消费 api.codexradar.com，全部可留空"""
 
-    ``_env`` 会把值经 ``json.loads``，所以合法的 ``0`` 到达时是 falsy 的 int ``0``：
-    必须与 ``None`` 比较，否则 ``0`` 与「未设置」无法区分。
-    """
-    raw = _env(name, None)
-    if raw is None:
-        return default
-    try:
-        return int(str(raw).strip())
-    except (TypeError, ValueError):
-        return default
-
-
-def _env_float(name: str, default: float) -> float:
-    raw = _env(name, None)
-    if raw is None:
-        return default
-    try:
-        return float(str(raw).strip())
-    except (TypeError, ValueError):
-        return default
-
-
-def _env_str(name: str, default: str = "") -> str:
-    raw = _env(name, None)
-    if raw is None:
-        return default
-    return str(raw).strip()
+    base_url: str = field(default=DEFAULT_BASE_URL, description="上游 API 基址；一般无需修改")
+    default_benchmark: str = field(
+        default=DEFAULT_BENCHMARK,
+        description="默认频道：deep-swe（代码修复）或 pompeii-adjacency（视觉恢复）；两者分数不可比",
+    )
+    timeout: float = field(default=DEFAULT_TIMEOUT, description="单次请求超时秒数（下限 1.0）")
+    table_timeout: float = field(default=DEFAULT_TABLE_TIMEOUT, description="/table 类命令的超时秒数（下限 1.0）")
+    concurrency: int = field(default=DEFAULT_CONCURRENCY, description="同时执行的雷达命令数上限（下限 1）")
+    max_bytes: int = field(default=DEFAULT_MAX_BYTES, description="单次响应字节上限（下限 1024）")
+    max_table_bytes: int = field(default=DEFAULT_TABLE_MAX_BYTES, description="/table 单次响应字节上限（下限 1024）")
+    user_agent: str = field(default="", description="出网 User-Agent；留空使用内置的 otae-bot-radar/<版本> (+仓库地址)")
+    proxy: str = field(default="", description="预留：共享 HTTP 层不挂代理，设置后不生效（只记一条警告，不记录取值）")
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,7 +105,7 @@ class RadarCacheTTL:
 class RadarConfig:
     base_url: str = DEFAULT_BASE_URL
     #: 保留字段：共享 HTTP 层固定 ``trust_env=False`` 且不挂代理，故本值当前不生效，
-    #: 仅用于记录部署意图（见 ``from_env`` 的告警）。
+    #: 仅用于记录部署意图（见 ``from_settings`` 的告警）。
     proxy: str | None = None
     timeout: float = DEFAULT_TIMEOUT
     table_timeout: float = DEFAULT_TABLE_TIMEOUT
@@ -137,23 +120,24 @@ class RadarConfig:
     retry: RadarRetry = RadarRetry()
 
     @classmethod
-    def from_env(cls) -> RadarConfig:
-        proxy = _env_str("RADAR_PROXY")
-        if proxy and proxy.lower() != "direct" and "RADAR_PROXY" not in _warned:
+    def from_settings(cls, settings: RadarSettings | None = None) -> RadarConfig:
+        settings = settings or plugin_settings("radar", RadarSettings)
+        proxy = settings.proxy.strip()
+        if proxy and proxy.lower() != "direct" and "proxy" not in _warned:
             # 只记录「已忽略」这一事实，不记录被忽略的值（代理 URL 可能含口令）。
-            _warned.add("RADAR_PROXY")
+            _warned.add("proxy")
             logger.warning(
-                "[radar] RADAR_PROXY is set but the shared HTTP layer pins trust_env=False "
+                "[radar] plugins.radar.proxy is set but the shared HTTP layer pins trust_env=False "
                 "and mounts no proxy; the value is ignored"
             )
         return cls(
-            base_url=(_env_str("RADAR_BASE_URL") or DEFAULT_BASE_URL).rstrip("/"),
+            base_url=(settings.base_url.strip() or DEFAULT_BASE_URL).rstrip("/"),
             proxy=proxy or None,
-            timeout=max(1.0, _env_float("RADAR_TIMEOUT", DEFAULT_TIMEOUT)),
-            table_timeout=max(1.0, _env_float("RADAR_TABLE_TIMEOUT", DEFAULT_TABLE_TIMEOUT)),
-            default_benchmark=_env_str("RADAR_DEFAULT_BENCHMARK") or DEFAULT_BENCHMARK,
-            concurrency=max(1, _env_int("RADAR_CONCURRENCY", DEFAULT_CONCURRENCY)),
-            max_bytes=max(1024, _env_int("RADAR_MAX_BYTES", DEFAULT_MAX_BYTES)),
-            table_max_bytes=max(1024, _env_int("RADAR_MAX_TABLE_BYTES", DEFAULT_TABLE_MAX_BYTES)),
-            user_agent=_env_str("RADAR_USER_AGENT") or DEFAULT_USER_AGENT,
+            timeout=max(1.0, settings.timeout),
+            table_timeout=max(1.0, settings.table_timeout),
+            default_benchmark=settings.default_benchmark.strip() or DEFAULT_BENCHMARK,
+            concurrency=max(1, settings.concurrency),
+            max_bytes=max(1024, settings.max_bytes),
+            table_max_bytes=max(1024, settings.max_table_bytes),
+            user_agent=settings.user_agent.strip() or DEFAULT_USER_AGENT,
         )

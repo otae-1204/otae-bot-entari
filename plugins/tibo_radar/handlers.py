@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -31,6 +30,7 @@ from otae_bot.delivery import Target
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
 
 from plugins.tibo_radar.client import TiboRadarClient
+from plugins.tibo_radar.config import tibo_radar_settings
 from plugins.tibo_radar.delivery import deliver_page
 from plugins.tibo_radar.draw_scope import AMBER, CYAN, GREEN, CardSection, event_sections, render_card
 from plugins.tibo_radar.draw_xfeed import render_xfeed
@@ -39,32 +39,22 @@ from plugins.tibo_radar.service import TiboRadarService
 from plugins.tibo_radar.store import TiboStore
 
 
-def _env_int(name: str, default: int, minimum: int, maximum: int) -> int:
-    try:
-        value = int(os.getenv(name, str(default)))
-    except (TypeError, ValueError):
-        value = default
+def _clamp(value: int, minimum: int, maximum: int) -> int:
     return max(minimum, min(maximum, value))
 
 
-def _env_bool(name: str, default: bool = True) -> bool:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() not in {"0", "false", "no", "off", "disabled"}
-
-
-REFRESH_MINUTES = _env_int("TIBO_RADAR_REFRESH_MINUTES", 10, 2, 1440)
-TIMEOUT_SECONDS = _env_int("TIBO_RADAR_TIMEOUT_SECONDS", 15, 3, 60)
-CODEXRADAR_ENABLED = _env_bool("TIBO_RADAR_CODEXRADAR_ENABLED", True)
-SUBSCRIPTION_BATCH = _env_int("TIBO_RADAR_SUBSCRIPTION_BATCH", 20, 1, 100)
-SUBSCRIPTION_MAX_PAGES = _env_int("TIBO_RADAR_SUBSCRIPTION_MAX_PAGES", 1, 1, 10)
+_settings = tibo_radar_settings()
+REFRESH_MINUTES = _clamp(_settings.refresh_minutes, 2, 1440)
+TIMEOUT_SECONDS = _clamp(_settings.timeout_seconds, 3, 60)
+CODEXRADAR_ENABLED = _settings.codexradar_enabled
+SUBSCRIPTION_BATCH = _clamp(_settings.subscription_batch, 1, 100)
+SUBSCRIPTION_MAX_PAGES = _clamp(_settings.subscription_max_pages, 1, 10)
 
 store = TiboStore()
 client = TiboRadarClient(
-    codexradar_url=os.getenv("TIBO_RADAR_CODEXRADAR_URL", "https://codexradar.com/"),
-    feed_url=os.getenv("TIBO_RADAR_FEED_URL", "https://codex-reset.com/api/feed?locale=zh"),
-    timeline_url=os.getenv("TIBO_RADAR_TIMELINE_URL", "https://codex-reset.com/api/timeline?locale=zh"),
+    codexradar_url=_settings.codexradar_url,
+    feed_url=_settings.feed_url,
+    timeline_url=_settings.timeline_url,
     timeout_seconds=TIMEOUT_SECONDS,
     ttl_seconds=REFRESH_MINUTES * 60,
     codexradar_enabled=CODEXRADAR_ENABLED,
