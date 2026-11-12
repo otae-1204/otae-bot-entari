@@ -1,10 +1,6 @@
 [
 {"rule": "compat-import", "file": "plugins/endfield/announcements/runtime.py", "snippet": "from otae_bot.compat.entari import (", "count": 1},
 {"rule": "compat-import", "file": "plugins/endfield/handlers.py", "snippet": "from otae_bot.compat.entari import (", "count": 1},
-{"rule": "compat-import", "file": "plugins/mcsm/handlers.py", "snippet": "from otae_bot.compat.entari import (", "count": 1},
-{"rule": "compat-import", "file": "plugins/mcsm/handlers.py", "snippet": "from otae_bot.compat.entari import Pred", "count": 1},
-{"rule": "compat-import", "file": "plugins/mcsm/handlers.py", "snippet": "from otae_bot.compat.entari import cmd_with_args as _cmd, get_rest", "count": 1},
-{"rule": "compat-import", "file": "plugins/mcsm/handlers.py", "snippet": "from otae_bot.compat.entari import listen_message, prompt", "count": 1},
 {"rule": "direct-env-read", "file": "plugins/hyw/handlers.py", "snippet": "os.environ.pop(\"DDGS_PROXY\", None)", "count": 2},
 {"rule": "direct-env-read", "file": "plugins/hyw/handlers.py", "snippet": "os.environ[\"DDGS_PROXY\"] = config.search_proxy", "count": 1},
 {"rule": "direct-env-read", "file": "plugins/hyw/handlers.py", "snippet": "os.environ[\"DDGS_PROXY\"] = previous_search_proxy", "count": 1},

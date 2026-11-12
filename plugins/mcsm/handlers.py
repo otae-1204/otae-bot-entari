@@ -11,20 +11,18 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from otae_bot.compat.entari import listen_message, prompt
-from arclet.entari import Account as Bot, Event
-from otae_bot.compat.entari import Pred
+from arclet.entari import (
+    Account as Bot, At, Event, Image, MessageChain, MessageCreatedEvent, Session, Text, command, listen,
+)
+from arclet.entari.command import Match
 from loguru import logger
 from arclet.letoderea import ExitState
-from otae_bot.compat.entari import (
-    ChainMsg, At, ArgVal, event_plain_text, event_user_id,
-    make_image as ChainImage, stop_session,
-)
 from otae_bot.delivery import Target, deliver
+from otae_bot.messaging.inbound import event_chain, event_plain_text, event_user_id, get_rest
+from otae_bot.messaging.prompts import prompt
 
-from arclet.alconna import Args, MultiVar
+from arclet.alconna import Alconna, Args, MultiVar
 from nepattern import AnyString
-from otae_bot.compat.entari import cmd_with_args as _cmd, get_rest
 from otae_bot.infrastructure.rendering.executor import run_image_render
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
 
@@ -159,7 +157,7 @@ async def _extract_at_users(event: Event, bot: Bot) -> List[str]:
     """从消息段中提取被 @ 的用户 ID。"""
     users: List[str] = []
     try:
-        msg = await ChainMsg.generate(event=event, bot=bot)
+        msg = event_chain(event)
         for seg in msg:
             if isinstance(seg, At):
                 uid = getattr(seg, "target", "") or getattr(seg, "user_id", "")
@@ -233,18 +231,18 @@ def _help_tip() -> str:
     return "发送 /help mcsm 获取 MCSM 详细指令说明。"
 
 
-def _to_image_segment(output: BytesIO) -> ChainImage:
+def _to_image_segment(output: BytesIO) -> Image:
     """Write PNG bytes to a temporary file and return a Satori-compatible image segment."""
     output.seek(0)
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
         f.write(output.getvalue())
         f.flush()
         schedule_temp_file_cleanup(f.name)
-        return ChainImage(path=f.name)
+        return Image.of(path=Path(f.name))
 
 
 async def _finish_image_or_text(
-    matcher,
+    session: Session,
     renderer: Callable[..., BytesIO],
     fallback: str,
     *args: Any,
@@ -252,21 +250,23 @@ async def _finish_image_or_text(
 ) -> None:
     try:
         output = await run_image_render(renderer, *args, **kwargs)
-        message = ChainMsg([_to_image_segment(output)])
+        message = MessageChain([_to_image_segment(output)])
     except Exception as exc:
         logger.warning(f"[MCSM] render image failed, fallback to text: {exc}")
-        await matcher.finish(fallback)
+        await session.send(fallback)
+        session.stop()
         return
-    await matcher.finish(message)
+    await session.send(message)
+    session.stop()
 
 
-async def _send_private(bot: Bot, user_id: str, message: ChainMsg) -> None:
+async def _send_private(bot: Bot, user_id: str, message: MessageChain) -> None:
     """Private message through the command's account; a failed send raises."""
     (await deliver(Target.private(user_id), message, account=bot)).raise_for_failure()
 
 
 async def _finish_dm_image_or_text(
-    matcher,
+    session: Session,
     bot: Bot,
     user_id: str,
     renderer: Callable[..., BytesIO],
@@ -276,35 +276,35 @@ async def _finish_dm_image_or_text(
 ) -> None:
     try:
         output = await run_image_render(renderer, *args, **kwargs)
-        message = ChainMsg([_to_image_segment(output)])
+        message = MessageChain([_to_image_segment(output)])
     except Exception as exc:
         logger.warning(f"[MCSM] render DM image failed, fallback to text: {exc}")
-        await ChainMsg.text(fallback).send()
-        stop_session()
+        await session.send(MessageChain([Text(str(fallback))]))
+        session.stop()
         return
     try:
         await _send_private(bot, user_id, message)
     except Exception as exc:
         logger.warning(f"[MCSM] send DM image failed, fallback to text: {exc}")
-        await ChainMsg.text(fallback).send()
-        stop_session()
+        await session.send(MessageChain([Text(str(fallback))]))
+        session.stop()
         return
-    stop_session()
+    session.stop()
 
 
-async def _finish_notice(matcher, title: str, lines: List[str] | tuple[str, ...], level: str = "info") -> None:
+async def _finish_notice(session: Session, title: str, lines: List[str] | tuple[str, ...], level: str = "info") -> None:
     fallback = title
     if lines:
         fallback += "\n" + "\n".join(lines)
-    await _finish_image_or_text(matcher, draw_notice, fallback, title, lines, level=level)
+    await _finish_image_or_text(session, draw_notice, fallback, title, lines, level=level)
 
 
-async def _finish_error(matcher, message: str) -> None:
-    await _finish_image_or_text(matcher, draw_error, message, message)
+async def _finish_error(session: Session, message: str) -> None:
+    await _finish_image_or_text(session, draw_error, message, message)
 
 
 async def _finish_dm_notice(
-    matcher,
+    session: Session,
     bot: Bot,
     user_id: str,
     title: str,
@@ -315,7 +315,7 @@ async def _finish_dm_notice(
     if lines:
         fallback += "\n" + "\n".join(lines)
     await _finish_dm_image_or_text(
-        matcher,
+        session,
         bot,
         user_id,
         draw_notice,
@@ -339,16 +339,16 @@ async def _is_dm_for_pending_key(event: Event) -> bool:
     return True
 
 
-dm_key_handler = listen_message(rule=Pred(_is_dm_for_pending_key), priority=5, block=True)
-
-
-@dm_key_handler.handle()
-async def handle_dm_key(event: Event, bot: Bot):
+@listen(MessageCreatedEvent)
+async def handle_dm_key(session: Session):
     """接收用户私聊发来的 API Key。"""
+    event = session.event
+    bot = session.account
+    if not await _is_dm_for_pending_key(event):
+        return
     user_id = str(event_user_id(event))
     pending = _store.get_pending_key(user_id)
     if not pending:
-        stop_session()
         return
 
     group_id, panel_url = pending
@@ -358,7 +358,7 @@ async def handle_dm_key(event: Event, bot: Bot):
     if api_key in ("取消", "cancel", "Cancel", "q", "Q"):
         _store.clear_pending_key(user_id)
         _store.clear_panel(group_id)
-        await _finish_dm_notice(dm_key_handler, bot, user_id, "MCSM 面板绑定已取消", (), "warning")
+        await _finish_dm_notice(session, bot, user_id, "MCSM 面板绑定已取消", (), "warning")
         return
 
     # 去除可能的前缀
@@ -368,7 +368,7 @@ async def handle_dm_key(event: Event, bot: Bot):
 
     if not api_key or len(api_key) < 8:
         await _finish_dm_notice(
-            dm_key_handler,
+            session,
             bot,
             user_id,
             "API Key 格式无效",
@@ -378,13 +378,13 @@ async def handle_dm_key(event: Event, bot: Bot):
         return
 
     # 验证 Key 是否有效
-    await ChainMsg.text("正在核对 API Key...").send()
+    await session.send(MessageChain([Text("正在核对 API Key...")]))
     test_client = MCSMClient(panel_url=panel_url, api_key=api_key)
     try:
         daemons = await test_client.get_daemon_list()
     except Exception as e:
         await _finish_dm_notice(
-            dm_key_handler,
+            session,
             bot,
             user_id,
             "API Key 校验未通过",
@@ -395,7 +395,7 @@ async def handle_dm_key(event: Event, bot: Bot):
 
     if not daemons:
         await _finish_dm_notice(
-            dm_key_handler,
+            session,
             bot,
             user_id,
             "面板下暂无在线节点",
@@ -411,7 +411,7 @@ async def handle_dm_key(event: Event, bot: Bot):
 
     node_count = len(daemons)
     await _finish_dm_notice(
-        dm_key_handler,
+        session,
         bot,
         user_id,
         "MCSM 面板绑定已完成",
@@ -433,9 +433,6 @@ async def _is_dm_for_pending_bind(event: Event) -> bool:
     if guild and guild.id:
         return False
     return True
-
-
-dm_bind_handler = listen_message(rule=Pred(_is_dm_for_pending_bind), priority=6, block=True)
 
 
 def _instance_match_values(inst: dict) -> set[str]:
@@ -514,9 +511,9 @@ def _split_command_text(text: str) -> list[str]:
         return text.split()
 
 
-async def _prompt_select(title: str, items: list[Any], label_func) -> Any | None:
+async def _prompt_select(session: Session, title: str, items: list[Any], label_func) -> Any | None:
     lines = [title, *option_lines(items, label_func), "请发送对应序号选择，发送 cancel 取消。"]
-    answer = await prompt("\n".join(lines), timeout=60)
+    answer = await prompt(session, "\n".join(lines), timeout=60)
     plain = answer.extract_plain_text() if hasattr(answer, "extract_plain_text") else str(answer or "")
     if plain.strip().lower() in {"cancel", "q", "取消"}:
         return None
@@ -526,7 +523,7 @@ async def _prompt_select(title: str, items: list[Any], label_func) -> Any | None
     return items[index]
 
 
-async def _resolve_deploy_download(options: DeployOptions, summary: dict[str, Any]) -> tuple[str, str, QFlashArchive | None]:
+async def _resolve_deploy_download(session: Session, options: DeployOptions, summary: dict[str, Any]) -> tuple[str, str, QFlashArchive | None]:
     if not is_qflash_url(options.url):
         summary["package"] = "direct URL"
         return options.url, "server package", None
@@ -535,7 +532,7 @@ async def _resolve_deploy_download(options: DeployOptions, summary: dict[str, An
     if len(archives) == 1:
         selected = archives[0]
     else:
-        selected = await _prompt_select("检测到闪传包含多个压缩包，请选择部署目标：", archives, qflash_archive_label)
+        selected = await _prompt_select(session, "检测到闪传包含多个压缩包，请选择部署目标：", archives, qflash_archive_label)
         if selected is None:
             raise QFlashError("已取消闪传压缩包选择")
 
@@ -570,11 +567,11 @@ def _daemon_label(daemon: dict) -> str:
     return f"{daemon_name(daemon)} ({daemon_id(daemon)[:8]}){suffix}"
 
 
-async def _select_deploy_daemon(client: MCSMClient, options: DeployOptions) -> dict | None:
+async def _select_deploy_daemon(session: Session, client: MCSMClient, options: DeployOptions) -> dict | None:
     daemons = await client.list_supported_docker_daemons()
     if not daemons:
         await _finish_notice(
-            mcsm,
+            session,
             "未发现支持 Docker 部署的节点",
             ("请排查节点是否保持在线、Docker 环境是否就绪以及 daemon 守护进程权限是否充足。",),
             "warning",
@@ -583,23 +580,23 @@ async def _select_deploy_daemon(client: MCSMClient, options: DeployOptions) -> d
     if options.node:
         matches = find_daemon(daemons, options.node)
         if not matches:
-            await _finish_notice(mcsm, "未检索到匹配的 Docker 节点", (f"节点关键词: {options.node}",), "warning")
+            await _finish_notice(session, "未检索到匹配的 Docker 节点", (f"节点关键词: {options.node}",), "warning")
             return None
         if len(matches) == 1:
             return matches[0]
-        selected = await _prompt_select("符合条件的 Docker 节点较多，请选择目标：", matches, _daemon_label)
+        selected = await _prompt_select(session, "符合条件的 Docker 节点较多，请选择目标：", matches, _daemon_label)
         if selected is None:
-            await _finish_notice(mcsm, "Docker 节点选择已取消", (), "warning")
+            await _finish_notice(session, "Docker 节点选择已取消", (), "warning")
         return selected
     if len(daemons) == 1:
         return daemons[0]
-    selected = await _prompt_select("请选择用于部署服务的 Docker 节点：", daemons, _daemon_label)
+    selected = await _prompt_select(session, "请选择用于部署服务的 Docker 节点：", daemons, _daemon_label)
     if selected is None:
-        await _finish_notice(mcsm, "Docker 节点选择已取消", (), "warning")
+        await _finish_notice(session, "Docker 节点选择已取消", (), "warning")
     return selected
 
 
-async def _select_deploy_image(client: MCSMClient, daemon: dict, options: DeployOptions) -> dict | None:
+async def _select_deploy_image(session: Session, client: MCSMClient, daemon: dict, options: DeployOptions) -> dict | None:
     did = daemon_id(daemon)
     images = list(daemon.get("_dockerImages") or [])
     if not images:
@@ -607,13 +604,13 @@ async def _select_deploy_image(client: MCSMClient, daemon: dict, options: Deploy
     if options.image:
         matches = find_images(images, options.image)
         if not matches:
-            await _finish_notice(mcsm, "未检索到匹配的 Docker 镜像", (f"镜像关键词: {options.image}",), "warning")
+            await _finish_notice(session, "未检索到匹配的 Docker 镜像", (f"镜像关键词: {options.image}",), "warning")
             return None
     else:
         matches = choose_default_java_images(images)
         if not matches:
             await _finish_notice(
-                mcsm,
+                session,
                 "当前节点缺失可用 Java 镜像",
                 ("建议在面板预先拉取 Java 21 或 Java 17 镜像，亦可通过 --image 参数直接指定其他已有镜像。",),
                 "warning",
@@ -621,9 +618,9 @@ async def _select_deploy_image(client: MCSMClient, daemon: dict, options: Deploy
             return None
     if len(matches) == 1:
         return matches[0]
-    selected = await _prompt_select("请挑选所使用的 Docker 镜像：", matches, image_display_name)
+    selected = await _prompt_select(session, "请挑选所使用的 Docker 镜像：", matches, image_display_name)
     if selected is None:
-        await _finish_notice(mcsm, "Docker 镜像选择已取消", (), "warning")
+        await _finish_notice(session, "Docker 镜像选择已取消", (), "warning")
     return selected
 
 
@@ -692,6 +689,7 @@ async def _auto_deploy_port(client: MCSMClient, daemon_id_value: str) -> tuple[i
 
 
 async def _finish_deploy_failure(
+    session: Session,
     stage: str,
     error: str,
     summary: dict[str, Any],
@@ -733,7 +731,7 @@ async def _finish_deploy_failure(
     if advice:
         lines.append("LLM 诊断建议:")
         lines.extend(advice.splitlines()[:8])
-    await _finish_notice(mcsm, "MCSM Docker 部署失败", tuple(lines), "error")
+    await _finish_notice(session, "MCSM Docker 部署失败", tuple(lines), "error")
 
 
 async def _auto_remediate_deploy_start(
@@ -780,6 +778,7 @@ def _instance_label(instance: dict[str, Any]) -> str:
 
 
 async def _retry_upload_after_permission_repair(
+    session: Session,
     client: MCSMClient,
     uuid: str,
     daemon_id_value: str,
@@ -803,7 +802,7 @@ async def _retry_upload_after_permission_repair(
         summary["upload_repair_status"] = f"权限修复实例 {repair_name} 缺少 UUID"
         raise RuntimeError(f"上传权限修复失败: 权限修复实例 {repair_name} 缺少 UUID")
 
-    await mcsm.send(f"检测到上传权限受限，正在调用同节点权限修复实例：{repair_name}...")
+    await session.send(f"检测到上传权限受限，正在调用同节点权限修复实例：{repair_name}...")
     summary["upload_repair_instance"] = repair_name
     summary["upload_repair_status"] = "已启动权限修复实例，准备重试上传"
     start_result = await client.start_instance(repair_uuid, daemon_id_value)
@@ -946,24 +945,26 @@ async def _cleanup_failed_deploy_instance(
         )
 
 
-async def _cmd_deploy(bot: Bot, event: Event, group_id: str, user_id: str, args_text: str) -> None:
+async def _cmd_deploy(session: Session, group_id: str, user_id: str, args_text: str) -> None:
+    bot = session.account
+    event = session.event
     permission_error = await _require_group_manager(bot, event, group_id, user_id)
     if permission_error:
-        await _finish_error(mcsm, permission_error)
+        await _finish_error(session, permission_error)
         return
 
     parsed = parse_deploy_args(_split_command_text(args_text))
     if parsed.errors or parsed.options is None:
-        await _finish_notice(mcsm, "deploy 指令参数有误", tuple(parsed.errors), "warning")
+        await _finish_notice(session, "deploy 指令参数有误", tuple(parsed.errors), "warning")
         return
     options = parsed.options
     if not options.alias:
-        await _finish_notice(mcsm, "deploy 指令参数有误", ("实例别名不可为空。",), "warning")
+        await _finish_notice(session, "deploy 指令参数有误", ("实例别名不可为空。",), "warning")
         return
 
     client = get_client(group_id)
     if client is None:
-        await _finish_notice(mcsm, "本群尚未关联 MCSM 面板", ("请先执行 /mcsm bind <面板地址> 进行面板关联。",), "warning")
+        await _finish_notice(session, "本群尚未关联 MCSM 面板", ("请先执行 /mcsm bind <面板地址> 进行面板关联。",), "warning")
         return
 
     summary: dict[str, Any] = {
@@ -981,11 +982,11 @@ async def _cmd_deploy(bot: Bot, event: Event, group_id: str, user_id: str, args_
     stage = "部署准备"
     try:
         stage = "解析下载链接"
-        await mcsm.send("开始部署流程：正在解析资源链接并检测节点与环境...")
-        install_url, package_name, qflash_archive = await _resolve_deploy_download(options, summary)
+        await session.send("开始部署流程：正在解析资源链接并检测节点与环境...")
+        install_url, package_name, qflash_archive = await _resolve_deploy_download(session, options, summary)
 
         stage = "检测 Docker 节点"
-        daemon = await _select_deploy_daemon(client, options)
+        daemon = await _select_deploy_daemon(session, client, options)
         if daemon is None:
             return
         did = daemon_id(daemon)
@@ -1007,11 +1008,11 @@ async def _cmd_deploy(bot: Bot, event: Event, group_id: str, user_id: str, args_
             lines = [f"别名: {options.alias}"]
             if summary.get("alias_change"):
                 lines.append(f"别名调整: {summary['alias_change']}")
-            await _finish_notice(mcsm, "该实例别名已被占用", tuple(lines), "warning")
+            await _finish_notice(session, "该实例别名已被占用", tuple(lines), "warning")
             return
 
         stage = "选择 Docker 镜像"
-        image = await _select_deploy_image(client, daemon, options)
+        image = await _select_deploy_image(session, client, daemon, options)
         if image is None:
             return
         image_name = image_display_name(image)
@@ -1019,7 +1020,7 @@ async def _cmd_deploy(bot: Bot, event: Event, group_id: str, user_id: str, args_
 
         if options.dry_run:
             await _finish_notice(
-                mcsm,
+                session,
                 "MCSM Docker 部署预检通过",
                 (
                     f"别名: {options.alias}",
@@ -1036,7 +1037,7 @@ async def _cmd_deploy(bot: Bot, event: Event, group_id: str, user_id: str, args_
             return
 
         stage = "创建 Docker 实例"
-        await mcsm.send("正在创建容器实例并部署文件包...")
+        await session.send("正在创建容器实例并部署文件包...")
         create_data = await client.create_docker_instance(
             did,
             options.alias,
@@ -1150,14 +1151,14 @@ async def _cmd_deploy(bot: Bot, event: Event, group_id: str, user_id: str, args_
                     lines.append(f"直链候选: {summary['remote_install_url_variant']}")
                 if summary.get("auto_remediation"):
                     lines.append(f"自动修复: {summary['auto_remediation']}")
-                await _finish_notice(mcsm, "MCSM Docker 部署完成", tuple(lines), "success")
+                await _finish_notice(session, "MCSM Docker 部署完成", tuple(lines), "success")
                 return
             logger.warning(
                 f"[MCSM] 闪传远程安装失败，切换 Bot 中转上传: {type(exc).__name__}: "
                 f"{redact_mcsm_sensitive_text(exc)}"
             )
             stage = "下载中转"
-            await mcsm.send("远程拉取失败，正在切换至机器人中转上传模式...")
+            await session.send("远程拉取失败，正在切换至机器人中转上传模式...")
             filename = safe_archive_filename(qflash_archive.name)
             with tempfile.TemporaryDirectory(prefix="mcsm-qflash-") as temp_dir:
                 local_file = Path(temp_dir) / filename
@@ -1180,7 +1181,7 @@ async def _cmd_deploy(bot: Bot, event: Event, group_id: str, user_id: str, args_
                     if is_upload_permission_error(upload_exc):
                         summary["upload_repair_status"] = f"上传权限异常，准备执行修复实例: {redact_mcsm_sensitive_text(upload_exc)}"
                         try:
-                            uploaded_name = await _retry_upload_after_permission_repair(client, uuid, did, local_file, summary)
+                            uploaded_name = await _retry_upload_after_permission_repair(session, client, uuid, did, local_file, summary)
                         except Exception as repair_exc:
                             stage = "远程直链安装重试"
                             await _retry_remote_install_after_upload_failure(
@@ -1260,7 +1261,7 @@ async def _cmd_deploy(bot: Bot, event: Event, group_id: str, user_id: str, args_
         await _asyncio.sleep(2)
 
         stage = "扫描启动脚本"
-        await mcsm.send("正在匹配启动命令并尝试启动服务...")
+        await session.send("正在匹配启动命令并尝试启动服务...")
         if not start_command:
             start_command, start_source = await detect_deploy_start_command(
                 client,
@@ -1347,7 +1348,7 @@ async def _cmd_deploy(bot: Bot, event: Event, group_id: str, user_id: str, args_
             if advice:
                 lines.append("启动日志疑似异常，LLM 建议:")
                 lines.extend(advice.splitlines()[:6])
-        await _finish_notice(mcsm, "MCSM Docker 部署完成", tuple(lines), "success")
+        await _finish_notice(session, "MCSM Docker 部署完成", tuple(lines), "success")
         return
     except ExitState:
         raise
@@ -1355,28 +1356,31 @@ async def _cmd_deploy(bot: Bot, event: Event, group_id: str, user_id: str, args_
         logger.warning(f"[MCSM] Docker deploy failed: {type(exc).__name__}: {redact_mcsm_sensitive_text(exc)}")
         if uuid and did:
             await _cleanup_failed_deploy_instance(client, uuid, did, summary)
-        await _finish_deploy_failure(stage, str(exc), summary)
+        await _finish_deploy_failure(session, stage, str(exc), summary)
 
 
-@dm_bind_handler.handle()
-async def handle_dm_bind(event: Event, bot: Bot):
+@listen(MessageCreatedEvent)
+async def handle_dm_bind(session: Session):
+    event = session.event
+    bot = session.account
+    if not await _is_dm_for_pending_bind(event):
+        return
     user_id = str(event_user_id(event))
-    session = _pending_bind_sessions.get(_bind_session_key(user_id))
-    if not session:
-        stop_session()
+    bind_session = _pending_bind_sessions.get(_bind_session_key(user_id))
+    if not bind_session:
         return
 
     text = event_plain_text(event).strip()
     if text in ("取消", "cancel", "Cancel", "q", "Q"):
         _pending_bind_sessions.pop(_bind_session_key(user_id), None)
-        await _finish_dm_notice(dm_bind_handler, bot, user_id, "实例批量关联已取消", (), "warning")
+        await _finish_dm_notice(session, bot, user_id, "实例批量关联已取消", (), "warning")
         return
 
-    instances = list(session.get("instances") or [])
+    instances = list(bind_session.get("instances") or [])
     selected, errors = _parse_bind_selection(text, instances)
     if not selected:
         await _finish_dm_notice(
-            dm_bind_handler,
+            session,
             bot,
             user_id,
             "未能匹配到有效实例",
@@ -1385,8 +1389,8 @@ async def handle_dm_bind(event: Event, bot: Bot):
         )
         return
 
-    group_id = str(session["group_id"])
-    daemon_id = str(session["daemon_id"])
+    group_id = str(bind_session["group_id"])
+    daemon_id = str(bind_session["daemon_id"])
     seen_uuid: set[str] = set()
     added: list[str] = []
     skipped: list[str] = []
@@ -1421,19 +1425,20 @@ async def handle_dm_bind(event: Event, bot: Bot):
         lines.append("跳过:")
         lines.extend((skipped + errors)[:20])
     await _finish_dm_notice(
-        dm_bind_handler,
+        session,
         bot,
         user_id,
         f"批量绑定完成：共 {len(added)} 个实例添加成功",
         tuple(lines) if lines else ("未产生任何变更。",),
         "success" if added else "warning",
     )
-mcsm = _cmd("mcsm", args=Args["rest;?", MultiVar(AnyString)], priority=5, block=True)
+mcsm = Alconna(["mcsm"], Args["rest;?", MultiVar(AnyString)])
 
 
-@mcsm.handle()
-async def handle_mcsm(bot: Bot, event: Event, rest: ArgVal):
+@command.on(mcsm)
+async def handle_mcsm(session: Session, rest: Match[tuple[str, ...]]):
     """MCSM 主命令 - 子命令路由。"""
+    event = session.event
     text = get_rest(rest)
     parts = text.split() if text else []
     subcmd = parts[0].lower() if parts else ""
@@ -1443,28 +1448,28 @@ async def handle_mcsm(bot: Bot, event: Event, rest: ArgVal):
 
     # 无子命令 -> list
     if not subcmd:
-        return await _cmd_list(bot, event, group_id, user_id)
+        return await _cmd_list(session, group_id, user_id)
 
     # help
     if subcmd in ("help", "帮助"):
-        await mcsm.finish(_help_tip())
+        await session.send(_help_tip())
         return
 
     # bind <panel_url>
     if subcmd == "bind":
         arg1 = parts[1] if len(parts) > 1 else ""
         if arg1 and ("://" in arg1 or arg1.startswith("http") or (":" in arg1 and "/" in arg1)):
-            return await _cmd_bind_panel(bot, event, group_id, user_id, arg1)
-        return await _cmd_bind_instance(bot, event, group_id, user_id, parts)
+            return await _cmd_bind_panel(session, group_id, user_id, arg1)
+        return await _cmd_bind_instance(session, group_id, user_id, parts)
 
     # unbindpanel
     if subcmd in ("unbindpanel", "解绑面板"):
-        return await _cmd_unbind_panel(bot, event, group_id, user_id)
+        return await _cmd_unbind_panel(session, group_id, user_id)
 
     # 以下需要面板已绑定
     if not _store.has_panel(group_id):
         await _finish_notice(
-            mcsm,
+            session,
             "本群尚未关联 MCSM 面板",
             ("请发送 /mcsm bind <面板地址> 完成面板关联。", _help_tip()),
             "warning",
@@ -1474,91 +1479,91 @@ async def handle_mcsm(bot: Bot, event: Event, rest: ArgVal):
     # deploy <alias> <url> --port <host_port>
     if subcmd in ("deploy", "部署"):
         deploy_text = text.split(None, 1)[1] if len(text.split(None, 1)) > 1 else ""
-        return await _cmd_deploy(bot, event, group_id, user_id, deploy_text)
+        return await _cmd_deploy(session, group_id, user_id, deploy_text)
 
     # list
     if subcmd in ("list", "列表"):
         show_all = any(p in ("-a", "--all", "all", "全部") for p in parts[1:])
-        return await _cmd_list(bot, event, group_id, user_id, show_all=show_all)
+        return await _cmd_list(session, group_id, user_id, show_all=show_all)
 
     # status
     if subcmd in ("status", "info"):
         alias = parts[1] if len(parts) > 1 else ""
-        return await _cmd_status(bot, event, group_id, alias)
+        return await _cmd_status(session, group_id, alias)
 
     # start
     if subcmd in ("start", "启动", "open"):
         alias = parts[1] if len(parts) > 1 else ""
-        return await _cmd_instance_action(bot, event, group_id, user_id, "open", alias)
+        return await _cmd_instance_action(session, group_id, user_id, "open", alias)
 
     # stop
     if subcmd in ("stop", "停止"):
         alias = parts[1] if len(parts) > 1 else ""
-        return await _cmd_instance_action(bot, event, group_id, user_id, "stop", alias)
+        return await _cmd_instance_action(session, group_id, user_id, "stop", alias)
 
     # start
     if subcmd in ("restart", "重启"):
         alias = parts[1] if len(parts) > 1 else ""
-        return await _cmd_instance_action(bot, event, group_id, user_id, "restart", alias)
+        return await _cmd_instance_action(session, group_id, user_id, "restart", alias)
 
     # kill
     if subcmd in ("kill", "强制结束", "强杀"):
         alias = parts[1] if len(parts) > 1 else ""
-        return await _cmd_instance_action(bot, event, group_id, user_id, "kill", alias)
+        return await _cmd_instance_action(session, group_id, user_id, "kill", alias)
 
     # cmd
     if subcmd in ("cmd", "命令", "exec"):
         cmd_parts = text.split(None, 2)
         alias = cmd_parts[1] if len(cmd_parts) > 1 else ""
         command = cmd_parts[2] if len(cmd_parts) > 2 else ""
-        return await _cmd_instance_action(bot, event, group_id, user_id, "command", alias, extra=command)
+        return await _cmd_instance_action(session, group_id, user_id, "command", alias, extra=command)
 
     # log
     if subcmd in ("log", "日志"):
         alias, log_limit, log_error = _parse_log_args(parts)
         if log_error:
-            await _finish_error(mcsm, log_error)
+            await _finish_error(session, log_error)
             return
-        return await _cmd_log(bot, event, group_id, user_id, alias, log_limit=log_limit)
+        return await _cmd_log(session, group_id, user_id, alias, log_limit=log_limit)
 
     # ── hide / unhide
     if subcmd in ("hide", "隐藏"):
         alias = parts[1] if len(parts) > 1 else ""
-        return await _cmd_hide(bot, event, group_id, user_id, alias, True)
+        return await _cmd_hide(session, group_id, user_id, alias, True)
     if subcmd in ("unhide", "取消隐藏", "显示"):
         alias = parts[1] if len(parts) > 1 else ""
-        return await _cmd_hide(bot, event, group_id, user_id, alias, False)
+        return await _cmd_hide(session, group_id, user_id, alias, False)
 
     # helpers
     if subcmd == "unbind":
         alias = parts[1] if len(parts) > 1 else ""
-        return await _cmd_unbind(bot, event, group_id, user_id, alias)
+        return await _cmd_unbind(session, group_id, user_id, alias)
     if subcmd in ("delete", "del", "remove", "删除"):
         alias = parts[1] if len(parts) > 1 else ""
         delete_files = any(p in ("--files", "--delete-files", "--file", "文件") for p in parts[2:])
-        return await _cmd_delete_instance(bot, event, group_id, user_id, alias, delete_files=delete_files)
+        return await _cmd_delete_instance(session, group_id, user_id, alias, delete_files=delete_files)
 
     # admin
     if subcmd == "admin":
-        return await _cmd_admin(bot, event, group_id, user_id, parts)
+        return await _cmd_admin(session, group_id, user_id, parts)
 
     # 模糊匹配 -> 查状态
     instances = _store.get_group_instances(group_id)
     if text in instances:
-        return await _cmd_status(bot, event, group_id, text)
+        return await _cmd_status(session, group_id, text)
     matches = _store.find_instance_by_name(group_id, text)
     if len(matches) == 1:
-        return await _cmd_status(bot, event, group_id, matches[0])
+        return await _cmd_status(session, group_id, matches[0])
     if len(matches) > 1:
         lines = [f"匹配到多个同名实例：{text}"]
         for m in matches:
             lines.append(f"  {m}")
         lines.append("请提供完整的实例别名。")
-        await _finish_notice(mcsm, "匹配到多个实例", lines[1:], "warning")
+        await _finish_notice(session, "匹配到多个实例", lines[1:], "warning")
         return
 
     await _finish_notice(
-        mcsm,
+        session,
         f"未知指令：{text}",
         ("可用指令：list | status | start | stop | restart | kill", "cmd | log | bind | unbind | delete | admin | hide | unhide | deploy", _help_tip()),
         "warning",
@@ -1570,21 +1575,23 @@ async def handle_mcsm(bot: Bot, event: Event, rest: ArgVal):
 # bind panel
 
 async def _cmd_bind_panel(
-    bot: Bot, event: Event, group_id: str, user_id: str, panel_url: str,
+    session: Session, group_id: str, user_id: str, panel_url: str,
 ):
     """绑定 MCSM 面板到当前群。"""
+    bot = session.account
+    event = session.event
     if not group_id:
-        await _finish_error(mcsm, "该指令须在群聊环境中运行。")
+        await _finish_error(session, "该指令须在群聊环境中运行。")
         return
     perm_err = await _require_group_manager(bot, event, group_id, user_id)
     if perm_err:
-        await _finish_error(mcsm, perm_err)
+        await _finish_error(session, perm_err)
         return
 
     if _store.has_panel(group_id):
         existing = _store.get_panel(group_id)
         await _finish_notice(
-            mcsm,
+            session,
             "本群已关联面板",
             (
                 f"面板地址: {existing[0] if existing else '/'}",
@@ -1604,34 +1611,36 @@ async def _cmd_bind_panel(
     _store.set_pending_key(user_id, group_id, url)
 
     try:
-        await _send_private(bot, user_id, ChainMsg.text(
+        await _send_private(bot, user_id, MessageChain([Text(str(
             f"请直接回复本条私聊消息以提供 MCSM API Key：\n"
             f"面板地址: {url}\n\n"
             f"可在 MCSM 控制面板的“API 密钥”管理页获取。\n"
             f"若需放弃本次关联，请回复“取消”。"
-        ))
+        ))]))
     except Exception as e:
         _store.clear_pending_key(user_id)
         _store.clear_panel(group_id)
-        await _finish_notice(mcsm, "私聊消息发送失败", (f"请先添加机器人为好友以接收私信: {e}",), "error")
+        await _finish_notice(session, "私聊消息发送失败", (f"请先添加机器人为好友以接收私信: {e}",), "error")
         return
 
-    await _finish_notice(mcsm, "面板地址已记录", (f"面板: {url}", "请前往机器人私聊窗口发送对应的 API Key。"), "success")
+    await _finish_notice(session, "面板地址已记录", (f"面板: {url}", "请前往机器人私聊窗口发送对应的 API Key。"), "success")
 
 
 # bind panel
 
-async def _cmd_unbind_panel(bot: Bot, event: Event, group_id: str, user_id: str):
+async def _cmd_unbind_panel(session: Session, group_id: str, user_id: str):
+    bot = session.account
+    event = session.event
     perm_err = await _require_group_manager(bot, event, group_id, user_id)
     if perm_err:
-        await _finish_error(mcsm, perm_err)
+        await _finish_error(session, perm_err)
         return
     if not _store.has_panel(group_id):
-        await _finish_notice(mcsm, "本群尚未关联 MCSM 面板", (), "warning")
+        await _finish_notice(session, "本群尚未关联 MCSM 面板", (), "warning")
         return
     _store.clear_panel(group_id)
     _clear_client(group_id)
-    await _finish_notice(mcsm, "MCSM 面板解绑成功", ("已清除当前群聊的所有实例关联数据。",), "success")
+    await _finish_notice(session, "MCSM 面板解绑成功", ("已清除当前群聊的所有实例关联数据。",), "success")
 
 
 def _instance_uuid(inst: dict) -> str:
@@ -1681,7 +1690,7 @@ def _match_daemon(daemons: List[dict], value: str) -> dict | None:
 
 
 async def _send_private_text(bot: Bot, user_id: str, text: str) -> None:
-    await _send_private(bot, user_id, ChainMsg.text(text))
+    await _send_private(bot, user_id, MessageChain([Text(str(text))]))
 
 
 def _candidate_line(index: int, inst: dict) -> str:
@@ -1690,22 +1699,23 @@ def _candidate_line(index: int, inst: dict) -> str:
     return f"{index}. {_instance_display_name(inst)} [{status}] {uuid[:8]}"
 
 
-async def _cmd_bind_node_private(bot: Bot, event: Event, group_id: str, user_id: str, daemon_arg: str):
+async def _cmd_bind_node_private(session: Session, group_id: str, user_id: str, daemon_arg: str):
+    bot = session.account
     client = get_client(group_id)
     if not client:
-        await _finish_error(mcsm, "本群尚未关联 MCSM 面板。")
+        await _finish_error(session, "本群尚未关联 MCSM 面板。")
         return
 
     try:
         daemons = await client.get_daemon_list()
     except Exception as exc:
-        await _finish_notice(mcsm, "拉取节点列表失败", (str(exc),), "error")
+        await _finish_notice(session, "拉取节点列表失败", (str(exc),), "error")
         return
 
     daemon = _match_daemon(daemons, daemon_arg)
     if not daemon:
         await _finish_notice(
-            mcsm,
+            session,
             "未检索到目标节点",
             ("请核对节点 ID 是否准确无误。", "若直接绑定具体实例，可使用：/mcsm bind <实例UUID> <别名> [节点ID]"),
             "error",
@@ -1717,7 +1727,7 @@ async def _cmd_bind_node_private(bot: Bot, event: Event, group_id: str, user_id:
         instances = await client.get_daemon_instances(daemon_id)
     except Exception as exc:
         await _finish_notice(
-            mcsm,
+            session,
             "获取节点实例列表失败",
             (
                 str(exc),
@@ -1728,7 +1738,7 @@ async def _cmd_bind_node_private(bot: Bot, event: Event, group_id: str, user_id:
         return
 
     if not instances:
-        await _finish_notice(mcsm, "该节点下暂无可用实例", (), "warning")
+        await _finish_notice(session, "该节点下暂无可用实例", (), "warning")
         return
 
     session_key = _bind_session_key(user_id)
@@ -1761,29 +1771,31 @@ async def _cmd_bind_node_private(bot: Bot, event: Event, group_id: str, user_id:
         await _send_private_text(bot, user_id, "\n".join(lines))
     except Exception as exc:
         _pending_bind_sessions.pop(session_key, None)
-        await _finish_notice(mcsm, "私聊向导推送失败", (f"请先添加机器人为好友以接收私信: {exc}",), "error")
+        await _finish_notice(session, "私聊向导推送失败", (f"请先添加机器人为好友以接收私信: {exc}",), "error")
         return
 
-    await _finish_notice(mcsm, "绑定向导已私信送达", ("候选实例清单及关联结果已发送至私聊窗口。",), "success")
+    await _finish_notice(session, "绑定向导已私信送达", ("候选实例清单及关联结果已发送至私聊窗口。",), "success")
 
 
 # bind instance
 
 async def _cmd_bind_instance(
-    bot: Bot, event: Event, group_id: str, user_id: str, parts: List[str],
+    session: Session, group_id: str, user_id: str, parts: List[str],
 ):
     """绑定实例别名: /mcsm bind <uuid> <别名> [节点ID]。"""
+    bot = session.account
+    event = session.event
     perm_err = await _require_group_manager(bot, event, group_id, user_id)
     if perm_err:
-        await _finish_error(mcsm, perm_err)
+        await _finish_error(session, perm_err)
         return
 
     if len(parts) == 2:
-        return await _cmd_bind_node_private(bot, event, group_id, user_id, parts[1])
+        return await _cmd_bind_node_private(session, group_id, user_id, parts[1])
 
     if len(parts) < 3:
         await _finish_notice(
-            mcsm,
+            session,
             "参数格式错误",
             ("关联面板：/mcsm bind <面板地址>", "关联节点实例：/mcsm bind <节点ID>", "直接关联实例：/mcsm bind <实例UUID> <别名> [节点ID]"),
             "error",
@@ -1794,22 +1806,22 @@ async def _cmd_bind_instance(
     alias = parts[2]
 
     if _store.alias_exists(group_id, alias):
-        await _finish_error(mcsm, f"别名冲突：别名 {alias} 已被使用。")
+        await _finish_error(session, f"别名冲突：别名 {alias} 已被使用。")
         return
 
     existing = _store.find_instance_by_uuid(group_id, uuid)
     if existing:
-        await _finish_error(mcsm, f"实例已绑定：该实例已命名为 {existing}。")
+        await _finish_error(session, f"实例已绑定：该实例已命名为 {existing}。")
         return
 
     client = get_client(group_id)
     if not client:
-        await _finish_error(mcsm, "本群尚未关联 MCSM 面板。")
+        await _finish_error(session, "本群尚未关联 MCSM 面板。")
         return
 
     daemon_id = parts[3] if len(parts) > 3 else ""
     if not daemon_id:
-        await mcsm.send("正在检索实例归属节点...")
+        await session.send("正在检索实例归属节点...")
         try:
             daemon_id = await client.find_instance_daemon(uuid) or ""
         except Exception as e:
@@ -1817,7 +1829,7 @@ async def _cmd_bind_instance(
             daemon_id = ""
         if not daemon_id:
             await _finish_notice(
-                mcsm,
+                session,
                 "未检索到指定实例",
                 ("全节点遍历均未发现此实例，请手动附带节点ID：", "/mcsm bind <UUID> <别名> <节点ID>"),
                 "error",
@@ -1826,55 +1838,58 @@ async def _cmd_bind_instance(
 
     _store.bind_instance(group_id, alias, uuid, daemon_id)
     fallback = f"实例绑定成功\n别名: {alias}\nUUID: {uuid}\n节点: {daemon_id[:24]}...\n\n/mcsm admin add @某人  添加本群 MCSM 管理员"
-    await _finish_image_or_text(mcsm, draw_bind_result, fallback, alias, uuid, daemon_id)
+    await _finish_image_or_text(session, draw_bind_result, fallback, alias, uuid, daemon_id)
 
 
 # bind instance
 
 async def _cmd_unbind(
-    bot: Bot, event: Event, group_id: str, user_id: str, alias: str,
+    session: Session, group_id: str, user_id: str, alias: str,
 ):
+    bot = session.account
+    event = session.event
     perm_err = await _require_group_manager(bot, event, group_id, user_id)
     if perm_err:
-        await _finish_error(mcsm, perm_err)
+        await _finish_error(session, perm_err)
         return
     if not alias:
-        await _finish_error(mcsm, "指令格式：/mcsm unbind <别名>")
+        await _finish_error(session, "指令格式：/mcsm unbind <别名>")
         return
     if not _store.alias_exists(group_id, alias):
-        await _finish_error(mcsm, f"未找到别名为 {alias} 的实例。")
+        await _finish_error(session, f"未找到别名为 {alias} 的实例。")
         return
     _store.unbind_instance(group_id, alias)
-    await _finish_notice(mcsm, "实例关联已解除", (f"实例: {alias}",), "success")
+    await _finish_notice(session, "实例关联已解除", (f"实例: {alias}",), "success")
 
 
 async def _cmd_delete_instance(
-    bot: Bot,
-    event: Event,
+    session: Session,
     group_id: str,
     user_id: str,
     alias: str,
     *,
     delete_files: bool = False,
 ):
+    bot = session.account
+    event = session.event
     if not alias:
-        await _finish_error(mcsm, "指令格式：/mcsm delete <别名> [--files]")
+        await _finish_error(session, "指令格式：/mcsm delete <别名> [--files]")
         return
 
     perm_err = await _require_group_manager(bot, event, group_id, user_id)
     if perm_err:
-        await _finish_error(mcsm, perm_err)
+        await _finish_error(session, perm_err)
         return
 
     info = _store.get_instance(group_id, alias)
     if info is None:
         matches = _store.find_instance_by_name(group_id, alias)
         if not matches:
-            await _finish_error(mcsm, f"未检索到实例：{alias}。")
+            await _finish_error(session, f"未检索到实例：{alias}。")
             return
         if len(matches) > 1:
             await _finish_notice(
-                mcsm,
+                session,
                 "匹配到多个同名实例",
                 tuple(f"  {match}" for match in matches),
                 "warning",
@@ -1883,12 +1898,12 @@ async def _cmd_delete_instance(
         alias = matches[0]
         info = _store.get_instance(group_id, alias)
         if info is None:
-            await _finish_error(mcsm, "处理异常：无法读取实例信息。")
+            await _finish_error(session, "处理异常：无法读取实例信息。")
             return
 
     client = get_client(group_id)
     if not client:
-        await _finish_error(mcsm, "本群尚未关联 MCSM 面板。")
+        await _finish_error(session, "本群尚未关联 MCSM 面板。")
         return
 
     daemon_id_value = str(info.get("daemonId") or "")
@@ -1896,7 +1911,7 @@ async def _cmd_delete_instance(
     try:
         await client.delete_instance(uuid, daemon_id_value, delete_files=delete_files)
     except Exception as exc:
-        await _finish_notice(mcsm, "删除实例失败", (str(exc),), "error")
+        await _finish_notice(session, "删除实例失败", (str(exc),), "error")
         return
 
     _store.unbind_instance(group_id, alias)
@@ -1905,22 +1920,23 @@ async def _cmd_delete_instance(
         f"实例: {uuid[:8]}",
         f"文件: {'已请求删除' if delete_files else '已保留'}",
     ]
-    await _finish_notice(mcsm, "实例已彻底删除", tuple(lines), "success")
+    await _finish_notice(session, "实例已彻底删除", tuple(lines), "success")
 
 
 # list
 
 async def _cmd_list(
-    bot: Bot,
-    event: Event,
+    session: Session,
     group_id: str,
     user_id: str,
     show_all: bool = False,
 ):
     """列出本群已绑定实例状态。"""
+    bot = session.account
+    event = session.event
     if not _store.has_panel(group_id):
         await _finish_notice(
-            mcsm,
+            session,
             "本群尚未关联 MCSM 面板",
             ("发送 /mcsm bind <面板地址> 进行关联。", _help_tip()),
             "warning",
@@ -1939,12 +1955,12 @@ async def _cmd_list(
         details = ["本群暂未添加任何可见实例。"]
         if can_manage_group:
             details.append("管理员可使用 /mcsm bind <节点ID> 在私聊向导中挑选实例添加。")
-        await _finish_notice(mcsm, "当前暂无实例", tuple(details), "warning")
+        await _finish_notice(session, "当前暂无实例", tuple(details), "warning")
         return
 
     client = get_client(group_id)
     if not client:
-        await _finish_error(mcsm, "处理异常：无法创建面板客户端。")
+        await _finish_error(session, "处理异常：无法创建面板客户端。")
         return
 
     daemon_names: Dict[str, str] = {}
@@ -2016,7 +2032,7 @@ async def _cmd_list(
             fallback_lines.append(f"  {status_text} {label}{hidden_tag}")
     fallback = "\n".join(fallback_lines)
     await _finish_image_or_text(
-        mcsm,
+        session,
         draw_panel_overview,
         fallback,
         daemon_map,
@@ -2026,46 +2042,48 @@ async def _cmd_list(
     )
 # status
 
-async def _cmd_status(bot: Bot, event: Event, group_id: str, alias: str):
+async def _cmd_status(session: Session, group_id: str, alias: str):
     """查询实例详情。"""
+    bot = session.account
+    event = session.event
     instances = _store.get_group_instances(group_id)
 
     if not alias:
-        return await _cmd_list(bot, event, group_id, _get_user_id(event))
+        return await _cmd_list(session, group_id, _get_user_id(event))
 
     info = instances.get(alias)
     if info is None:
         matches = _store.find_instance_by_name(group_id, alias)
         if not matches:
-            await _finish_notice(mcsm, f"未检索到实例：{alias}", ("发送 /mcsm list 可查阅本群所有实例。",), "error")
+            await _finish_notice(session, f"未检索到实例：{alias}", ("发送 /mcsm list 可查阅本群所有实例。",), "error")
             return
         if len(matches) > 1:
             lines = [f"匹配到多个同名实例：{alias}"]
             for m in matches:
                 lines.append(f"  {m}")
-            await _finish_notice(mcsm, "匹配到多个实例", lines[1:], "warning")
+            await _finish_notice(session, "匹配到多个实例", lines[1:], "warning")
             return
         alias = matches[0]
         info = instances[alias]
 
     user_id = _get_user_id(event)
     if not await _can_view_instance(bot, event, group_id, alias, user_id):
-        await _finish_notice(mcsm, f"未检索到实例：{alias}", ("发送 /mcsm list 可查阅本群所有实例。",), "error")
+        await _finish_notice(session, f"未检索到实例：{alias}", ("发送 /mcsm list 可查阅本群所有实例。",), "error")
         return
 
     client = get_client(group_id)
     if not client:
-        await _finish_error(mcsm, "本群尚未关联 MCSM 面板。")
+        await _finish_error(session, "本群尚未关联 MCSM 面板。")
         return
 
     try:
         detail = await client.get_instance_detail(info["uuid"], info["daemonId"])
     except Exception as e:
-        await _finish_notice(mcsm, "连接面板失败", (str(e),), "error")
+        await _finish_notice(session, "连接面板失败", (str(e),), "error")
         return
 
     if detail is None:
-        await _finish_notice(mcsm, f"无法获取实例详情：{alias}", ("请检查面板中该实例是否仍然存在。",), "error")
+        await _finish_notice(session, f"无法获取实例详情：{alias}", ("请检查面板中该实例是否仍然存在。",), "error")
         return
 
     try:
@@ -2124,7 +2142,7 @@ async def _cmd_status(bot: Bot, event: Event, group_id: str, alias: str):
     lines.append("/mcsm start|stop|restart|kill|cmd|log")
 
     await _finish_image_or_text(
-        mcsm,
+        session,
         draw_status,
         "\n".join(lines),
         alias,
@@ -2136,53 +2154,55 @@ async def _cmd_status(bot: Bot, event: Event, group_id: str, alias: str):
 # instance action (start/stop/restart/kill/cmd)
 
 async def _cmd_instance_action(
-    bot: Bot, event: Event, group_id: str, user_id: str,
+    session: Session, group_id: str, user_id: str,
     action: str, alias: str, extra: str = "",
 ):
     """通用实例操作。"""
+    bot = session.account
+    event = session.event
     op_name = OPERATION_NAMES.get(action, action)
 
     if not alias:
-        await _finish_error(mcsm, f"指令格式：/mcsm {action} <别名>")
+        await _finish_error(session, f"指令格式：/mcsm {action} <别名>")
         return
 
     info = _store.get_instance(group_id, alias)
     if info is None:
         matches = _store.find_instance_by_name(group_id, alias)
         if not matches:
-            await _finish_error(mcsm, f"未检索到实例：{alias}。")
+            await _finish_error(session, f"未检索到实例：{alias}。")
             return
         if len(matches) > 1:
             lines = [f"匹配到多个同名实例：{alias}"]
             for m in matches:
                 lines.append(f"  {m}")
-            await _finish_notice(mcsm, "匹配到多个实例", lines[1:], "warning")
+            await _finish_notice(session, "匹配到多个实例", lines[1:], "warning")
             return
         alias = matches[0]
         info = _store.get_instance(group_id, alias)
         if info is None:
-            await _finish_error(mcsm, "处理异常：无法读取实例信息。")
+            await _finish_error(session, "处理异常：无法读取实例信息。")
             return
 
     perm_err = await _require_group_manager(bot, event, group_id, user_id)
     if perm_err:
-        await _finish_error(mcsm, perm_err)
+        await _finish_error(session, perm_err)
         return
 
     client = get_client(group_id)
     if not client:
-        await _finish_error(mcsm, "本群尚未关联 MCSM 面板。")
+        await _finish_error(session, "本群尚未关联 MCSM 面板。")
         return
 
     daemon_id = info["daemonId"]
     uuid = info["uuid"]
 
-    await mcsm.send(f"正在对实例 {alias} 执行「{op_name}」操作...")
+    await session.send(f"正在对实例 {alias} 执行「{op_name}」操作...")
 
     try:
         if action == "command":
             if not extra:
-                await _finish_error(mcsm, "请输入要在控制台执行的具体命令。")
+                await _finish_error(session, "请输入要在控制台执行的具体命令。")
                 return
             try:
                 before_output = await client.get_instance_output(uuid, daemon_id, size=500)
@@ -2194,7 +2214,7 @@ async def _cmd_instance_action(
     except ExitState:
         raise
     except Exception as e:
-        await _finish_notice(mcsm, "操作失败", (str(e),), "error")
+        await _finish_notice(session, "操作失败", (str(e),), "error")
         return
 
     status_code = result.get("status", -1)
@@ -2212,7 +2232,7 @@ async def _cmd_instance_action(
             fallback_output = render_console_text(raw_output, command=extra, show_command=True, empty_text="(无新增输出)")
             fallback = f"{alias} 控制台输出\n{'-' * 30}\n{fallback_output}"
             await _finish_image_or_text(
-                mcsm,
+                session,
                 draw_console_output,
                 fallback,
                 alias,
@@ -2222,10 +2242,10 @@ async def _cmd_instance_action(
                 empty_text="(无新增输出)",
             )
         else:
-            await _finish_notice(mcsm, "操作成功执行", (f"实例 {alias} 的「{op_name}」已完成。",), "success")
+            await _finish_notice(session, "操作成功执行", (f"实例 {alias} 的「{op_name}」已完成。",), "success")
     else:
         err = result.get("error", f"状态码 {status_code}")
-        await _finish_notice(mcsm, f"实例 {alias}「{op_name}」执行失败", (str(err),), "error")
+        await _finish_notice(session, f"实例 {alias}「{op_name}」执行失败", (str(err),), "error")
 
 
 # log
@@ -2275,41 +2295,43 @@ def _parse_log_args(parts: List[str]) -> tuple[str, Optional[int], Optional[str]
     return alias, log_limit, None
 
 
-async def _cmd_log(bot: Bot, event: Event, group_id: str, user_id: str, alias: str, *, log_limit: Optional[int] = LOG_DEFAULT_ENTRIES):
+async def _cmd_log(session: Session, group_id: str, user_id: str, alias: str, *, log_limit: Optional[int] = LOG_DEFAULT_ENTRIES):
     """查看实例控制台日志。"""
+    bot = session.account
+    event = session.event
     if not alias:
-        await _finish_error(mcsm, LOG_USAGE)
+        await _finish_error(session, LOG_USAGE)
         return
 
     info = _store.get_instance(group_id, alias)
     if info is None:
         matches = _store.find_instance_by_name(group_id, alias)
         if not matches:
-            await _finish_error(mcsm, f"未检索到实例：{alias}。")
+            await _finish_error(session, f"未检索到实例：{alias}。")
             return
         if len(matches) > 1:
-            await _finish_notice(mcsm, "匹配到多个实例", (f"别名 {alias} 命中多个实例，请输入完整名称。",), "warning")
+            await _finish_notice(session, "匹配到多个实例", (f"别名 {alias} 命中多个实例，请输入完整名称。",), "warning")
             return
         alias = matches[0]
         info = _store.get_instance(group_id, alias)
         if info is None:
-            await _finish_error(mcsm, "处理异常：无法读取实例信息。")
+            await _finish_error(session, "处理异常：无法读取实例信息。")
             return
 
     perm_err = await _require_group_manager(bot, event, group_id, user_id)
     if perm_err:
-        await _finish_error(mcsm, perm_err)
+        await _finish_error(session, perm_err)
         return
 
     client = get_client(group_id)
     if not client:
-        await _finish_error(mcsm, "本群尚未关联 MCSM 面板。")
+        await _finish_error(session, "本群尚未关联 MCSM 面板。")
         return
 
     try:
         raw = await client.get_instance_output(info["uuid"], info["daemonId"], size=2048)
     except Exception as e:
-        await _finish_notice(mcsm, "获取日志失败", (str(e),), "error")
+        await _finish_notice(session, "获取日志失败", (str(e),), "error")
         return
 
     if not raw:
@@ -2318,7 +2340,7 @@ async def _cmd_log(bot: Bot, event: Event, group_id: str, user_id: str, alias: s
     fallback_output = render_console_text(raw, max_entries=log_limit, mode="log", empty_text="(无输出)")
     fallback = f"{alias} 控制台日志\n{'-' * 30}\n{fallback_output}"
     await _finish_image_or_text(
-        mcsm,
+        session,
         draw_console_output,
         fallback,
         alias,
@@ -2333,47 +2355,51 @@ async def _cmd_log(bot: Bot, event: Event, group_id: str, user_id: str, alias: s
 # ── hide / unhide
 
 async def _cmd_hide(
-    bot: Bot, event: Event, group_id: str, user_id: str,
+    session: Session, group_id: str, user_id: str,
     alias: str, hidden: bool,
 ):
+    bot = session.account
+    event = session.event
     action_text = "隐藏" if hidden else "取消隐藏"
     if not alias:
-        await _finish_error(mcsm, f"指令格式：/mcsm {'hide' if hidden else 'unhide'} <别名>")
+        await _finish_error(session, f"指令格式：/mcsm {'hide' if hidden else 'unhide'} <别名>")
         return
 
     info = _store.get_instance(group_id, alias)
     if info is None:
         matches = _store.find_instance_by_name(group_id, alias)
         if not matches:
-            await _finish_error(mcsm, f"未检索到实例：{alias}。")
+            await _finish_error(session, f"未检索到实例：{alias}。")
             return
         if len(matches) > 1:
-            await _finish_notice(mcsm, "匹配到多个实例", (f"别名 {alias} 命中多个实例，请输入完整名称。",), "warning")
+            await _finish_notice(session, "匹配到多个实例", (f"别名 {alias} 命中多个实例，请输入完整名称。",), "warning")
             return
         alias = matches[0]
 
     perm_err = await _require_group_manager(bot, event, group_id, user_id)
     if perm_err:
-        await _finish_error(mcsm, perm_err)
+        await _finish_error(session, perm_err)
         return
 
     ok = _store.set_hidden(group_id, alias, hidden)
     if ok:
-        await _finish_notice(mcsm, f"实例已设定为{action_text}", (f"实例: {alias}",), "success")
+        await _finish_notice(session, f"实例已设定为{action_text}", (f"实例: {alias}",), "success")
     else:
-        await _finish_error(mcsm, "操作执行失败。")
+        await _finish_error(session, "操作执行失败。")
 
 
 async def _cmd_admin(
-    bot: Bot, event: Event, group_id: str, user_id: str, parts: List[str],
+    session: Session, group_id: str, user_id: str, parts: List[str],
 ):
     """Manage per-group MCSM administrators."""
+    bot = session.account
+    event = session.event
     admin_parts = parts[1:]
     action = admin_parts[0].lower() if admin_parts else ""
 
     if action not in ("add", "del", "list", "delete", "remove"):
         await _finish_notice(
-            mcsm,
+            session,
             "admin 子命令格式错误",
             ("/mcsm admin add @某人", "/mcsm admin del @某人", "/mcsm admin list"),
             "error",
@@ -2386,12 +2412,12 @@ async def _cmd_admin(
     if action == "list":
         admins = _store.get_admins(group_id)
         fallback = "本群 MCSM 管理员\n" + ("\n".join(f"  {a}" for a in admins) if admins else "  (未设置)")
-        await _finish_image_or_text(mcsm, draw_admin_list, fallback, "本群", admins)
+        await _finish_image_or_text(session, draw_admin_list, fallback, "本群", admins)
         return
 
     perm_err = await _require_group_manager(bot, event, group_id, user_id)
     if perm_err:
-        await _finish_error(mcsm, perm_err)
+        await _finish_error(session, perm_err)
         return
 
     at_users = await _extract_at_users(event, bot)
@@ -2400,7 +2426,7 @@ async def _cmd_admin(
         if target_text.isdigit():
             at_users = [target_text]
         else:
-            await _finish_notice(mcsm, "未指定目标成员", (f"请 @ 目标成员，或指定其 QQ 号：/mcsm admin {action} @某人",), "error")
+            await _finish_notice(session, "未指定目标成员", (f"请 @ 目标成员，或指定其 QQ 号：/mcsm admin {action} @某人",), "error")
             return
 
     if action == "add":
@@ -2415,7 +2441,7 @@ async def _cmd_admin(
             msg.append(f"已授权群管理员：{', '.join(added)}")
         if skipped:
             msg.append(f"原已具备管理员权限：{', '.join(skipped)}")
-        await _finish_notice(mcsm, "MCSM 群管理员已更新", msg if msg else ["没有产生变更。"], "success")
+        await _finish_notice(session, "MCSM 群管理员已更新", msg if msg else ["没有产生变更。"], "success")
         return
 
     if action == "del":
@@ -2433,7 +2459,7 @@ async def _cmd_admin(
             msg.append(f"已解除群管理员：{', '.join(removed)}")
         if skipped:
             msg.append(f"跳过处理：{', '.join(skipped)}")
-        await _finish_notice(mcsm, "MCSM 群管理员已更新", msg if msg else ["没有产生变更。"], "success")
+        await _finish_notice(session, "MCSM 群管理员已更新", msg if msg else ["没有产生变更。"], "success")
         return
 
 

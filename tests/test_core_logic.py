@@ -1739,11 +1739,9 @@ class CoreLogicTests(unittest.TestCase):
 
         self.assertIn("async def _finish_dm_image_or_text", source)
         self.assertIn("await _send_private(bot, user_id, message)", dm_finish_source)
-        self.assertIn("stop_session()", dm_finish_source)
-        self.assertIn("await ChainMsg.text(fallback).send()", dm_finish_source)
-        self.assertNotIn("await matcher.send(", dm_finish_source)
-        self.assertNotIn("await matcher.finish()", dm_finish_source)
-        self.assertIn("await _finish_dm_notice(\n        dm_key_handler,\n        bot,\n        user_id,", source)
+        self.assertIn("session.stop()", dm_finish_source)
+        self.assertIn("await session.send(MessageChain([Text(str(fallback))]))", dm_finish_source)
+        self.assertIn("await _finish_dm_notice(\n        session,\n        bot,\n        user_id,", source)
         self.assertNotIn("_finish_notice(dm_key_handler", source)
 
     def test_mcsm_delete_instance_command_is_wired(self):
@@ -2174,7 +2172,7 @@ remotePort = {{ $v.Second }}
     def test_mcsm_deploy_failure_auto_deletes_created_instance(self):
         source = (ROOT / "plugins/mcsm/handlers.py").read_text(encoding="utf-8")
         start = source.index("async def _cmd_deploy")
-        end = source.index("@dm_bind_handler.handle()", start)
+        end = source.index("async def handle_dm_bind", start)
         deploy_source = source[start:end]
 
         self.assertIn("async def _cleanup_failed_deploy_instance", source)
@@ -2191,7 +2189,7 @@ remotePort = {{ $v.Second }}
     def test_mcsm_deploy_upload_permission_repair_is_wired(self):
         source = (ROOT / "plugins/mcsm/handlers.py").read_text(encoding="utf-8")
         start = source.index("async def _cmd_deploy")
-        end = source.index("@dm_bind_handler.handle()", start)
+        end = source.index("async def handle_dm_bind", start)
         deploy_source = source[start:end]
 
         self.assertIn("async def _retry_upload_after_permission_repair", source)
@@ -2199,12 +2197,12 @@ remotePort = {{ $v.Second }}
         self.assertIn("client.start_instance(repair_uuid, daemon_id_value)", source)
         self.assertIn("except Exception as upload_exc:", deploy_source)
         self.assertIn("if is_upload_permission_error(upload_exc):", deploy_source)
-        self.assertIn("uploaded_name = await _retry_upload_after_permission_repair(client, uuid, did, local_file, summary)", deploy_source)
+        self.assertIn("uploaded_name = await _retry_upload_after_permission_repair(session, client, uuid, did, local_file, summary)", deploy_source)
 
     def test_mcsm_deploy_retries_remote_install_after_upload_failure(self):
         source = (ROOT / "plugins/mcsm/handlers.py").read_text(encoding="utf-8")
         start = source.index("async def _cmd_deploy")
-        end = source.index("@dm_bind_handler.handle()", start)
+        end = source.index("async def handle_dm_bind", start)
         deploy_source = source[start:end]
 
         self.assertIn("async def _retry_remote_install_after_upload_failure", source)
@@ -2218,7 +2216,7 @@ remotePort = {{ $v.Second }}
     def test_mcsm_deploy_refreshes_qflash_direct_urls_for_large_packages(self):
         source = (ROOT / "plugins/mcsm/handlers.py").read_text(encoding="utf-8")
         start = source.index("async def _cmd_deploy")
-        end = source.index("@dm_bind_handler.handle()", start)
+        end = source.index("async def handle_dm_bind", start)
         deploy_source = source[start:end]
 
         self.assertIn("refresh_qflash_archive", source)
@@ -2240,12 +2238,12 @@ remotePort = {{ $v.Second }}
     def test_mcsm_deploy_does_not_report_session_stop_as_failure(self):
         source = (ROOT / "plugins/mcsm/handlers.py").read_text(encoding="utf-8")
         start = source.index("async def _cmd_deploy")
-        end = source.index("@dm_bind_handler.handle()", start)
+        end = source.index("async def handle_dm_bind", start)
         deploy_source = source[start:end]
 
         self.assertIn("from arclet.letoderea import ExitState", source)
-        self.assertIn('await _finish_notice(mcsm, "MCSM Docker 部署完成"', deploy_source)
-        success_index = deploy_source.index('await _finish_notice(mcsm, "MCSM Docker 部署完成"')
+        self.assertIn('await _finish_notice(session, "MCSM Docker 部署完成"', deploy_source)
+        success_index = deploy_source.index('await _finish_notice(session, "MCSM Docker 部署完成"')
         exit_index = deploy_source.index("except ExitState:", success_index)
         generic_index = deploy_source.index("except Exception as exc:", exit_index)
         self.assertIn("return", deploy_source[success_index:exit_index])
