@@ -21,8 +21,6 @@
 {"rule": "compat-import", "file": "plugins/steamInfo/handlers.py", "snippet": "from otae_bot.compat.entari import inject", "count": 1},
 {"rule": "compat-import", "file": "plugins/steamInfo/handlers.py", "snippet": "from otae_bot.compat.entari import prompt, get_bot, on_ready", "count": 1},
 {"rule": "compat-import", "file": "plugins/steamInfo/handlers.py", "snippet": "from otae_bot.compat.entari import timer", "count": 1},
-{"rule": "compat-import", "file": "plugins/tibo_radar/delivery.py", "snippet": "from otae_bot.compat.entari import ChainMsg, Text, make_image", "count": 1},
-{"rule": "compat-import", "file": "plugins/tibo_radar/handlers.py", "snippet": "from otae_bot.compat.entari import (", "count": 1},
 {"rule": "direct-env-read", "file": "plugins/hyw/handlers.py", "snippet": "os.environ.pop(\"DDGS_PROXY\", None)", "count": 2},
 {"rule": "direct-env-read", "file": "plugins/hyw/handlers.py", "snippet": "os.environ[\"DDGS_PROXY\"] = config.search_proxy", "count": 1},
 {"rule": "direct-env-read", "file": "plugins/hyw/handlers.py", "snippet": "os.environ[\"DDGS_PROXY\"] = previous_search_proxy", "count": 1},

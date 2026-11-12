@@ -11,10 +11,10 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 
+from arclet.entari import Image, MessageChain, Text
 from loguru import logger
 from satori.model import Upload
 
-from otae_bot.compat.entari import ChainMsg, Text, make_image
 from otae_bot.delivery import Target, deliver
 
 from .models import TiboPost
@@ -24,7 +24,7 @@ class DeliveryNotAcknowledged(RuntimeError):
     """An empty receipt can also mean a send hook intentionally cancelled it."""
 
 
-async def _send(message: ChainMsg, target: Target, bot, timeout: float) -> None:
+async def _send(message: MessageChain, target: Target, bot, timeout: float) -> None:
     result = await asyncio.wait_for(deliver(target, message, account=bot), timeout)
     result.raise_for_failure()
     if not any(getattr(receipt, "id", None) for receipt in result.messages):
@@ -41,14 +41,14 @@ async def _image(png: bytes, bot, timeout: float):
                 upload(Upload(png, "image/png", "tibo-radar.png")), timeout
             )
             if isinstance(urls, (list, tuple)) and urls and isinstance(urls[0], str) and urls[0]:
-                return make_image(url=urls[0])
+                return Image(src=urls[0])
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             logger.debug("[tibo_radar] image upload unavailable error_type={}", type(exc).__name__)
     # Compatibility for bridges without upload.create. Image.of(raw=...) emits
     # an inline data URL and never assumes a shared disk with the QQ client.
-    return make_image(raw=png)
+    return Image.of(raw=png)
 
 
 def _clip(text: str, limit: int) -> str:
@@ -92,7 +92,7 @@ async def deliver_page(
         segments = [segment]
         if links:
             segments.append(Text("源帖链接：\n" + "\n".join(links)))
-        await _send(ChainMsg(segments), target, bot, timeout)
+        await _send(MessageChain(segments), target, bot, timeout)
         return "image"
     except (asyncio.CancelledError, DeliveryNotAcknowledged):
         # Do not bypass an intentional send cancellation with a second message.
@@ -102,5 +102,5 @@ async def deliver_page(
             "[tibo_radar] image delivery degraded group={} stage={} error_type={} image_bytes={}",
             target.guild_id, stage, type(exc).__name__, image_bytes,
         )
-    await _send(ChainMsg.text(fallback_text(posts, relevance_label)), target, bot, timeout)
+    await _send(MessageChain([Text(fallback_text(posts, relevance_label))]), target, bot, timeout)
     return "text"

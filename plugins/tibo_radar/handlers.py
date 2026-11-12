@@ -8,24 +8,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
-from arclet.entari import Account as Bot, Cleanup, Event, listen
+from arclet.alconna import Alconna, Args, MultiVar
+from arclet.entari import Account as Bot, Cleanup, Event, Image, MessageChain, Session, Text, command, listen
+from arclet.entari.command import Match
 from loguru import logger
+from nepattern import AnyString
 
 from otae_bot.config.settings import Config as GlobalConfig
-from otae_bot.compat.entari import (
-    ArgVal,
-    ChainMsg,
-    Text,
-    cmd as _cmd,
-    get_channel_id,
-    get_group_id,
-    get_rest,
-    get_bot,
-    make_image,
-    on_ready,
-    timer,
-    event_user_id,
-)
+from otae_bot.accounts.ready import get_bot, on_ready
+from otae_bot.messaging.inbound import event_user_id, get_channel_id, get_group_id, get_rest
+from otae_bot.scheduling.jobs import timer
 from otae_bot.delivery import Target
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
 
@@ -67,7 +59,7 @@ def _image_segment(png: bytes):
         handle.write(png)
         handle.flush()
         schedule_temp_file_cleanup(handle.name, delay_seconds=60)
-        return make_image(path=handle.name)
+        return Image.of(path=Path(handle.name))
 
 
 def _post_links(posts: Iterable[TiboPost]) -> list[str]:
@@ -331,16 +323,13 @@ def _overview_sections() -> tuple[list[CardSection], list[str]]:
     return sections, [*recent_links, *_post_links(posts), *_source_links()]
 
 
-async def _finish_card(title: str, subtitle: str, sections: list[CardSection], links: list[str], *, page: str = "", finish: bool = True):
+async def _send_card(session: Session, title: str, subtitle: str, sections: list[CardSection], links: list[str], *, page: str = ""):
     png = await render_card(title, subtitle, sections, page=page)
     segments = [_image_segment(png)]
     deduped = list(dict.fromkeys(link for link in links if link))
     if deduped:
         segments.append(Text("来源链接：\n" + "\n".join(deduped)))
-    if finish:
-        await tibo_cmd.finish(ChainMsg(segments))
-    else:
-        await tibo_cmd.send(ChainMsg(segments))
+    await session.send(MessageChain(segments))
 
 
 def _parse_count(parts: list[str], default: int, maximum: int = 20) -> tuple[int | None, str | None]:
@@ -370,11 +359,13 @@ def _help_text() -> str:
     )
 
 
-tibo_cmd = _cmd("tibo", aliases={"雷达"}, priority=5, block=True)
+tibo_cmd = Alconna(["tibo", "雷达"], Args["rest;?", MultiVar(AnyString)])
 
 
-@tibo_cmd.handle()
-async def handle_tibo(rest: ArgVal[str], event: Event, bot: Bot):
+@command.on(tibo_cmd)
+async def handle_tibo(rest: Match[tuple[str, ...]], session: Session):
+    event = session.event
+    bot = session.account
     parts = [part for part in get_rest(rest).split() if part]
     action = parts[0].lower() if parts else "总览"
     action = {
@@ -397,62 +388,62 @@ async def handle_tibo(rest: ArgVal[str], event: Event, bot: Bot):
     if action == "订阅" and len(parts) > 1 and parts[1].lower() in {"状态", "status"}:
         action = "订阅状态"
     if action in {"帮助", "?"}:
-        await tibo_cmd.finish(_help_text())
+        await session.send(_help_text())
         return
     if action == "订阅":
         group_id = get_group_id(event)
         if not group_id:
-            await tibo_cmd.finish("使用场景限制：Tibo 新帖订阅仅限在群聊中配置。")
+            await session.send("使用场景限制：Tibo 新帖订阅仅限在群聊中配置。")
             return
         if not await _is_subscription_manager(bot, event, group_id, event_user_id(event)):
-            await tibo_cmd.finish(_subscription_permission_text())
+            await session.send(_subscription_permission_text())
             return
         _remember_account(bot)
         already_enabled, _subscription = store.subscribe(group_id, get_channel_id(event) or group_id, account_key=_account_key(bot))
         if already_enabled:
-            await tibo_cmd.finish("本群此前已启用 Tibo 新帖订阅，新动态将依采集周期自动推送。")
+            await session.send("本群此前已启用 Tibo 新帖订阅，新动态将依采集周期自动推送。")
         else:
-            await tibo_cmd.finish("已成功开启本群 Tibo 新帖订阅，后续新帖将携图文卡片及源帖链接实时推送。")
+            await session.send("已成功开启本群 Tibo 新帖订阅，后续新帖将携图文卡片及源帖链接实时推送。")
         return
     if action == "取消订阅":
         group_id = get_group_id(event)
         if not group_id:
-            await tibo_cmd.finish("使用场景限制：Tibo 新帖订阅仅限在群聊中配置。")
+            await session.send("使用场景限制：Tibo 新帖订阅仅限在群聊中配置。")
             return
         if not await _is_subscription_manager(bot, event, group_id, event_user_id(event)):
-            await tibo_cmd.finish(_subscription_permission_text())
+            await session.send(_subscription_permission_text())
             return
         if store.unsubscribe(group_id):
-            await tibo_cmd.finish("已成功关闭本群的 Tibo 新帖推送服务。")
+            await session.send("已成功关闭本群的 Tibo 新帖推送服务。")
         else:
-            await tibo_cmd.finish("本群当前尚未启用 Tibo 新帖订阅，无需退订。")
+            await session.send("本群当前尚未启用 Tibo 新帖订阅，无需退订。")
         return
     if action == "订阅状态":
         group_id = get_group_id(event)
         if not group_id:
-            await tibo_cmd.finish("使用场景限制：Tibo 新帖订阅仅限在群聊中配置。")
+            await session.send("使用场景限制：Tibo 新帖订阅仅限在群聊中配置。")
             return
         subscription = store.subscription(group_id)
         if subscription and subscription.enabled:
             cursor = subscription.last_notified_at.astimezone().strftime("%Y-%m-%d %H:%M:%S") if subscription.last_notified_at else "尚未推送"
             mode = {"image": "图片", "text": "文字兜底"}.get(subscription.last_delivery_mode, "暂无")
             retry = f"\n连续失败：{subscription.delivery_failures} 次（{subscription.last_delivery_error}）；退避后继续重试" if subscription.delivery_failures else ""
-            await tibo_cmd.finish(f"当前群订阅状态：已开启 Tibo 新帖推送\n最新推送记录：{cursor}\n最近投递方式：{mode}{retry}")
+            await session.send(f"当前群订阅状态：已开启 Tibo 新帖推送\n最新推送记录：{cursor}\n最近投递方式：{mode}{retry}")
         else:
-            await tibo_cmd.finish("当前群尚未启用 Tibo 新帖订阅；可使用 /tibo 订阅 进行开启。")
+            await session.send("当前群尚未启用 Tibo 新帖订阅；可使用 /tibo 订阅 进行开启。")
         return
     if action in {"总览", "概览"}:
         sections, links = _overview_sections()
-        await _finish_card("Tibo 雷达总览", f"本地缓存查询 · 最近采集周期 {REFRESH_MINUTES} 分钟", sections, links)
+        await _send_card(session, "Tibo 雷达总览", f"本地缓存查询 · 最近采集周期 {REFRESH_MINUTES} 分钟", sections, links)
         return
     if action == "动态":
         count, error = _parse_count(parts, 6)
         if error:
-            await tibo_cmd.finish(error + "；格式示例：/tibo 动态 6")
+            await session.send(error + "；格式示例：/tibo 动态 6")
             return
         posts = service.latest_posts(count or 6)
         if not posts:
-            await _finish_card("Tibo 最新动态", "本地历史中暂无直接或间接相关内容", [CardSection("动态", ["暂无记录；无关动态不会显示在此列表中"], CYAN)], _source_links())
+            await _send_card(session, "Tibo 最新动态", "本地历史中暂无直接或间接相关内容", [CardSection("动态", ["暂无记录；无关动态不会显示在此列表中"], CYAN)], _source_links())
             return
         # Keep the default six-post query in one message.  Larger explicit
         # requests still paginate at six posts per card to stay within the
@@ -470,10 +461,7 @@ async def handle_tibo(rest: ArgVal[str], event: Event, bot: Bot):
             deduped = list(dict.fromkeys(link for link in [*_post_links(page_posts), *_source_links()] if link))
             if deduped:
                 segments.append(Text("来源链接：\n" + "\n".join(deduped)))
-            if page_index == len(pages):
-                await tibo_cmd.finish(ChainMsg(segments))
-            else:
-                await tibo_cmd.send(ChainMsg(segments))
+            await session.send(MessageChain(segments))
         return
     if action == "状态":
         current = service.status()
@@ -481,12 +469,12 @@ async def handle_tibo(rest: ArgVal[str], event: Event, bot: Bot):
         lines = [current.label, current.detail]
         if current.event:
             lines.extend([f"事件：{current.event.event_id}", f"证据原文：{current.event.localized_summary or current.event.summary}"])
-        await _finish_card("Tibo 重置状态", "只区分预告、窗口、疑似和已确认，不把预测写成事实", [CardSection("当前状态", lines, GREEN if current.active else AMBER)], links)
+        await _send_card(session, "Tibo 重置状态", "只区分预告、窗口、疑似和已确认，不把预测写成事实", [CardSection("当前状态", lines, GREEN if current.active else AMBER)], links)
         return
     if action == "最近":
         latest = service.latest_confirmed()
         if latest is None:
-            await _finish_card("最近一次重置", "本地历史中暂无严格核验完成记录", [CardSection("状态", ["暂无已确认完成的全局重置"], CYAN)], _source_links())
+            await _send_card(session, "最近一次重置", "本地历史中暂无严格核验完成记录", [CardSection("状态", ["暂无已确认完成的全局重置"], CYAN)], _source_links())
         else:
             at = latest.effective_at or latest.announced_at
             lines = [
@@ -495,22 +483,22 @@ async def handle_tibo(rest: ArgVal[str], event: Event, bot: Bot):
                 f"确认状态：{service.event_label(latest.status)}",
                 f"证据：{latest.localized_summary or latest.summary}",
             ]
-            await _finish_card("最近一次已确认重置", "只显示可核验完成事件", event_sections([latest], service.event_label), _event_links([latest]) + _source_links())
+            await _send_card(session, "最近一次已确认重置", "只显示可核验完成事件", event_sections([latest], service.event_label), _event_links([latest]) + _source_links())
         return
     if action == "历史":
         count, error = _parse_count(parts, 6)
         if error:
-            await tibo_cmd.finish(error + "；格式示例：/tibo 历史 6")
+            await session.send(error + "；格式示例：/tibo 历史 6")
             return
         events = service.history(count or 6)
         if not events:
-            await _finish_card("Tibo 重置历史", "本地缓存查询", [CardSection("历史", ["暂无记录"], CYAN)], _source_links())
+            await _send_card(session, "Tibo 重置历史", "本地缓存查询", [CardSection("历史", ["暂无记录"], CYAN)], _source_links())
             return
         pages = _chunk(events)
         for page_index, page_events in enumerate(pages, 1):
-            await _finish_card("Tibo 重置历史", "预告、窗口、疑似与完成状态分开标注", event_sections(page_events, service.event_label), [*_event_links(page_events), *_source_links()], page=f"{page_index}/{len(pages)}", finish=page_index == len(pages))
+            await _send_card(session, "Tibo 重置历史", "预告、窗口、疑似与完成状态分开标注", event_sections(page_events, service.event_label), [*_event_links(page_events), *_source_links()], page=f"{page_index}/{len(pages)}")
         return
-    await tibo_cmd.finish("未知子命令，请参考以下说明：\n\n" + _help_text())
+    await session.send("未知子命令，请参考以下说明：\n\n" + _help_text())
 
 
 _startup_started = False

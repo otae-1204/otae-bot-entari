@@ -252,5 +252,117 @@ class TiboRadarTests(unittest.TestCase):
             self.assertGreaterEqual(image.height, 430)
 
 
+
+TIBO_SCENARIOS = r"""
+import io
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock, patch
+from PIL import Image as PILImage
+from satori import Member, Role, User
+from plugins.tibo_radar.models import EVENT_CONFIRMED, ResetEvent, TiboPost
+
+tibo = plugin('plugins.tibo_radar.handlers')
+buffer = io.BytesIO()
+PILImage.new('RGB', (2, 2)).save(buffer, format='PNG')
+PNG = buffer.getvalue()
+ADMIN = Member(user=User('admin-1'), roles=[Role('admin', '群管理员')])
+REGULAR = Member(user=User('member-1'), roles=[])
+AT = datetime(2026, 8, 21, tzinfo=timezone.utc)
+
+
+def posts(n):
+    return [TiboPost(str(i), 'text ' + str(i), 'https://x.com/t/' + str(i), source_time=AT) for i in range(n)]
+
+
+def events(n):
+    return [ResetEvent(str(i), 'done', 'https://x.com/e/' + str(i), announced_at=AT, status=EVENT_CONFIRMED) for i in range(n)]
+
+
+def is_card(item, link):
+    return item.startswith('<img') and link in item
+
+
+async def main():
+    service = tibo.service
+    renders = []
+    card = AsyncMock(side_effect=lambda *a, **k: renders.append(('card', a[0], k.get('page', ''))) or PNG)
+    feed = AsyncMock(side_effect=lambda *a, **k: renders.append(('feed', k.get('page', ''))) or PNG)
+    with patch.object(tibo, 'render_card', card), patch.object(tibo, 'render_xfeed', feed):
+        # 两个指令名；无参数与 overview / 概览 走总览卡片
+        for text in ('/tibo', '/雷达', '/tibo overview', '/tibo 概览'):
+            sent = await say(text)
+            assert len(sent) == 1 and is_card(sent[0], '来源链接：') and 'codexradar.com' in sent[0], (text, sent)
+            assert renders[-1][:2] == ('card', 'Tibo 雷达总览'), renders
+        # 帮助与未知子命令
+        for text in ('/tibo 帮助', '/tibo help'):
+            sent = await say(text)
+            assert len(sent) == 1 and sent[0].startswith('Tibo 雷达使用指南'), sent
+        sent = await say('/tibo 乱写')
+        assert len(sent) == 1 and sent[0].startswith('未知子命令，请参考以下说明：') and 'Tibo 雷达使用指南' in sent[0], sent
+        # 动态：参数校验、空列表、默认一页、超过 6 条分页
+        assert await say('/tibo 动态 x') == ['参数错误：数量需为整数；格式示例：/tibo 动态 6']
+        assert await say('/tibo 最新 21') == ['参数错误：数量需介于 1～20 之间；格式示例：/tibo 动态 6']
+        with patch.object(service, 'latest_posts', lambda limit=6: []):
+            sent = await say('/tibo 动态')
+            assert len(sent) == 1 and is_card(sent[0], '来源链接：') and renders[-1][:2] == ('card', 'Tibo 最新动态'), (sent, renders)
+        asked = []
+        with patch.object(service, 'latest_posts', lambda limit=6: asked.append(limit) or posts(limit)):
+            sent = await say('/tibo 动态')
+            assert asked[-1] == 6 and len(sent) == 1 and is_card(sent[0], 'https://x.com/t/5'), sent
+            assert renders[-1] == ('feed', ''), renders
+            sent = await say('/tibo 动态 8')
+            assert asked[-1] == 8 and len(sent) == 2, sent
+            assert is_card(sent[0], 'https://x.com/t/5') and is_card(sent[1], 'https://x.com/t/7'), sent
+            assert renders[-2:] == [('feed', '1/2'), ('feed', '2/2')], renders
+        # 状态、最近（有/无）、历史（参数、空、分页）
+        for text in ('/tibo 状态', '/tibo reset', '/tibo 重置'):
+            sent = await say(text)
+            assert len(sent) == 1 and is_card(sent[0], '来源链接：') and renders[-1][:2] == ('card', 'Tibo 重置状态'), sent
+        with patch.object(service, 'latest_confirmed', lambda: None):
+            sent = await say('/tibo 最近')
+            assert len(sent) == 1 and renders[-1][:2] == ('card', '最近一次重置'), renders
+        with patch.object(service, 'latest_confirmed', lambda: events(1)[0]):
+            sent = await say('/tibo last')
+            assert len(sent) == 1 and is_card(sent[0], 'https://x.com/e/0') and renders[-1][:2] == ('card', '最近一次已确认重置'), sent
+        assert await say('/tibo 历史 0') == ['参数错误：数量需介于 1～20 之间；格式示例：/tibo 历史 6']
+        with patch.object(service, 'history', lambda limit=6: []):
+            sent = await say('/tibo history')
+            assert len(sent) == 1 and renders[-1] == ('card', 'Tibo 重置历史', ''), renders
+        with patch.object(service, 'history', lambda limit=6: events(limit)):
+            sent = await say('/tibo 历史 4')
+            assert len(sent) == 2 and is_card(sent[0], 'https://x.com/e/2') and is_card(sent[1], 'https://x.com/e/3'), sent
+            assert renders[-2:] == [('card', 'Tibo 重置历史', '1/2'), ('card', 'Tibo 重置历史', '2/2')], renders
+
+    # 订阅：私聊受限、普通成员无权、管理员开启/重复开启、状态、取消、重复取消
+    limit = '使用场景限制：Tibo 新帖订阅仅限在群聊中配置。'
+    for text in ('/tibo 订阅', '/tibo 取消订阅', '/tibo 订阅状态'):
+        assert await say(text, private=True, user='admin-1') == [limit], text
+    for text in ('/tibo subscribe', '/tibo unsub'):
+        assert await say(text, user='member-1', member=REGULAR) == ['权限不足：仅限群主、群管理员或 SUPERUSER 操作 Tibo 新帖订阅。'], text
+    assert await say('/tibo 订阅状态', group='300') == ['当前群尚未启用 Tibo 新帖订阅；可使用 /tibo 订阅 进行开启。']
+    assert await say('/tibo 订阅', group='300', user='admin-1', member=ADMIN) == ['已成功开启本群 Tibo 新帖订阅，后续新帖将携图文卡片及源帖链接实时推送。']
+    assert tibo.store.subscription('300').channel_id == '300'
+    assert await say('/tibo sub', group='300', user='admin-1', member=ADMIN) == ['本群此前已启用 Tibo 新帖订阅，新动态将依采集周期自动推送。']
+    for text in ('/tibo 订阅 状态', '/tibo substatus', '/tibo subscriptions'):
+        sent = await say(text, group='300')
+        assert len(sent) == 1 and sent[0].startswith('当前群订阅状态：已开启 Tibo 新帖推送\n最新推送记录：') and '最近投递方式：暂无' in sent[0], sent
+    assert await say('/tibo 退订', group='300', user='admin-1', member=ADMIN) == ['已成功关闭本群的 Tibo 新帖推送服务。']
+    assert await say('/tibo unsubscribe', group='300', user='admin-1', member=ADMIN) == ['本群当前尚未启用 Tibo 新帖订阅，无需退订。']
+    print('ALL-OK')
+
+run(main())
+"""
+
+
+class TiboDispatchTests(unittest.TestCase):
+    def test_tibo_command_through_the_real_event_path(self):
+        from tests.support.dispatch import run_scenarios
+
+        result = run_scenarios(TIBO_SCENARIOS)
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, output[-6000:])
+        self.assertIn("ALL-OK", result.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()
