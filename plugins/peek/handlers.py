@@ -13,11 +13,12 @@ from arclet.entari import Account as Bot, Event
 from otae_bot.compat.entari import cmd_with_args as _cmd
 from otae_bot.infrastructure.http.tls import ashared_ssl_context
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
-from otae_bot.config.settings import Plugin_Config, Config as GlobalConfig
+from otae_bot.config.settings import Config as GlobalConfig
+from plugins.peek.store import PeekState
 
-config = Plugin_Config("peek")
+state = PeekState()
 owner = GlobalConfig.SUPERUSERS
-white_list = config.plugin_content.get("white_list", [])
+white_list = state.data.get("white_list", [])
 
 screen_end = "/screenshot"
 status_end = "/status"
@@ -73,14 +74,14 @@ async def handle_peek(
     command_args = target.result.strip() if target.available else ""
 
     if command_args:
-        peek_list = config.plugin_content.get(group_id, {}).get("peek_list", {})
+        peek_list = state.data.get(group_id, {}).get("peek_list", {})
         if command_args in peek_list:
             webpath = peek_list[command_args]
             nickname = command_args
         else:
             await peek.finish(f"未找到名为「{command_args}」的监控目标。")
     else:
-        def_peek_config = config.plugin_content.get(group_id, {}).get("def_peek_path", None)
+        def_peek_config = state.data.get(group_id, {}).get("def_peek_path", None)
         if def_peek_config is not None:
             webpath = def_peek_config.get("peek_http_path")
             nickname = def_peek_config.get("nickname")
@@ -127,8 +128,8 @@ async def handle_add_whitelist(
 
     if gid not in white_list:
         white_list.append(gid)
-        config.plugin_content["white_list"] = white_list
-        config.update()
+        state.data["white_list"] = white_list
+        state.save()
         await add_whitelist.finish(f"群号 {gid} 已加入白名单。")
     else:
         await add_whitelist.finish(f"群号 {gid} 已在白名单列表中。")
@@ -156,7 +157,7 @@ async def handle_add_peek(
     if not group_id:
         await add_peek.finish("该指令仅支持在群聊或频道中使用。")
 
-    if nick in config.plugin_content.get(group_id, {}).get("peek_list", {}):
+    if nick in state.data.get(group_id, {}).get("peek_list", {}):
         await add_peek.finish(f"目标昵称「{nick}」已存在。")
 
     if not (path.startswith("http://") or path.startswith("https://")):
@@ -169,20 +170,20 @@ async def handle_add_peek(
     except httpx.HTTPError:
         await add_peek.finish(f"无法连通目标地址：{path}")
 
-    if group_id not in config.plugin_content:
-        config.plugin_content[group_id] = {"peek_list": {}}
-    peek_list = config.plugin_content[group_id].get("peek_list", {})
+    if group_id not in state.data:
+        state.data[group_id] = {"peek_list": {}}
+    peek_list = state.data[group_id].get("peek_list", {})
 
     add_msg = ""
-    if config.plugin_content.get(group_id, {}).get("def_peek_path") is None:
-        config.plugin_content[group_id]["def_peek_path"] = {
+    if state.data.get(group_id, {}).get("def_peek_path") is None:
+        state.data[group_id]["def_peek_path"] = {
             "nickname": nick, "peek_http_path": path
         }
         add_msg = "\n已同步设为默认 peek 地址。"
 
     peek_list[nick] = path
-    config.plugin_content[group_id]["peek_list"] = peek_list
-    config.update()
+    state.data[group_id]["peek_list"] = peek_list
+    state.save()
     await add_peek.finish(f"已成功添加 {nick}: {path}" + add_msg)
 
 
@@ -205,23 +206,23 @@ async def handle_del_peek(
     if not group_id:
         await del_peek.finish("该指令仅支持在群聊或频道中使用。")
 
-    if group_id not in config.plugin_content:
+    if group_id not in state.data:
         await del_peek.finish(f"群组 {group_id} 尚未配置任何目标。")
 
-    peek_list = config.plugin_content.get(group_id, {}).get("peek_list", {})
+    peek_list = state.data.get(group_id, {}).get("peek_list", {})
     if nick not in peek_list:
         await del_peek.finish(f"目标昵称「{nick}」不存在。")
 
     del peek_list[nick]
-    config.plugin_content[group_id]["peek_list"] = peek_list
+    state.data[group_id]["peek_list"] = peek_list
 
-    def_peek = config.plugin_content.get(group_id, {}).get("def_peek_path")
+    def_peek = state.data.get(group_id, {}).get("def_peek_path")
     if def_peek and def_peek.get("nickname") == nick:
-        del config.plugin_content[group_id]["def_peek_path"]
-        config.update()
+        del state.data[group_id]["def_peek_path"]
+        state.save()
         await del_peek.finish(f"已移除 {nick}（包含默认地址）。")
     else:
-        config.update()
+        state.save()
         await del_peek.finish(f"已移除 {nick}。")
 
 
@@ -244,12 +245,12 @@ async def handle_set_def_peek(
     if not group_id:
         await set_def_peek.finish("该指令仅支持在群聊或频道中使用。")
 
-    peek_list = config.plugin_content.get(group_id, {}).get("peek_list", {})
+    peek_list = state.data.get(group_id, {}).get("peek_list", {})
     if nick not in peek_list:
         await set_def_peek.finish(f"目标昵称「{nick}」不存在。")
 
-    config.plugin_content[group_id]["def_peek_path"] = {
+    state.data[group_id]["def_peek_path"] = {
         "nickname": nick, "peek_http_path": peek_list[nick]
     }
-    config.update()
+    state.save()
     await set_def_peek.finish(f"已将默认 peek 目标切换为 {nick}。")
