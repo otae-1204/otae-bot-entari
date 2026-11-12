@@ -7,12 +7,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from arclet.entari import MessageChain, Text
 from arclet.letoderea import ExitState, Subscriber
 from satori import ChannelType
 
 from otae_bot.accounts import runtime
 from otae_bot.pipeline import feature_gate
-from otae_bot.compat.entari import ChainMsg
 from otae_bot.delivery import FAILED, NO_ACCOUNT, SENT, SUPPRESSED, Target, deliver, is_not_in_group
 from otae_bot.groups.features import GroupFeatureStore, GroupScope
 
@@ -81,7 +81,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         await self.online(other, default)
         result = await deliver(Target.group("100"), "hi", account=other)
         self.assertEqual((result.status, result.account), (SENT, other))
-        other.protocol.send_message.assert_awaited_once_with("100", ChainMsg.text("hi"))
+        other.protocol.send_message.assert_awaited_once_with("100", MessageChain([Text("hi")]))
         self.assertEqual(result.messages[0].id, "m-2")
 
     async def test_group_prefers_the_named_account_when_it_is_in_the_group(self):
@@ -123,14 +123,14 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         await self.online(named, default)
         result = await deliver(Target.private("200", self_id="2"), "x")
         self.assertIs(result.account, named)
-        named.protocol.send_private_message.assert_awaited_once_with("200", ChainMsg.text("x"))
+        named.protocol.send_private_message.assert_awaited_once_with("200", MessageChain([Text("x")]))
         self.assertIs((await deliver(Target.private("200"), "x")).account, default)
         self.assertIs((await deliver(Target.private("200", self_id="3"), "x")).account, default)
 
     async def test_channel_id_is_the_send_destination_when_known(self):
         bot = account("1")
         await deliver(Target.group("100", channel_id="101"), "x", account=bot)
-        bot.protocol.send_message.assert_awaited_once_with("101", ChainMsg.text("x"))
+        bot.protocol.send_message.assert_awaited_once_with("101", MessageChain([Text("x")]))
 
     # Per-group feature switch
 

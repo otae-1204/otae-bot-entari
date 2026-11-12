@@ -9,11 +9,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from arclet.entari import MessageChain, Text
 from arclet.entari.const import ITEM_ACCOUNT, ITEM_SESSION
 from arclet.letoderea import EVENT, STOP, Scope, Subscriber
 from satori import ChannelType, Role
 
-from otae_bot.compat.entari import ChainMsg
 from otae_bot.delivery import Target, deliver
 from otae_bot.groups.features import (
     GroupFeatureStore,
@@ -337,17 +337,17 @@ class GateTests(unittest.IsolatedAsyncioTestCase):
         async def notify():
             for target in (Target.group("100"), Target.group("101"), Target.private("100")):
                 # A worker inherits its plugin's subscriber context.
-                result = await asyncio.create_task(deliver(target, ChainMsg.text("test"), account=self.current.account))
+                result = await asyncio.create_task(deliver(target, MessageChain([Text("test")]), account=self.current.account))
                 results.append(result.messages)
 
         notify.__module__ = "plugins.hyw.handlers"
         await Subscriber(notify).handle({})
         self.assertEqual(results, [[], ["receipt"], ["private-receipt"]])
-        self.current.account.protocol.send_message.assert_awaited_once_with("101", ChainMsg.text("test"))
+        self.current.account.protocol.send_message.assert_awaited_once_with("101", MessageChain([Text("test")]))
 
     async def test_other_plugin_delivery_is_unaffected(self):
         async def notify():
-            result = await deliver(Target.group("100"), ChainMsg.text("test"), account=self.current.account)
+            result = await deliver(Target.group("100"), MessageChain([Text("test")]), account=self.current.account)
             return result.messages
 
         notify.__module__ = "plugins.endfield.handlers"
