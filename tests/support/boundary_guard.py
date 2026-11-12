@@ -3,8 +3,9 @@
 Inside the bot only Satori should exist; OneBot actions, HTTP side channels,
 framework private APIs and platform-name branching belong to the boundary
 (rules R1-R8). Imports must follow the layering in
-``docs/architecture_conventions.md`` (rules L1-L4). The checks are AST
-heuristics run over ``otae_bot/`` and ``plugins/``.
+``docs/architecture_conventions.md`` (rules L1-L4), and nothing may still use
+the NoneBot-style compatibility layer ``otae_bot/compat`` (rule C1). The checks
+are AST heuristics run over ``otae_bot/`` and ``plugins/``.
 
 Today they are report-only: the current inventory is the checked-in baseline,
 new violations fail, and fixed ones must be removed from the baseline (it may
@@ -43,6 +44,7 @@ RULES = {
     "L2": "boundary-import",
     "L3": "infrastructure-upward-import",
     "L4": "core-imports-plugins",
+    "C1": "compat-import",
 }
 
 # L2: only the boundary itself and the module that wires it may import these.
@@ -55,6 +57,10 @@ LOWER_FORBIDDEN = ("arclet.entari", "arclet.letoderea", "satori", "plugins")
 # otae_bot/config is where settings bind to Entari's config API; nothing else of Entari.
 CONFIG_LAYER = "otae_bot/config/"
 CONFIG_FRAMEWORK_API = "arclet.entari.config"
+
+# C1: the compatibility layer is being removed; only its own modules may import it.
+COMPAT_MODULE = "otae_bot.compat"
+COMPAT_LAYER = "otae_bot/compat/"
 
 # R8: settings come from otae_bot.config (entari.yml / .env); only it reads the environment.
 ENV_READERS = frozenset({"getenv", "environ", "getenvb", "environb"})
@@ -305,6 +311,8 @@ class _Scanner(ast.NodeVisitor):
             self.add("L3", node)
         if rel.startswith("otae_bot/") and any(_within(n, "plugins") for n in names):
             self.add("L4", node)
+        if not rel.startswith(COMPAT_LAYER) and any(_within(n, COMPAT_MODULE) for n in names):
+            self.add("C1", node)
 
     # R3, R4, R8: imports
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:

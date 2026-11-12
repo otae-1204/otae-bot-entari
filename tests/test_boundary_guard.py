@@ -116,6 +116,14 @@ def g(cmd, self, store):
         self.assertEqual(_layering("otae_bot/groups/features.py", source), ["core-imports-plugins"] * 3)
         self.assertEqual(_layering("otae_bot/boundary/onebot11.py", source), ["core-imports-plugins"] * 3)
 
+    def test_only_the_compat_layer_imports_itself(self):
+        source = ("from otae_bot.compat.entari import cmd\nfrom otae_bot.compat import entari\n"
+                  "from otae_bot import compat\nimport otae_bot.compat.messages\n")
+        for rel in ("plugins/a/handlers.py", "otae_bot/delivery/send.py", "otae_bot/boundary/onebot11.py"):
+            self.assertEqual(_scan_source(source, rel).count("compat-import"), 4, rel)
+        self.assertEqual(_scan_source(source, "otae_bot/compat/entari.py").count("compat-import"), 0)
+        self.assertEqual(_scan_source("from otae_bot.compatibility import x\n", "plugins/a/h.py"), [])
+
 
 if __name__ == "__main__":
     unittest.main()

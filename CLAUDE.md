@@ -13,7 +13,7 @@
 - 主动消息（定时、后台任务）一律走 `otae_bot.delivery.deliver`；指令内回复用会话。
 - 凡 `except Exception` 之前必须有 `except ExitState: raise`（`asyncio.CancelledError` 同理）。
 - 插件目录名就是数据键（群功能开关、指令统计、`/功能` 参数），不得重命名已有插件目录。
-- `otae_bot/compat/`（NoneBot 风格兼容层）只减不增，新代码不用它。
+- `otae_bot/compat/`（NoneBot 风格兼容层）只减不增，新代码不用它（守卫 C1）。
 
 ## 分层（依赖只能向下）
 
@@ -29,7 +29,7 @@
 ## 测试与守卫
 
 - 全量：`.venv/bin/python -m pytest -q -p no:cacheprovider`（约 2–3 分钟）。
-- 守卫：`.venv/bin/python -m tests.support.boundary_guard --report` 查看清单；`--write` 重写基线 `tests/fixtures/boundary_guard_baseline.json`。基线只许缩小，不能靠 `--write` 放行新违规。规则 R1–R7 管协议边界，R8 禁止在 `otae_bot/config/` 之外直接读环境变量，L1–L4 管分层。
+- 守卫：`.venv/bin/python -m tests.support.boundary_guard --report` 查看清单；`--write` 重写基线 `tests/fixtures/boundary_guard_baseline.json`。基线只许缩小，不能靠 `--write` 放行新违规。规则 R1–R7 管协议边界，R8 禁止在 `otae_bot/config/` 之外直接读环境变量，L1–L4 管分层，C1 禁止 `otae_bot/compat/` 之外 import 兼容层。
 - 已知失败：`tests/test_hyw_retry.py`（与执行顺序有关，全量时 4 个用例 + 2 个子测试失败，单独跑通过）；`tests/test_changelog.py::DataIntegrityTests` 的 3 个（分支上有未被 `changelog.json` 收录的提交时失败）。
 - 不稳定：`tests/test_bilibili_poller.py::test_video_and_dynamic_targets_are_staggered_and_backed_off`；负载下也见过 `test_browser_render_queue` 与 `test_http_asset_broker` 的计时用例偶发失败。失败时单独重跑确认，并在提交说明里写明。
 - 启动冒烟：`cp entari.example.yml entari.yml`，把 `basic.network` 唯一一条的端口改成 `1`，然后 `timeout -s INT 25 .venv/bin/python bot.py`，应加载 21 个插件，除连接失败外无 ERROR/Traceback；跑完删掉 `entari.yml`（它不进 Git）。

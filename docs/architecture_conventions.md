@@ -25,7 +25,7 @@
 
 - 插件之间不互相 import。需要共享的东西下沉到 `otae_bot`。〔守卫〕
 - 装配应用的 `otae_bot/application.py` 是唯一可以 import `otae_bot.boundary` 的非边界模块。
-- `otae_bot/compat`（NoneBot 风格兼容层）只减不增：新代码不得使用，改到哪个插件就顺手把那个插件迁到 Entari 原生写法。
+- `otae_bot/compat`（NoneBot 风格兼容层）只减不增：新代码不得使用，改到哪个插件就顺手把那个插件迁到 Entari 原生写法。〔守卫 C1〕
 
 ## 3. 边界层
 
