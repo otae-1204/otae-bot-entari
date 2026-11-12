@@ -16,8 +16,6 @@
 {"rule": "compat-import", "file": "plugins/minecraft_plugin/handlers.py", "snippet": "from otae_bot.compat.entari import (", "count": 1},
 {"rule": "compat-import", "file": "plugins/minecraft_plugin/handlers.py", "snippet": "from otae_bot.compat.entari import cmd as _cmd, get_rest, get_bot", "count": 1},
 {"rule": "compat-import", "file": "plugins/minecraft_plugin/handlers.py", "snippet": "from otae_bot.compat.entari import on_alconna", "count": 1},
-{"rule": "compat-import", "file": "plugins/peek/handlers.py", "snippet": "from otae_bot.compat.entari import (", "count": 1},
-{"rule": "compat-import", "file": "plugins/peek/handlers.py", "snippet": "from otae_bot.compat.entari import cmd_with_args as _cmd", "count": 1},
 {"rule": "compat-import", "file": "plugins/radar/handlers.py", "snippet": "from otae_bot.compat.entari import ArgVal, Image, get_rest, on_alconna, send", "count": 1},
 {"rule": "compat-import", "file": "plugins/steamInfo/handlers.py", "snippet": "from otae_bot.compat.entari import (", "count": 1},
 {"rule": "compat-import", "file": "plugins/steamInfo/handlers.py", "snippet": "from otae_bot.compat.entari import cmd as _cmd, get_rest", "count": 1},

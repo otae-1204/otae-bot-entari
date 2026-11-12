@@ -1,19 +1,17 @@
 """远程屏幕窥视插件 - 查询远程服务器桌面截图。"""
 
-import io
 import tempfile
+from pathlib import Path
 
 import httpx
-from arclet.alconna import Args
-from otae_bot.compat.entari import (
-    ArgVal, ChainMsg, Text, event_user_id, make_image,
-)
-from arclet.entari import Account as Bot, Event
+from arclet.alconna import Alconna, Args
+from arclet.entari import Event, Image, MessageChain, Session, Text, command
+from arclet.entari.command import Match
 
-from otae_bot.compat.entari import cmd_with_args as _cmd
 from otae_bot.infrastructure.http.tls import ashared_ssl_context
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
 from otae_bot.config.settings import Config as GlobalConfig
+from otae_bot.messaging.inbound import event_user_id
 from plugins.peek.store import PeekState
 
 state = PeekState()
@@ -25,11 +23,11 @@ status_end = "/status"
 
 # 命令注册
 
-peek = _cmd("peek", args=Args["target?", str], aliases={"窥视"}, priority=5, block=True)
-add_peek = _cmd("add_peek", args=Args["nickname", str]["peek_http_path", str], aliases={"添加窥视"}, priority=5, block=True)
-add_whitelist = _cmd("add_whitelist", args=Args["group_id", str], aliases={"添加白名单", "add_whitelist_group"}, priority=5, block=True)
-del_peek = _cmd("del_peek", args=Args["nickname", str], aliases={"删除窥视"}, priority=5, block=True)
-set_def_peek = _cmd("set_default_peek", args=Args["nickname", str], aliases={"设置默认窥视"}, priority=5, block=True)
+peek = Alconna(["peek", "窥视"], Args["target?", str])
+add_peek = Alconna(["add_peek", "添加窥视"], Args["nickname", str]["peek_http_path", str])
+add_whitelist = Alconna(["add_whitelist", "添加白名单", "add_whitelist_group"], Args["group_id", str])
+del_peek = Alconna(["del_peek", "删除窥视"], Args["nickname", str])
+set_def_peek = Alconna(["set_default_peek", "设置默认窥视"], Args["nickname", str])
 
 # 辅助
 
@@ -53,20 +51,21 @@ def _image_segment_from_bytes(content: bytes):
         f.write(content)
         f.flush()
         schedule_temp_file_cleanup(f.name)
-        return make_image(path=f.name)
+        return Image.of(path=Path(f.name))
 
 
 # helpers
 
-@peek.handle()
+@command.on(peek)
 async def handle_peek(
-    event: Event,
-    bot: Bot,
-    target: ArgVal[str],
+    session: Session,
+    target: Match[str],
 ):
+    event = session.event
     group_id = _get_group_id(event)
     if not group_id:
-        await peek.finish("该指令仅支持在群聊或频道中使用。")
+        await session.send("该指令仅支持在群聊或频道中使用。")
+        return
 
     if group_id not in white_list:
         return
@@ -79,19 +78,23 @@ async def handle_peek(
             webpath = peek_list[command_args]
             nickname = command_args
         else:
-            await peek.finish(f"未找到名为「{command_args}」的监控目标。")
+            await session.send(f"未找到名为「{command_args}」的监控目标。")
+            return
     else:
         def_peek_config = state.data.get(group_id, {}).get("def_peek_path", None)
         if def_peek_config is not None:
             webpath = def_peek_config.get("peek_http_path")
             nickname = def_peek_config.get("nickname")
         else:
-            await peek.finish("当前群暂未配置默认 peek 地址。")
+            await session.send("当前群暂未配置默认 peek 地址。")
+            return
         if webpath is None:
-            await peek.finish("当前群未设置默认 peek 地址，请先添加可用地址。")
+            await session.send("当前群未设置默认 peek 地址，请先添加可用地址。")
+            return
 
     if not (webpath.startswith("http://") or webpath.startswith("https://")):
-        await peek.finish("peek 地址格式不正确，须以 http:// 或 https:// 开头。")
+        await session.send("peek 地址格式不正确，须以 http:// 或 https:// 开头。")
+        return
 
     screen_url = _join_endpoint(webpath, screen_end)
 
@@ -100,75 +103,87 @@ async def handle_peek(
             response = await client.get(screen_url)
             response.raise_for_status()
     except httpx.HTTPError:
-        await peek.finish("获取屏幕截图失败，目标服务可能未启动。")
+        await session.send("获取屏幕截图失败，目标服务可能未启动。")
+        return
 
     if response.status_code == 200:
-        await ChainMsg([
+        await session.send(MessageChain([
             Text(f"Screenshot for {nickname}"),
             _image_segment_from_bytes(response.content),
-        ]).finish()
+        ]))
     else:
-        await peek.finish("获取屏幕截图失败，目标服务可能未启动。")
+        await session.send("获取屏幕截图失败，目标服务可能未启动。")
 
 
 # list
 
-@add_whitelist.handle()
+@command.on(add_whitelist)
 async def handle_add_whitelist(
-    event: Event,
-    group_id: ArgVal[str],
+    session: Session,
+    group_id: Match[str],
 ):
+    event = session.event
     user_id = str(event_user_id(event))
     if user_id not in owner:
-        await add_whitelist.finish("权限不足，无法执行该操作。")
+        await session.send("权限不足，无法执行该操作。")
+        return
 
     gid = group_id.result.strip() if group_id.available else ""
     if not gid:
-        await add_whitelist.finish("请输入待添加的群号。")
+        await session.send("请输入待添加的群号。")
+        return
 
     if gid not in white_list:
         white_list.append(gid)
         state.data["white_list"] = white_list
         state.save()
-        await add_whitelist.finish(f"群号 {gid} 已加入白名单。")
+        await session.send(f"群号 {gid} 已加入白名单。")
+        return
     else:
-        await add_whitelist.finish(f"群号 {gid} 已在白名单列表中。")
+        await session.send(f"群号 {gid} 已在白名单列表中。")
 
 
 # helpers
 
-@add_peek.handle()
+@command.on(add_peek)
 async def handle_add_peek(
-    event: Event,
-    nickname: ArgVal[str],
-    peek_http_path: ArgVal[str],
+    session: Session,
+    nickname: Match[str],
+    peek_http_path: Match[str],
 ):
+    event = session.event
     user_id = str(event_user_id(event))
     if user_id not in owner:
-        await add_peek.finish("权限不足，无法执行该操作。")
+        await session.send("权限不足，无法执行该操作。")
+        return
 
     nick = nickname.result.strip() if nickname.available else ""
     path = peek_http_path.result.strip() if peek_http_path.available else ""
 
     if not nick or not path:
-        await add_peek.finish("格式：/add_peek <昵称> <http地址>")
+        await session.send("格式：/add_peek <昵称> <http地址>")
+        return
 
     group_id = _get_group_id(event)
     if not group_id:
-        await add_peek.finish("该指令仅支持在群聊或频道中使用。")
+        await session.send("该指令仅支持在群聊或频道中使用。")
+        return
 
     if nick in state.data.get(group_id, {}).get("peek_list", {}):
-        await add_peek.finish(f"目标昵称「{nick}」已存在。")
+        await session.send(f"目标昵称「{nick}」已存在。")
+        return
 
     if not (path.startswith("http://") or path.startswith("https://")):
-        await add_peek.finish("请输入有效的 peek 地址。")
+        await session.send("请输入有效的 peek 地址。")
+        return
 
     try:
         async with httpx.AsyncClient(timeout=5, verify=await ashared_ssl_context()) as client:
             resp = await client.get(_join_endpoint(path, screen_end))
             resp.raise_for_status()
     except httpx.HTTPError:
-        await add_peek.finish(f"无法连通目标地址：{path}")
+        await session.send(f"无法连通目标地址：{path}")
+        return
 
     if group_id not in state.data:
         state.data[group_id] = {"peek_list": {}}
@@ -184,34 +199,40 @@ async def handle_add_peek(
     peek_list[nick] = path
     state.data[group_id]["peek_list"] = peek_list
     state.save()
-    await add_peek.finish(f"已成功添加 {nick}: {path}" + add_msg)
+    await session.send(f"已成功添加 {nick}: {path}" + add_msg)
 
 
 # helpers
 
-@del_peek.handle()
+@command.on(del_peek)
 async def handle_del_peek(
-    event: Event,
-    nickname: ArgVal[str],
+    session: Session,
+    nickname: Match[str],
 ):
+    event = session.event
     user_id = str(event_user_id(event))
     if user_id not in owner:
-        await del_peek.finish("权限不足，无法执行该操作。")
+        await session.send("权限不足，无法执行该操作。")
+        return
 
     nick = nickname.result.strip() if nickname.available else ""
     if not nick:
-        await del_peek.finish("请输入待删除的目标昵称。")
+        await session.send("请输入待删除的目标昵称。")
+        return
 
     group_id = _get_group_id(event)
     if not group_id:
-        await del_peek.finish("该指令仅支持在群聊或频道中使用。")
+        await session.send("该指令仅支持在群聊或频道中使用。")
+        return
 
     if group_id not in state.data:
-        await del_peek.finish(f"群组 {group_id} 尚未配置任何目标。")
+        await session.send(f"群组 {group_id} 尚未配置任何目标。")
+        return
 
     peek_list = state.data.get(group_id, {}).get("peek_list", {})
     if nick not in peek_list:
-        await del_peek.finish(f"目标昵称「{nick}」不存在。")
+        await session.send(f"目标昵称「{nick}」不存在。")
+        return
 
     del peek_list[nick]
     state.data[group_id]["peek_list"] = peek_list
@@ -220,37 +241,43 @@ async def handle_del_peek(
     if def_peek and def_peek.get("nickname") == nick:
         del state.data[group_id]["def_peek_path"]
         state.save()
-        await del_peek.finish(f"已移除 {nick}（包含默认地址）。")
+        await session.send(f"已移除 {nick}（包含默认地址）。")
+        return
     else:
         state.save()
-        await del_peek.finish(f"已移除 {nick}。")
+        await session.send(f"已移除 {nick}。")
 
 
 # helpers
 
-@set_def_peek.handle()
+@command.on(set_def_peek)
 async def handle_set_def_peek(
-    event: Event,
-    nickname: ArgVal[str],
+    session: Session,
+    nickname: Match[str],
 ):
+    event = session.event
     user_id = str(event_user_id(event))
     if user_id not in owner:
-        await set_def_peek.finish("权限不足，无法执行该操作。")
+        await session.send("权限不足，无法执行该操作。")
+        return
 
     nick = nickname.result.strip() if nickname.available else ""
     if not nick:
-        await set_def_peek.finish("格式：/set_default_peek <昵称>")
+        await session.send("格式：/set_default_peek <昵称>")
+        return
 
     group_id = _get_group_id(event)
     if not group_id:
-        await set_def_peek.finish("该指令仅支持在群聊或频道中使用。")
+        await session.send("该指令仅支持在群聊或频道中使用。")
+        return
 
     peek_list = state.data.get(group_id, {}).get("peek_list", {})
     if nick not in peek_list:
-        await set_def_peek.finish(f"目标昵称「{nick}」不存在。")
+        await session.send(f"目标昵称「{nick}」不存在。")
+        return
 
     state.data[group_id]["def_peek_path"] = {
         "nickname": nick, "peek_http_path": peek_list[nick]
     }
     state.save()
-    await set_def_peek.finish(f"已将默认 peek 目标切换为 {nick}。")
+    await session.send(f"已将默认 peek 目标切换为 {nick}。")
