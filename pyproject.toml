@@ -6,7 +6,6 @@ authors = ["otae"]
 packages = [
     {include = "otae_bot"},
     {include = "plugins"},
-    {include = "utils"},
     {include = "configs"},
 ]
 

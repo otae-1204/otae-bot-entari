@@ -412,7 +412,7 @@ class CoreLogicTests(unittest.TestCase):
 
     def test_no_direct_adapter_get_name_calls_remain(self):
         offenders = []
-        for base in (ROOT / "plugins", ROOT / "utils"):
+        for base in (ROOT / "plugins", ROOT / "otae_bot"):
             for path in base.rglob("*.py"):
                 text = path.read_text(encoding="utf-8")
                 if ".adapter.get_name(" in text:

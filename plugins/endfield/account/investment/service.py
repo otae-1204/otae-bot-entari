@@ -183,7 +183,7 @@ def clear_account_investment_catalog() -> int:
 async def fetch_account_investment_catalog() -> InvestmentCatalog:
     """Load and compact the current AKEData cost tables.
 
-    The raw HTTP responses are cached by ``utils.http_client``.  This second
+    The raw HTTP responses are cached by ``otae_bot.infrastructure.http.client``.  This second
     cache avoids reparsing the large tables for every account query and is
     invalidated automatically when AKEData changes its revision.
     """

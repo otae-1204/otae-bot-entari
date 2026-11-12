@@ -76,23 +76,10 @@ class ArchitectureTests(unittest.TestCase):
         aliases = {
             "configs.config": "otae_bot.config.settings",
             "configs.path_config": "otae_bot.config.paths",
-            "utils.http_client": "otae_bot.infrastructure.http.client",
-            "utils.async_cache": "otae_bot.infrastructure.cache",
-            "utils.entari_native": "otae_bot.compat.entari",
-            "utils.runtime": "otae_bot.accounts.runtime",
-            "utils.image_executor": "otae_bot.infrastructure.rendering.executor",
-            "utils.image_utils": "otae_bot.infrastructure.rendering.browser",
-            "utils.json_store": "otae_bot.infrastructure.storage.json_store",
         }
         for old, new in aliases.items():
             with self.subTest(old=old):
                 self.assertIs(importlib.import_module(old), importlib.import_module(new))
-        from utils.image_utils import Cv2BuildImage, PILBuildImage
-        from otae_bot.infrastructure.rendering.opencv import Cv2BuildImage as Cv2
-        from otae_bot.infrastructure.rendering.pillow import PILBuildImage as Pillow
-
-        self.assertIs(Cv2BuildImage, Cv2)
-        self.assertIs(PILBuildImage, Pillow)
 
     def test_resource_paths_are_independent_of_feature_depth(self):
         from plugins.endfield import paths

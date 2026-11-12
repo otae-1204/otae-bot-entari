@@ -55,7 +55,6 @@ plugins/
     ownership/                 持有率聚合与渲染
     rendering/                 共享卡片、HTML、素材处理
 configs/                       原有 JSON 配置；Python 文件为兼容入口
-utils/                         旧公共工具导入的兼容入口
 assets/                        原有共享资源
 data/                          运行数据（不入库）
 scripts/                       原有运维、导出、预览工具
@@ -82,7 +81,7 @@ tests/                         功能回归、结构约束、真实插件加载�
 - `.env`、`data/`、JSON 配置和数据库仍按原先的工作目录规则读取；请在项目根目录启动。
 - 源码附带资源统一通过 `otae_bot.paths` 和 `plugins.endfield.paths` 定位，
   不随功能模块的目录深度变化。没有搬迁图片、字体、别名 JSON 或运行数据。
-- `utils.*`、`configs.config`、`configs.path_config` 仍指向同一个新模块对象，
+- `configs.config`、`configs.path_config` 仍指向同一个新模块对象，
   不复制 HTTP 客户端、缓存、环境配置或调度器状态。
 - 新代码使用 `otae_bot.*` 和按业务域组织的终末地模块路径；终末地旧平铺模块路径
   已更新到所有仓库内调用方、脚本和测试。

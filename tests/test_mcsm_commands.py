@@ -23,7 +23,7 @@ MCSM_HANDLERS = ROOT / "plugins/mcsm/handlers.py"
 HANDLER_SOURCES = tuple(
     sorted(
         path
-        for base in ("plugins", "otae_bot", "utils", "scripts")
+        for base in ("plugins", "otae_bot", "scripts")
         for path in (ROOT / base).rglob("*.py")
         if "__pycache__" not in path.parts
     )
