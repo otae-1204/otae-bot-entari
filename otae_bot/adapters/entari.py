@@ -99,9 +99,9 @@ def make_forward(
 
     Each node becomes one child ``<message>``; a node may be a single element, a
     string, or a sequence of elements.  ``name``/``uin`` are emitted as an
-    ``<author>`` inside every node.  Note that LLOneBot keeps a single author
-    state per merged forward, so per-node senders are not portable: pass one
-    author for the whole forward instead.
+    ``<author>`` inside every node.  Callers pass one author for the whole
+    forward; per-node senders are not relied on.  This is the only way plugins
+    send a merged forward; there is no protocol-specific fallback.
     """
     children: list[_MessageElement] = []
     for node in nodes:

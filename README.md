@@ -118,13 +118,10 @@ group, based on each account's Satori `guild.list`. Bilibili pushes use that to
 send each group's notification from an account in the group, switching account
 at once on "not in group" errors (see `docs/bilibili_refactor_plan.md` §5.7).
 
-Some actions only exist in OneBot 11 (reading a quoted merged forward, native
-forward sending). An entry may add `"onebot_url"` (and `"onebot_token"`) for that
-instance's OneBot HTTP server; the account then uses only its own endpoint.
-Entries without it fall back to `ONEBOT_HTTP_URL`. Reading a quoted message needs
-neither when LLOneBot exposes its Satori passthrough `/v1/internal/onebot11/*`
-(LLBot 8.2.1 does): the read goes through the receiving account's own connection.
-See `docs/hyw_plugin.md`.
+Plugins speak only Satori. Platform protocol lives in `otae_bot/boundary/`:
+`ONEBOT_CLIENTS` connects LLBot's OneBot 11 WebSocket through the in-process
+boundary adapter, which presents the account as Satori (quoted merged forwards
+arrive expanded inside the quote; see `docs/hyw_plugin.md`).
 
 ## Deploy To Windows Server
 
