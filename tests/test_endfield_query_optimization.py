@@ -8,6 +8,7 @@ from functools import partial
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import plugins.endfield.catalog.handlers as catalog_handlers
 import plugins.endfield.handlers as endfield
 from plugins.endfield import caches
 from plugins.endfield.catalog import commands
@@ -169,7 +170,7 @@ class EquipmentDirectoryTests(unittest.IsolatedAsyncioTestCase):
         loader = AsyncMock(return_value=EquipmentCatalogView("装备"))
         with patch.object(endfield.service, "get_equipment_catalog_view_from_fz", loader):
             self.assertEqual(
-                await endfield._resolve_equipment_candidates_fz("不存在装备"), []
+                await catalog_handlers._resolve_equipment_candidates_fz("不存在装备"), []
             )
         loader.assert_awaited_once_with(rarity_filter="gold", include_details=False)
 
@@ -301,13 +302,13 @@ class LoadoutCacheTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_repeated_and_concurrent_views_render_once(self):
         renderer = AsyncMock(return_value=(b"png", True))
-        with patch.object(endfield, "draw_loadout_card_with_status", renderer):
+        with patch.object(catalog_handlers, "draw_loadout_card_with_status", renderer):
             outputs = await asyncio.gather(
-                *(endfield._render_loadout_view(loadout_view()) for _ in range(8))
+                *(catalog_handlers._render_loadout_view(loadout_view()) for _ in range(8))
             )
             self.assertEqual(outputs, [b"png"] * 8)
             self.assertEqual(
-                await endfield._render_loadout_view(loadout_view()), b"png"
+                await catalog_handlers._render_loadout_view(loadout_view()), b"png"
             )
         renderer.assert_awaited_once()
 
@@ -325,38 +326,38 @@ class LoadoutCacheTests(unittest.IsolatedAsyncioTestCase):
             {"effects": [LoadoutEffectView("套装", "新效果", True)]},
         )
         renderer = AsyncMock(return_value=(b"png", True))
-        with patch.object(endfield, "draw_loadout_card_with_status", renderer):
-            await endfield._render_loadout_view(view)
+        with patch.object(catalog_handlers, "draw_loadout_card_with_status", renderer):
+            await catalog_handlers._render_loadout_view(view)
             for change in changes:
                 with self.subTest(change=change):
                     changed = replace(view, **change)
-                    await endfield._render_loadout_view(changed)
-                    await endfield._render_loadout_view(changed)
-            await endfield._render_loadout_view(view)
+                    await catalog_handlers._render_loadout_view(changed)
+                    await catalog_handlers._render_loadout_view(changed)
+            await catalog_handlers._render_loadout_view(view)
         self.assertEqual(renderer.await_count, 1 + len(changes))
 
     async def test_renderer_version_invalidates_cache(self):
         renderer = AsyncMock(return_value=(b"png", True))
-        with patch.object(endfield, "draw_loadout_card_with_status", renderer):
-            await endfield._render_loadout_view(loadout_view())
-            with patch.object(endfield, "CARD_RENDER_VERSION", "next-render-version"):
-                await endfield._render_loadout_view(loadout_view())
+        with patch.object(catalog_handlers, "draw_loadout_card_with_status", renderer):
+            await catalog_handlers._render_loadout_view(loadout_view())
+            with patch.object(catalog_handlers, "CARD_RENDER_VERSION", "next-render-version"):
+                await catalog_handlers._render_loadout_view(loadout_view())
         self.assertEqual(renderer.await_count, 2)
 
     async def test_incomplete_image_is_returned_but_not_cached(self):
         renderer = AsyncMock(
             side_effect=[(b"missing-icon", False), (b"complete", True)]
         )
-        with patch.object(endfield, "draw_loadout_card_with_status", renderer):
+        with patch.object(catalog_handlers, "draw_loadout_card_with_status", renderer):
             self.assertEqual(
-                await endfield._render_loadout_view(loadout_view()), b"missing-icon"
+                await catalog_handlers._render_loadout_view(loadout_view()), b"missing-icon"
             )
             self.assertEqual((await endfield._LOADOUT_CACHE.stats()).entries, 0)
             self.assertEqual(
-                await endfield._render_loadout_view(loadout_view()), b"complete"
+                await catalog_handlers._render_loadout_view(loadout_view()), b"complete"
             )
             self.assertEqual(
-                await endfield._render_loadout_view(loadout_view()), b"complete"
+                await catalog_handlers._render_loadout_view(loadout_view()), b"complete"
             )
         self.assertEqual(renderer.await_count, 2)
 
@@ -364,11 +365,11 @@ class LoadoutCacheTests(unittest.IsolatedAsyncioTestCase):
         renderer = AsyncMock(
             side_effect=[RuntimeError("browser unavailable"), (b"png", True)]
         )
-        with patch.object(endfield, "draw_loadout_card_with_status", renderer):
+        with patch.object(catalog_handlers, "draw_loadout_card_with_status", renderer):
             with self.assertRaisesRegex(RuntimeError, "browser unavailable"):
-                await endfield._render_loadout_view(loadout_view())
+                await catalog_handlers._render_loadout_view(loadout_view())
             self.assertEqual(
-                await endfield._render_loadout_view(loadout_view()), b"png"
+                await catalog_handlers._render_loadout_view(loadout_view()), b"png"
             )
         self.assertEqual(renderer.await_count, 2)
 
@@ -377,14 +378,14 @@ class LoadoutCacheTests(unittest.IsolatedAsyncioTestCase):
         renderer = AsyncMock(return_value=(b"png", True))
         with (
             patch.object(endfield._LOADOUT_CACHE, "_clock", lambda: now[0]),
-            patch.object(endfield, "draw_loadout_card_with_status", renderer),
+            patch.object(catalog_handlers, "draw_loadout_card_with_status", renderer),
         ):
-            await endfield._render_loadout_view(loadout_view())
+            await catalog_handlers._render_loadout_view(loadout_view())
             now[0] += 61
-            await endfield._render_loadout_view(loadout_view())
+            await catalog_handlers._render_loadout_view(loadout_view())
             self.assertEqual(renderer.await_count, 1)  # the content-keyed PNG outlives a minute
             now[0] += caches.RENDER_CACHE_TTL_SECONDS
-            await endfield._render_loadout_view(loadout_view())
+            await catalog_handlers._render_loadout_view(loadout_view())
         self.assertEqual(renderer.await_count, 2)
         self.assertEqual(endfield._LOADOUT_CACHE.max_entries, 32)
         self.assertEqual(endfield._LOADOUT_CACHE.max_bytes, 24 * 1024 * 1024)

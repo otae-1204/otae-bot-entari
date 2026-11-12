@@ -16,6 +16,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+import plugins.endfield.catalog.handlers as catalog_handlers
+import plugins.endfield.stages.handlers as stage_handlers
 from plugins.endfield.catalog import aliases as catalog_aliases
 from plugins.endfield.catalog import commands
 from plugins.endfield.catalog.models import ArchiveItemView, ArchiveSnapshotView
@@ -142,15 +144,15 @@ def _offline_public_sources(test: unittest.TestCase) -> dict[tuple[str, str], As
     """
     mocks: dict[tuple[str, str], AsyncMock] = {}
     replaced: dict[str, dict] = {}
-    for kind, resolvers in endfield.SOURCE_CANDIDATE_RESOLVERS.items():
+    for kind, resolvers in catalog_handlers.SOURCE_CANDIDATE_RESOLVERS.items():
         table = dict(resolvers)
         for source in ("fz", "warfarin"):
             if source in table:
                 table[source] = mocks[(kind, source)] = AsyncMock(return_value=[])
         replaced[kind] = table
     for patcher in (
-        patch.dict(endfield.SOURCE_CANDIDATE_RESOLVERS, replaced),
-        patch.object(endfield.stage_service, "discover_matches", AsyncMock(return_value=())),
+        patch.dict(catalog_handlers.SOURCE_CANDIDATE_RESOLVERS, replaced),
+        patch.object(stage_handlers.stage_service, "discover_matches", AsyncMock(return_value=())),
         patch.object(endfield, "notice_before_public_data", AsyncMock()),
     ):
         patcher.start()
@@ -339,7 +341,7 @@ class EndfieldEncyclopediaClassificationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_item_scope_fallback_picks_a_prop_when_item_candidates_are_empty(self):
         command = commands.ParsedEndfieldCommand("query", scope="item", query="炝炒时蔬")
-        fallback = await endfield._item_scope_fallback(command, [])
+        fallback = await catalog_handlers._item_scope_fallback(command, [])
         self.assertIsInstance(fallback, list)
         self.assertEqual([item.key for item in fallback], [PROP_RATION])
 
@@ -347,14 +349,14 @@ class EndfieldEncyclopediaClassificationTests(unittest.IsolatedAsyncioTestCase):
         command = commands.ParsedEndfieldCommand("query", scope="item", query="苔藓样本")
         existing = [commands.EndfieldCandidate("item", ITEM_MOSS, "苔藓样本", 90, "akedata")]
         with patch.object(encyclopedia_service, "prop_candidates") as prop_candidates:
-            fallback = await endfield._item_scope_fallback(command, existing)
+            fallback = await catalog_handlers._item_scope_fallback(command, existing)
         self.assertIsNone(fallback)
         self.assertEqual(prop_candidates.call_count, 0)
 
     async def test_item_scope_fallback_redirects_medals(self):
         _offline_public_sources(self)
         command = commands.ParsedEndfieldCommand("query", scope="item", query="一星蚀刻章")
-        fallback = await endfield._item_scope_fallback(command, [])
+        fallback = await catalog_handlers._item_scope_fallback(command, [])
         self.assertEqual(fallback, "medal")
 
     async def test_item_obtain_way_is_localized(self):
@@ -476,9 +478,9 @@ class EndfieldEncyclopediaPropEffectTests(unittest.IsolatedAsyncioTestCase):
         candidate = commands.EndfieldCandidate(
             "prop", PROP_BROKEN, "半成品口粮", 100, "akedata", revision=self.data.revision
         )
-        with patch.object(endfield.encyclopedia_draw, "draw_prop_card", drawer):
+        with patch.object(catalog_handlers.encyclopedia_draw, "draw_prop_card", drawer):
             with self.assertRaises(encyclopedia_props.PropEffectIncomplete):
-                await endfield._render_candidate(candidate, "akedata")
+                await catalog_handlers._render_candidate(candidate, "akedata")
         self.assertEqual(drawer.await_count, 0)
 
 
@@ -595,7 +597,7 @@ class EndfieldEncyclopediaAliasHandlerTests(unittest.IsolatedAsyncioTestCase):
         command = commands.ParsedEndfieldCommand(
             "alias", alias_action="add", args=("物品", "苔藓样本", "苔藓")
         )
-        message = await endfield._handle_alias_command(command)
+        message = await catalog_handlers._handle_alias_command(command)
         self.assertIn("添加", message)
         self.assertIn("物品别名", message)
         self.assertIn("苔藓 → 苔藓样本", message)
@@ -605,7 +607,7 @@ class EndfieldEncyclopediaAliasHandlerTests(unittest.IsolatedAsyncioTestCase):
         command = commands.ParsedEndfieldCommand(
             "alias", alias_action="add", args=("物品", "不存在的物品", "x")
         )
-        message = await endfield._handle_alias_command(command)
+        message = await catalog_handlers._handle_alias_command(command)
         self.assertIn("失败", message)
         self.assertIn("未收录正式名称", message)
         self.assertIn("不存在的物品", message)
@@ -617,7 +619,7 @@ class EndfieldEncyclopediaAliasHandlerTests(unittest.IsolatedAsyncioTestCase):
             command = commands.ParsedEndfieldCommand(
                 "alias", alias_action="add", args=("档案", "终末地物资", "终末地")
             )
-            message = await endfield._handle_alias_command(command)
+            message = await catalog_handlers._handle_alias_command(command)
         self.assertIn("添加", message)
         self.assertIn("档案条目别名", message)
         self.assertIn("终末地 → 终末地物资", message)
@@ -630,7 +632,7 @@ class EndfieldEncyclopediaAliasHandlerTests(unittest.IsolatedAsyncioTestCase):
             command = commands.ParsedEndfieldCommand(
                 "alias", alias_action="add", args=("档案", "不存在条目", "x")
             )
-            message = await endfield._handle_alias_command(command)
+            message = await catalog_handlers._handle_alias_command(command)
         # 档案条目不能被当作“分类未开放”拒绝，而是走正式名核对后报“未收录”。
         self.assertNotIn("未开放", message)
         self.assertIn("未收录正式名称", message)
@@ -847,7 +849,7 @@ class EndfieldEncyclopediaTermTests(unittest.IsolatedAsyncioTestCase):
 
     def test_mention_only_sources_are_hidden_from_the_card(self):
         view = TermView(term_id="ba.probe", name="测试词条", mention_total=3)
-        html = endfield.encyclopedia_draw._term_sources(view)
+        html = catalog_handlers.encyclopedia_draw._term_sources(view)
         self.assertIn("暂无直接来源", html)
         self.assertIn("3 处技能文本提及", html)
 
@@ -916,7 +918,7 @@ class EndfieldEncyclopediaTermTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_term_html_has_no_image_tag_level_or_multiplier(self):
         view = await encyclopedia_terms.build_term_view(self.data, "ba.physicalvul")
-        document = endfield.encyclopedia_draw.render_term_html(view, {})
+        document = catalog_handlers.encyclopedia_draw.render_term_html(view, {})
         for forbidden in ("<image=", "Lv1", "倍率", "源石技艺"):
             self.assertNotIn(forbidden, document)
         self.assertIn("物理脆弱", document)
@@ -926,7 +928,7 @@ class EndfieldEncyclopediaTermTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_term_html_draws_level_values_and_grouped_sources(self):
         view = await encyclopedia_terms.build_term_view(self.data, TERM_BURNING)
-        document = endfield.encyclopedia_draw.render_term_html(view, {})
+        document = catalog_handlers.encyclopedia_draw.render_term_html(view, {})
         self.assertIn("val-table", document)
         for level in ("Lv1", "Lv2", "Lv3", "Lv4"):
             self.assertIn(level, document)
@@ -948,14 +950,14 @@ class EndfieldEncyclopediaArchiveTests(unittest.IsolatedAsyncioTestCase):
         )
         self.archive.start()
         self.addCleanup(self.archive.stop)
-        self.addCleanup(endfield.encyclopedia_archives.clear_caches)
+        self.addCleanup(catalog_handlers.encyclopedia_archives.clear_caches)
 
     async def test_archive_entry_is_never_wrapped_in_an_ake_snapshot(self):
-        self.assertNotIn("archive_entry", endfield._AKE_SNAPSHOT_KINDS)
-        self.assertNotIn("archive_entry", endfield._FZ_WHOLE_VIEW_FALLBACK_KINDS)
+        self.assertNotIn("archive_entry", catalog_handlers._AKE_SNAPSHOT_KINDS)
+        self.assertNotIn("archive_entry", catalog_handlers._FZ_WHOLE_VIEW_FALLBACK_KINDS)
 
     async def test_archive_candidates_carry_the_archive_version(self):
-        candidates = await endfield._resolve_archive_entry_candidates("终末地物资")
+        candidates = await catalog_handlers._resolve_archive_entry_candidates("终末地物资")
         self.assertEqual(len(candidates), 1)
         self.assertEqual(candidates[0].kind, "archive_entry")
         self.assertEqual(candidates[0].revision, "1.5")
@@ -963,7 +965,7 @@ class EndfieldEncyclopediaArchiveTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_archive_candidates_are_empty_without_a_snapshot(self):
         with patch.object(endfield.archive_store, "load_current_view", return_value=None):
-            self.assertEqual(await endfield._resolve_archive_entry_candidates("终末地物资"), [])
+            self.assertEqual(await catalog_handlers._resolve_archive_entry_candidates("终末地物资"), [])
 
     async def test_missing_snapshot_sends_a_refresh_hint_for_the_explicit_scope(self):
         session = AsyncMock()
@@ -993,8 +995,8 @@ class EndfieldEncyclopediaArchiveTests(unittest.IsolatedAsyncioTestCase):
             "archive_entry", "nar_1", "终末地物资", 100, "akedata", revision="1.5"
         )
         with patch.object(repository, "snapshot", side_effect=AssertionError("must not open AkeSnapshot")):
-            with patch.object(endfield.encyclopedia_draw, "draw_archive_entry_card", drawer):
-                pages = await endfield._render_candidate(candidate, "")
+            with patch.object(catalog_handlers.encyclopedia_draw, "draw_archive_entry_card", drawer):
+                pages = await catalog_handlers._render_candidate(candidate, "")
         self.assertEqual(pages, (b"png",))
         self.assertEqual(drawer.await_count, 1)
         view = drawer.await_args.args[0]
@@ -1006,31 +1008,31 @@ class EndfieldEncyclopediaArchiveTests(unittest.IsolatedAsyncioTestCase):
 
 class EndfieldEncyclopediaWiringTests(unittest.TestCase):
     def test_registries_are_consistent(self):
-        for kind in endfield.CONTENT_RESOLVERS:
+        for kind in catalog_handlers.CONTENT_RESOLVERS:
             with self.subTest(kind=kind):
                 self.assertIn(kind, commands.SCOPE_LABELS)
-                self.assertIn(kind, endfield.CONTENT_RENDERERS)
+                self.assertIn(kind, catalog_handlers.CONTENT_RENDERERS)
                 self.assertTrue(endfield.source_order(kind))
 
     def test_fz_whole_view_fallback_is_a_subset_of_the_ake_snapshot_kinds(self):
         self.assertTrue(
-            endfield._FZ_WHOLE_VIEW_FALLBACK_KINDS <= endfield._AKE_SNAPSHOT_KINDS
+            catalog_handlers._FZ_WHOLE_VIEW_FALLBACK_KINDS <= catalog_handlers._AKE_SNAPSHOT_KINDS
         )
 
     def test_every_ake_snapshot_kind_has_a_renderer(self):
-        self.assertTrue(endfield._AKE_SNAPSHOT_KINDS <= set(endfield.CONTENT_RENDERERS))
+        self.assertTrue(catalog_handlers._AKE_SNAPSHOT_KINDS <= set(catalog_handlers.CONTENT_RENDERERS))
 
     def test_catalogs_are_renderable_but_not_resolvable(self):
         for kind in ("item_catalog", "prop_catalog", "enemy_catalog", "term_catalog"):
             with self.subTest(kind=kind):
-                self.assertIn(kind, endfield.CONTENT_RENDERERS)
-                self.assertNotIn(kind, endfield.CONTENT_RESOLVERS)
+                self.assertIn(kind, catalog_handlers.CONTENT_RENDERERS)
+                self.assertNotIn(kind, catalog_handlers.CONTENT_RESOLVERS)
 
     def test_encyclopedia_kinds_only_declare_akedata(self):
         for kind in ("item", "prop", "enemy", "term"):
             with self.subTest(kind=kind):
-                self.assertEqual(set(endfield.SOURCE_CANDIDATE_RESOLVERS[kind]), {"akedata"})
-        self.assertNotIn("archive_entry", endfield.SOURCE_CANDIDATE_RESOLVERS)
+                self.assertEqual(set(catalog_handlers.SOURCE_CANDIDATE_RESOLVERS[kind]), {"akedata"})
+        self.assertNotIn("archive_entry", catalog_handlers.SOURCE_CANDIDATE_RESOLVERS)
         self.assertEqual(endfield.source_order("archive_entry"), ("akedata",))
 
 
@@ -1041,7 +1043,7 @@ class EndfieldEncyclopediaSourceTests(unittest.IsolatedAsyncioTestCase):
     async def _guard_message(self) -> str:
         session = AsyncMock()
         collect = AsyncMock(side_effect=AssertionError("must be rejected before collecting"))
-        with patch.object(endfield, "_collect_candidates", collect):
+        with patch.object(catalog_handlers, "_collect_candidates", collect):
             await endfield._handle_command(session, None, commands.parse_command("道具 xx --source fz"))
         collect.assert_not_awaited()
         session.send.assert_awaited_once()
@@ -1065,8 +1067,8 @@ class EndfieldEncyclopediaSourceTests(unittest.IsolatedAsyncioTestCase):
             "fz": AsyncMock(return_value=[]),
             "warfarin": AsyncMock(side_effect=WarfarinAPIError("offline")),
         }
-        with patch.dict(endfield.SOURCE_CANDIDATE_RESOLVERS, {"operator": resolvers}):
-            candidates = await endfield._resolve_candidates_from_sources("operator", "q")
+        with patch.dict(catalog_handlers.SOURCE_CANDIDATE_RESOLVERS, {"operator": resolvers}):
+            candidates = await catalog_handlers._resolve_candidates_from_sources("operator", "q")
         self.assertEqual(candidates, [])
 
     async def test_every_source_failing_raises_the_last_error(self):
@@ -1074,17 +1076,17 @@ class EndfieldEncyclopediaSourceTests(unittest.IsolatedAsyncioTestCase):
             "fz": AsyncMock(side_effect=WarfarinAPIError("first")),
             "warfarin": AsyncMock(side_effect=WarfarinAPIError("second")),
         }
-        with patch.dict(endfield.SOURCE_CANDIDATE_RESOLVERS, {"operator": resolvers}):
+        with patch.dict(catalog_handlers.SOURCE_CANDIDATE_RESOLVERS, {"operator": resolvers}):
             with self.assertRaisesRegex(WarfarinAPIError, "second"):
-                await endfield._resolve_candidates_from_sources("operator", "q")
+                await catalog_handlers._resolve_candidates_from_sources("operator", "q")
 
     async def test_akedata_failure_with_an_empty_fz_list_is_not_reported_as_unavailable(self):
         resolvers = {
             "akedata": AsyncMock(side_effect=AkeDataIncomplete("missing")),
             "fz": AsyncMock(return_value=[]),
         }
-        with patch.dict(endfield.SOURCE_CANDIDATE_RESOLVERS, {"operator": resolvers}):
-            candidates = await endfield._resolve_candidates_from_sources("operator", "q")
+        with patch.dict(catalog_handlers.SOURCE_CANDIDATE_RESOLVERS, {"operator": resolvers}):
+            candidates = await catalog_handlers._resolve_candidates_from_sources("operator", "q")
         self.assertEqual(candidates, [])
 
     async def test_scope_all_raises_when_the_only_akedata_kind_is_incomplete(self):
@@ -1093,15 +1095,15 @@ class EndfieldEncyclopediaSourceTests(unittest.IsolatedAsyncioTestCase):
                 raise AkeDataIncomplete("stage table missing")
             return []
 
-        with patch.object(endfield, "_resolve_candidates_from_sources", resolve):
+        with patch.object(catalog_handlers, "_resolve_candidates_from_sources", resolve):
             with self.assertRaises(AkeDataIncomplete):
-                await endfield._collect_candidates("all", "q")
+                await catalog_handlers._collect_candidates("all", "q")
 
     async def test_akedata_incomplete_reaches_the_user_as_unavailable(self):
         session = AsyncMock()
         # 冷启动提示同样经 session.send 发出，这里只看最终回复。
         with patch.object(
-            endfield,
+            catalog_handlers,
             "_resolve_candidates_from_sources",
             AsyncMock(side_effect=AkeDataIncomplete("missing")),
         ), patch.object(endfield, "notice_before_public_data", AsyncMock()):
@@ -1131,7 +1133,7 @@ class EndfieldEncyclopediaRenderTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(repository, "snapshot", AsyncMock(return_value=data)):
             with patch.object(cards, "fetch_many_resilient", fetch_many):
                 with patch.object(
-                    endfield.encyclopedia_draw,
+                    catalog_handlers.encyclopedia_draw,
                     "screenshot_web_element",
                     AsyncMock(return_value=b"png-bytes"),
                 ):
@@ -1142,8 +1144,8 @@ class EndfieldEncyclopediaRenderTests(unittest.IsolatedAsyncioTestCase):
                     candidate = commands.EndfieldCandidate(
                         "item", ITEM_MOSS, "苔藓样本", 100, "akedata", revision=data.revision
                     )
-                    first = await endfield._render_candidate(candidate, "akedata")
-                    second = await endfield._render_candidate(candidate, "akedata")
+                    first = await catalog_handlers._render_candidate(candidate, "akedata")
+                    second = await catalog_handlers._render_candidate(candidate, "akedata")
                     after = (await endfield._CARD_CACHE.stats()).direct_hits
         return first, second, after - before
 
@@ -1166,7 +1168,7 @@ class EndfieldEncyclopediaRenderTests(unittest.IsolatedAsyncioTestCase):
             encyclopedia_draw, "draw_catalog_card", AsyncMock(return_value=b"page")
         ):
             view = encyclopedia_service.build_archive_catalog(
-                endfield.encyclopedia_archives.build_entries(_archive_snapshot()), "1.5"
+                catalog_handlers.encyclopedia_archives.build_entries(_archive_snapshot()), "1.5"
             )
             pages = await encyclopedia_draw.draw_catalog_cards(view)
         self.assertEqual(pages, (b"page",))
@@ -1175,7 +1177,7 @@ class EndfieldEncyclopediaRenderTests(unittest.IsolatedAsyncioTestCase):
     async def test_archive_entry_html_uses_only_snapshot_fields(self):
         from plugins.endfield.encyclopedia import draw as encyclopedia_draw
 
-        entry = endfield.encyclopedia_archives.entry_view(_archive_snapshot(), "nar_1")
+        entry = catalog_handlers.encyclopedia_archives.entry_view(_archive_snapshot(), "nar_1")
         document = encyclopedia_draw.render_archive_entry_html(entry, {})
         self.assertIn("终末地物资", document)
         self.assertIn("中枢档案", document)

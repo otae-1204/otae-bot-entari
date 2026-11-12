@@ -164,6 +164,9 @@ async def benchmark(args):
 
     logger.remove()
     import plugins.endfield.handlers as endfield
+    import plugins.endfield.caches as endfield_caches
+    import plugins.endfield.catalog.handlers as endfield_catalog
+    import plugins.endfield.state as endfield_state
     from otae_bot.infrastructure.http import client as shared_http
     from otae_bot.infrastructure.rendering.browser import (
         close_browser,
@@ -205,13 +208,13 @@ async def benchmark(args):
         view = WeaponView(
             "赤缨", "amaranthine-tassel", "武器/赤缨", weapon_id="wpn_claym_0017"
         )
-        names = await endfield.service.find_weapon_operator_names(view)
+        names = await endfield_state.service.find_weapon_operator_names(view)
         if not names:
             raise RuntimeError("Weapon relation lookup returned no operators")
         return names
 
     async def loadout():
-        return await endfield._handle_loadout(
+        return await endfield_catalog._handle_loadout(
             Matcher(),
             ParsedEndfieldCommand(
                 "loadout",
@@ -220,7 +223,7 @@ async def benchmark(args):
         )
 
     async def card(kind, key, source="fz"):
-        pages = await endfield._render_candidate(
+        pages = await endfield_catalog._render_candidate(
             EndfieldCandidate(kind, key, key, 100, source)
         )
         if not pages:
@@ -228,7 +231,7 @@ async def benchmark(args):
         return pages
 
     async def stage_card():
-        catalog = await endfield.stage_service.get_catalog_view("akedata")
+        catalog = await endfield_state.stage_service.get_catalog_view("akedata")
         item = next(
             item for group in catalog.groups for item in group.items if item.queryable
         )
@@ -236,7 +239,7 @@ async def benchmark(args):
 
     async def medals():
         from dataclasses import asdict
-        value = asdict(await endfield.service.fetch_medal_snapshot_akedata())
+        value = asdict(await endfield_state.service.fetch_medal_snapshot_akedata())
         value.pop("fetched_at", None)  # Local capture time is not source content.
         return value
 
@@ -264,11 +267,18 @@ async def benchmark(args):
     }
 
     async def clear_derived():
-        endfield.service = EndfieldService(endfield.client)
-        endfield.stage_service = type(endfield.stage_service)(endfield.client)
-        endfield.calendar_source = type(endfield.calendar_source)(endfield.client)
+        # 插件各模块都从 plugins.endfield.state import 这些实例；冷启动要在每个模块里一起替换。
+        fresh = {
+            "service": EndfieldService(endfield_state.client),
+            "stage_service": type(endfield_state.stage_service)(endfield_state.client),
+            "calendar_source": type(endfield_state.calendar_source)(endfield_state.client),
+        }
+        for module in [m for n, m in sys.modules.items() if n.startswith("plugins.endfield")]:
+            for name, value in fresh.items():
+                if hasattr(module, name):
+                    setattr(module, name, value)
         for name in ("_CARD_CACHE", "_LOADOUT_CACHE", "_CALENDAR_CACHE"):
-            cache = getattr(endfield, name, None)
+            cache = getattr(endfield_caches, name, None)
             if cache is not None:
                 await cache.clear()
 
@@ -313,8 +323,8 @@ async def benchmark(args):
     try:
         with (
             http.install(),
-            patch.object(endfield, "_finish_png", finish_png),
-            patch.object(endfield, "prompt", no_prompt),
+            patch.object(endfield_catalog, "_finish_png", finish_png),
+            patch.object(endfield_catalog, "prompt", no_prompt),
         ):
             if set(args.cases) - {
                 "equipment_search",
@@ -388,7 +398,7 @@ async def benchmark(args):
         await close_browser()
         await close_image_executor()
         await shared_http.close_http_client()
-        await endfield.official_client.close()
+        await endfield_state.official_client.close()
     try:
         import resource
         report["python_peak_rss_mib"] = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024

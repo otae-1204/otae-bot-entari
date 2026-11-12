@@ -4,6 +4,8 @@ import unittest
 from dataclasses import replace
 from unittest.mock import AsyncMock, patch
 
+import plugins.endfield.catalog.handlers as catalog_handlers
+import plugins.endfield.stages.handlers as stage_handlers
 import plugins.endfield.handlers as endfield
 from plugins.endfield.catalog import commands
 from plugins.endfield.stages import draw as stage_draw
@@ -2167,10 +2169,10 @@ class EndfieldStageIntegrationTests(unittest.IsolatedAsyncioTestCase):
         second = commands.EndfieldCandidate(
             "stage_catalog", "", "关卡资料目录", 100, "akedata", revision="r2"
         )
-        with patch.dict(endfield.CONTENT_RENDERERS, {"stage_catalog": renderer}):
-            self.assertEqual(await endfield._render_candidate(first, "akedata"), (b"revision-one",))
-            self.assertEqual(await endfield._render_candidate(first, "akedata"), (b"revision-one",))
-            self.assertEqual(await endfield._render_candidate(second, "akedata"), (b"revision-two",))
+        with patch.dict(catalog_handlers.CONTENT_RENDERERS, {"stage_catalog": renderer}):
+            self.assertEqual(await catalog_handlers._render_candidate(first, "akedata"), (b"revision-one",))
+            self.assertEqual(await catalog_handlers._render_candidate(first, "akedata"), (b"revision-one",))
+            self.assertEqual(await catalog_handlers._render_candidate(second, "akedata"), (b"revision-two",))
         self.assertEqual(renderer.await_count, 2)
 
     async def test_auto_candidate_renders_from_its_discovered_source(self):
@@ -2183,8 +2185,8 @@ class EndfieldStageIntegrationTests(unittest.IsolatedAsyncioTestCase):
             revision="1.4.4@fixture-1",
         )
         renderer = AsyncMock(return_value=(b"akedata-stage", False))
-        with patch.object(endfield, "_render_stage", renderer):
-            self.assertEqual(await endfield._render_candidate(candidate), (b"akedata-stage",))
+        with patch.object(catalog_handlers, "_render_stage", renderer):
+            self.assertEqual(await catalog_handlers._render_candidate(candidate), (b"akedata-stage",))
         renderer.assert_awaited_once_with(
             "indie_hard022",
             "akedata",
@@ -2205,8 +2207,8 @@ class EndfieldStageIntegrationTests(unittest.IsolatedAsyncioTestCase):
             queryable=True,
             source="akedata",
         )
-        with patch.object(endfield.stage_service, "discover_matches", AsyncMock(return_value=(match,))):
-            candidates = await endfield._resolve_stage_candidates("撼山雾火")
+        with patch.object(stage_handlers.stage_service, "discover_matches", AsyncMock(return_value=(match,))):
+            candidates = await stage_handlers._resolve_stage_candidates("撼山雾火")
         self.assertEqual(len(candidates), 1)
         self.assertEqual(
             (candidates[0].key, candidates[0].source, candidates[0].score),

@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 
 from PIL import Image
 
+import plugins.endfield.catalog.handlers as catalog_handlers
 import plugins.endfield.handlers as endfield
 from plugins.endfield.rendering import cards as draw
 from plugins.endfield.providers.warfarin import WarfarinAPIError
@@ -43,8 +44,8 @@ class EndfieldPerformanceBehaviorTests(unittest.IsolatedAsyncioTestCase):
                 return {"hits": []}
 
         fake = FakeClient()
-        with patch.object(endfield, "client", fake):
-            candidates = await endfield._resolve_operator_candidates_fz("lwt")
+        with patch.object(catalog_handlers, "client", fake):
+            candidates = await catalog_handlers._resolve_operator_candidates_fz("lwt")
         self.assertEqual(fake.search_calls, 0)
         self.assertEqual(candidates[0].key, "干员/莱万汀")
         self.assertEqual(candidates[0].score, 100)
@@ -72,9 +73,9 @@ class EndfieldPerformanceBehaviorTests(unittest.IsolatedAsyncioTestCase):
             "get_equipment_catalog_view_from_fz",
             AsyncMock(return_value=catalog),
         ) as loader:
-            group_candidates = await endfield._resolve_equipment_candidates_fz("长息")
-            item_candidates = await endfield._resolve_equipment_candidates_fz("长息轻护甲")
-            alias_candidates = await endfield._resolve_equipment_candidates_fz("长息充能甲")
+            group_candidates = await catalog_handlers._resolve_equipment_candidates_fz("长息")
+            item_candidates = await catalog_handlers._resolve_equipment_candidates_fz("长息轻护甲")
+            alias_candidates = await catalog_handlers._resolve_equipment_candidates_fz("长息充能甲")
 
         loader.assert_awaited()
         selected_group, _ = endfield.choose_candidate(group_candidates)
@@ -90,8 +91,8 @@ class EndfieldPerformanceBehaviorTests(unittest.IsolatedAsyncioTestCase):
         catalog = EquipmentCatalogView("全部装备套组")
         loader = AsyncMock(return_value=catalog)
         with patch.object(endfield.service, "get_equipment_catalog_view", loader):
-            default = await endfield._resolve_equipment_candidates_fz("__all__")
-            all_items = await endfield._resolve_equipment_candidates_fz("__all__", "all")
+            default = await catalog_handlers._resolve_equipment_candidates_fz("__all__")
+            all_items = await catalog_handlers._resolve_equipment_candidates_fz("__all__", "all")
 
         self.assertEqual(default[0].key, "gold::")
         self.assertEqual(all_items[0].key, "all::")
@@ -255,18 +256,18 @@ class EndfieldPerformanceBehaviorTests(unittest.IsolatedAsyncioTestCase):
             return b"png-data"
 
         candidate = EndfieldCandidate("operator", "干员/莱万汀", "莱万汀", 100, "fz")
-        with patch.dict(endfield.CONTENT_RENDERERS, {"operator": renderer}, clear=False):
+        with patch.dict(catalog_handlers.CONTENT_RENDERERS, {"operator": renderer}, clear=False):
             first, second = await asyncio.gather(
-                endfield._render_candidate(candidate, "fz"),
-                endfield._render_candidate(candidate, "fz"),
+                catalog_handlers._render_candidate(candidate, "fz"),
+                catalog_handlers._render_candidate(candidate, "fz"),
             )
-            third = await endfield._render_candidate(candidate, "fz")
+            third = await catalog_handlers._render_candidate(candidate, "fz")
         self.assertEqual((first, second, third), ((b"png-data",), (b"png-data",), (b"png-data",)))
         self.assertEqual(calls, 1)
         self.assertEqual(rendered_sources, ["fz"])
 
         command = ParsedEndfieldCommand("dev", dev_action="cache", args=("clear", "operator"))
-        message = await endfield._handle_dev_command(command)
+        message = await catalog_handlers._handle_dev_command(command)
         self.assertIn("operator", message)
         self.assertIn("缓存", message)
         self.assertEqual((await endfield._CARD_CACHE.stats()).entries, 0)
@@ -283,8 +284,8 @@ class EndfieldPerformanceBehaviorTests(unittest.IsolatedAsyncioTestCase):
             return [EndfieldCandidate("operator", "laevatain", "莱万汀", 100, "warfarin")]
 
         resolvers = {"operator": {"fz": fz_resolver, "warfarin": warfarin_resolver}}
-        with patch.dict(endfield.SOURCE_CANDIDATE_RESOLVERS, resolvers, clear=True):
-            candidates = await endfield._resolve_candidates_from_sources(
+        with patch.dict(catalog_handlers.SOURCE_CANDIDATE_RESOLVERS, resolvers, clear=True):
+            candidates = await catalog_handlers._resolve_candidates_from_sources(
                 "operator", "莱万汀", "warfarin"
             )
 
@@ -296,9 +297,9 @@ class EndfieldPerformanceBehaviorTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(endfield.service, "get_operator_view_from_warfarin", AsyncMock(return_value=view)) as selected,
             patch.object(endfield.service, "get_operator_view", AsyncMock()) as fallback,
-            patch.object(endfield, "draw_operator_card", AsyncMock(return_value=b"png-data")),
+            patch.object(catalog_handlers, "draw_operator_card", AsyncMock(return_value=b"png-data")),
         ):
-            output = await endfield._render_operator("laevatain", "warfarin")
+            output = await catalog_handlers._render_operator("laevatain", "warfarin")
 
         self.assertEqual(output, b"png-data")
         selected.assert_awaited_once_with("laevatain")
@@ -309,9 +310,9 @@ class EndfieldPerformanceBehaviorTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(endfield.service, "get_equipment_view_from_fz", AsyncMock(return_value=view)) as selected,
             patch.object(endfield.service, "get_equipment_view", AsyncMock()) as fallback,
-            patch.object(endfield, "draw_equipment_card", AsyncMock(return_value=b"png-data")),
+            patch.object(catalog_handlers, "draw_equipment_card", AsyncMock(return_value=b"png-data")),
         ):
-            output = await endfield._render_equipment("装备/长息轻护甲", "fz")
+            output = await catalog_handlers._render_equipment("装备/长息轻护甲", "fz")
 
         self.assertEqual(output, b"png-data")
         selected.assert_awaited_once_with("装备/长息轻护甲")
@@ -321,9 +322,9 @@ class EndfieldPerformanceBehaviorTests(unittest.IsolatedAsyncioTestCase):
         view = EquipmentCatalogView("长息装备组", rarity_filter="purple")
         with (
             patch.object(endfield.service, "get_equipment_catalog_view", AsyncMock(return_value=view)) as selected,
-            patch.object(endfield, "draw_equipment_catalog_card", AsyncMock(return_value=b"png-data")),
+            patch.object(catalog_handlers, "draw_equipment_catalog_card", AsyncMock(return_value=b"png-data")),
         ):
-            output = await endfield._render_equipment_catalog("purple::长息装备组", "fz")
+            output = await catalog_handlers._render_equipment_catalog("purple::长息装备组", "fz")
 
         self.assertEqual(output, b"png-data")
         selected.assert_awaited_once_with("长息装备组", "purple", source="fz")

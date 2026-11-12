@@ -24,7 +24,8 @@ from otae_bot.infrastructure.rendering.browser import close_browser
 from otae_bot.infrastructure.rendering.executor import (
     close_image_executor,
 )
-from plugins.endfield import handlers
+from plugins.endfield import handlers, state
+from plugins.endfield.catalog import handlers as catalog_handlers
 from plugins.endfield.catalog.commands import parse_command
 from plugins.endfield.catalog.random_wiki import RandomWikiService
 
@@ -58,9 +59,9 @@ class PreviewMatcher:
 class PreviewSelection(RandomWikiService):
     def __init__(self, seed: int | None) -> None:
         super().__init__(
-            handlers.service,
-            handlers.stage_service,
-            lambda: handlers.archive_store.load_current_view(),
+            state.service,
+            state.stage_service,
+            lambda: state.archive_store.load_current_view(),
             rng=random.Random(seed) if seed is not None else None,
         )
         self.attempts: list[dict] = []
@@ -76,8 +77,8 @@ async def run(args: argparse.Namespace) -> int:
     directory.mkdir(parents=True, exist_ok=True)
     matcher = PreviewMatcher(directory)
     selection = PreviewSelection(args.seed)
-    original_service = handlers.random_wiki_service
-    handlers.random_wiki_service = selection
+    original_service = catalog_handlers.random_wiki_service
+    catalog_handlers.random_wiki_service = selection
     try:
         # No user identity, bot connection, or QQ destination is supplied.
         await handlers._handle_command(matcher, object(), parse_command("随机"))
@@ -98,7 +99,7 @@ async def run(args: argparse.Namespace) -> int:
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return 0 if matcher.images else 1
     finally:
-        handlers.random_wiki_service = original_service
+        catalog_handlers.random_wiki_service = original_service
         await close_http_client()
         await close_browser()
         await close_image_executor()

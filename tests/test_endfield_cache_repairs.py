@@ -19,6 +19,7 @@ from otae_bot.infrastructure.http.disk import (
     PublicImageDiskCache,
     public_image_request,
 )
+import plugins.endfield.catalog.handlers as catalog_handlers
 from plugins.endfield import caches, handlers as endfield
 from plugins.endfield.rendering.health import (
     record_asset_seconds,
@@ -408,23 +409,23 @@ class OperatorPortraitDiskAliasTests(unittest.IsolatedAsyncioTestCase):
             htmls.append((await cards.prepare_operator_card_html(view)).html)
             return b"png"
 
-        candidate = endfield.EndfieldCandidate("operator", "干员/洛茜", "洛茜", 100, "fz")
+        candidate = catalog_handlers.EndfieldCandidate("operator", "干员/洛茜", "洛茜", 100, "fz")
         with (
             patch.object(
                 endfield.service,
                 "get_operator_view_from_fz",
                 AsyncMock(return_value=self.view),
             ),
-            patch.object(endfield, "draw_operator_card", side_effect=draw),
+            patch.object(catalog_handlers, "draw_operator_card", side_effect=draw),
             asset_render_budget(0.5),
         ):
             for _ in range(2):
-                self.assertEqual(await endfield._render_candidate(candidate), (b"png",))
+                self.assertEqual(await catalog_handlers._render_candidate(candidate), (b"png",))
             self.assertEqual(len(htmls), 2)
             self.assertTrue(all('alt="洛茜"' not in html for html in htmls))
             await self.seed_gacha_banner()
             for _ in range(2):
-                self.assertEqual(await endfield._render_candidate(candidate), (b"png",))
+                self.assertEqual(await catalog_handlers._render_candidate(candidate), (b"png",))
         self.assertEqual(len(htmls), 3)
         self.assertIn('alt="洛茜"', htmls[-1])
 

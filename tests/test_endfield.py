@@ -94,7 +94,7 @@ class EndfieldCommandParserTests(unittest.TestCase):
     def test_handler_does_not_report_session_stop_as_failure(self):
         source = (ROOT / "plugins/endfield/handlers.py").read_text(encoding="utf-8")
         start = source.index("async def _handle_command")
-        end = source.index("async def _collect_candidates", start)
+        end = source.index("\nasync def ", start + 1)
         handler_source = source[start:end]
 
         self.assertIn("from arclet.letoderea import ExitState", source)
@@ -108,7 +108,7 @@ class EndfieldCommandParserTests(unittest.TestCase):
     def test_handler_reports_image_send_failure_separately(self):
         import plugins.endfield.handlers as handlers
 
-        candidate = handlers.EndfieldCandidate("operator", "chen-qianyu", "陈千语", 100)
+        candidate = commands.EndfieldCandidate("operator", "chen-qianyu", "陈千语", 100)
         session = AsyncMock()
         render = AsyncMock(return_value=(b"png",))
         fake_logger = Mock()
@@ -358,7 +358,7 @@ class EndfieldCommandParserTests(unittest.TestCase):
         self.assertEqual(aliases.alias_targets("weapon", "麦克风"), ("曜夜的首演",))
 
     def test_candidate_resolvers_require_source_verified_entities(self):
-        source = (ROOT / "plugins/endfield/handlers.py").read_text(encoding="utf-8")
+        source = (ROOT / "plugins/endfield/catalog/handlers.py").read_text(encoding="utf-8")
 
         self.assertIn('score_entity_candidate("operator", query, item.name', source)
         self.assertIn('score_entity_candidate("weapon", query, item.name', source)
@@ -832,7 +832,7 @@ class EndfieldCommandParserTests(unittest.TestCase):
         self.assertNotIn("PIL", rendered_html)
 
     def test_plugin_tries_complete_ake_calendar_then_preserves_official_fallback(self):
-        source = (ROOT / "plugins/endfield/handlers.py").read_text(encoding="utf-8")
+        source = (ROOT / "plugins/endfield/calendar/handlers.py").read_text(encoding="utf-8")
 
         self.assertLess(source.index("calendar_source.current_ake_primary()"), source.index("official_calendar_source.current()"))
         self.assertIn("official_calendar_source.current()", source)
@@ -3281,7 +3281,7 @@ class EndfieldServiceTests(unittest.TestCase):
     def test_equipment_attribute_query_is_wired_into_the_handler(self):
         source = "\n".join(
             (ROOT / "plugins/endfield" / name).read_text(encoding="utf-8")
-            for name in ("handlers.py", "caches.py")
+            for name in ("handlers.py", "caches.py", "catalog/handlers.py")
         )
 
         self.assertIn('"equipment_attribute": lambda key, source: _render_equipment_attribute', source)
@@ -4157,6 +4157,8 @@ from plugins.endfield.account.store import RoleCandidate
 from plugins.endfield.catalog.commands import EndfieldCandidate, format_help, format_source, format_unknown
 
 ef = plugin('plugins.endfield.handlers')
+ef_state = plugin('plugins.endfield.state')
+ef_catalog = plugin('plugins.endfield.catalog.handlers')
 CIPHER = CredentialCipher(b'k' * 32)
 PNG = b'\x89PNG\r\n\x1a\n-endfield-test'
 CN_ROLE = RoleCandidate('b1', '1095714689', '1', '甲', 'China')
@@ -4293,7 +4295,8 @@ async def main():
          patch.object(ef, '_render_current_version_calendar', AsyncMock(return_value=PNG)):
         sent = await say('/ef 日历')
         assert sent[0] == cold_start.COLD_START_NOTICE and len(sent) == 2 and is_image(sent[1]), sent
-    with patch.object(ef, 'notice_default_ake_public', AsyncMock()):
+    with patch.object(ef, 'notice_default_ake_public', AsyncMock()), \
+         patch.object(ef_catalog, 'notice_default_ake_public', AsyncMock()):
         with patch.object(ef, '_render_current_version_calendar', AsyncMock(side_effect=ef.VersionCalendarError('x'))):
             assert await say('/ef calendar') == ['版本日历数据暂不可用，请稍后再试。']
         with patch.object(ef, '_render_current_version_calendar', AsyncMock(side_effect=RuntimeError('x'))):
@@ -4304,14 +4307,14 @@ async def main():
             return
             yield
 
-        with patch.object(ef.random_wiki_service, 'candidates', no_candidates):
+        with patch.object(ef_state.random_wiki_service, 'candidates', no_candidates):
             assert await say('/ef 随机') == ['公开 Wiki 资料暂时不可用，请稍后再试。']
 
     # 奖章 / 档案：先发进度文案再发失败；没有快照
-    with patch.object(ef.collection_refresher, 'ensure_fresh', AsyncMock()), \
-         patch.object(ef.collection_refresher, 'refresh', AsyncMock(side_effect=RuntimeError('down'))), \
-         patch.object(ef.medal_store, 'load_current_view', return_value=None), \
-         patch.object(ef.archive_store, 'load_current_view', return_value=None):
+    with patch.object(ef_state.collection_refresher, 'ensure_fresh', AsyncMock()), \
+         patch.object(ef_state.collection_refresher, 'refresh', AsyncMock(side_effect=RuntimeError('down'))), \
+         patch.object(ef_state.medal_store, 'load_current_view', return_value=None), \
+         patch.object(ef_state.archive_store, 'load_current_view', return_value=None):
         assert await say('/ef 奖章') == ['本地暂无蚀刻章数据快照，请稍后查询，或发送 /ef 奖章 刷新 重试。']
         assert await say('/ef 奖章 刷新') == ['正在同步 AKEData 蚀刻章最新数据…', 'AKEData 奖章数据源响应异常，请稍后再试。']
         assert await say('/ef 档案') == ['本地暂无档案库数据快照，请稍后查询，或发送 /ef 档案 刷新 重试。']
@@ -4330,8 +4333,8 @@ async def main():
     assert len(sent) == 1 and '未配置凭据密钥' in sent[0], sent
 
     with patch.object(ef.CredentialCipher, 'from_settings', return_value=CIPHER), \
-         patch.object(ef.official_client, 'discover_roles', AsyncMock(return_value=[CN_ROLE])), \
-         patch.object(ef.ownership_stats_service, 'refresh_roles', AsyncMock()):
+         patch.object(ef_state.official_client, 'discover_roles', AsyncMock(return_value=[CN_ROLE])), \
+         patch.object(ef_state.ownership_stats_service, 'refresh_roles', AsyncMock()):
         unbound = '尚未绑定终末地账号，请先私聊发送 /ef 绑定 进行添加。'
         assert await say('/ef 账号', private=True, user='7') == [unbound]
         assert await say('/ef 影拓', private=True, user='7') == [unbound]
@@ -4353,10 +4356,10 @@ async def main():
             sent = await dialog('/ef 绑定')
         assert len(sent) == 3 and '超时' in sent[1] and sent[2] == ef._BINDING_STOPPED['timeout'], sent
         # 亚服 Token；多角色选择（先无效再全部）
-        ef.official_client.discover_roles.return_value = [ASIA_ROLE]
+        ef_state.official_client.discover_roles.return_value = [ASIA_ROLE]
         sent = await dialog('/ef 添加账号', '2', 'asia-token')
         assert 'SKPORT' in sent[1] and sent[3].startswith('亚服角色绑定成功：新增 1 个账号'), sent
-        ef.official_client.discover_roles.return_value = [CN_ROLE, CN_ROLE_2]
+        ef_state.official_client.discover_roles.return_value = [CN_ROLE, CN_ROLE_2]
         sent = await dialog('/ef 绑定', '1', '1', 'cn-token', '9', '全部')
         assert sent[4].startswith('检测到多个终末地角色') and sent[5].startswith('编号无效'), sent
         assert sent[6].startswith('国服角色绑定成功：新增 1 个账号，更新 1 个账号'), sent
@@ -4379,7 +4382,7 @@ async def main():
 
         # 账号详情 / 基建经真实的渲染入口（数据与出图打桩）
         with patch.object(ef, '_card_detail_with_snapshot', AsyncMock(return_value={})), \
-             patch.object(ef.official_client, 'currency_balances', AsyncMock(return_value={})), \
+             patch.object(ef_state.official_client, 'currency_balances', AsyncMock(return_value={})), \
              patch.object(ef, 'fetch_account_detail_name_map', AsyncMock(return_value=None)), \
              patch.object(ef, 'build_account_detail_view', return_value=SimpleNamespace(main_mission='主线')), \
              patch.object(ef, 'build_account_base_view', return_value=SimpleNamespace()), \

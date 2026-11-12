@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from arclet.letoderea import STOP
 
+import plugins.endfield.catalog.handlers as catalog_handlers
 import plugins.endfield.handlers as endfield
 from plugins.endfield.catalog import random_wiki
 from plugins.endfield.catalog.commands import EndfieldCandidate, parse_command
@@ -231,14 +232,14 @@ class RandomWikiCatalogTests(unittest.IsolatedAsyncioTestCase):
                 endfield.archive_store, "load_current_view", self.archive_snapshot
             ),
             patch.object(
-                endfield.encyclopedia_draw,
+                catalog_handlers.encyclopedia_draw,
                 "draw_archive_entry_card",
                 AsyncMock(side_effect=lambda entry: entry.name.encode()),
             ) as draw,
         ):
             first = (await self.service.load_candidates("archive_entry"))[0]
             self.assertEqual(
-                await endfield._render_candidate(first), ("旧报告".encode(),)
+                await catalog_handlers._render_candidate(first), ("旧报告".encode(),)
             )
             # The same game version can be refreshed with revised public metadata.
             self.archive_snapshot.return_value = replace(
@@ -248,7 +249,7 @@ class RandomWikiCatalogTests(unittest.IsolatedAsyncioTestCase):
             )
             second = (await self.service.load_candidates("archive_entry"))[0]
             self.assertEqual(
-                await endfield._render_candidate(second), ("修订报告".encode(),)
+                await catalog_handlers._render_candidate(second), ("修订报告".encode(),)
             )
             self.assertNotEqual(first.revision, second.revision)
             self.assertEqual(draw.await_count, 2)
@@ -375,21 +376,24 @@ class RandomWikiHandlerTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.session = Mock(send=AsyncMock())
         self.patches = {}
-        for name in (
-            "notice_default_ake_public",
-            "_render_candidate",
-            "_finish_pngs",
-            "_handle_personal_command",
+        for module, name in (
+            (catalog_handlers, "notice_default_ake_public"),
+            (catalog_handlers, "_render_candidate"),
+            (catalog_handlers, "_finish_pngs"),
+            (endfield, "_handle_personal_command"),
         ):
-            patcher = patch.object(endfield, name, AsyncMock())
+            patcher = patch.object(module, name, AsyncMock())
             self.patches[name] = patcher.start()
             self.addCleanup(patcher.stop)
         self.patches["_render_candidate"].return_value = (b"card",)
         # Random Wiki must also work without any user identity or account services.
-        for name in ("event_user_id", "account_store", "official_client"):
-            patcher = patch.object(endfield, name, None)
-            patcher.start()
-            self.addCleanup(patcher.stop)
+        for module in (endfield, catalog_handlers):
+            for name in ("event_user_id", "account_store", "official_client"):
+                if not hasattr(module, name):
+                    continue
+                patcher = patch.object(module, name, None)
+                patcher.start()
+                self.addCleanup(patcher.stop)
         self.yielded = []
 
     async def run_command(self, entries):
@@ -398,7 +402,7 @@ class RandomWikiHandlerTests(unittest.IsolatedAsyncioTestCase):
                 self.yielded.append(entry)
                 yield entry
 
-        with patch.object(endfield.random_wiki_service, "candidates", candidates):
+        with patch.object(catalog_handlers.random_wiki_service, "candidates", candidates):
             await endfield._handle_command(
                 self.session, object(), parse_command("随机")
             )
