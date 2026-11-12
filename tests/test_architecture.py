@@ -648,6 +648,25 @@ async def check_command_space_dispatch():
             assert '\\u00a0' in str(event.content) or '\\u3000' in str(event.content)
 
 asyncio.get_event_loop().run_until_complete(check_command_space_dispatch())
+
+async def check_minecraft_rejoin_clears_the_kick_mark():
+    from arclet.entari.event.base import GuildMemberAddedEvent
+    broadcast = sys.modules['plugins.minecraft_plugin.broadcast']
+    account = SimpleNamespace(platform='qq', self_id='test-bot')
+
+    def joined(user):
+        origin = Event('guild-member-added', datetime.now(timezone.utc), Login(user=User('test-bot'), platform='qq'),
+                       guild=Guild('100'), user=User(user))
+        return GuildMemberAddedEvent(account, origin)
+
+    broadcast._kicked_groups.add('100')
+    with patch.object(broadcast, 'get_bot', return_value=account):
+        await publish(joined('someone'))
+        assert '100' in broadcast._kicked_groups
+        await publish(joined('test-bot'))
+        assert '100' not in broadcast._kicked_groups
+
+asyncio.get_event_loop().run_until_complete(check_minecraft_rejoin_clears_the_kick_mark())
 print('CONTRACT ' + json.dumps({'plugins': sorted(expected), 'jobs': jobs}, ensure_ascii=False))
 """
         with tempfile.TemporaryDirectory() as directory:

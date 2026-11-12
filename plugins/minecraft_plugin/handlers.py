@@ -465,7 +465,6 @@ async def handle_online_command(event: Event, rest: ArgVal[str]):
     """Show historical online-time leaderboard."""
     command_args = get_rest(rest)
     group_id = _get_group_id(event)
-    gid_int = int(group_id)
 
     # 解析 -a 参数
     show_all = False
@@ -479,7 +478,7 @@ async def handle_online_command(event: Event, rest: ArgVal[str]):
         if not server:
             await online_rank.finish(f"未查询到服务器：{command_args}")
             return
-        top_players = data_manager.get_top_players(gid_int, server["address"], limit=limit)
+        top_players = data_manager.get_top_players(group_id, server["address"], limit=limit)
         total_count = len(data_manager.get_server_player_gametimes(group_id, server["address"]))
         server_name = server["name"]
         addr = server["address"]
@@ -495,7 +494,7 @@ async def handle_online_command(event: Event, rest: ArgVal[str]):
         except Exception:
             favicon, version, max_players = None, "", 0
     else:
-        top_players = data_manager.get_top_players_all_servers(gid_int, limit=limit)
+        top_players = data_manager.get_top_players_all_servers(group_id, limit=limit)
         total_count = len(data_manager.get_all_servers_player_gametimes(group_id))
         guild = getattr(event, 'guild', None)
         server_name = "全部服务器"

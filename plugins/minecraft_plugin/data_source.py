@@ -414,7 +414,7 @@ class MinecraftDataManager:
         _, s = found
         return dict(s.get('player_gametime', {}))
 
-    def get_top_players(self, group_id: int, identifier: str, limit: int = 10) -> List[Dict]:
+    def get_top_players(self, group_id: int | str, identifier: str, limit: int = 10) -> List[Dict]:
         players = self.get_server_player_gametimes(group_id, identifier)
         if not players:
             return []
@@ -437,7 +437,7 @@ class MinecraftDataManager:
                 combined[pname] = combined.get(pname, 0) + seconds
         return combined
 
-    def get_top_players_all_servers(self, group_id: int, limit: int = 10) -> List[Dict]:
+    def get_top_players_all_servers(self, group_id: int | str, limit: int = 10) -> List[Dict]:
         """获取群内所有服务器的玩家游戏时间排行榜（跨服务器汇总）."""
         players = self.get_all_servers_player_gametimes(group_id)
         if not players:
@@ -541,7 +541,7 @@ class PlayerGameTimeManager:
     def get_all_player_gametime(self, group_id: int | str, server_name: str) -> Dict:
         return self._dm_ensure().get_server_player_gametimes(group_id, server_name)
 
-    def get_top_players(self, group_id: int, server_name: str, limit: int = 10) -> List[Dict]:
+    def get_top_players(self, group_id: int | str, server_name: str, limit: int = 10) -> List[Dict]:
         return self._dm_ensure().get_top_players(group_id, server_name, limit)
 
     def format_time(self, seconds: int) -> str:

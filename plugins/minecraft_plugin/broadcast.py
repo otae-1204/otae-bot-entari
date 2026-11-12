@@ -7,9 +7,9 @@ import logging
 import time
 import traceback
 
-from otae_bot.adapters.entari import listen_notice, get_bot
-from arclet.entari import Account as Bot, Event
-from otae_bot.adapters.entari import Pred
+from otae_bot.adapters.entari import get_bot
+from arclet.entari import Account as Bot, Session, listen
+from arclet.entari.event.base import GuildMemberAddedEvent
 from otae_bot.adapters.entari import ChainMsg, SendDest, account_adapter_name
 from otae_bot.adapters.entari import timer
 
@@ -41,23 +41,22 @@ _last_broadcast_at: dict[str, int] = {}
 
 # ── 监听 bot 重新入群 → 清除踢出标记 ──
 
-async def _is_bot_added(event: Event) -> bool:
-    if event.__class__.__name__ != "GuildMemberAddedEvent":
-        return False
+def _is_bot_added(event) -> bool:
     bot_self_id = get_bot().self_id if get_bot() else ""
     return str(event.user.id) == str(bot_self_id)
 
 
-_bot_rejoin = listen_notice(rule=Pred(_is_bot_added), priority=5, block=False)
-
-
-@_bot_rejoin.handle()
-async def _clear_kick_mark(event: Event):
+async def _clear_kick_mark(session: Session):
+    event = session.event
+    if not _is_bot_added(event):
+        return
     guild_id = str(event.guild.id) if event.guild else ""
     if guild_id:
         _kicked_groups.discard(guild_id)
         logger.info(f"Bot 重新加入群 {guild_id}，恢复广播")
-    await _bot_rejoin.finish()
+
+
+listen(GuildMemberAddedEvent)(_clear_kick_mark)
 
 
 async def safe_ping(server_address: str, server_type: str = "java") -> dict:

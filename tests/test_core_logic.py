@@ -45,14 +45,10 @@ def _load_minecraft_broadcast_module(name: str):
     previous_arclet = sys.modules.get("arclet")
     previous_pkg = sys.modules.get("plugins.minecraft_plugin")
     previous_ping = sys.modules.get("plugins.minecraft_plugin.ping")
+    previous_event_base = sys.modules.get("arclet.entari.event.base")
 
     entari_native = types.ModuleType("otae_bot.adapters.entari")
-    entari_native.listen_notice = lambda *args, **kwargs: types.SimpleNamespace(
-        handle=lambda: (lambda func: func),
-        finish=lambda *a, **kw: None,
-    )
     entari_native.get_bot = lambda: None
-    entari_native.Pred = lambda func: func
     entari_native.ChainMsg = types.SimpleNamespace(text=lambda text: types.SimpleNamespace(send=lambda *a, **kw: None))
     entari_native.SendDest = lambda *args, **kwargs: (args, kwargs)
     entari_native.account_adapter_name = lambda bot: ""
@@ -63,7 +59,11 @@ def _load_minecraft_broadcast_module(name: str):
     arclet = previous_arclet or types.ModuleType("arclet")
     arclet_entari = types.ModuleType("arclet.entari")
     arclet_entari.Account = object
-    arclet_entari.Event = object
+    arclet_entari.Session = object
+    arclet_entari.listen = lambda *args, **kwargs: (lambda func: func)
+    event_base = types.ModuleType("arclet.entari.event.base")
+    event_base.GuildMemberAddedEvent = object
+    sys.modules["arclet.entari.event.base"] = event_base
 
     sys.modules["otae_bot.adapters.entari"] = entari_native
     sys.modules["arclet"] = arclet
@@ -99,6 +99,10 @@ def _load_minecraft_broadcast_module(name: str):
             sys.modules.pop("plugins.minecraft_plugin.ping", None)
         else:
             sys.modules["plugins.minecraft_plugin.ping"] = previous_ping
+        if previous_event_base is None:
+            sys.modules.pop("arclet.entari.event.base", None)
+        else:
+            sys.modules["arclet.entari.event.base"] = previous_event_base
 
 
 def _load_steam_data_source():
@@ -3037,6 +3041,8 @@ remotePort = {{ $v.Second }}
                 manager.add_player_gametime("Alex", "10001", "mc.example.net", 120)
                 top = manager.get_top_players(10001, "mc.example.net", limit=1)
                 self.assertEqual(top[0]["player_id"], "Steve")
+                # /online passes the Satori guild id as a string; storage keys are strings already.
+                self.assertEqual(manager.get_top_players("10001", "mc.example.net", limit=1), top)
                 self.assertEqual(top[0]["formatted_time"], "1\u5c0f\u65f60\u5206\u949f")
 
                 self.assertTrue(manager.update_server_address("10001", "涓绘湇", "mc2.example.net"))
@@ -3137,6 +3143,7 @@ remotePort = {{ $v.Second }}
                 )
                 self.assertEqual(manager.get_server_player_gametimes("10001", "a.example.net"), {})
                 self.assertEqual(manager.get_top_players_all_servers(10001)[0]["player_id"], "Steve")
+                self.assertEqual(manager.get_top_players_all_servers("10001"), manager.get_top_players_all_servers(10001))
             finally:
                 broadcast_module._bm = None
                 os.chdir(cwd)
