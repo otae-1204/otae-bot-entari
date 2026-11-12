@@ -9,26 +9,28 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime
 
-from arclet.entari import Session
+from arclet.alconna import Alconna, Args, MultiVar
+from arclet.entari import Image, MessageChain, Session, command
+from arclet.entari.command import Match
 from loguru import logger
+from nepattern import AnyString
 
 from otae_bot.command_usage import Scope, usage_recorder
-from otae_bot.compat.entari import ArgVal, Image, get_group_id, get_rest, send
-from otae_bot.compat.entari import cmd as _cmd
 from otae_bot.infrastructure.rendering.art_card import render_card
+from otae_bot.messaging.inbound import get_group_id, get_rest
 from otae_bot.pipeline.feature_gate import loaded_group_plugins
 
 from .presentation import build_card, format_text
 from .query import parse_query
 
-stats_cmd = _cmd("指令统计", aliases={"统计"}, priority=5, block=True)
+stats_cmd = Alconna(["指令统计", "统计"], Args["rest;?", MultiVar(AnyString)])
 
 
-@stats_cmd.handle()
-async def handle_usage_stats(rest: ArgVal, session: Session) -> None:
+@command.on(stats_cmd)
+async def handle_usage_stats(rest: Match[tuple[str, ...]], session: Session) -> None:
     query = parse_query(get_rest(rest) or "", loaded_group_plugins())
     if query.error:
-        await send(session, query.error)
+        await session.send(query.error)
         return
     group_id = get_group_id(session.event)
     scope = Scope(
@@ -42,13 +44,13 @@ async def handle_usage_stats(rest: ArgVal, session: Session) -> None:
     report = await asyncio.to_thread(usage_recorder.store.report, scope, query.days, now)
     try:
         png = await render_card(build_card(report, query.days, now))
-        await send(session, [Image(raw=png)])
+        await session.send(MessageChain([Image.of(raw=png)]))
         return
     except asyncio.CancelledError:
         raise
     except Exception as error:  # noqa: BLE001 - 图片边界必须保住文本
         logger.warning("[usage_stats] card delivery fell back to text: {}", type(error).__name__)
-    await send(session, "\n".join(format_text(report, query.days)))
+    await session.send("\n".join(format_text(report, query.days)))
 
 
 __all__ = ["handle_usage_stats", "stats_cmd"]
