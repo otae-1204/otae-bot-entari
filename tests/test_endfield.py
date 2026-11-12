@@ -4142,5 +4142,299 @@ class EndfieldSlugResolutionTests(unittest.TestCase):
         self.assertEqual(view.source_name, "Warfarin Wiki")
 
 
+ENDFIELD_SCENARIOS = r"""
+import asyncio
+import tempfile
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+from arclet.entari import At, Quote, Text
+from plugins.endfield import cold_start
+from plugins.endfield.account.crypto import CredentialCipher
+from plugins.endfield.account.store import RoleCandidate
+from plugins.endfield.catalog.commands import EndfieldCandidate, format_help, format_source, format_unknown
+
+ef = plugin('plugins.endfield.handlers')
+CIPHER = CredentialCipher(b'k' * 32)
+PNG = b'\x89PNG\r\n\x1a\n-endfield-test'
+CN_ROLE = RoleCandidate('b1', '1095714689', '1', '甲', 'China')
+CN_ROLE_2 = RoleCandidate('b2', '1770431888', '1', '乙', 'China')
+ASIA_ROLE = RoleCandidate('b3', '1770431999', '2', '丙', 'Asia')
+real_prompt, real_prompt_silently = ef.prompt, ef.prompt_silently
+protocol = default_account.protocol
+sent_ids = []
+_call_api = protocol.call_api
+
+
+async def recording_call_api(action, params=None, *args, **kwargs):
+    result = await _call_api(action, params, *args, **kwargs)
+    if getattr(action, 'value', action) == 'message.create':
+        sent_ids.append(result[0]['id'])
+    return result
+
+
+protocol.call_api = recording_call_api
+
+
+def short_prompt(*args, timeout):
+    return real_prompt(*args, timeout=0.3)
+
+
+def short_prompt_silently(*args, timeout):
+    return real_prompt_silently(*args, timeout=0.3)
+
+
+def channel_of(user, private, group):
+    return 'private:' + user if private else group
+
+
+async def dialog(first, *answers, user='7', private=True, group='100', quote=False):
+    # 第一条指令在后台等待 prompt，之后的消息逐条回答；quote=True 时回答引用机器人最新一条消息
+    channel = channel_of(user, private, group)
+    before = len([1 for target, _ in protocol.sent if target == channel])
+    task = asyncio.create_task(say(first, private=private, user=user, group=group))
+    for answer in answers:
+        await asyncio.sleep(0.15)
+        content = [Quote(sent_ids[-1]), Text(answer)] if quote else answer
+        await say(content, private=private, user=user, group=group)
+    await asyncio.wait_for(task, 5)
+    return [content for target, content in protocol.sent if target == channel][before:]
+
+
+def is_image(content, count=1):
+    return content.startswith('<img') and content.count('<img') == count
+
+
+async def main():
+    # 数据源：四个名字回复一致
+    first = await say('/ef 数据源')
+    assert len(first) == 1 and first[0].startswith(format_source()[:8]), first
+    for text in ('/终末地 数据源', '/endfield source', '/zmd sources'):
+        assert await say(text) == first, text
+
+    # 帮助：图片可用时发图，否则发文字
+    help_png = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+    help_png.write(PNG)
+    help_png.close()
+    with patch.object(ef, 'cached_help_image', AsyncMock(return_value=help_png.name)):
+        sent = await say('/ef')
+        assert len(sent) == 1 and is_image(sent[0]), sent
+    with patch.object(ef, 'cached_help_image', AsyncMock(return_value=None)), \
+         patch.object(ef, 'ENDFIELD_HELP_IMAGE_PATH', ''):
+        sent = await say('/zmd 帮助')
+        assert len(sent) == 1 and sent[0].startswith(format_help()[:6]) and not sent[0].startswith('<img'), sent
+
+    # 参数错误、速算、非开发者看不到 dev / 别名
+    sent = await say('/ef 速算 x')
+    assert len(sent) == 1 and '指令格式' in sent[0], sent
+    sent = await say('/ef 速算 2腐蚀 200')
+    assert len(sent) == 1 and '指令格式' not in sent[0], sent
+    unknown = await say('/ef dev status')
+    assert len(unknown) == 1 and unknown[0].startswith(format_unknown()[:6]), unknown
+    assert await say('/ef 别名 添加 甲 乙') == unknown
+
+    # 公告子命令
+    sent = await say('/ef 公告 帮助')
+    assert len(sent) == 1 and '公告' in sent[0], sent
+
+    # 资料查询快捷名与搜索：没有候选
+    collect = AsyncMock(return_value=[])
+    with patch.object(ef, '_collect_candidates', collect), \
+         patch.object(ef, '_item_scope_fallback', AsyncMock(return_value=None)), \
+         patch.object(ef, 'notice_before_public_data', AsyncMock()):
+        for names, scope in ((('efop', 'efoperator', '终末地干员'), 'operator'),
+                             (('efwp', 'efweapon', '终末地武器'), 'weapon'),
+                             (('efeq', 'efequipment', '终末地装备'), 'equipment')):
+            replies = []
+            for name in names:
+                collect.reset_mock()
+                replies.append(await say('/' + name + ' 甲'))
+                assert collect.await_args.args[:2] == (scope, '甲'), (name, collect.await_args)
+            assert len(replies[0]) == 1 and not replies[0][0].startswith('<img'), replies
+            assert replies[1:] == [replies[0]] * 2, (names, replies)
+        replies = []
+        for name in ('efs', 'efsearch', '终末地搜索'):
+            collect.reset_mock()
+            replies.append(await say('/' + name + ' 甲'))
+            assert collect.await_args.args[1] == '甲', (name, collect.await_args)
+        assert len(replies[0]) == 1 and '未匹配到相关条目' in replies[0][0], replies
+        assert replies[1:] == [replies[0]] * 2, replies
+        assert await say('/ef 搜索 甲') == replies[0]
+
+    # 候选选择（引用回复的 prompt_silently）
+    options = [EndfieldCandidate('operator', 'k1', '甲一', 100, 'akedata'),
+               EndfieldCandidate('operator', 'k2', '甲二', 99, 'akedata')]
+    render = AsyncMock(return_value=(PNG, PNG))
+    with patch.object(ef, '_collect_candidates', AsyncMock(return_value=options)), \
+         patch.object(ef, '_item_scope_fallback', AsyncMock(return_value=None)), \
+         patch.object(ef, 'notice_before_public_data', AsyncMock()), \
+         patch.object(ef, '_render_candidate', render):
+        sent = await dialog('/ef 干员 甲', '2', private=False, quote=True)
+        assert len(sent) == 2 and '甲一' in sent[0] and is_image(sent[1], 2), sent
+        assert render.await_args.args[0].key == 'k2', render.await_args
+        sent = await dialog('/ef 干员 甲', '取消', private=False, quote=True)
+        assert sent[1:] == ['已取消候选选择。'], sent
+        sent = await dialog('/ef 干员 甲', '9', private=False, quote=True)
+        assert sent[1:] == ['序号输入有误，请输入 1–2。'], sent
+        with patch.object(ef, 'prompt_silently', short_prompt_silently):
+            sent = await dialog('/ef 干员 甲', private=False)
+        assert len(sent) == 1 and '甲一' in sent[0], sent
+        render.side_effect = RuntimeError('boom')
+        sent = await dialog('/ef 干员 甲', '1', private=False, quote=True)
+        assert sent[1:] == ['卡片图片生成失败，请稍后再试。'], sent
+
+    # 版本日历：冷启动提示经会话发出，再发图；两类失败文案
+    async def cold_notice():
+        await cold_start.send_cold_start_notice()
+
+    with patch.object(ef, 'notice_default_ake_public', cold_notice), \
+         patch.object(ef, '_render_current_version_calendar', AsyncMock(return_value=PNG)):
+        sent = await say('/ef 日历')
+        assert sent[0] == cold_start.COLD_START_NOTICE and len(sent) == 2 and is_image(sent[1]), sent
+    with patch.object(ef, 'notice_default_ake_public', AsyncMock()):
+        with patch.object(ef, '_render_current_version_calendar', AsyncMock(side_effect=ef.VersionCalendarError('x'))):
+            assert await say('/ef calendar') == ['版本日历数据暂不可用，请稍后再试。']
+        with patch.object(ef, '_render_current_version_calendar', AsyncMock(side_effect=RuntimeError('x'))):
+            assert await say('/ef 版本日历') == ['版本日历图生成失败，请稍后再试。']
+
+        # 随机百科：没有可用条目
+        async def no_candidates():
+            return
+            yield
+
+        with patch.object(ef.random_wiki_service, 'candidates', no_candidates):
+            assert await say('/ef 随机') == ['公开 Wiki 资料暂时不可用，请稍后再试。']
+
+    # 奖章 / 档案：先发进度文案再发失败；没有快照
+    with patch.object(ef.collection_refresher, 'ensure_fresh', AsyncMock()), \
+         patch.object(ef.collection_refresher, 'refresh', AsyncMock(side_effect=RuntimeError('down'))), \
+         patch.object(ef.medal_store, 'load_current_view', return_value=None), \
+         patch.object(ef.archive_store, 'load_current_view', return_value=None):
+        assert await say('/ef 奖章') == ['本地暂无蚀刻章数据快照，请稍后查询，或发送 /ef 奖章 刷新 重试。']
+        assert await say('/ef 奖章 刷新') == ['正在同步 AKEData 蚀刻章最新数据…', 'AKEData 奖章数据源响应异常，请稍后再试。']
+        assert await say('/ef 档案') == ['本地暂无档案库数据快照，请稍后查询，或发送 /ef 档案 刷新 重试。']
+        assert await say('/ef 档案 刷新') == ['正在同步 AKEData 档案库最新数据…', 'AKEData 档案数据源响应异常，请稍后再试。']
+
+    # 持有率：私聊不能看群内；群里普通成员不能刷新
+    assert await say('/ef 持有率 群内', private=True) == ['私聊环境不支持群内统计，请使用 /ef 持有率 全局。']
+    with patch.object(ef, 'is_group_manager', AsyncMock(return_value=False)):
+        assert await say('/ef 持有率 刷新') == ['权限不足：仅群主、群管理员或机器人管理员可刷新本群持有率快照。']
+
+    # 个人功能：群里拒绝绑定类操作；未配置密钥
+    privacy = '该功能涉及个人隐私凭证或手机号，请在私聊中发起。'
+    for text in ('/ef 绑定', '/ef 解绑 1', '/ef 主账号 1', '/ef 抽卡导入'):
+        assert await say(text) == [privacy], text
+    sent = await say('/ef 绑定', private=True, user='7')
+    assert len(sent) == 1 and '未配置凭据密钥' in sent[0], sent
+
+    with patch.object(ef.CredentialCipher, 'from_settings', return_value=CIPHER), \
+         patch.object(ef.official_client, 'discover_roles', AsyncMock(return_value=[CN_ROLE])), \
+         patch.object(ef.ownership_stats_service, 'refresh_roles', AsyncMock()):
+        unbound = '尚未绑定终末地账号，请先私聊发送 /ef 绑定 进行添加。'
+        assert await say('/ef 账号', private=True, user='7') == [unbound]
+        assert await say('/ef 影拓', private=True, user='7') == [unbound]
+        assert await say('/ef 签到', private=True, user='7') == ['未找到对应的终末地账号，请先私聊发送 /ef 绑定 进行添加。']
+        assert await say([Text('/ef 影拓 '), At('11'), Text(' '), At('12')]) == ['单次查询仅支持 @ 一位群友。']
+
+        # 绑定对话：国服 Token
+        sent = await dialog('/ef 绑定', '1', '1', 'cn-token')
+        assert len(sent) == 5 and sent[0].startswith('请选择服务器分区') and sent[1].startswith('请选择绑定授权途径'), sent
+        assert '森空岛' in sent[2] and sent[3].startswith('请发送 data.content'), sent
+        assert sent[4].startswith('国服角色绑定成功：新增 1 个账号') and '甲' in sent[4], sent
+        # 取消、无法识别、手机号格式、二维码未开放、超时
+        assert (await dialog('/ef bind', '取消'))[1:] == ['已取消绑定。']
+        assert (await dialog('/ef 绑定', '9'))[1:] == ['无法识别所选服务器，绑定流程已终止。']
+        sent = await dialog('/ef 绑定', '1', '2', '123')
+        assert sent[2].startswith('请输入鹰角网络账号') and sent[3:] == ['手机号格式不符合标准，绑定流程已终止。'], sent
+        assert (await dialog('/ef 绑定', '1', '3'))[2:] == ['二维码扫码暂未开放，请回复 1 或 2 选择其他方式。']
+        with patch.object(ef, 'prompt', short_prompt):
+            sent = await dialog('/ef 绑定')
+        assert len(sent) == 3 and '超时' in sent[1] and sent[2] == ef._BINDING_STOPPED['timeout'], sent
+        # 亚服 Token；多角色选择（先无效再全部）
+        ef.official_client.discover_roles.return_value = [ASIA_ROLE]
+        sent = await dialog('/ef 添加账号', '2', 'asia-token')
+        assert 'SKPORT' in sent[1] and sent[3].startswith('亚服角色绑定成功：新增 1 个账号'), sent
+        ef.official_client.discover_roles.return_value = [CN_ROLE, CN_ROLE_2]
+        sent = await dialog('/ef 绑定', '1', '1', 'cn-token', '9', '全部')
+        assert sent[4].startswith('检测到多个终末地角色') and sent[5].startswith('编号无效'), sent
+        assert sent[6].startswith('国服角色绑定成功：新增 1 个账号，更新 1 个账号'), sent
+
+        # 主账号 / 解绑
+        sent = await say('/ef 主账号 2', private=True, user='7')
+        assert len(sent) == 1 and sent[0].startswith('已将 ') and sent[0].endswith('设为默认主账号。'), sent
+        assert await say('/ef 解绑 9', private=True, user='7') == ['未找到指定账号，发送 /ef 账号 可查看有效编号。']
+
+        # 多账号时的引用选择：账号 / 基建 / 养成统计 / 资源流水
+        for text, cancelled in (('/ef 账号', '已取消账号查询。'), ('/ef 账号 基建', '已取消账号查询。'),
+                                ('/ef 养成统计', '已取消账号养成统计查询。'), ('/ef 资源流水', '已取消资源流水查询。')):
+            sent = await dialog(text, '取消', quote=True)
+            assert sent[0].startswith('已绑定的终末地账号列表') and sent[1:] == [cancelled], (text, sent)
+            sent = await dialog(text, '9', quote=True)
+            assert sent[1:] == ['序号输入有误，请输入 1–3。'], (text, sent)
+        with patch.object(ef, 'prompt_silently', short_prompt_silently):
+            sent = await dialog('/ef 账号')
+        assert len(sent) == 1 and sent[0].startswith('已绑定的终末地账号列表'), sent
+
+        # 账号详情 / 基建经真实的渲染入口（数据与出图打桩）
+        with patch.object(ef, '_card_detail_with_snapshot', AsyncMock(return_value={})), \
+             patch.object(ef.official_client, 'currency_balances', AsyncMock(return_value={})), \
+             patch.object(ef, 'fetch_account_detail_name_map', AsyncMock(return_value=None)), \
+             patch.object(ef, 'build_account_detail_view', return_value=SimpleNamespace(main_mission='主线')), \
+             patch.object(ef, 'build_account_base_view', return_value=SimpleNamespace()), \
+             patch.object(ef, 'notice_default_ake_public', AsyncMock()), \
+             patch.object(ef, '_render_account_pages', AsyncMock(return_value=(PNG, PNG))):
+            sent = await dialog('/ef 账号', '1', quote=True)
+            assert len(sent) == 2 and is_image(sent[1], 2), sent
+            sent = await say('/ef 账号 基建 1', private=True, user='7')
+            assert len(sent) == 1 and is_image(sent[0], 2), sent
+
+        # 小黑盒导入与配装的 prompt
+        sent = await dialog('/ef 抽卡导入', 'abc')
+        assert sent[0].startswith('请输入小黑盒账号') and sent[1:] == ['手机号格式不符合规范，导入已取消。'], sent
+        assert (await dialog('/ef 抽卡导入', '取消'))[1:] == ['导入流程已取消或等待超时。']
+        sent = await dialog('/ef 配装', '取消')
+        assert sent[0].startswith('请输入干员名称') and sent[1:] == ['配装参数有误：已取消配置。。'], sent
+
+        # 抽卡：同步文案；分析图超过阈值走合并转发，否则一条消息
+        gacha = SimpleNamespace(
+            sync=AsyncMock(return_value=SimpleNamespace(inserted=3, failed=())),
+            analysis=lambda *args: 'analysis',
+        )
+        cache = SimpleNamespace(**{name: AsyncMock(return_value={}) for name in (
+            'prepare', 'prepare_pool_rules', 'prepare_names', 'prepare_keepsakes', 'prepare_pool_banners')})
+        with patch.object(ef, 'EndfieldGachaService', return_value=gacha), \
+             patch.object(ef, 'gacha_asset_cache', cache), \
+             patch.object(ef, 'draw_gacha_analysis_cards', AsyncMock(return_value=(PNG, PNG, PNG))):
+            sent = await say('/ef 抽卡同步', private=True, user='7')
+            assert len(sent) == 1 and '抽卡记录' in sent[0] and '新增收录 3 条' in sent[0], sent
+            with patch.object(ef, '_gacha_forward_above', return_value=0):
+                sent = await say('/ef 抽卡', private=True, user='7')
+            assert len(sent) == 1 and is_image(sent[0], 3), sent
+            with patch.object(ef, '_gacha_forward_above', return_value=1):
+                sent = await say('/ef 抽卡', private=True, user='7')
+            assert len(sent) == 1 and '<message forward' in sent[0] and sent[0].count('<img') == 3, sent
+
+        # 签到：文字结果经会话发出
+        with patch.object(ef, 'sign_attendance_roles', AsyncMock(return_value='view')), \
+             patch.object(ef, 'format_attendance_report', return_value='终末地签到完成'), \
+             patch.object(ef, '_attendance_png', AsyncMock(return_value=None)), \
+             patch.object(ef, 'collect_companion_outcomes', AsyncMock(return_value=[])):
+            sent = await say('/ef 签到', private=True, user='7')
+            assert len(sent) == 1 and '终末地签到完成' in sent[0], sent
+    print('ALL-OK')
+
+run(main())
+"""
+
+
+class EndfieldDispatchTests(unittest.TestCase):
+    def test_ef_commands_and_dialogs_through_the_real_event_path(self):
+        from tests.support.dispatch import run_scenarios
+
+        result = run_scenarios(ENDFIELD_SCENARIOS)
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, output[-6000:])
+        self.assertIn("ALL-OK", result.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()
