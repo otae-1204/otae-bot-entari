@@ -79,6 +79,33 @@ def g(cmd, self, store):
         self.assertEqual(_scan_source(source, "otae_bot/infrastructure/http/tls.py").count("direct-env-read"), 4)
         self.assertEqual(_scan_source(source, "otae_bot/config/settings.py"), [])
 
+    def test_media_leave_only_as_bytes_and_uploads_happen_in_the_pipeline(self):
+        source = (
+            "from arclet.entari import Image as EntariImage, File\n"
+            "from satori import Api\n"
+            "a = EntariImage.of(path=p)\n"
+            "b = Image(src=p.resolve().as_uri())\n"
+            "c = File(src='file:///tmp/x.txt')\n"
+            "d = Image.of(url=f'file://{p}')\n"
+            "e = await bot.protocol.upload_create(up)\n"
+            "f = getattr(bot.protocol, 'upload_create', None)\n"
+            "g = await bot.protocol.call_api(Api.UPLOAD_CREATE, {}, multipart=True)\n"
+        )
+        self.assertEqual(_scan_source(source, "plugins/a/handlers.py").count("local-media-path"), 7)
+        self.assertEqual(_scan_source(source, "otae_bot/delivery/send.py").count("local-media-path"), 7)
+        self.assertEqual(_scan_source(source, "otae_bot/pipeline/outbound_media.py"), [])
+        self.assertEqual(guard._Scanner("otae_bot/boundary/onebot11.py", source, protocol=False).run(
+            ast.parse(source)), [])
+        lookalikes = (
+            "from arclet.entari import Image\n"
+            "x = Image.of(raw=data)\n"
+            "await tab.goto(html_path.resolve().as_uri())\n"
+            "css = f'url({path.as_uri()})'\n"
+            "ok = src.startswith('file://')\n"
+            "summary = {'upload_dir': 1}\n"
+        )
+        self.assertEqual(_scan_source(lookalikes, "plugins/a/handlers.py"), [])
+
     def test_plugins_do_not_import_other_plugins(self):
         source = "from plugins.b.store import x\nfrom plugins import b\nfrom ..b import y\nimport plugins.b.draw\n"
         self.assertEqual(_layering("plugins/a/handlers.py", source), ["plugin-cross-import"] * 4)

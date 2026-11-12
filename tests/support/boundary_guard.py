@@ -2,7 +2,9 @@
 
 Inside the bot only Satori should exist; OneBot actions, HTTP side channels,
 framework private APIs and platform-name branching belong to the boundary
-(rules R1-R8). Imports must follow the layering in
+(rules R1-R8). Media leave the bot only as uploads or inline data, built from
+bytes; local paths in media elements and direct ``upload.create`` calls are
+only allowed in the outbound pipeline and the boundary (rule R9). Imports must follow the layering in
 ``docs/architecture_conventions.md`` (rules L1-L4), and nothing may still use
 the NoneBot-style compatibility layer ``otae_bot/compat`` (rule C1). The checks
 are AST heuristics run over ``otae_bot/`` and ``plugins/``.
@@ -40,6 +42,7 @@ RULES = {
     "R6": "platform-name",
     "R7": "event-class-name",
     "R8": "direct-env-read",
+    "R9": "local-media-path",
     "L1": "plugin-cross-import",
     "L2": "boundary-import",
     "L3": "infrastructure-upward-import",
@@ -97,6 +100,13 @@ SCOPE_LISTS = frozenset({"subscribers", "propagators"})
 ID_SUFFIXES = ("user_id", "group_id", "guild_id", "channel_id", "self_id")
 ID_EXACT = frozenset({"peer", "uin", "qq"})
 ID_OWNERS = frozenset({"user", "guild", "channel", "member", "self", "account", "login", "operator"})
+
+# R9: media elements built from local paths; the outbound pipeline (and the boundary)
+# are the only places that may turn bytes into uploads.
+MEDIA_EXEMPT = ("otae_bot/pipeline/", "otae_bot/boundary/")
+MEDIA_CLASSES = frozenset({"Image", "Audio", "Video", "File"})
+MEDIA_SOURCES = frozenset({"src", "url"})
+UPLOAD_NAMES = frozenset({"upload_create", "UPLOAD_CREATE"})
 
 # R6: receivers whose string comparison means "which platform/adapter is this".
 PLATFORM_ATTRS = frozenset({"platform", "adapter"})
@@ -214,6 +224,8 @@ class _Scanner(ast.NodeVisitor):
         self.found: dict[tuple[str, int], Violation] = {}
         self.parents: dict[ast.AST, ast.AST] = {}
         self.docstrings: set[ast.AST] = set()
+        self.media = not rel.startswith(MEDIA_EXEMPT)
+        self.media_classes = set(MEDIA_CLASSES)  # plus aliases such as `Image as EntariImage`
 
     def run(self, tree: ast.AST) -> list[Violation]:
         for parent in ast.walk(tree):
@@ -227,6 +239,8 @@ class _Scanner(ast.NodeVisitor):
 
     def add(self, rule: str, node: ast.AST) -> None:
         if rule.startswith("R") and not self.protocol:
+            return
+        if rule == "R9" and not self.media:
             return
         line = node.lineno
         snippet = " ".join(self.lines[line - 1].split())[:80]
@@ -277,7 +291,32 @@ class _Scanner(ast.NodeVisitor):
         if isinstance(func, ast.Name) and func.id == "int" and node.args and (
                 _is_platform_id(node.args[0]) or self._id_destination(node)):
             self.add("R5", node)
+        if isinstance(func, ast.Attribute) and func.attr == "of" and any(k.arg == "path" for k in node.keywords):
+            self.add("R9", node)  # Image.of(path=...) → file:// src
+        if isinstance(func, ast.Name) and func.id in {"getattr", "hasattr"} and len(node.args) >= 2 \
+                and set(_strings(node.args[1])) & UPLOAD_NAMES:
+            self.add("R9", node)
+        if self._media_call(node):
+            for value in [*node.args, *(k.value for k in node.keywords if k.arg in MEDIA_SOURCES)]:
+                if self._local_source(value):
+                    self.add("R9", node)
         self.generic_visit(node)
+
+    def _media_call(self, node: ast.Call) -> bool:
+        """``Image(...)``, ``Image.of(...)``, ``Image.unpack(...)`` and their aliases."""
+        func = node.func
+        if isinstance(func, ast.Attribute) and func.attr in {"of", "unpack"}:
+            func = func.value
+        return _name(func) in self.media_classes
+
+    @staticmethod
+    def _local_source(node: ast.AST) -> bool:
+        """``x.as_uri()``, or a literal / f-string starting with ``file:``."""
+        if isinstance(node, ast.Call) and _name(node.func) == "as_uri":
+            return True
+        if isinstance(node, ast.JoinedStr) and node.values:
+            node = node.values[0]
+        return isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value.lower().startswith("file:")
 
     def _id_destination(self, node: ast.AST) -> bool:
         parent = self.parents.get(node)
@@ -317,6 +356,8 @@ class _Scanner(ast.NodeVisitor):
     # R3, R4, R8: imports
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         self._layering(node)
+        if (node.module or "").startswith(("arclet.entari", "satori")):
+            self.media_classes.update(a.asname for a in node.names if a.name in MEDIA_CLASSES and a.asname)
         if node.module == "os" and any(a.name in ENV_READERS for a in node.names):
             self._env_read(node)
         module = node.module or ""
@@ -350,6 +391,8 @@ class _Scanner(ast.NodeVisitor):
             self._env_read(node)
         if node.attr in ONEBOT_HTTP_NAMES:
             self.add("R3", node)
+        if node.attr in UPLOAD_NAMES:
+            self.add("R9", node)  # uploads happen in the outbound pipeline only
         if node.attr in {"_scope", "_origin"} or node.attr in SCOPE_LISTS:
             self.add("R4", node)
         elif node.attr == "_data" and "event" in _name(node.value).lower():
