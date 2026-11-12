@@ -16,11 +16,9 @@ import aiohttp
 from arclet.alconna import Alconna, Arparma, Args, Empty, MultiVar
 from arclet.entari import (
     Account,
-    AccountUpdate,
     At,
     Author,
     Image as _Image,
-    LoginStatus,
     Message as _MessageElement,
     MessageChain,
     MessageCreatedEvent,
@@ -37,7 +35,12 @@ from loguru import logger
 from nepattern import AnyString
 from satori import ChannelType
 
-from otae_bot.accounts import runtime
+from otae_bot.accounts.ready import (  # noqa: F401 - re-exported until callers migrate
+    get_bot,
+    get_bot_for_guild,
+    get_bots,
+    on_ready,
+)
 from otae_bot.scheduling.jobs import (  # noqa: F401 - re-exported until callers migrate
     _ManagedJob,
     _plugin_module,
@@ -341,45 +344,6 @@ def listen_notice(*_, rule=None, block=True, **__) -> _EventHook:
     return _EventHook(NoticeEvent, rule=rule, block=block)
 
 
-def on_ready(func: Callable[..., Any]):
-    async def _account_update(event: AccountUpdate):
-        if event.status in {LoginStatus.OFFLINE, LoginStatus.DISCONNECT}:
-            account_id = str(getattr(event.account, "self_id", "") or getattr(event.account, "id", ""))
-            runtime.clear_account(account_id or None)
-            return None
-        if event.status not in {LoginStatus.ONLINE, LoginStatus.CONNECT, LoginStatus.RECONNECT}:
-            return None
-        runtime.set_account(event.account, event.status)
-        # Several plugins register on_ready; the registry lists each login's groups once.
-        runtime.schedule_guild_refresh(event.account)
-        result = func(event.account) if _takes_one_arg(func) else func()
-        if inspect.isawaitable(result):
-            return await result
-        return result
-
-    _account_update.__module__ = func.__module__
-    listen(AccountUpdate)(_account_update)
-    return func
-
-
-def get_bot() -> Account:
-    """The default account: the most recent login that is still online."""
-    account = runtime.get_account()
-    if account is None:
-        raise RuntimeError("No Entari account is ready")
-    return account
-
-
-def get_bots() -> list[Account]:
-    """Every online account, the default one first."""
-    return runtime.get_bots()
-
-
-def get_bot_for_guild(guild_id: str) -> Account | None:
-    """An online account known to be in the group (the default one if it is), else None."""
-    return runtime.get_bot_for_guild(guild_id)
-
-
 def inject(func: Callable[..., Any]):
     return _Injected(func)
 
@@ -424,14 +388,6 @@ async def prompt_silently(message: str, timeout: int = 60):
     step = step_out(MessageCreatedEvent, waiter, block=False, priority=15)
     defer(step.dispose)
     return await step.wait(timeout=timeout)
-
-
-def _takes_one_arg(func: Callable[..., Any]) -> bool:
-    try:
-        params = inspect.signature(func).parameters
-    except (TypeError, ValueError):
-        return False
-    return bool(params)
 
 
 def cmd(name: str, aliases: set[str] | None = None, **kwargs):

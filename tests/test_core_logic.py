@@ -179,7 +179,7 @@ class CoreLogicTests(unittest.TestCase):
         self.assertTrue(callable(notice_hook.finish))
 
     def test_entari_on_ready_clears_account_on_disconnect(self):
-        entari_native = _load_module("entari_native_lifecycle_for_test", "otae_bot/compat/entari.py")
+        entari_native = _load_module("accounts_ready_for_test", "otae_bot/accounts/ready.py")
         captured = []
 
         def fake_listen(event_type):
