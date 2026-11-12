@@ -5,15 +5,18 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from arclet.entari import MessageChain
+from arclet.entari import MessageChain, command
+from arclet.entari.command import EntariCommands
+from arclet.entari.command.provider import _remove_config_prefix
 from arclet.entari.config import EntariConfig
 from arclet.entari.const import ITEM_MESSAGE_CONTENT, ITEM_MESSAGE_REPLY
 from arclet.entari.message import Reply
-from arclet.letoderea import Subscriber
+from arclet.letoderea import Scope, Subscriber
 from satori import At, Author, ChannelType, Image, MessageObject, Quote, Text, User
 
-from otae_bot.adapters import command_input
+from otae_bot.adapters import command_input, framework_hooks
 from otae_bot.adapters.command_input import strip_reply_mentions
+from otae_bot.adapters.quote_fallback import UnavailableMessage
 
 
 def quoted(author="other"):
@@ -96,27 +99,61 @@ class CommandSpaceTests(unittest.TestCase):
             with self.subTest(message=message):
                 self.assertIsNone(command_input.normalize_command_spaces(message))
 
-    def test_installs_each_normalizer_once_on_a_loaded_command_dispatcher(self):
+    def test_installs_each_normalizer_once_on_the_command_dispatcher_now_and_after_reload(self):
         async def other_handler():
             return None
 
-        dispatcher = Subscriber(command_input._commands.execute)
+        loaded = Subscriber(command._commands.execute)
         other = Subscriber(other_handler)
-        registered = []
-        with (patch.object(command_input, "global_propagators", registered),
-              patch.object(command_input, "get_all_subscribers", return_value=[dispatcher, other])):
-            command_input.install_command_input_normalizers()
-            command_input.install_command_input_normalizers()
+        with patch.object(framework_hooks, "get_all_subscribers", return_value=[loaded, other]):
+            self.addCleanup(command_input.install_command_input_normalizers())
+            self.addCleanup(command_input.install_command_input_normalizers())
+        # A reloaded .commands registers its dispatcher again, in a new plugin scope.
+        scope = Scope("test-command-input-reload")
+        self.addCleanup(scope.dispose)
+        reloaded = scope.register(EntariCommands().execute)
         kinds = (command_input.QuotedCommandMentions, command_input.CommandSpaces)
-        self.assertEqual(tuple(type(item) for item in registered), kinds)
-        for kind, normalizer in zip(kinds, registered):
-            self.assertIs(dispatcher.get_propagator(kind), normalizer)
+        for dispatcher in (loaded, reloaded):
+            for kind in kinds:
+                self.assertIsInstance(dispatcher.get_propagator(kind), kind)
+            steps = [(sub.callable_target, sub.priority) for sub in dispatcher._propagates]
+            self.assertEqual(sorted(steps, key=lambda step: step[1]), [
+                (command_input.normalize_quoted_command, 50), (command_input.normalize_command_spaces, 55),
+            ])
+        for kind in kinds:
             with self.assertRaises(ValueError):
                 other.get_propagator(kind)
-        steps = [(sub.callable_target, sub.priority) for sub in dispatcher._propagates]
-        self.assertEqual(sorted(steps, key=lambda step: step[1]), [
-            (command_input.normalize_quoted_command, 50), (command_input.normalize_command_spaces, 55),
+
+
+class CommandPrefixTests(unittest.TestCase):
+    def check(self, prefix, nickname, cases):
+        config = SimpleNamespace(basic=SimpleNamespace(prefix=prefix, nickname=nickname))
+        with patch.object(EntariConfig, "instance", config, create=True):
+            for message, allow_skip, expected in cases:
+                with self.subTest(prefix=prefix, nickname=nickname, message=message, allow_skip=allow_skip):
+                    self.assertIs(command_input.looks_like_command(message, allow_skip), expected)
+                    # Same decision as Entari's own prefix check.
+                    self.assertIs(bool(_remove_config_prefix(MessageChain(list(message)), allow_skip)), expected)
+
+    def test_matches_entari_prefix_rules(self):
+        image = Image(src="https://example.com/a.png")
+        cases = [
+            (MessageChain("/q 解释"), False, True),
+            (MessageChain("  /q 解释"), False, True),
+            (MessageChain("q 解释"), False, False),
+            (MessageChain("q 解释"), True, True),
+            (MessageChain([image, Text("/q")]), False, False),
+            (MessageChain([image, Text("/q")]), True, False),
+            (MessageChain(), True, False),
+        ]
+        self.check(["/"], None, cases)
+        self.check(["/", "!"], "小O", cases + [
+            (MessageChain("小O，解释"), False, True), (MessageChain("@小O 解释"), False, True),
+            (MessageChain("!q"), False, True), (MessageChain("小O解释"), False, False),
         ])
+        self.check(["", "/"], None, [(MessageChain("q 解释"), False, True)])
+        self.check([], "小O", [(MessageChain("q 解释"), False, True), (MessageChain([image]), False, False)])
+        self.check([], None, [(MessageChain("q 解释"), False, True), (MessageChain(), False, False)])
 
 
 class InlineQuoteAuthorTests(unittest.IsolatedAsyncioTestCase):
@@ -182,6 +219,14 @@ class InlineQuoteAuthorTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("secret-token", str(warning.call_args))
         self.assertNotIn("raw-message-body", str(warning.call_args))
         self.assertIn("RuntimeError", str(warning.call_args))
+        self.assertIs(self.session.reply, self.reply)
+
+    async def test_unavailable_placeholder_from_the_quote_hook_is_a_quiet_failure(self):
+        # quote_fallback.guard_message_get answers a failed message.get with a placeholder and logs it.
+        self.lookup.return_value = UnavailableMessage.from_elements("quoted", [])
+        with patch.object(command_input.logger, "warning") as warning:
+            self.assertIsNone(await command_input.normalize_quoted_command(self.message, self.session))
+        warning.assert_not_called()
         self.assertIs(self.session.reply, self.reply)
 
     async def test_author_lookup_timeout_cancels_the_adapter_request(self):

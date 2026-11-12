@@ -65,6 +65,10 @@ def attach_to_every_subscriber(kind: type[P], factory: Callable[[Subscriber], P 
     ``factory`` returns a ``kind`` instance, or ``None`` to leave the subscriber
     alone. Installing the same ``kind`` again is a no-op. Returns a function that
     stops covering future registrations (attached propagators stay).
+
+    "Already attached" is checked with ``Subscriber.get_propagator``, which only sees
+    propagators that are still referenced (letoderea keeps them in a WeakSet): return
+    a shared instance, or one whose composed callables refer to it.
     """
     hook = next((item for item in global_propagators if isinstance(item, _AttachToEach) and item.kind is kind), None)
     if hook is None:

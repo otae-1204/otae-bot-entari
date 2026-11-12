@@ -1,8 +1,5 @@
 [
 {"rule": "event-class-name", "file": "plugins/minecraft_plugin/broadcast.py", "snippet": "if event.__class__.__name__ != \"GuildMemberAddedEvent\":", "count": 1},
-{"rule": "framework-private", "file": "otae_bot/adapters/command_input.py", "snippet": "from arclet.entari.command import _commands", "count": 1},
-{"rule": "framework-private", "file": "otae_bot/adapters/command_input.py", "snippet": "from arclet.entari.command.provider import _remove_config_prefix", "count": 1},
-{"rule": "framework-private", "file": "otae_bot/adapters/command_input.py", "snippet": "from arclet.letoderea.scope import global_propagators", "count": 1},
 {"rule": "framework-private", "file": "otae_bot/adapters/framework_hooks.py", "snippet": "from arclet.letoderea.scope import global_propagators", "count": 1},
 {"rule": "framework-private", "file": "otae_bot/attendance_delivery.py", "snippet": "from arclet.letoderea.exceptions import _ExitException", "count": 1},
 {"rule": "framework-private", "file": "otae_bot/attendance_registry.py", "snippet": "from arclet.letoderea.exceptions import _ExitException", "count": 1},

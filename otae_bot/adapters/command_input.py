@@ -3,18 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from dataclasses import replace
 
 from arclet.entari import MessageChain, Session
-from arclet.entari.command import _commands
-from arclet.entari.command.provider import _remove_config_prefix
+from arclet.entari.command import EntariCommands
+from arclet.entari.config import EntariConfig
 from arclet.entari.const import ITEM_MESSAGE_CONTENT, ITEM_MESSAGE_REPLY
 from arclet.entari.message import Reply
-from arclet.entari.plugin import get_all_subscribers
 from arclet.letoderea import Propagator, Subscriber
-from arclet.letoderea.scope import global_propagators
 from loguru import logger
 from satori import At, Author, ChannelType, MessageObject, Text, select
+
+from otae_bot.adapters.framework_hooks import attach_to_every_subscriber
+from otae_bot.adapters.quote_fallback import UnavailableMessage
 
 QUOTE_AUTHOR_TIMEOUT = 5
 # Alconna only splits on ASCII spaces. Some clients send NBSP or the CJK
@@ -32,6 +34,27 @@ def reply_author_id(reply: Reply | None) -> str | None:
     return author_id
 
 
+def looks_like_command(message: MessageChain, allow_skip: bool) -> bool:
+    """Whether Entari's prefix check (``MessageJudges``) would let ``message`` through.
+
+    Same rules as Entari 0.19.4 ``command.provider``: the configured nickname, then
+    the configured prefixes (an empty prefix accepts everything); ``allow_skip`` is
+    its ``ignore_prefix_filter`` result, by default "this is a private chat".
+    """
+    basic = EntariConfig.instance.basic
+    prefixes, nickname = basic.prefix, basic.nickname
+    if not prefixes and not nickname:
+        return bool(message)
+    if not message or not isinstance(message[0], Text):
+        return False
+    text = message[0].text.lstrip()
+    if nickname and re.match(rf"^@?{re.escape(nickname)}[，,:\s]+", text):
+        return True
+    if not prefixes or any(not prefix or text.startswith(prefix) for prefix in prefixes):
+        return True
+    return allow_skip
+
+
 async def resolve_reply_author(message: MessageChain, session: Session) -> Reply | None:
     reply = session.reply
     if not reply or not reply.origin or reply_author_id(reply) or not reply.quote.id or not reply.quote.children:
@@ -45,8 +68,7 @@ async def resolve_reply_author(message: MessageChain, session: Session) -> Reply
             index += 1
         else:
             break
-    candidate = MessageChain(message[index:])
-    if not _remove_config_prefix(candidate, session.channel.type == ChannelType.DIRECT):
+    if not looks_like_command(MessageChain(message[index:]), session.channel.type == ChannelType.DIRECT):
         return reply
     try:
         origin = await asyncio.wait_for(
@@ -55,6 +77,8 @@ async def resolve_reply_author(message: MessageChain, session: Session) -> Reply
     except Exception as error:  # noqa: BLE001 - Keep unresolved mentions; never log adapter bodies or credentials.
         logger.warning("[commands] quoted author lookup failed: {}", type(error).__name__)
         return reply
+    if isinstance(origin, UnavailableMessage):
+        return reply  # quote_fallback already logged the failed message.get
     if not isinstance(origin, MessageObject) or origin.id != reply.quote.id or not getattr(origin.user, "id", None):
         logger.warning("[commands] quoted author lookup returned missing or mismatched metadata")
         return reply
@@ -110,39 +134,42 @@ def normalize_command_spaces(message: MessageChain):
     ])}
 
 
-class CommandInput(Propagator):
-    def validate(self, subscriber: Subscriber) -> bool:
-        return subscriber.callable_target == _commands.execute
+def is_command_dispatcher(subscriber: Subscriber) -> bool:
+    """The ``.commands`` listener that checks prefixes and dispatches every command."""
+    target = subscriber.callable_target
+    return getattr(target, "__func__", None) is EntariCommands.execute and isinstance(
+        getattr(target, "__self__", None), EntariCommands)
 
 
-class QuotedCommandMentions(CommandInput):
+class QuotedCommandMentions(Propagator):
     def compose(self):
         # MessageJudges checks / and other configured prefixes at priority 60.
         yield normalize_quoted_command, True, 50
 
 
-class CommandSpaces(CommandInput):
+class CommandSpaces(Propagator):
     def compose(self):
         # After quote mentions are stripped, so the cleaned chain is rewritten too.
         yield normalize_command_spaces, True, 55
 
 
-def install_command_input_normalizers() -> None:
-    for kind in (QuotedCommandMentions, CommandSpaces):
-        normalizer = next((item for item in global_propagators if isinstance(item, kind)), None)
-        if normalizer is None:
-            normalizer = kind()
-            global_propagators.append(normalizer)
-        # Rootless .commands normally loads later during startup. The global
-        # propagator also covers its reload; attach to an already loaded one too.
-        for subscriber in get_all_subscribers():
-            if normalizer.validate(subscriber) and not _has_propagator(subscriber, kind):
-                subscriber.propagate(normalizer)
+# Stateless, so one instance serves every dispatcher; keeping it referenced also keeps
+# it visible to Subscriber.get_propagator (a WeakSet), which install relies on.
+_NORMALIZERS = (QuotedCommandMentions(), CommandSpaces())
 
 
-def _has_propagator(subscriber: Subscriber, kind: type[Propagator]) -> bool:
-    # Letoderea raises instead of returning None when nothing is attached.
-    try:
-        return bool(subscriber.get_propagator(kind))
-    except ValueError:
-        return False
+def install_command_input_normalizers():
+    """Attach both normalizers to the command dispatcher, now and after ``.commands`` reloads."""
+    removers = [
+        attach_to_every_subscriber(
+            type(normalizer),
+            lambda subscriber, normalizer=normalizer: normalizer if is_command_dispatcher(subscriber) else None,
+        )
+        for normalizer in _NORMALIZERS
+    ]
+
+    def remove() -> None:
+        for remover in removers:
+            remover()
+
+    return remove
