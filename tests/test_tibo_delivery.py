@@ -12,7 +12,7 @@ from plugins.tibo_radar import handlers
 from plugins.tibo_radar.delivery import deliver_page, fallback_text
 from plugins.tibo_radar.models import TiboPost
 from plugins.tibo_radar.store import TiboStore
-from otae_bot.adapters.entari import SendDest
+from otae_bot.delivery import Target
 
 
 PNG = b"\x89PNG\r\n\x1a\nfixture"
@@ -401,7 +401,7 @@ def test_render_timeout_falls_back_to_text():
         await asyncio.sleep(1)
         return PNG
 
-    result = asyncio.run(deliver_page(bot, SendDest("channel"), [post(1)], render, [], str, timeout=0.01))
+    result = asyncio.run(deliver_page(bot, Target.group("channel"), [post(1)], render, [], str, timeout=0.01))
     assert result == "text"
 
 

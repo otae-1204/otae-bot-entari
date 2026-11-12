@@ -16,9 +16,7 @@ from otae_bot.config.settings import Config as GlobalConfig
 from otae_bot.adapters.entari import (
     ArgVal,
     ChainMsg,
-    SendDest,
     Text,
-    account_adapter_name,
     cmd as _cmd,
     get_channel_id,
     get_group_id,
@@ -29,6 +27,7 @@ from otae_bot.adapters.entari import (
     timer,
     event_user_id,
 )
+from otae_bot.delivery import Target
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
 
 from plugins.tibo_radar.client import TiboRadarClient
@@ -219,7 +218,6 @@ async def _deliver_subscriptions(bot: Bot, *, initialize_baselines: bool) -> Non
         if not _account_connected(delivery_bot):
             logger.debug("[tibo_radar] subscription deferred group={}: bound account unavailable", subscription.group_id)
             continue
-        adapter = account_adapter_name(delivery_bot)
         if subscription.baseline_pending:
             if initialize_baselines:
                 store.mark_subscription_initialized(subscription.group_id)
@@ -252,14 +250,7 @@ async def _deliver_subscriptions(bot: Bot, *, initialize_baselines: bool) -> Non
                     )
 
                 links = list(dict.fromkeys([*_post_links(page_posts), *_source_links()]))
-                target = SendDest(
-                    subscription.channel_id or subscription.group_id,
-                    subscription.group_id,
-                    True,
-                    False,
-                    "",
-                    adapter,
-                )
+                target = Target.group(subscription.group_id, channel_id=subscription.channel_id)
                 mode = await deliver_page(delivery_bot, target, page_posts, render, links, service.relevance_label)
             except asyncio.CancelledError:
                 raise

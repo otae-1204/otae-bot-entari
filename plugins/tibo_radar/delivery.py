@@ -14,7 +14,8 @@ from collections.abc import Awaitable, Callable
 from loguru import logger
 from satori.model import Upload
 
-from otae_bot.adapters.entari import ChainMsg, SendDest, Text, make_image
+from otae_bot.adapters.entari import ChainMsg, Text, make_image
+from otae_bot.delivery import Target, deliver
 
 from .models import TiboPost
 
@@ -23,9 +24,10 @@ class DeliveryNotAcknowledged(RuntimeError):
     """An empty receipt can also mean a send hook intentionally cancelled it."""
 
 
-async def _send(message: ChainMsg, target: SendDest, bot, timeout: float) -> None:
-    receipts = await asyncio.wait_for(message.send(target, bot), timeout)
-    if not receipts or not any(getattr(receipt, "id", None) for receipt in receipts):
+async def _send(message: ChainMsg, target: Target, bot, timeout: float) -> None:
+    result = await asyncio.wait_for(deliver(target, message, account=bot), timeout)
+    result.raise_for_failure()
+    if not any(getattr(receipt, "id", None) for receipt in result.messages):
         raise DeliveryNotAcknowledged("no message receipt; delivery cursor retained")
 
 
@@ -71,7 +73,7 @@ def fallback_text(posts: list[TiboPost], relevance_label: Callable[[str], str]) 
 
 async def deliver_page(
     bot,
-    target: SendDest,
+    target: Target,
     posts: list[TiboPost],
     render: Callable[[], Awaitable[bytes]],
     links: list[str],
@@ -98,7 +100,7 @@ async def deliver_page(
     except Exception as exc:
         logger.warning(
             "[tibo_radar] image delivery degraded group={} stage={} error_type={} image_bytes={}",
-            target.parent_id, stage, type(exc).__name__, image_bytes,
+            target.guild_id, stage, type(exc).__name__, image_bytes,
         )
     await _send(ChainMsg.text(fallback_text(posts, relevance_label)), target, bot, timeout)
     return "text"
