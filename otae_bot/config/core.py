@@ -62,6 +62,15 @@ class BrowserSettings(Settings):
     concurrency: int = field(default=2, description="同一浏览器同时渲染几张图（1–4；每多一张约多占 150–300 MB 内存）")
 
 
+class MediaSettings(Settings):
+    """媒体发送（图片、语音、视频、文件）"""
+
+    shared_filesystem: bool = field(
+        default=False,
+        description="OneBot 接入端（LLBot）与 bot 在同一台机器、以同一用户运行时设 true：上传的图片以 file:// 路径交给它，省去 base64；默认 false",
+    )
+
+
 class CoreSettings(Settings):
     """otae_bot 核心配置（entari.yml 根部的 otae: 段）"""
 
@@ -69,4 +78,5 @@ class CoreSettings(Settings):
     http_asset: HttpAssetSettings = field(default_factory=HttpAssetSettings, description="素材通道")
     http_cache: HttpCacheSettings = field(default_factory=HttpCacheSettings, description="HTTP 缓存预算")
     browser: BrowserSettings = field(default_factory=BrowserSettings, description="出图浏览器")
+    media: MediaSettings = field(default_factory=MediaSettings, description="媒体发送")
     help_cache_path: str = field(default="data/cache/help-cards", description="运行时帮助卡片缓存目录（相对仓库根）")

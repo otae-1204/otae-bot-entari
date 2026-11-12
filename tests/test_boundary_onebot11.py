@@ -573,6 +573,83 @@ class UploadTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn(b"upload" if status == 404 else b"only upload.create", resp.body)
         self.assertEqual(self._sent(), [])
 
+    async def test_shared_filesystem_passes_stored_uploads_by_path(self):
+        import base64
+
+        from otae_bot.boundary import onebot11
+
+        self.addCleanup(onebot11.share_uploads_by_path, False)
+        onebot11.share_uploads_by_path(True)
+        url = await self._upload(PNG, "image/png", "card.png")
+        note = await self._upload(b"hello", "text/plain", "notes.txt")
+        resp = await self._send(f'<img src="{url}"/><file src="{note}"/>')
+        self.assertEqual(resp.status_code, 200, resp.body)
+        (message,) = self._sent()
+        stored = Path(self.server._tempdir.name) / url.rsplit("/", 1)[1]
+        self.assertEqual(message["message"][0]["data"]["file"], stored.as_uri())
+        self.assertEqual(Path(stock_message.uri_to_path(stored.as_uri())).read_bytes(), PNG)
+        # files keep base64 and their original name
+        (params,) = self._sent("upload_group_file")
+        self.assertEqual((params["file"], params["name"]), ("base64://" + base64.b64encode(b"hello").decode(), "notes.txt"))
+
+    async def test_image_from_bytes_reaches_onebot_once_as_base64_through_the_pipeline(self):
+        """Entari account → outbound pipeline → upload.create → message.create → one OneBot send."""
+        import base64
+
+        from arclet.entari import MessageChain, Text
+        from arclet.letoderea import Scope, use
+        from arclet.entari.session import EntariProtocol
+        from arclet.letoderea.utils import _EventSystem
+        from satori.client.account import Account, ApiInfo
+        from satori.utils import decode
+
+        from otae_bot.messaging.media import png
+        from otae_bot.pipeline import outbound_media
+
+        loop_patch = patch.object(_EventSystem, "loop", asyncio.get_running_loop())
+        loop_patch.start()
+        self.addCleanup(loop_patch.stop)
+        scope = Scope.of("test-boundary-outbound-media")
+        self.addAsyncCleanup(scope.cleanup)
+        with scope.context():
+            use(outbound_media.publisher, outbound_media.rewrite_outbound_media)
+        test = self
+
+        class DirectProtocol(EntariProtocol):
+            """entari-plugin-server's direct mode in short: the request goes straight to the server."""
+
+            async def call_api(self, action, params=None, multipart=False, method="POST"):
+                import io
+
+                from starlette.datastructures import FormData, Headers, UploadFile
+
+                form = None
+                if multipart:
+                    form = FormData([
+                        (k, UploadFile(io.BytesIO(v["value"]), filename=v.get("filename"),
+                                       headers=Headers({"content-type": v["content_type"]})))
+                        if isinstance(v, dict) else (k, v)
+                        for k, v in params.items()
+                    ])
+                resp = await test._call(Api(getattr(action, "value", action)), json=None if form else params, form=form)
+                test.assertEqual(resp.status_code, 200, resp.body)
+                return decode(resp.body)
+
+        login = Login(sn=0, status=LoginStatus.ONLINE, adapter="onebot", platform="qq-client", user=User(SELF),
+                      features=self.adapter.features)
+        account = Account(login, ApiInfo(port=5140), [], DirectProtocol)
+        self.addAsyncCleanup(account.protocol.session.close)
+        self.assertTrue(outbound_media.supports_upload(account))
+
+        with patch.object(asyncio.get_running_loop(), "call_later"):
+            receipts = await account.protocol.send_message(GROUP, MessageChain([Text("看图"), png(PNG)]))
+        self.assertEqual(len(receipts), 1)
+        (message,) = self._sent()
+        self.assertEqual(message["message"][0], {"type": "text", "data": {"text": "看图"}})
+        self.assertEqual(message["message"][1]["data"]["file"], "base64://" + base64.b64encode(PNG).decode())
+        self.assertEqual(len(message["message"]), 2)
+        self.assertEqual(len(list(Path(self.server._tempdir.name).iterdir())), 1)  # stored once, by upload.create
+
     async def test_ordinary_urls_are_left_to_the_stock_encoder(self):
         await self._send('<img src="https://example.com/a.png"/><at id="1"/>')
         self.assertEqual([seg["type"] for seg in self._sent()[0]["message"]], ["image", "at"])
@@ -632,6 +709,17 @@ class WiringTests(unittest.TestCase):
         # The forced values and the fresh token never reach the loaded file's data.
         self.assertNotIn("token", declared)
         self.assertEqual(declared["host"], "0.0.0.0")
+
+    def test_shared_filesystem_setting_reaches_the_boundary(self):
+        from otae_bot.boundary import onebot11
+
+        self.addCleanup(onebot11.share_uploads_by_path, False)
+        server = "plugins:\n  server:\n    adapters:\n      - endpoint: ws://127.0.0.1:3001\n"
+        for value, expected in (("true", True), ("false", False)):
+            yml = f"basic:\n  network: []\notae:\n  media:\n    shared_filesystem: {value}\n" + server
+            with self.subTest(value=value), loaded_config_file(yml, "") as _:
+                self._create_app()
+                self.assertIs(onebot11._shared_filesystem, expected)
 
     def test_server_listens_on_a_private_unix_socket(self):
         import os

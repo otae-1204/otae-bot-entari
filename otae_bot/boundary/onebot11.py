@@ -17,7 +17,9 @@ against LLBot 8.3.2:
   stock ``guild-member-added``;
 - ``upload.create`` is routed (and declared) here, since the server's default handler
   fails in direct mode, and ``message.create`` inlines those uploads: LLBot cannot read
-  the server's ``internal:…/_tmp/…`` URLs.
+  the server's ``internal:…/_tmp/…`` URLs. When LLBot shares the bot's filesystem
+  (``otae.media.shared_filesystem``), images, audio and video go as ``file://`` paths
+  to the stored upload instead of base64.
 """
 
 from __future__ import annotations
@@ -68,6 +70,13 @@ __all__ = ["OneBot11ForwardConfig", "OneBotBoundaryAdapter", "decode", "decode_e
 FORWARD_MAX_DEPTH = 3
 FORWARD_MAX_MESSAGES = 200
 _MEDIA_ELEMENTS = frozenset({"img", "image", "audio", "video", "file"})
+_shared_filesystem = False
+
+
+def share_uploads_by_path(enabled: bool) -> None:
+    """Whether LLBot may read stored uploads by path (same machine, same user)."""
+    global _shared_filesystem
+    _shared_filesystem = bool(enabled)
 
 
 # ── message decoding ──
@@ -318,8 +327,10 @@ class OneBotBoundaryAdapter(OneBot11ForwardAdapter):
         """Stock message.create, with upload.create resources turned into inline data.
 
         The stock encoder hands ``internal:…/_tmp/…`` to LLBot as ``file``, and LLBot
-        fails with 未知文件类型或路径不存在. Inline base64, not ``file://``: LLBot need not
-        share our filesystem (or user, or container) for it to work.
+        fails with 未知文件类型或路径不存在. Inline base64 by default: LLBot need not
+        share our filesystem (or user, or container) for it to work. Only when the
+        deployment says it does are images, audio and video passed as ``file://``
+        paths (files keep base64: the stock encoder would name them by the stored name).
         """
         elements = parse(request.params["content"])
         await self._inline_uploads(elements)
@@ -334,6 +345,9 @@ class OneBotBoundaryAdapter(OneBot11ForwardAdapter):
                 for key in ("src", "url"):
                     value = element.attrs.get(key)
                     if not isinstance(value, str) or (file := self._upload_file(value)) is None:
+                        continue
+                    if _shared_filesystem and element.type != "file":
+                        element.attrs[key] = file.as_uri()
                         continue
                     try:
                         data = await asyncio.to_thread(file.read_bytes)

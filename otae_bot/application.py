@@ -7,7 +7,7 @@ from arclet.entari.event.plugin import PluginUnloaded
 from loguru import logger
 
 from otae_bot.command_usage import close_command_usage, install_command_usage_recorders
-from otae_bot.config.settings import loaded_config, server_declaration
+from otae_bot.config.settings import core_settings, loaded_config, server_declaration
 from otae_bot.hypergryph.attendance_registry import on_plugin_unloaded
 from otae_bot.infrastructure.http.tls import prewarm_shared_ssl_context
 from otae_bot.infrastructure.loop_watchdog import (
@@ -34,6 +34,9 @@ def create_app() -> Entari:
         # Loaded here, before Entari would load `server` from the file with its own
         # defaults (a TCP listener): the boundary forces loopback/unix socket and a fresh token.
         from otae_bot.boundary import SERVER_PLUGIN, server_plugin_config
+        from otae_bot.boundary.onebot11 import share_uploads_by_path
+
+        share_uploads_by_path(core_settings().media.shared_filesystem)
 
         loaded = load_plugin(SERVER_PLUGIN, server_plugin_config(server))
         if not loaded:

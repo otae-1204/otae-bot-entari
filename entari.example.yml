@@ -82,6 +82,9 @@ otae:
   # 出图用的共享浏览器
   browser:
     concurrency: 2   # 同一浏览器同时渲染几张图（1–4；每多一张约多占 150–300 MB 内存）
+  # 媒体发送（图片、语音、视频、文件）
+  media:
+    shared_filesystem: false   # OneBot 接入端（LLBot）与 bot 在同一台机器、以同一用户运行时设 true：上传的图片以 file:// 路径交给它，省去 base64；默认 false
   help_cache_path: "data/cache/help-cards"   # 运行时帮助卡片缓存目录（相对仓库根）
 plugins:
   # OneBot 11 接入（可选）：由进程内的 otae_bot/boundary 把 LLBot 的 OneBot 11 正向 WebSocket
