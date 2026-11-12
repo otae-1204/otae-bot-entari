@@ -123,6 +123,29 @@ Plugins speak only Satori. Platform protocol lives in `otae_bot/boundary/`:
 boundary adapter, which presents the account as Satori (quoted merged forwards
 arrive expanded inside the quote; see `docs/hyw_plugin.md`).
 
+## 平台名迁移（llonebot → qq-client）
+
+改用 `ONEBOT_CLIENTS` 后，账号的平台名从 LLBot 原生 Satori 的 `llonebot` 变为
+`qq-client`。群功能开关、指令统计、Tibo 雷达订阅、终末地公告订阅与通知回执都按平台名存储，
+切换前需一次性迁移，否则这些数据不再命中。在项目根目录执行：
+
+```powershell
+.\scripts\stop.bat
+# 预演：只打印各存储将改动的条数，不写文件
+.\.venv\Scripts\python.exe -X utf8 scripts\migrate_platform.py --from llonebot --to qq-client
+# 执行：先备份到 data\_migration_backup\<时间戳>\，再逐个存储原子写入
+.\.venv\Scripts\python.exe -X utf8 scripts\migrate_platform.py --from llonebot --to qq-client --apply
+```
+
+然后在 `.env` 配置 `ONEBOT_CLIENTS` 再启动。机器人运行时（持有 `.runtime\bot.lock`）
+`--apply` 会拒绝执行。重复执行不会再改动；`--self-id` 可只迁移指定账号。
+
+Grok 会话绑定默认跳过：云端 Bot 的会话标记由会话键的哈希生成，改键后已绑定的会话会报
+“绑定不一致”。不迁移时，新平台名下的会话会创建新的 Grok Bot；确需迁移可加 `--include-grok`。
+
+回滚：停止机器人，用 `--from qq-client --to llonebot --apply` 反向执行，或从备份目录拷回原文件，
+再改回 `SATORI_CLIENTS` 启动。
+
 ## Deploy To Windows Server
 
 Default production directory:
