@@ -16,7 +16,7 @@ from otae_bot.adapters.entari import listen_message, prompt
 from arclet.entari import Account as Bot, Event
 from otae_bot.adapters.entari import Pred
 from loguru import logger
-from arclet.letoderea.exceptions import _ExitException
+from arclet.letoderea import ExitState
 from otae_bot.adapters.entari import (
     ChainMsg, At, ArgVal, SendDest, event_plain_text, event_user_id,
     make_image as ChainImage, account_adapter_name, stop_session,
@@ -1356,7 +1356,7 @@ async def _cmd_deploy(bot: Bot, event: Event, group_id: str, user_id: str, args_
                 lines.extend(advice.splitlines()[:6])
         await _finish_notice(mcsm, "MCSM Docker 部署完成", tuple(lines), "success")
         return
-    except _ExitException:
+    except ExitState:
         raise
     except Exception as exc:
         logger.warning(f"[MCSM] Docker deploy failed: {type(exc).__name__}: {redact_mcsm_sensitive_text(exc)}")

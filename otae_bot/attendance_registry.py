@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from arclet.entari.event.plugin import PluginUnloaded
-from arclet.letoderea.exceptions import _ExitException
+from arclet.letoderea import ExitState
 from loguru import logger
 
 # Outcome states.  ``SIGNED`` means the game ran and produced its own result
@@ -185,8 +185,8 @@ async def collect_outcomes(
 
     ``enabled`` answers the group switch question for a game's plugin key.  It
     is only consulted for games that are actually registered, so a group switch
-    can never mask a plugin that failed to load.  ``CancelledError`` and Entari's
-    ``_ExitException`` still propagate: cancellation must release the per-role
+    can never mask a plugin that failed to load.  ``CancelledError`` and Entari's stop signal
+    (``ExitState``) still propagate: cancellation must release the per-role
     lock and must not be reported as a sign-in failure.
     """
     outcomes: list[AttendanceOutcome] = []
@@ -209,7 +209,7 @@ async def collect_outcomes(
             continue
         try:
             roles = tuple(capability.roles(user_id) or ())
-        except _ExitException:
+        except ExitState:
             raise
         except Exception as exc:  # noqa: BLE001 - one game must not abort the other
             logger.error(
@@ -226,7 +226,7 @@ async def collect_outcomes(
             continue
         try:
             result = await capability.sign(user_id, group=group)
-        except _ExitException:
+        except ExitState:
             raise
         except Exception as exc:  # noqa: BLE001 - one game must not abort the other
             logger.error(

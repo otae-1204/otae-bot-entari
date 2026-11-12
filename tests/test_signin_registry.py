@@ -319,15 +319,15 @@ class CollectOutcomesTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("ARKNIGHTS_CREDENTIAL_KEY", registry_module.build_notice(outcomes))
 
     async def test_cancellation_and_entari_exit_still_propagate(self):
-        from arclet.letoderea.exceptions import _ExitException
+        from arclet.letoderea import STOP
 
         async def cancelled(user_id, *, group):
             raise asyncio.CancelledError()
 
         async def stopping(user_id, *, group):
-            raise _ExitException("stop")
+            raise STOP  # what session.stop() / matcher.finish() raise
 
-        for sign, expected in ((cancelled, asyncio.CancelledError), (stopping, _ExitException)):
+        for sign, expected in ((cancelled, asyncio.CancelledError), (stopping, type(STOP))):
             with self.subTest(sign=sign):
                 self.registry.clear()
                 self.registry.register(capability("endfield", roles=[object()], sign=sign))

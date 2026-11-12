@@ -17,7 +17,7 @@ from time import perf_counter
 import aiohttp
 from arclet.alconna import Alconna, Args, MultiVar
 from arclet.entari import At, Cleanup, Event, Text, listen
-from arclet.letoderea.exceptions import _ExitException
+from arclet.letoderea import ExitState
 from loguru import logger
 from nepattern import AnyString
 
@@ -540,7 +540,7 @@ async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand,
             try:
                 png = await _render_current_version_calendar()
                 return await _finish_png(matcher, png)
-            except _ExitException:
+            except ExitState:
                 raise
             except (VersionCalendarError, WarfarinAPIError, StageDataIncomplete) as exc:
                 logger.error(f"[endfield] version calendar unavailable: {exc}")
@@ -669,12 +669,12 @@ async def _handle_command(matcher, event: Event, command: ParsedEndfieldCommand,
             )
             try:
                 return await _finish_pngs(matcher, pngs)
-            except _ExitException:
+            except ExitState:
                 raise
             except Exception as exc:
                 logger.exception(f"[endfield] send failed for {selected.kind} {command.query}: {exc}")
                 return await matcher.finish("图片发送失败，请稍后再试。")
-    except _ExitException:
+    except ExitState:
         raise
     except WarfarinAPIError as exc:
         logger.warning(f"[endfield] data API failed for {command.scope} {command.query}: {exc}")
@@ -1188,7 +1188,7 @@ async def _handle_personal_command(matcher, event: Event, command: ParsedEndfiel
     except aiohttp.ClientConnectionError:
         logger.warning(f"[endfield-account] message connection interrupted: action={command.action}")
         return await matcher.finish("网络连接中断，请重新发送指令。")
-    except _ExitException:
+    except ExitState:
         raise
     except Exception as exc:
         logger.opt(exception=exc).error(
@@ -1514,7 +1514,7 @@ async def _finish_challenge_pages(matcher, event, bot, pngs: tuple[bytes, ...], 
         return await _finish_pngs(matcher, pngs)
     try:
         await _send_forward_pngs(matcher, bot, pngs)
-    except _ExitException:
+    except ExitState:
         raise
     except Exception as exc:
         logger.warning(f"[endfield-challenge] merged forward unavailable: {type(exc).__name__}")
@@ -1542,7 +1542,7 @@ async def _send_forward_pngs(
         images = [_png_image(png) for png in pngs]
         await send_forward(images, name=sender_name, uin=uin)
         return "satori"
-    except _ExitException:
+    except ExitState:
         raise
     except Exception as exc:
         logger.warning(
@@ -1587,7 +1587,7 @@ async def _finish_gacha_pngs(matcher, event, bot, pngs: tuple[bytes, ...]) -> No
                 matcher, bot, chunk, sender_name=_GACHA_FORWARD_SENDER_NAME, log_tag="endfield-gacha",
             ))
             sent += len(chunk)
-    except _ExitException:
+    except ExitState:
         raise
     except Exception as exc:
         logger.warning(
@@ -2255,7 +2255,7 @@ async def _render_account_currency(
             period_label=period_label,
         )
         return await _finish_pngs(matcher, cards)
-    except _ExitException:
+    except ExitState:
         raise
     except Exception:
         logger.exception("[endfield] currency log card render failed")
@@ -2489,7 +2489,7 @@ async def _attendance_png(view: AttendanceCardView) -> bytes | None:
     """Render the card, or return ``None`` so the caller sends full text."""
     try:
         return await draw_attendance_card(view)
-    except _ExitException:
+    except ExitState:
         raise
     except Exception as exc:  # noqa: BLE001 - the text result must still be delivered
         logger.warning(
@@ -2785,7 +2785,7 @@ async def _handle_loadout(matcher, command: ParsedEndfieldCommand) -> None:
                 f"draw={perf_counter() - started - data_seconds:.3f}s"
             )
             return await _finish_png(matcher, png)
-    except _ExitException:
+    except ExitState:
         raise
     except (WarfarinAPIError, ValueError) as exc:
         logger.warning(f"[endfield] loadout rejected: {exc}")
@@ -3631,7 +3631,7 @@ async def _handle_random_wiki(matcher) -> None:
                 continue
             try:
                 pngs = await _render_candidate(candidate)
-            except _ExitException:
+            except ExitState:
                 raise
             except Exception as exc:  # noqa: BLE001 - Try another entry after any renderer failure.
                 logger.warning(
@@ -3643,7 +3643,7 @@ async def _handle_random_wiki(matcher) -> None:
                 continue
             try:
                 return await _finish_pngs(matcher, pngs)
-            except _ExitException:
+            except ExitState:
                 raise
             except Exception:  # noqa: BLE001 - Transport failure must stop random selection.
                 logger.exception("[endfield] random Wiki send failed")

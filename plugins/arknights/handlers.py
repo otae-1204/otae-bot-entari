@@ -14,7 +14,7 @@ from typing import Any
 
 from arclet.alconna import Alconna, Args, MultiVar
 from arclet.entari import Cleanup, Event, listen
-from arclet.letoderea.exceptions import _ExitException
+from arclet.letoderea import ExitState
 from loguru import logger
 from nepattern import AnyString
 
@@ -203,7 +203,7 @@ async def _dispatch(matcher, event: Event, command, bot=None) -> None:
             f"[arknights] api request failed operation={exc.operation} code={exc.code or 'unknown'}"
         )
         return await matcher.finish(str(exc))
-    except _ExitException:
+    except ExitState:
         raise
     except Exception as exc:  # noqa: BLE001 - report instead of crashing the bot
         logger.error(
@@ -418,7 +418,7 @@ async def _attendance_png(view: AttendanceCardView) -> bytes | None:
     """Render the card, or return ``None`` so the caller sends full text."""
     try:
         return await draw_attendance_card(view)
-    except _ExitException:
+    except ExitState:
         raise
     except Exception as exc:  # noqa: BLE001 - the text result must still be delivered
         logger.warning(

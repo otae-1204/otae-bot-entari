@@ -3,7 +3,7 @@
 from io import BytesIO
 from unittest import IsolatedAsyncioTestCase, TestCase, mock
 
-from arclet.letoderea.exceptions import _ExitException
+from arclet.letoderea import STOP
 from PIL import Image
 
 from otae_bot import attendance_delivery as delivery_module
@@ -120,7 +120,7 @@ class DeliverTests(IsolatedAsyncioTestCase):
 
     async def test_entari_exit_still_propagates(self):
         async def stop(_message):
-            raise _ExitException("stop")
+            raise STOP  # what session.stop() / matcher.finish() raise
 
-        with self.assertRaises(_ExitException):
+        with self.assertRaises(type(STOP)):
             await delivery_module.deliver(stop, delivery_module.AttendanceDelivery(b"png", "", "完整文字"))

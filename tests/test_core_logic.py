@@ -2251,10 +2251,10 @@ remotePort = {{ $v.Second }}
         end = source.index("@dm_bind_handler.handle()", start)
         deploy_source = source[start:end]
 
-        self.assertIn("from arclet.letoderea.exceptions import _ExitException", source)
+        self.assertIn("from arclet.letoderea import ExitState", source)
         self.assertIn('await _finish_notice(mcsm, "MCSM Docker 部署完成"', deploy_source)
         success_index = deploy_source.index('await _finish_notice(mcsm, "MCSM Docker 部署完成"')
-        exit_index = deploy_source.index("except _ExitException:", success_index)
+        exit_index = deploy_source.index("except ExitState:", success_index)
         generic_index = deploy_source.index("except Exception as exc:", exit_index)
         self.assertIn("return", deploy_source[success_index:exit_index])
         self.assertLess(exit_index, generic_index)

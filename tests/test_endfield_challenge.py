@@ -1179,10 +1179,10 @@ class EndfieldGachaDeliveryTests(unittest.TestCase):
         matcher.finish.assert_awaited_once_with()
 
     def test_exit_exception_from_forward_is_not_swallowed(self):
-        from arclet.letoderea.exceptions import _ExitException
+        from arclet.letoderea import STOP
 
-        with self.assertRaises(_ExitException):
-            self._run(self._pages(4), satori=AsyncMock(side_effect=_ExitException()))
+        with self.assertRaises(type(STOP)):
+            self._run(self._pages(4), satori=AsyncMock(side_effect=STOP))
 
     def test_environment_switch(self):
         _, satori, finish_pngs = self._run(self._pages(10), env={"ENDFIELD_GACHA_FORWARD_ABOVE": "0"})

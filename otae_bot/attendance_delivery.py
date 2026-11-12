@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from io import BytesIO
 from typing import Any
 
-from arclet.letoderea.exceptions import _ExitException
+from arclet.letoderea import ExitState
 from loguru import logger
 from PIL import Image
 
@@ -104,7 +104,7 @@ async def build_delivery(outcomes: Sequence[AttendanceOutcome]) -> AttendanceDel
 async def deliver(send: Callable[[Any], Awaitable[Any]], delivery: AttendanceDelivery) -> None:
     """Send the image and its notices together; retry only the delivery, as text.
 
-    ``send`` is the matcher's ``send``.  Entari's ``_ExitException`` still
+    ``send`` is the matcher's ``send``.  Entari's stop signal (``ExitState``) still
     propagates; any other send failure of the image is answered with the full
     text report, and a failure of that retry is only logged.
     """
@@ -117,7 +117,7 @@ async def deliver(send: Callable[[Any], Awaitable[Any]], delivery: AttendanceDel
         if delivery.text:
             parts.append("\n" + delivery.text)
         await send(ChainMsg(parts))
-    except _ExitException:
+    except ExitState:
         raise
     except Exception as exc:  # noqa: BLE001 - preserve results when image delivery fails
         logger.warning(f"[attendance] delivery failed error_type={type(exc).__name__}")
@@ -125,7 +125,7 @@ async def deliver(send: Callable[[Any], Awaitable[Any]], delivery: AttendanceDel
             return
         try:
             await send(delivery.fallback_text)
-        except _ExitException:
+        except ExitState:
             raise
         except Exception as retry_exc:  # noqa: BLE001 - never repeat the attendance request
             logger.warning(f"[attendance] text delivery failed error_type={type(retry_exc).__name__}")

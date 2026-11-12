@@ -1,10 +1,5 @@
 [
 {"rule": "event-class-name", "file": "plugins/minecraft_plugin/broadcast.py", "snippet": "if event.__class__.__name__ != \"GuildMemberAddedEvent\":", "count": 1},
 {"rule": "framework-private", "file": "otae_bot/adapters/framework_hooks.py", "snippet": "from arclet.letoderea.scope import global_propagators", "count": 1},
-{"rule": "framework-private", "file": "otae_bot/attendance_delivery.py", "snippet": "from arclet.letoderea.exceptions import _ExitException", "count": 1},
-{"rule": "framework-private", "file": "otae_bot/attendance_registry.py", "snippet": "from arclet.letoderea.exceptions import _ExitException", "count": 1},
-{"rule": "framework-private", "file": "plugins/arknights/handlers.py", "snippet": "from arclet.letoderea.exceptions import _ExitException", "count": 1},
-{"rule": "framework-private", "file": "plugins/endfield/handlers.py", "snippet": "from arclet.letoderea.exceptions import _ExitException", "count": 1},
-{"rule": "framework-private", "file": "plugins/mcsm/handlers.py", "snippet": "from arclet.letoderea.exceptions import _ExitException", "count": 1},
 {"rule": "numeric-id", "file": "plugins/minecraft_plugin/handlers.py", "snippet": "gid_int = int(group_id)", "count": 1}
 ]

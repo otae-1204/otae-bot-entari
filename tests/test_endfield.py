@@ -97,8 +97,8 @@ class EndfieldCommandParserTests(unittest.TestCase):
         end = source.index("async def _collect_candidates", start)
         handler_source = source[start:end]
 
-        self.assertIn("from arclet.letoderea.exceptions import _ExitException", source)
-        exit_index = handler_source.index("except _ExitException:")
+        self.assertIn("from arclet.letoderea import ExitState", source)
+        exit_index = handler_source.index("except ExitState:")
         api_error_index = handler_source.index("except WarfarinAPIError as exc:", exit_index)
         generic_index = handler_source.index("except Exception as exc:", api_error_index)
         self.assertLess(exit_index, generic_index)

@@ -141,6 +141,31 @@ class ArchitectureTests(unittest.TestCase):
         self.assertEqual(networks[0], {"host": "one", "port": 5501, "path": "", "token": "test-token"})
         self.assertEqual(networks[1], {"host": "two", "port": 5502, "path": "/satori", "token": None})
 
+    def test_every_way_the_bot_stops_a_handler_is_an_entari_exit_state(self):
+        # Handlers re-raise ``except ExitState`` before ``except Exception``; every
+        # stop/finish helper must raise something that clause recognises.
+        import asyncio
+        from arclet.alconna import Alconna
+        from arclet.entari import Session
+        from arclet.letoderea import ExitState
+        from otae_bot.adapters import entari
+
+        session = object.__new__(Session)
+        stops = {
+            "Session.stop": lambda: session.stop(),
+            "stop_session": entari.stop_session,
+            "finish": lambda: asyncio.run(entari.finish(session)),
+            "Matcher.finish": lambda: asyncio.run(entari.Matcher(Alconna("x")).finish()),
+            "on_event.finish": lambda: asyncio.run(entari._EventHook().finish()),
+        }
+        token = entari._CURRENT_SESSION.set(session)
+        try:
+            for name, stop in stops.items():
+                with self.subTest(name), self.assertRaises(ExitState):
+                    stop()
+        finally:
+            entari._CURRENT_SESSION.reset(token)
+
     def test_scheduler_uses_the_scope_registering_imported_service_methods(self):
         from otae_bot.adapters import entari
 

@@ -8,6 +8,8 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
+from arclet.letoderea import STOP
+
 import plugins.endfield.handlers as endfield
 from plugins.endfield.catalog import random_wiki
 from plugins.endfield.catalog.commands import EndfieldCandidate, parse_command
@@ -441,8 +443,8 @@ class RandomWikiHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.matcher.finish.assert_awaited_once_with("图片发送失败，请稍后再试。")
 
     async def test_finish_exit_signal_is_not_treated_as_a_failure(self):
-        self.patches["_finish_pngs"].side_effect = endfield._ExitException
-        with self.assertRaises(endfield._ExitException):
+        self.patches["_finish_pngs"].side_effect = STOP  # what matcher.finish() raises
+        with self.assertRaises(endfield.ExitState):
             await self.run_command([candidate(), candidate("weapon")])
         self.assertEqual(len(self.yielded), 1)
         self.matcher.finish.assert_not_awaited()
