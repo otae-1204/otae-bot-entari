@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ast
 import asyncio
 import unittest
 from datetime import datetime
@@ -630,20 +629,6 @@ class WiringTests(unittest.TestCase):
             self.assertEqual(socket_dir.stat().st_mode & 0o777, 0o700)
         self.assertIsNone(config["adapters"][0]["access_token"])
         self.assertTrue(config["token"])
-
-    def test_only_the_boundary_imports_onebot_adapters(self):
-        for path in (ROOT / "otae_bot").rglob("*.py"):
-            if "boundary" in path.relative_to(ROOT / "otae_bot").parts:
-                continue
-            for item in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-                if isinstance(item, ast.ImportFrom):
-                    names = [item.module or ""]
-                elif isinstance(item, ast.Import):
-                    names = [alias.name for alias in item.names]
-                else:
-                    continue
-                for name in names:
-                    self.assertFalse(name.startswith("satori.adapters"), (path, name))
 
 
 if __name__ == "__main__":

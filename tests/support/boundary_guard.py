@@ -1,11 +1,14 @@
-"""Boundary guard: platform-protocol code outside ``otae_bot/boundary/``.
+"""Boundary guard: platform-protocol code outside ``otae_bot/boundary/`` and layering.
 
 Inside the bot only Satori should exist; OneBot actions, HTTP side channels,
-framework private APIs and platform-name branching belong to the boundary.
-The checks are AST heuristics run over ``otae_bot/`` and ``plugins/``.
+framework private APIs and platform-name branching belong to the boundary
+(rules R1-R7). Imports must follow the layering in
+``docs/architecture_conventions.md`` (rules L1-L4). The checks are AST
+heuristics run over ``otae_bot/`` and ``plugins/``.
 
 Today they are report-only: the current inventory is the checked-in baseline,
-new violations fail, and fixed ones must be removed from the baseline.
+new violations fail, and fixed ones must be removed from the baseline (it may
+only shrink).
 
     python -m tests.support.boundary_guard --report   # inventory with line numbers
     python -m tests.support.boundary_guard --write    # regenerate the baseline
@@ -35,7 +38,19 @@ RULES = {
     "R5": "numeric-id",
     "R6": "platform-name",
     "R7": "event-class-name",
+    "L1": "plugin-cross-import",
+    "L2": "boundary-import",
+    "L3": "infrastructure-upward-import",
+    "L4": "core-imports-plugins",
 }
+
+# L2: only the boundary itself and the module that wires it may import these.
+BOUNDARY_MODULES = ("otae_bot.boundary", "satori.adapters", "entari_plugin_server")
+BOUNDARY_WIRING = "otae_bot/application.py"  # the single exception: it loads the server plugin
+# L3: the bottom layers depend on the standard library and third-party code only.
+LOWER_LAYERS = ("otae_bot/infrastructure/", "otae_bot/config/")
+LOWER_ALLOWED = ("otae_bot.infrastructure", "otae_bot.config")
+LOWER_FORBIDDEN = ("arclet.entari", "arclet.letoderea", "satori", "plugins")
 
 # R1: always flagged wherever they appear (outside docstrings).
 KNOWN_ACTIONS = frozenset({
@@ -139,6 +154,34 @@ def _is_platform_receiver(node: ast.AST) -> bool:
     return False
 
 
+def _within(name: str, prefixes: tuple[str, ...] | str) -> bool:
+    """``name`` is one of ``prefixes`` or a submodule of one."""
+    if isinstance(prefixes, str):
+        prefixes = (prefixes,)
+    return any(name == prefix or name.startswith(prefix + ".") for prefix in prefixes)
+
+
+def _module_of(rel: str) -> list[str]:
+    """Package path of a scanned file, for resolving relative imports."""
+    parts = rel[:-3].split("/")
+    return parts[:-1] if parts[-1] == "__init__" else parts
+
+
+def _imported(rel: str, node: ast.Import | ast.ImportFrom) -> list[str]:
+    """Absolute module names an import statement may load (relative ones resolved)."""
+    if isinstance(node, ast.Import):
+        return [alias.name for alias in node.names]
+    module = node.module or ""
+    if node.level:
+        package = _module_of(rel)
+        if not rel.endswith("__init__.py"):
+            package = package[:-1]
+        base = package[: len(package) - (node.level - 1)]
+        module = ".".join([*base, module] if module else base)
+    # `from pkg import sub` may load the submodule pkg.sub.
+    return [module, *(f"{module}.{alias.name}" for alias in node.names if alias.name != "*")]
+
+
 def _is_class_name(node: ast.AST) -> bool:
     if not (isinstance(node, ast.Attribute) and node.attr == "__name__"):
         return False
@@ -148,8 +191,10 @@ def _is_class_name(node: ast.AST) -> bool:
 
 
 class _Scanner(ast.NodeVisitor):
-    def __init__(self, rel: str, source: str):
+    def __init__(self, rel: str, source: str, protocol: bool = True):
         self.rel = rel
+        # R1-R7 do not apply inside the boundary; the layering rules apply everywhere.
+        self.protocol = protocol
         self.lines = source.splitlines()
         self.mentions_protocol = bool(re.search(r"internal|onebot", source, re.I))
         self.found: dict[tuple[str, int], Violation] = {}
@@ -167,6 +212,8 @@ class _Scanner(ast.NodeVisitor):
         return list(self.found.values())
 
     def add(self, rule: str, node: ast.AST) -> None:
+        if rule.startswith("R") and not self.protocol:
+            return
         line = node.lineno
         snippet = " ".join(self.lines[line - 1].split())[:80]
         # One entry per rule and line keeps the inventory readable.
@@ -227,8 +274,32 @@ class _Scanner(ast.NodeVisitor):
             return key is not None and any(s.endswith(ID_SUFFIXES) for s in _strings(key))
         return False
 
+    # L1-L4: import direction
+    def _layering(self, node: ast.Import | ast.ImportFrom) -> None:
+        rel = self.rel
+        names = _imported(rel, node)
+        if isinstance(node, ast.ImportFrom) and _within(names[0], "otae_bot") and names[0].count(".") == 0:
+            names = names[1:]  # `from otae_bot import x` is about x only
+        if isinstance(node, ast.ImportFrom) and names and names[0] == "plugins":
+            names = names[1:]  # `from plugins import x` is about plugins.x only
+        if rel.startswith("plugins/"):
+            own = rel.split("/")[1]
+            if any(_within(n, "plugins") and n.count(".") >= 1 and n.split(".")[1] != own for n in names):
+                self.add("L1", node)
+        in_boundary = rel.startswith("otae_bot/boundary/")
+        if not in_boundary and rel != BOUNDARY_WIRING and any(_within(n, BOUNDARY_MODULES) for n in names):
+            self.add("L2", node)
+        if rel.startswith(LOWER_LAYERS) and any(
+                _within(n, LOWER_FORBIDDEN)
+                or (_within(n, "otae_bot") and n != "otae_bot" and not _within(n, LOWER_ALLOWED))
+                for n in names):
+            self.add("L3", node)
+        if rel.startswith("otae_bot/") and any(_within(n, "plugins") for n in names):
+            self.add("L4", node)
+
     # R3, R4: imports
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        self._layering(node)
         module = node.module or ""
         if module.startswith(ONEBOT_MODULES) or any(f"{module}.{a.name}".startswith(ONEBOT_MODULES) for a in node.names):
             self.add("R3", node)
@@ -238,6 +309,7 @@ class _Scanner(ast.NodeVisitor):
             self.add("R4", node)
 
     def visit_Import(self, node: ast.Import) -> None:
+        self._layering(node)
         for alias in node.names:
             if alias.name.startswith(ONEBOT_MODULES):
                 self.add("R3", node)
@@ -276,10 +348,9 @@ def scan(root: Path = ROOT) -> list[Violation]:
     for top in SCANNED:
         for path in sorted((root / top).rglob("*.py")):
             rel = path.relative_to(root).as_posix()
-            if rel.startswith(EXEMPT):
-                continue
             source = path.read_text(encoding="utf-8")
-            found.extend(_Scanner(rel, source).run(ast.parse(source, filename=rel)))
+            scanner = _Scanner(rel, source, protocol=not rel.startswith(EXEMPT))
+            found.extend(scanner.run(ast.parse(source, filename=rel)))
     return sorted(found, key=lambda v: (v.rule, v.file, v.line))
 
 
