@@ -19,13 +19,13 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from otae_bot.help_images import cover_visibility, image_ratio  # noqa: E402
 from otae_bot.infrastructure.rendering import (  # noqa: E402
     art_card,
     art_frame,
     help_cards,
     help_runtime,
 )
+from otae_bot.infrastructure.rendering.help_images import cover_visibility, image_ratio  # noqa: E402
 
 RERENDER = "run: python scripts/render_help_cards.py --write"
 

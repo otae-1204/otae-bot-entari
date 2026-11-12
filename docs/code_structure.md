@@ -30,7 +30,7 @@ otae_bot/
     cache.py                   有界异步缓存
     http/                      HTTP 连接池、资源缓存、User-Agent
     storage/                   JSON、SQLite、旧数据迁移
-    rendering/                 浏览器截图、Pillow、OpenCV、渲染线程池
+    rendering/                 浏览器截图、Pillow、OpenCV、渲染线程池、帮助卡片取图几何
 plugins/
   <plugin>/__init__.py          Entari 注册入口
   <plugin>/handlers.py          命令路由、交互流程和后台任务接线

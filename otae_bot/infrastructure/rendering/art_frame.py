@@ -24,7 +24,7 @@ from html import escape
 from pathlib import Path
 from typing import Any
 
-from otae_bot.help_images import cover_visibility, image_ratio
+from otae_bot.infrastructure.rendering.help_images import cover_visibility, image_ratio
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 ART_DIR = PROJECT_ROOT / "assets/image/help/art"

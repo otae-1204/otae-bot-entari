@@ -11,7 +11,7 @@
 | `otae_bot/infrastructure/rendering/help_cards.py` | 读取上面两份数据，生成帮助页的面板内容、校验排版、写入 spec 哈希 |
 | `scripts/render_help_cards.py` | 命令行：出图、校验、写入正式资源、检查是否过期 |
 | `otae_bot/infrastructure/rendering/help_runtime.py` | 运行时按比例挑插画、出图并缓存到 `data/cache/help-cards/` |
-| `otae_bot/help_images.py` | 比例与可见度的几何计算 |
+| `otae_bot/infrastructure/rendering/help_images.py` | 比例与可见度的几何计算 |
 | `assets/image/help/<file>.png` | 每页的静态回退图（无浏览器时使用） |
 
 ## 版式

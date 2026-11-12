@@ -39,7 +39,7 @@ PR #7 整理的终末地帮助内容（按账号 / 资料分区、权限标签�
 ## 前置条件
 
 1. 帮助框架及相关改动已提交到本地 `main`：
-   - `otae_bot/help_images.py`、`otae_bot/infrastructure/rendering/help_cards.py`
+   - `otae_bot/infrastructure/rendering/help_images.py`、`otae_bot/infrastructure/rendering/help_cards.py`
    - `scripts/render_help_cards.py`、`scripts/help_pages.json`
    - `assets/image/help/`（全部主图、`variants/`、`art/`）
    - `plugins/help_plugin/handlers.py`、`plugins/endfield/handlers.py`（`_finish_endfield_help` 改为随机挑图）

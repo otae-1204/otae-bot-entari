@@ -23,7 +23,6 @@ from html import escape
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Sequence
 
-from otae_bot.help_images import VARIANT_DIR_NAME
 from otae_bot.infrastructure.rendering.art_frame import (  # noqa: F401
     ART_DIR,
     CARD_HEIGHT_INSET,
@@ -45,6 +44,7 @@ from otae_bot.infrastructure.rendering.art_frame import (  # noqa: F401
     subtitle_html,
     window_ratio,
 )
+from otae_bot.infrastructure.rendering.help_images import VARIANT_DIR_NAME
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 HELP_IMAGE_DIR = PROJECT_ROOT / "assets/image/help"
