@@ -1,7 +1,7 @@
 """Render the combined ``/ak 签到`` / ``/ef 签到`` messages using sample accounts.
 
-Drives the real orchestration (``otae_bot.attendance_registry`` and
-``otae_bot.attendance_delivery``) and the two games' real card renderers with
+Drives the real orchestration (``otae_bot.hypergryph.attendance_registry`` and
+``otae_bot.hypergryph.attendance_delivery``) and the two games' real card renderers with
 fabricated roles, then writes the exact message sequence the chat would receive.
 The requested game's card is on top; the other game's bound roles follow:
 
@@ -74,7 +74,7 @@ try:
     for module in ("models", "rendering.cards"):
         importlib.import_module(f"{ARKNIGHTS_PACKAGE}.{module}")
 
-    from otae_bot import attendance_delivery, attendance_registry
+    from otae_bot.hypergryph import attendance_delivery, attendance_registry
     from otae_bot.infrastructure.rendering.browser import close_browser
     from otae_bot.infrastructure.rendering.executor import close_image_executor
 finally:

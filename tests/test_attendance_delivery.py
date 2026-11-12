@@ -6,8 +6,8 @@ from unittest import IsolatedAsyncioTestCase, TestCase, mock
 from arclet.letoderea import STOP
 from PIL import Image
 
-from otae_bot import attendance_delivery as delivery_module
-from otae_bot.attendance_registry import FAILED, SIGNED, AttendanceOutcome
+from otae_bot.hypergryph import attendance_delivery as delivery_module
+from otae_bot.hypergryph.attendance_registry import FAILED, SIGNED, AttendanceOutcome
 
 
 def png(color, size=(80, 40), mode="RGB"):

@@ -17,7 +17,7 @@ from urllib.parse import urlencode
 import httpx
 from loguru import logger
 
-from otae_bot.hypergryph_captcha import CaptchaChallenge, captcha_challenge, captcha_result_body
+from otae_bot.hypergryph.captcha import CaptchaChallenge, captcha_challenge, captcha_result_body
 from otae_bot.infrastructure.http.tls import shared_ssl_context
 
 from .store import GachaRecord, RoleCandidate

@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 
-from otae_bot.endfield_notifications.classification import Event
+from otae_bot.hypergryph.endfield_notifications.classification import Event
 
 BEIJING = timezone(timedelta(hours=8))
 KINDS = {

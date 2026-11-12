@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from otae_bot.endfield_notifications.classification import (
+from otae_bot.hypergryph.endfield_notifications.classification import (
     classify,
     version_of,
     window_event,

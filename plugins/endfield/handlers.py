@@ -22,8 +22,8 @@ from loguru import logger
 from nepattern import AnyString
 
 from otae_bot.config.settings import Config
-from otae_bot.attendance_delivery import build_delivery, deliver
-from otae_bot.attendance_registry import (
+from otae_bot.hypergryph.attendance_delivery import build_delivery, deliver
+from otae_bot.hypergryph.attendance_registry import (
     AttendanceCapability,
     AttendanceResult,
     collect_companion_outcomes,
@@ -31,7 +31,7 @@ from otae_bot.attendance_registry import (
     signed_outcome,
 )
 from otae_bot.groups.features import feature_store, scope_from_event
-from otae_bot.hypergryph_captcha import (
+from otae_bot.hypergryph.captcha import (
     CAPTCHA_GIVE_UP,
     CAPTCHA_GUIDE,
     CAPTCHA_ROUNDS,

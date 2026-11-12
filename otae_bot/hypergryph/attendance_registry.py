@@ -6,7 +6,7 @@ registration and initialization as a side effect, so a game instead registers a
 small capability object while it loads.  After a game command signed its own
 roles, it walks this registry for the *other* games the user has bound.
 Nothing here sends a message or finishes a matcher: the caller renders and
-delivers (see :mod:`otae_bot.attendance_delivery`), which keeps the loop
+delivers (see :mod:`otae_bot.hypergryph.attendance_delivery`), which keeps the loop
 testable without an Entari session.
 
 This is shared code, so it must never import ``plugins.*`` — that dependency

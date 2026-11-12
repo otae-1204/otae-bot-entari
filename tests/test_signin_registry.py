@@ -26,8 +26,8 @@ from unittest import mock
 from PIL import Image
 from satori import ChannelType
 
-from otae_bot import attendance_delivery as delivery_module
-from otae_bot import attendance_registry as registry_module
+from otae_bot.hypergryph import attendance_delivery as delivery_module
+from otae_bot.hypergryph import attendance_registry as registry_module
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = "endfield_attendance_for_test"

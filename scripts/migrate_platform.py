@@ -349,7 +349,7 @@ def migrate_announcements(conn: sqlite3.Connection, rename: Rename, report: Repo
 
 
 def migrate_receipts(conn: sqlite3.Connection, rename: Rename, report: Report) -> None:
-    """otae_bot/endfield_notifications/receipts.py ReceiptStore."""
+    """otae_bot/hypergryph/endfield_notifications/receipts.py ReceiptStore."""
     _require(conn, "delivery_receipts", {"id", "destination"})
     for rowid, raw in conn.execute("SELECT id, destination FROM delivery_receipts").fetchall():
         parts = _destination(raw)

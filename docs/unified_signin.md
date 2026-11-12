@@ -31,11 +31,11 @@
 
 ## 结构与复用
 
-- `otae_bot/attendance_registry.py`：共享注册表与调度循环，只依赖 `otae_bot.*`，
+- `otae_bot/hypergryph/attendance_registry.py`：共享注册表与调度循环，只依赖 `otae_bot.*`，
   不导入任何 `plugins.*`（`tests/test_architecture.py` 会校验这一点）。
   `collect_companion_outcomes` 跳过当前游戏，只返回另一款游戏真正的结果或失败；
   未绑定、群内关闭、插件未加载的游戏不产生任何输出。
-- `otae_bot/attendance_delivery.py`：在共享图片线程池中拼接 PNG，按较窄图片等比缩放，
+- `otae_bot/hypergryph/attendance_delivery.py`：在共享图片线程池中拼接 PNG，按较窄图片等比缩放，
   不放大、不裁掉账号行；拼接结果超过 16384px 高或 3200 万像素时回退完整文字。
   `deliver` 先把图片和必要说明放在同一条消息里发送，图片发送异常时改发一次完整文字。
 - 两个游戏插件在**加载时**各自注册一份能力（游戏标识、查询绑定角色、签到全部角色、

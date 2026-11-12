@@ -1,7 +1,7 @@
 """Turn attendance results into one chat reply, without repeating attendance.
 
 ``/ak 签到`` and ``/ef 签到`` sign the requested game first and then, through
-:mod:`otae_bot.attendance_registry`, the user's bound roles in the other game.
+:mod:`otae_bot.hypergryph.attendance_registry`, the user's bound roles in the other game.
 This module stacks the resulting cards into one image and sends it together
 with any notices.  When sending the image fails, the complete text report is
 sent once instead; the attendance requests themselves are never repeated.
@@ -19,8 +19,12 @@ from arclet.letoderea import ExitState
 from loguru import logger
 from PIL import Image
 
-from otae_bot.attendance_registry import SIGNED, AttendanceOutcome, build_notice
 from otae_bot.compat.entari import ChainMsg, make_image
+from otae_bot.hypergryph.attendance_registry import (
+    SIGNED,
+    AttendanceOutcome,
+    build_notice,
+)
 from otae_bot.infrastructure.rendering.executor import run_image_render
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
 

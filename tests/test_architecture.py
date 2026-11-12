@@ -448,7 +448,7 @@ async def check_attendance_dispatch():
     assert recorded.await_args.kwargs['bot'] is session.account, recorded.await_args
     assert recorded.await_args.args[3].account_selector == '1234', recorded.await_args
     # Both games must have registered their attendance capability while loading.
-    from otae_bot.attendance_registry import registry
+    from otae_bot.hypergryph.attendance_registry import registry
     assert registry.games() == ('endfield', 'arknights'), registry.games()
 
 asyncio.get_event_loop().run_until_complete(check_attendance_dispatch())
@@ -457,7 +457,7 @@ asyncio.get_event_loop().run_until_complete(check_attendance_dispatch())
 async def check_attendance_real_unload_reload():
     from arclet.entari import Entari, load_plugin
     from arclet.entari.plugin import unload_plugin_async
-    from otae_bot.attendance_registry import registry
+    from otae_bot.hypergryph.attendance_registry import registry
     old = registry.get('arknights')
     with patch.object(Entari, 'current', return_value=app):
         assert await unload_plugin_async('plugins.arknights')

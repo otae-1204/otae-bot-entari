@@ -7,8 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from otae_bot.endfield_notifications.classification import classify, window_event
-from otae_bot.endfield_notifications.receipts import (
+from otae_bot.hypergryph.endfield_notifications.classification import (
+    classify,
+    window_event,
+)
+from otae_bot.hypergryph.endfield_notifications.receipts import (
     ReceiptStore,
     destination_key,
     equivalent,

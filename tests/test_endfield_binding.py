@@ -8,7 +8,7 @@ from unittest import mock
 from loguru import logger
 
 import plugins.endfield.handlers as endfield
-from otae_bot import hypergryph_captcha
+from otae_bot.hypergryph import captcha as hypergryph_captcha
 from otae_bot.pipeline import message_log
 from plugins.endfield.account.client import ACCOUNT_PROVIDER_CN
 from plugins.endfield.account.store import RoleCandidate

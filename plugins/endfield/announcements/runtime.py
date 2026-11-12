@@ -17,10 +17,10 @@ from otae_bot.compat.entari import (
     make_image,
 )
 from otae_bot.delivery import Target, deliver
-from otae_bot.endfield_notifications.classification import LABELS
-from otae_bot.endfield_notifications.receipts import ReceiptStore
 from otae_bot.groups.features import feature_store, group_scope, scope_from_event
 from otae_bot.groups.permissions import can_manage
+from otae_bot.hypergryph.endfield_notifications.classification import LABELS
+from otae_bot.hypergryph.endfield_notifications.receipts import ReceiptStore
 from otae_bot.infrastructure.cache import AsyncTTLCache
 
 from .commands import HELP, parse

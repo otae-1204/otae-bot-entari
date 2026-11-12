@@ -12,9 +12,11 @@ otae_bot/
   application.py               创建 Entari、连接配置、启动协调
   lifecycle.py                 单实例锁、共享资源释放
   plugin_registry.py           按原顺序发现顶层插件
-  attendance_registry.py       双游戏签到：游戏注册表与调度循环（不导入插件）
-  attendance_delivery.py       双游戏签到：结果卡拼接、发送与文字回退
-  hypergryph_captcha.py        鹰角短信风控的极验：验证页、结果解析、临时页面上传（双游戏共用）
+  hypergryph/                  /ak 与 /ef 共用的鹰角领域代码（不导入插件）
+    attendance_registry.py     双游戏签到：游戏注册表与调度循环
+    attendance_delivery.py     双游戏签到：结果卡拼接、发送与文字回退
+    captcha.py                 鹰角短信风控的极验：验证页、结果解析、临时页面上传
+    endfield_notifications/    终末地官方内容分类与推送回执
   groups/
     features.py                按机器人账号和群保存插件开关
     permissions.py             当前机器人账号、当前群的管理员权限核验
@@ -101,8 +103,8 @@ tests/                         功能回归、结构约束、真实插件加载�
 无需为了转换一份数据引入账号客户端或事件注册。
 
 跨游戏功能通过 `otae_bot` 下的注册表解耦，而不是在插件之间互相导入 `handlers`：
-`/ak 签到` 与 `/ef 签到` 签完本游戏后，只调用 `otae_bot.attendance_registry` 里另一款
-游戏登记的能力，再用 `otae_bot.attendance_delivery` 拼图发送；终末地与明日方舟在各自
+`/ak 签到` 与 `/ef 签到` 签完本游戏后，只调用 `otae_bot.hypergryph.attendance_registry` 里另一款
+游戏登记的能力，再用 `otae_bot.hypergryph.attendance_delivery` 拼图发送；终末地与明日方舟在各自
 加载时注册，插件卸载时由 `application.py` 清理。详见 [双游戏签到合并](unified_signin.md)。
 
 运行 `python -m pytest tests/test_architecture.py` 检查依赖边界、

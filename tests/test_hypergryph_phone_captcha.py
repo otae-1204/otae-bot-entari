@@ -13,7 +13,7 @@ from pathlib import Path
 import httpx
 from loguru import logger
 
-from otae_bot import hypergryph_captcha as captcha_module
+from otae_bot.hypergryph import captcha as captcha_module
 
 ROOT = Path(__file__).resolve().parents[1]
 

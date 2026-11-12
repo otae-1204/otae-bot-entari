@@ -5,9 +5,9 @@ from __future__ import annotations
 from arclet.entari import WS, Cleanup, Entari, Startup, listen, load_plugin
 from arclet.entari.event.plugin import PluginUnloaded
 
-from otae_bot.attendance_registry import on_plugin_unloaded
 from otae_bot.command_usage import close_command_usage, install_command_usage_recorders
 from otae_bot.config.settings import ONEBOT_CLIENTS, SATORI_CLIENTS
+from otae_bot.hypergryph.attendance_registry import on_plugin_unloaded
 from otae_bot.infrastructure.http.tls import prewarm_shared_ssl_context
 from otae_bot.infrastructure.loop_watchdog import (
     close_loop_watchdog,

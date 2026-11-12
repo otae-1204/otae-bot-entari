@@ -1468,7 +1468,7 @@ class ArknightsHandlerTests(unittest.IsolatedAsyncioTestCase):
         cls.handlers = handlers
 
     def setUp(self):
-        from otae_bot import attendance_delivery, attendance_registry
+        from otae_bot.hypergryph import attendance_delivery, attendance_registry
 
         # No other game is registered here, so /ak 签到 only signs Arknights;
         # tests/test_signin_registry.py covers the combined reply.
@@ -1579,7 +1579,7 @@ class ArknightsHandlerTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn(secret, logged)
 
     async def test_sms_captcha_is_solved_in_a_browser_and_the_code_is_resent_with_its_result(self):
-        from otae_bot import hypergryph_captcha
+        from otae_bot.hypergryph import captcha as hypergryph_captcha
 
         phone, code, token = "13812345678", "654321", "sms-account-token-secret-value"
         gt, challenge = "c9c4facd1a6feeb80802222a1a0b6a5e", "1d8c0f9a2b3c4d5e6f7a8b9c0d1e2f3a"
@@ -1608,7 +1608,7 @@ class ArknightsHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(result["geetest_validate"], logged)
 
     async def test_sms_captcha_upload_failure_ends_binding_and_suggests_token(self):
-        from otae_bot import hypergryph_captcha
+        from otae_bot.hypergryph import captcha as hypergryph_captcha
 
         required = self.handlers.HypergryphCaptchaRequired(
             hypergryph_captcha.CaptchaChallenge("c9c4facd1a6feeb8", "1d8c0f9a2b3c4d5e", False, {}),

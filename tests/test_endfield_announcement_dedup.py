@@ -10,8 +10,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from otae_bot.endfield_notifications.classification import classify
-from otae_bot.endfield_notifications.receipts import ReceiptStore, equivalent
+from otae_bot.hypergryph.endfield_notifications.classification import classify
+from otae_bot.hypergryph.endfield_notifications.receipts import ReceiptStore, equivalent
 from tests.test_endfield_announcements import (
     NOW,
     PACKAGE,

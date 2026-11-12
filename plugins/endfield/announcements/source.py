@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 
 from lxml import html
 
-from otae_bot.endfield_notifications.classification import classify
+from otae_bot.hypergryph.endfield_notifications.classification import classify
 from otae_bot.infrastructure.http.client import fetch_json
 
 from .models import BEIJING, ActivityWindow, Announcement, digest

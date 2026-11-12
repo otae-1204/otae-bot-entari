@@ -9,7 +9,7 @@
 发短信接口不直接下发验证码，而是回 `status=1`、`msg=需要人机验证`，
 并在 `data.captcha` 给出极验 v3 参数 `{gt, challenge, success, new_captcha}`。这时：
 
-1. 机器人用这组 `gt` / `challenge` 生成一个独立的验证页（`otae_bot/hypergryph_captcha.py`），
+1. 机器人用这组 `gt` / `challenge` 生成一个独立的验证页（`otae_bot/hypergryph/captcha.py`），
    页面加载官方 `gt.0.5.0.js`，`api_server` 为 `api.geevisit.com`；页面里没有手机号或账号信息。
 2. 把页面上传到临时文件床：先试 0x0.st，失败再试 catbox 的临时盘 litterbox，两边都只保留 1 小时。
    私聊发出：「鹰角触发了人机验证。请用手机浏览器打开下面的链接，完成滑动验证后，
