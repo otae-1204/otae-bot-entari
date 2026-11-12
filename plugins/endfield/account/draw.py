@@ -16,7 +16,7 @@ from typing import Any, Iterable, Mapping
 from otae_bot.infrastructure.http.client import fetch_many_resilient
 from otae_bot.infrastructure.rendering.browser import BrowserResource, screenshot_web_element
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
-from otae_bot.paths import PROJECT_ROOT
+from otae_bot.config.root import PROJECT_ROOT
 
 from ..cold_start import shared_image_namespaces
 from .models import AccountUiPayload, JsonObject

@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from otae_bot.paths import PROJECT_ROOT
+from otae_bot.config.root import PROJECT_ROOT
 
 
 PLUGIN_ROOT = Path(__file__).resolve().parent

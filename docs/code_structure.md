@@ -21,8 +21,7 @@ otae_bot/
     features.py                按机器人账号和群保存插件开关
     permissions.py             当前机器人账号、当前群的管理员权限核验
     superusers.py              配置的超级用户判断
-  paths.py                     随源码定位的资源根目录
-  config/                      环境变量解析、原有路径配置
+  config/                      环境变量解析、原有路径配置；root.py 定位随源码的资源根目录
   compat/                      NoneBot 风格的兼容层：Entari 会话/命令/定时任务、消息构造（逐步清空）
   accounts/                    在线账号登记与各账号所在群（runtime.py）
   pipeline/                    每条事件与订阅器都经过的全局钩子：群开关、指令输入、引用回退、[message] 日志脱敏
@@ -82,7 +81,7 @@ tests/                         功能回归、结构约束、真实插件加载�
 
 - `python bot.py`、Windows 启动/部署脚本和 Satori 多端点配置继续可用。
 - `.env`、`data/`、JSON 配置和数据库仍按原先的工作目录规则读取；请在项目根目录启动。
-- 源码附带资源统一通过 `otae_bot.paths` 和 `plugins.endfield.paths` 定位，
+- 源码附带资源统一通过 `otae_bot.config.root` 和 `plugins.endfield.paths` 定位，
   不随功能模块的目录深度变化。没有搬迁图片、字体、别名 JSON 或运行数据。
 - 旧的 `utils.*`、`configs.config`、`configs.path_config` 转发模块已删除，
   仓库内一律直接导入 `otae_bot.*`。

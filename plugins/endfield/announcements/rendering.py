@@ -16,7 +16,7 @@ from otae_bot.infrastructure.rendering.browser import (
 )
 from otae_bot.infrastructure.rendering.executor import run_image_render
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
-from otae_bot.paths import PROJECT_ROOT
+from otae_bot.config.root import PROJECT_ROOT
 
 from ..rendering.cards import _prepare_assets, optimize_png_container
 from .models import KINDS, AnnouncementDigest, local_time

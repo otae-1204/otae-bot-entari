@@ -30,7 +30,7 @@ from otae_bot.infrastructure.rendering.browser import evaluate_web_page, screens
 from otae_bot.infrastructure.rendering.executor import run_image_render
 from otae_bot.infrastructure.rendering.pages import render_pages
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
-from otae_bot.paths import PROJECT_ROOT
+from otae_bot.config.root import PROJECT_ROOT
 
 from ..account.i18n import server_label
 from ..rendering import cards as _cards

@@ -27,7 +27,7 @@ from otae_bot.infrastructure.rendering.browser import (
     browser_queue_snapshot,
     render_timing_snapshot,
 )
-from otae_bot.paths import PROJECT_ROOT
+from otae_bot.config.root import PROJECT_ROOT
 from otae_bot.plugin_registry import discover_plugins
 
 try:

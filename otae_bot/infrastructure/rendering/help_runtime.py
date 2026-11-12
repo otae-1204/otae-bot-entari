@@ -23,7 +23,7 @@ from loguru import logger
 
 from otae_bot.infrastructure.rendering import art_frame, help_cards
 from otae_bot.infrastructure.rendering.browser import screenshot_web_element
-from otae_bot.paths import PROJECT_ROOT
+from otae_bot.config.root import PROJECT_ROOT
 
 #: Runtime cache location; override with ``OTAE_HELP_CACHE_PATH``.
 CACHE_PATH_ENV = "OTAE_HELP_CACHE_PATH"
