@@ -1,71 +1,43 @@
-"""Dispatch message events even when Entari cannot fetch the quoted message.
+"""Dispatch message events even when the quoted message cannot be fetched.
 
-Entari 0.19.4 ``MessageEvent.gather`` (``arclet/entari/event/base.py`` 327-352) builds the
-reply while assembling the event context. A quote without inline children is looked up with
-``account.protocol.message_get(channel, quote.id)`` (base.py:334). LLBot answers a quoted
-merged forward with ``500 ServerException: 消息为空``; the exception leaves the gather,
-letoderea's ``dispatch`` never reaches a subscriber, and the event is lost: no command runs
-and record_message does not even log it.
+Entari 0.19.4 ``MessageEvent.gather`` builds the reply while assembling the event
+context: a quote without inline children is looked up with
+``account.protocol.message_get(channel, quote.id)``. If that raises (LLBot answers a
+quoted merged forward with ``500 ServerException: 消息为空``; the boundary adapter emits
+a bare ``<quote id/>`` when it could not fetch the quote itself), the gather fails,
+no subscriber runs and the event is lost.
 
-The wrapper leaves all of that to the original gather and only guards the lookup. When
-``message_get`` fails, the gather runs again with the quote hidden, which is Entari's own
-"no quote" path: no ``ITEM_MESSAGE_REPLY``, ``is_reply_me`` False. ``event.quote`` is put
-back afterwards, so plugins still get the quoted element and its id.
+Both pieces below use public hooks only:
 
-letoderea's ``Publisher`` copies ``target.gather`` into ``supplier`` when Entari defines the
-event types, so replacing the class attribute alone would not reach those publishers; their
-suppliers are re-pointed as well.
+* ``guard_message_get`` listens to Entari's ``APIRequest`` (posted by
+  ``EntariProtocol`` before every non-static API method). For ``message_get`` it makes
+  the call itself and answers with an empty ``UnavailableMessage`` when it fails, so
+  the gather goes on. It calls the class's own ``message_get``: ``EntariProtocol``
+  wraps the instance's methods only, so this does not post ``APIRequest`` again.
+* ``drop_unavailable_reply`` is a shared context supplier (it runs after the event's
+  gather and after Entari's session supplier). It removes the reply built from that
+  placeholder, which is what Entari does when there is no quote at all: no
+  ``ITEM_MESSAGE_REPLY``, ``session.reply`` is ``None``, ``is_reply_me`` stays False.
+  ``event.quote`` is untouched, so plugins still see the quoted element and its id.
 """
 
 from __future__ import annotations
 
-import copy
-import functools
-import inspect
 import re
-from collections.abc import Callable, Mapping
 from typing import Any
 
+from arclet.entari.const import ITEM_MESSAGE_REPLY, ITEM_SESSION
+from arclet.entari.event.api import APIRequest
+from arclet.letoderea import Contexts
 from loguru import logger
+from satori import MessageObject
 
-_MARK = "__otae_quote_fallback__"
-# Names the guarded gather has to use. If an Entari upgrade drops one of them, the
-# lookup moved and the guard would no longer sit around it.
-_EXPECTED_NAMES = frozenset({"quote", "children", "account", "protocol", "message_get", "Reply", "ITEM_MESSAGE_REPLY"})
 _BEARER = re.compile(r"(?i)\bbearer\s+\S+")
+_installed = False
 
 
-class QuoteUnavailable(Exception):
-    """Raised by the guarded protocol instead of the adapter's own error."""
-
-    def __init__(self, error: Exception):
-        super().__init__(error)
-        self.error = error
-
-
-class _GuardedProtocol:
-    def __init__(self, protocol: Any):
-        self._protocol = protocol
-
-    async def message_get(self, *args: Any, **kwargs: Any) -> Any:
-        try:
-            return await self._protocol.message_get(*args, **kwargs)
-        except Exception as error:
-            raise QuoteUnavailable(error) from error
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._protocol, name)
-
-
-class _GuardedAccount:
-    """Stands in for ``event.account`` only while the original gather runs."""
-
-    def __init__(self, account: Any):
-        self._account = account
-        self.protocol = _GuardedProtocol(account.protocol)
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._account, name)
+class UnavailableMessage(MessageObject):
+    """Placeholder ``message_get`` result for a message the platform did not return."""
 
 
 def _safe_message(error: BaseException, account: Any) -> str:
@@ -79,116 +51,41 @@ def _safe_message(error: BaseException, account: Any) -> str:
     return _BEARER.sub("Bearer <redacted>", text)[:300]
 
 
-def _log_failure(event: Any, quote: Any, account: Any, error: Exception) -> None:
-    logger.warning(
-        "[entari] quoted message fetch failed, dispatching without reply: channel={} quote={} error={}: {}",
-        getattr(getattr(event, "channel", None), "id", None),
-        getattr(quote, "id", None),
-        type(error).__name__,
-        _safe_message(error, account),
-    )
-
-
-def _wrap(original: Callable[..., Any], account_key: str, reply_key: str) -> Callable[..., Any]:
-    @functools.wraps(original)
-    async def gather(self, context):
-        quote = getattr(self, "quote", None)
-        account = self.account
-        if (
-            quote is None
-            or not getattr(quote, "id", None)
-            or getattr(quote, "children", None)
-            or getattr(account, "protocol", None) is None
-        ):
-            return await original(self, context)
-        content = copy.copy(self.content)
-        self.account = _GuardedAccount(account)
-        try:
-            return await original(self, context)
-        except QuoteUnavailable as failure:
-            error = failure.error
-        finally:
-            self.account = account
-            if account_key in context:
-                context[account_key] = account
-        _log_failure(self, quote, account, error)
-        # Start the retry from the state the failed attempt started from.
-        context.pop(reply_key, None)
-        self.content = content
-        self.quote = None
-        try:
-            return await original(self, context)
-        finally:
-            self.quote = quote
-
-    setattr(gather, _MARK, True)
-    return gather
-
-
-def _unexpected_structure(gather: Any) -> str | None:
-    if gather is None:
-        return "is missing"
-    if not inspect.iscoroutinefunction(gather):
-        return "is not a coroutine function"
+async def guard_message_get(event: APIRequest):
+    if event.name != "message_get":
+        return None
+    protocol = event.account.protocol
     try:
-        params = list(inspect.signature(gather).parameters)
-    except (TypeError, ValueError):
-        return "has no inspectable signature"
-    if params != ["self", "context"]:
-        return f"takes {params} instead of ['self', 'context']"
-    names = set(getattr(getattr(gather, "__code__", None), "co_names", ()))
-    if missing := sorted(_EXPECTED_NAMES - names):
-        return f"no longer references {missing}"
-    return None
+        return await type(protocol).message_get(protocol, **event.params)
+    except Exception as error:  # noqa: BLE001 - any failure: the event must still be dispatched
+        logger.warning(
+            "[entari] quoted message fetch failed, dispatching without reply: channel={} quote={} error={}: {}",
+            event.params.get("channel_id"),
+            event.params.get("message_id"),
+            type(error).__name__,
+            _safe_message(error, event.account),
+        )
+        return UnavailableMessage.from_elements(str(event.params.get("message_id") or ""), [])
 
 
-def _entari_version() -> str:
-    try:
-        import arclet.entari as entari
-    except ImportError:
-        return "?"
-    return str(getattr(entari, "__version__", "?"))
+async def drop_unavailable_reply(context: Contexts) -> None:
+    reply = context.get(ITEM_MESSAGE_REPLY)
+    if reply is None or not isinstance(getattr(reply, "origin", None), UnavailableMessage):
+        return
+    del context[ITEM_MESSAGE_REPLY]
+    session = context.get(ITEM_SESSION)
+    if session is not None and session.reply is reply:
+        session.reply = None
 
 
-def install_quote_fetch_fallback(event_cls: type | None = None, publishers: Mapping[str, Any] | None = None) -> bool:
-    """Guard the quote lookup in ``MessageEvent.gather``; return whether the guard is active.
+def install_quote_fetch_fallback() -> None:
+    """Register both hooks once (root scope, so plugin reloads keep them)."""
+    global _installed
+    if _installed:
+        return
+    from arclet.entari import listen
+    from arclet.letoderea import add_shared_supplier
 
-    Safe to call again: an installed wrapper is detected and only publishers that still
-    hold the original gather are re-pointed. If Entari's gather no longer looks like the
-    one this guard was written for, nothing is patched and a warning is logged.
-    """
-    try:
-        from arclet.entari.const import ITEM_ACCOUNT, ITEM_MESSAGE_REPLY
-
-        if event_cls is None:
-            from arclet.entari.event.base import MessageEvent as event_cls
-        if publishers is None:
-            from arclet.letoderea.publisher import _publishers as publishers
-    except ImportError as error:
-        logger.warning("[entari] quote fetch fallback not installed: {}", error)
-        return False
-    if not isinstance(publishers, Mapping):
-        logger.warning("[entari] quote fetch fallback not installed: letoderea publisher registry changed")
-        return False
-    current = event_cls.__dict__.get("gather")
-    if getattr(current, _MARK, False):
-        original, wrapper = current.__wrapped__, current
-    else:
-        if problem := _unexpected_structure(current):
-            logger.warning(
-                "[entari] quote fetch fallback not installed: {}.gather {} (Entari {})",
-                event_cls.__name__, problem, _entari_version(),
-            )
-            return False
-        original, wrapper = current, _wrap(current, ITEM_ACCOUNT, ITEM_MESSAGE_REPLY)
-        event_cls.gather = wrapper
-    for publisher in list(publishers.values()):
-        if getattr(publisher, "supplier", None) is original:
-            publisher.supplier = wrapper
-    if current is not wrapper:
-        users = sum(getattr(publisher, "supplier", None) is wrapper for publisher in publishers.values())
-        if users:
-            logger.info("[entari] quote fetch fallback installed on {} event publishers", users)
-        else:
-            logger.warning("[entari] quote fetch fallback installed, but no event publisher uses {}.gather", event_cls.__name__)
-    return True
+    listen(APIRequest, priority=0)(guard_message_get)
+    add_shared_supplier(drop_unavailable_reply)
+    _installed = True

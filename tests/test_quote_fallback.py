@@ -14,10 +14,14 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from arclet.entari import MessageCreatedEvent
-from arclet.entari.const import ITEM_ACCOUNT, ITEM_MESSAGE_CONTENT, ITEM_MESSAGE_REPLY
+from arclet.entari import MessageChain, MessageCreatedEvent, Session
+from arclet.entari.const import ITEM_MESSAGE_REPLY, ITEM_SESSION
+from arclet.entari.event.api import APIRequest
 from arclet.entari.event.base import MessageEvent
 from arclet.entari.message import Reply
+from arclet.entari.session import EntariProtocol
+from arclet.letoderea import Scope, add_shared_supplier, on, publish
+from arclet.letoderea.utils import _EventSystem
 from satori import Channel, ChannelType, Event, Guild, Login, MessageObject, Quote, Text, User
 from satori.client.account import Account, ApiInfo
 from satori.exception import ServerException
@@ -29,19 +33,16 @@ ROOT = Path(__file__).resolve().parents[1]
 TOKEN = "SATORI-SECRET-TOKEN"
 
 
-def _original_gather():
-    gather = MessageEvent.__dict__["gather"]
-    return gather.__wrapped__ if getattr(gather, quote_fallback._MARK, False) else gather
+class FakeProtocol(EntariProtocol):
+    """EntariProtocol whose HTTP call is replaced; message_get etc. stay Entari-wrapped."""
 
-
-class FakeProtocol:
     def __init__(self, account):
-        self.account = account
+        super().__init__(account)
         self.calls = []
         self.result: object = ServerException("消息为空")
 
-    async def message_get(self, channel_id, message_id):
-        self.calls.append((channel_id, message_id))
+    async def call_api(self, action, params=None, multipart=False, method="POST"):
+        self.calls.append((str(getattr(action, "value", action)), dict(params or {})))
         if isinstance(self.result, BaseException):
             raise self.result
         return self.result
@@ -61,39 +62,69 @@ def _event(elements, account=None) -> MessageCreatedEvent:
     return MessageCreatedEvent(account or _account(), origin)
 
 
-class GatherFallbackTests(unittest.IsolatedAsyncioTestCase):
-    def setUp(self):
-        self.gather = quote_fallback._wrap(_original_gather(), ITEM_ACCOUNT, ITEM_MESSAGE_REPLY)
+class QuoteFallbackTests(unittest.IsolatedAsyncioTestCase):
+    """Both hooks registered in a test scope; events go through the real dispatch."""
+
+    async def asyncSetUp(self):
+        # Entari pins letoderea's tasks to its own loop at import; this test runs on another.
+        loop_patch = mock.patch.object(_EventSystem, "loop", asyncio.get_running_loop())
+        loop_patch.start()
+        self.addCleanup(loop_patch.stop)
+        self.scope = Scope.of("test-quote-fallback")
+        self.addAsyncCleanup(self.scope.cleanup)
+        self.seen = []
+
+        async def plugin(session: Session, event: MessageCreatedEvent, reply: Reply | None = None,
+                         is_reply_me: bool = False, content: MessageChain | None = None):
+            self.seen.append(SimpleNamespace(session=session, event=event, reply=reply,
+                                             is_reply_me=is_reply_me, content=str(content)))
+
+        with self.scope.context():
+            on(APIRequest, quote_fallback.guard_message_get, priority=0)
+            add_shared_supplier(quote_fallback.drop_unavailable_reply)
+            on(MessageCreatedEvent, plugin)
         patcher = mock.patch.object(quote_fallback, "logger")
         self.log = patcher.start()
         self.addCleanup(patcher.stop)
+        self.accounts = []
 
-    async def test_unpatched_gather_drops_the_event(self):
-        # 复现：Entari 0.19.4 的 gather（0.17.4 相同） 把 message_get 的异常原样抛出，事件到不了任何订阅者。
-        event = _event([Quote("fwd-msg-1"), Text("/q 总结一下")])
+    def account(self, result=None):
+        account = _account()
+        if result is not None:
+            account.protocol.result = result
+        self.accounts.append(account)
+        self.addAsyncCleanup(account.protocol.session.close)
+        return account
+
+    async def dispatch(self, event):
+        await publish(event, scope=self.scope)
+        self.assertEqual(len(self.seen), 1, "the event must reach the plugin")
+        return self.seen.pop()
+
+    async def test_without_the_hook_entari_loses_the_event(self):
+        # 复现：Entari 0.19.4 的 gather 把 message_get 的异常原样抛出，事件到不了任何订阅者。
+        await self.scope.cleanup()
+        account = self.account()
         with self.assertRaises(ServerException):
-            await _original_gather()(event, {})
+            await account.protocol.message_get("100", "fwd-msg-1")
 
     async def test_failed_fetch_dispatches_without_reply_and_keeps_the_quote(self):
-        account = _account()
-        quote = Quote("fwd-msg-1")
-        event = _event([quote, Text("/q 总结一下")], account)
-        context = {}
-        await self.gather(event, context)
-        self.assertNotIn(ITEM_MESSAGE_REPLY, context)
-        self.assertIs(context["is_reply_me"], False)
-        self.assertEqual(str(context[ITEM_MESSAGE_CONTENT]), "/q 总结一下")
-        self.assertIs(context[ITEM_ACCOUNT], account)
-        self.assertIs(event.account, account)
+        account = self.account()
+        event = _event([Quote("fwd-msg-1"), Text("/q 总结一下")], account)
+        got = await self.dispatch(event)
+        self.assertIsNone(got.reply)
+        self.assertIsNone(got.session.reply)
+        self.assertIs(got.is_reply_me, False)
+        self.assertEqual(got.content, "/q 总结一下")
         # 原始 quote 元素（含 id）留在事件上交给插件
-        self.assertIsInstance(event.quote, Quote)
-        self.assertEqual(event.quote.id, "fwd-msg-1")
-        self.assertEqual(account.protocol.calls, [("100", "fwd-msg-1")])
+        self.assertIsInstance(got.event.quote, Quote)
+        self.assertEqual(got.event.quote.id, "fwd-msg-1")
+        # 只请求一次：钩子自己调用，没有再触发 APIRequest，也没有回落到原方法
+        self.assertEqual(account.protocol.calls, [("message.get", {"channel_id": "100", "message_id": "fwd-msg-1"})])
 
     async def test_failure_is_logged_with_channel_quote_and_error_but_no_token(self):
-        account = _account()
-        account.protocol.result = ServerException(f"消息为空 Authorization: Bearer {TOKEN}")
-        await self.gather(_event([Quote("fwd-msg-1"), Text("/q")], account), {})
+        account = self.account(ServerException(f"消息为空 Authorization: Bearer {TOKEN}"))
+        await self.dispatch(_event([Quote("fwd-msg-1"), Text("/q")], account))
         self.log.warning.assert_called_once()
         template, *args = self.log.warning.call_args.args
         self.assertIn("quoted message fetch failed", template)
@@ -103,104 +134,61 @@ class GatherFallbackTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_any_exception_from_message_get_is_tolerated(self):
         for error in (RuntimeError("boom"), asyncio.TimeoutError(), KeyError("id")):
-            account = _account()
-            account.protocol.result = error
-            context = {}
-            await self.gather(_event([Quote("q-1"), Text("/q 问")], account), context)
-            self.assertNotIn(ITEM_MESSAGE_REPLY, context)
-            self.assertEqual(str(context[ITEM_MESSAGE_CONTENT]), "/q 问")
+            got = await self.dispatch(_event([Quote("q-1"), Text("/q 问")], self.account(error)))
+            self.assertIsNone(got.reply)
+            self.assertEqual(got.content, "/q 问")
 
     async def test_successful_fetch_keeps_entari_behaviour(self):
-        account = _account()
-        quoted = MessageObject.from_elements("q-1", [Text("原文")], user=User("test-bot"))
-        account.protocol.result = quoted
+        account = self.account({"id": "q-1", "content": "原文", "user": {"id": "test-bot"}})
         event = _event([Quote("q-1"), Text(" /q 问")], account)
-        context = {}
-        await self.gather(event, context)
-        reply = context[ITEM_MESSAGE_REPLY]
-        self.assertIsInstance(reply, Reply)
-        self.assertIs(reply.origin, quoted)
-        self.assertIs(reply.quote, event.quote)
-        self.assertIs(context["is_reply_me"], True)
+        got = await self.dispatch(event)
+        self.assertIsInstance(got.reply, Reply)
+        self.assertIs(got.session.reply, got.reply)
+        self.assertNotIsInstance(got.reply.origin, quote_fallback.UnavailableMessage)
+        self.assertEqual(got.reply.origin.content, "原文")
+        self.assertIs(got.reply.quote, event.quote)
+        self.assertIs(got.is_reply_me, True)
         # is_reply_me 时 Entari 去掉开头空白，这一步仍由原 gather 完成
-        self.assertEqual(str(context[ITEM_MESSAGE_CONTENT]), "/q 问")
-        self.assertIs(context[ITEM_ACCOUNT], account)
-        self.assertEqual(account.protocol.calls, [("100", "q-1")])
+        self.assertEqual(got.content, "/q 问")
+        self.assertEqual(len(account.protocol.calls), 1)
         self.log.warning.assert_not_called()
 
     async def test_inline_quote_and_plain_messages_do_not_fetch(self):
-        account = _account()
-        context = {}
-        await self.gather(_event([Quote("q-1", content=[Text("内联")]), Text("/q")], account), context)
-        self.assertEqual(context[ITEM_MESSAGE_REPLY].origin.content, "内联")
-        await self.gather(_event([Text("/q 没有引用")], account), context)
+        account = self.account()
+        got = await self.dispatch(_event([Quote("q-1", content=[Text("内联")]), Text("/q")], account))
+        self.assertEqual(got.reply.origin.content, "内联")
+        got = await self.dispatch(_event([Text("/q 没有引用")], account))
+        self.assertIsNone(got.reply)
         self.assertEqual(account.protocol.calls, [])
 
-    async def test_cancellation_is_not_swallowed(self):
-        account = _account()
-        account.protocol.result = asyncio.CancelledError()
-        with self.assertRaises(asyncio.CancelledError):
-            await self.gather(_event([Quote("q-1"), Text("/q")], account), {})
+    async def test_other_api_calls_are_left_to_entari(self):
+        account = self.account(ServerException("boom"))
+        with self.assertRaises(ServerException):
+            await account.protocol.message_delete("100", "m-1")
+        self.assertEqual([action for action, _ in account.protocol.calls], ["message.delete"])
         self.log.warning.assert_not_called()
+
+    async def test_cancellation_is_not_swallowed(self):
+        account = self.account(asyncio.CancelledError())
+        with self.assertRaises(asyncio.CancelledError):
+            await account.protocol.message_get("100", "q-1")
+        self.log.warning.assert_not_called()
+
+    async def test_only_placeholder_replies_are_dropped(self):
+        reply = Reply(Quote("q-1"), MessageObject.from_elements("q-1", [Text("原文")]))
+        session = SimpleNamespace(reply=reply)
+        context = {ITEM_MESSAGE_REPLY: reply, ITEM_SESSION: session}
+        await quote_fallback.drop_unavailable_reply(context)
+        self.assertIs(context[ITEM_MESSAGE_REPLY], reply)
+        self.assertIs(session.reply, reply)
+        await quote_fallback.drop_unavailable_reply({})
 
 
 class InstallTests(unittest.TestCase):
-    def setUp(self):
-        patcher = mock.patch.object(quote_fallback, "logger")
-        self.log = patcher.start()
-        self.addCleanup(patcher.stop)
-
-    def test_real_entari_gather_has_the_expected_structure(self):
-        self.assertIsNone(quote_fallback._unexpected_structure(_original_gather()))
-
-    def test_install_patches_the_class_and_repoints_publishers_once(self):
-        original = _original_gather()
-        saved = MessageEvent.__dict__["gather"]
-        self.addCleanup(setattr, MessageEvent, "gather", saved)
-        other = SimpleNamespace(supplier=object())
-        publishers = {"message-created": SimpleNamespace(supplier=original), "other": other}
-
-        MessageEvent.gather = original
-        self.assertTrue(quote_fallback.install_quote_fetch_fallback(MessageEvent, publishers))
-        wrapper = MessageEvent.__dict__["gather"]
-        self.assertTrue(getattr(wrapper, quote_fallback._MARK))
-        self.assertIs(wrapper.__wrapped__, original)
-        self.assertIs(publishers["message-created"].supplier, wrapper)
-        self.assertIsNot(other.supplier, wrapper)
-        # 再装一次：不套第二层，后来出现的旧引用也会改指过来
-        publishers["late"] = SimpleNamespace(supplier=original)
-        self.assertTrue(quote_fallback.install_quote_fetch_fallback(MessageEvent, publishers))
-        self.assertIs(MessageEvent.__dict__["gather"], wrapper)
-        self.assertIs(publishers["late"].supplier, wrapper)
-        self.log.info.assert_called_once()
-        self.log.warning.assert_not_called()
-
-    def test_unexpected_structure_is_left_alone_with_a_warning(self):
-        async def moved(self, context):
-            return await self.account.fetch_reply(context)
-
-        async def renamed(self, ctx, extra=None):
-            return self.account.protocol.message_get(self.quote.children, Reply, ITEM_MESSAGE_REPLY)
-
-        def sync(self, context):
-            return None
-
-        for gather in (moved, renamed, sync, None):
-            self.log.reset_mock()
-            namespace = {} if gather is None else {"gather": gather}
-            event_cls = type("FutureMessageEvent", (), namespace)
-            publishers = {"message-created": SimpleNamespace(supplier=gather)}
-            self.assertFalse(quote_fallback.install_quote_fetch_fallback(event_cls, publishers))
-            self.assertIs(event_cls.__dict__.get("gather"), gather)
-            self.assertIs(publishers["message-created"].supplier, gather)
-            self.log.warning.assert_called_once()
-            self.assertIn("not installed", self.log.warning.call_args.args[0])
-
-    def test_missing_publisher_registry_is_skipped(self):
-        event_cls = type("E", (), {"gather": _original_gather()})
-        self.assertFalse(quote_fallback.install_quote_fetch_fallback(event_cls, object()))
-        self.assertIs(event_cls.__dict__["gather"], _original_gather())
-        self.log.warning.assert_called_once()
+    def test_entari_classes_are_not_patched(self):
+        # 不再替换 MessageEvent.gather 或 letoderea 的 publisher supplier
+        self.assertEqual(MessageEvent.__dict__["gather"].__module__, "arclet.entari.event.base")
+        self.assertFalse(hasattr(MessageEvent.__dict__["gather"], "__wrapped__"))
 
 
 DISPATCH_SCRIPT = r'''
@@ -216,8 +204,8 @@ app = create_app()
 from arclet.entari.config import EntariConfig
 from arclet.entari.event.base import MessageEvent
 from arclet.entari.plugin.service import plugin_service
-from arclet.letoderea.publisher import _publishers
-from satori import Channel, ChannelType, Event, Guild, Login, MessageObject, User
+from arclet.entari.session import EntariProtocol
+from satori import Api, Channel, ChannelType, Event, Guild, Login, MessageObject, User
 from satori.client.account import Account, ApiInfo
 from satori.exception import NotFoundException, ServerException
 from unittest.mock import AsyncMock, patch
@@ -228,10 +216,9 @@ for builtin in ('$.commands', '$.record_message'):
 EntariConfig.instance.basic.prefix = ['/']
 hyw = plugin_service.plugins['plugins.hyw'].module
 
-# create_app 装好的补丁对真实 publisher 生效
-gather = MessageEvent.__dict__['gather']
-users = sorted(k for k, p in _publishers.items() if p.supplier is gather)
-assert users == ['message-created', 'message-deleted', 'message-updated', 'reaction-added', 'reaction-removed'], users
+# 不再给 Entari 打补丁：gather 还是 Entari 自己的，保护靠 create_app 注册的公开钩子
+assert MessageEvent.__dict__['gather'].__module__ == 'arclet.entari.event.base'
+assert not hasattr(MessageEvent.__dict__['gather'], '__wrapped__')
 
 QUOTE_ID = '2|100|3969610'
 # 边界适配器送来的引用：作者 + 原消息内容；被引用的是合并转发时，转发的各条消息就在其中
@@ -246,15 +233,19 @@ UNEXPANDED_QUOTE = '<quote id="' + QUOTE_ID + '"><author id="9" name="转发人"
 BARE_QUOTE = '<quote id="' + QUOTE_ID + '"/>'
 
 
-class Protocol:
+class Protocol(EntariProtocol):
+    """Real EntariProtocol (APIRequest hooks included); only the HTTP call is faked."""
+
     def __init__(self, account):
-        self.account = account
+        super().__init__(account)
         self.gets = []
         self.internal_calls = []
 
-    async def message_get(self, channel_id, message_id):
-        self.gets.append(message_id)
-        raise ServerException('消息为空')
+    async def call_api(self, action, params=None, multipart=False, method='POST'):
+        if action == Api.MESSAGE_GET:
+            self.gets.append(params['message_id'])
+            raise ServerException('消息为空')
+        raise AssertionError(f'unexpected API call {action}')
 
     async def internal(self, action, method='POST', **params):
         self.internal_calls.append((action, params))

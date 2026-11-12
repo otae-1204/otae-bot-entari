@@ -4,7 +4,6 @@
 {"rule": "framework-private", "file": "otae_bot/adapters/command_input.py", "snippet": "from arclet.entari.command.provider import _remove_config_prefix", "count": 1},
 {"rule": "framework-private", "file": "otae_bot/adapters/command_input.py", "snippet": "from arclet.letoderea.scope import global_propagators", "count": 1},
 {"rule": "framework-private", "file": "otae_bot/adapters/framework_hooks.py", "snippet": "from arclet.letoderea.scope import global_propagators", "count": 1},
-{"rule": "framework-private", "file": "otae_bot/adapters/quote_fallback.py", "snippet": "from arclet.letoderea.publisher import _publishers as publishers", "count": 1},
 {"rule": "framework-private", "file": "otae_bot/attendance_delivery.py", "snippet": "from arclet.letoderea.exceptions import _ExitException", "count": 1},
 {"rule": "framework-private", "file": "otae_bot/attendance_registry.py", "snippet": "from arclet.letoderea.exceptions import _ExitException", "count": 1},
 {"rule": "framework-private", "file": "plugins/arknights/handlers.py", "snippet": "from arclet.letoderea.exceptions import _ExitException", "count": 1},
