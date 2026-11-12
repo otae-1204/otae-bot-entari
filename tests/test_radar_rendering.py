@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock
 import pytest
 from lxml import html
 from PIL import Image as PILImage
+from arclet.entari import MessageChain
 from satori import Image as ImageSegment
 
 from plugins.radar import handlers
@@ -203,6 +204,13 @@ def test_untrusted_labels_cannot_inject_html_or_resources():
     )
 
 
+class _Session:
+    """Minimal session: _reply and _run only call ``session.send``."""
+
+    def __init__(self, send):
+        self.send = send
+
+
 def test_image_reply_renders_before_sending_and_uses_image_segments(monkeypatch):
     events = []
 
@@ -210,14 +218,13 @@ def test_image_reply_renders_before_sending_and_uses_image_segments(monkeypatch)
         events.append("render")
         return png_sample()
 
-    async def send(session, message):
+    async def send(message):
         events.append("send")
-        assert isinstance(message, list) and isinstance(message[0], ImageSegment)
+        assert isinstance(message, MessageChain) and isinstance(message[0], ImageSegment)
 
     monkeypatch.setattr(handlers, "render_page", render)
-    monkeypatch.setattr(handlers, "send", send)
     pages = help_pages() * 2
-    asyncio.run(handlers._reply(object(), RadarReply(["fallback"], pages)))
+    asyncio.run(handlers._reply(_Session(send), RadarReply(["fallback"], pages)))
     assert events == ["render", "render", "send", "send"]
 
 
@@ -230,11 +237,10 @@ def test_image_failure_delivers_original_text(monkeypatch, failure_stage):
     else:
         send.side_effect = [RuntimeError("image rejected"), None]
     monkeypatch.setattr(handlers, "render_page", render)
-    monkeypatch.setattr(handlers, "send", send)
     asyncio.run(
-        handlers._reply(object(), RadarReply(["完整文本", "保留口径"], help_pages()))
+        handlers._reply(_Session(send), RadarReply(["完整文本", "保留口径"], help_pages()))
     )
-    assert send.await_args.args[1] == "完整文本\n保留口径"
+    assert send.await_args.args[0] == "完整文本\n保留口径"
 
 
 def test_cancellation_never_sends_fallback(monkeypatch):
@@ -242,16 +248,15 @@ def test_cancellation_never_sends_fallback(monkeypatch):
         handlers, "render_page", AsyncMock(side_effect=asyncio.CancelledError)
     )
     send = AsyncMock()
-    monkeypatch.setattr(handlers, "send", send)
     with pytest.raises(asyncio.CancelledError):
-        asyncio.run(handlers._reply(object(), RadarReply(["fallback"], help_pages())))
+        asyncio.run(handlers._reply(_Session(send), RadarReply(["fallback"], help_pages())))
     send.assert_not_awaited()
 
 
 def test_concurrency_gate_covers_render_and_delivery(monkeypatch):
     monkeypatch.setattr(handlers, "_active", {})
     monkeypatch.setattr(handlers, "_config", SimpleNamespace(concurrency=1))
-    monkeypatch.setattr(handlers, "send", AsyncMock())
+    session = _Session(AsyncMock())
 
     async def reply(*args):
         assert handlers._active["radar"] == 1
@@ -261,9 +266,9 @@ def test_concurrency_gate_covers_render_and_delivery(monkeypatch):
     async def query():
         return ["ready"]
 
-    asyncio.run(handlers._run(object(), query(), timeout=1))
+    asyncio.run(handlers._run(session, query(), timeout=1))
     assert handlers._active["radar"] == 0
     handlers._active["radar"] = 1
     rejected = query()
-    asyncio.run(handlers._run(object(), rejected, timeout=1))
+    asyncio.run(handlers._run(session, rejected, timeout=1))
     assert rejected.cr_frame is None

@@ -1206,13 +1206,14 @@ class HandlerTests(unittest.TestCase):
         self.assertEqual(_split_benchmark(["@"]), (["@"], None))
 
     def test_tokens_come_from_the_rest_argument(self):
-        from otae_bot.compat.entari import ArgVal
+        from arclet.alconna import Empty
+        from arclet.entari.command import Match
 
         from plugins.radar.handlers import _tokens
 
-        self.assertEqual(_tokens(ArgVal(("模型", "gpt-6-astra"), True)), ["模型", "gpt-6-astra"])
-        self.assertEqual(_tokens(ArgVal(None, False)), [])
-        self.assertEqual(_tokens(ArgVal(("a  b",), True)), ["a", "b"])
+        self.assertEqual(_tokens(Match(("模型", "gpt-6-astra"), True)), ["模型", "gpt-6-astra"])
+        self.assertEqual(_tokens(Match(Empty, False)), [])
+        self.assertEqual(_tokens(Match(("a  b",), True)), ["a", "b"])
 
     def test_every_subcommand_maps_to_a_known_key(self):
         from plugins.radar.handlers import _SUBCOMMANDS
@@ -1435,6 +1436,73 @@ async def main():
 # RuntimeError: ... got Future ... attached to a different loop。
 asyncio.get_event_loop().run_until_complete(main())
 '''
+
+
+RADAR_SCENARIOS = r"""
+import io
+from unittest.mock import AsyncMock, patch
+from PIL import Image as PILImage
+from plugins.radar.errors import UnknownModel
+from plugins.radar.presentation import RadarReply, help_pages
+
+radar = plugin('plugins.radar.handlers')
+buffer = io.BytesIO()
+PILImage.new('RGB', (2, 2)).save(buffer, format='PNG')
+PNG = buffer.getvalue()
+calls = []
+
+
+def dispatch_with(result):
+    async def fake(key, args):
+        calls.append((key, args))
+        if isinstance(result, BaseException):
+            raise result
+        return result
+    return fake
+
+
+async def main():
+    pages = help_pages()
+    reply = RadarReply(['完整文本', '保留口径'], pages)
+    with patch.object(radar, '_dispatch', dispatch_with(reply)), \
+         patch.object(radar, 'render_page', AsyncMock(return_value=PNG)):
+        # 两个指令名；无参数走总览，子命令按表分派（含英文别名与大小写）
+        sent = await say('/radar')
+        assert calls[-1] == ('overview', []) and len(sent) == len(pages), sent
+        assert all(item.startswith('<img src="data:image/png;base64,') for item in sent), sent
+        await say('/智商雷达 模型 gpt-6-astra @deep-swe')
+        assert calls[-1] == ('model', ['gpt-6-astra', '@deep-swe']), calls
+        await say('/radar VS a b')
+        assert calls[-1] == ('compare', ['a', 'b']), calls
+        # 未知子命令只回提示，不分派
+        count = len(calls)
+        sent = await say('/radar 乱写')
+        assert len(sent) == 1 and '未知子命令「乱写」' in sent[0] and len(calls) == count, sent
+    with patch.object(radar, '_dispatch', dispatch_with(reply)), \
+         patch.object(radar, 'render_page', AsyncMock(side_effect=RuntimeError('no browser'))):
+        # 渲染失败回退为完整文本
+        assert await say('/radar 帮助') == ['完整文本\n保留口径']
+    with patch.object(radar, '_dispatch', dispatch_with(UnknownModel('找不到模型「x」。'))):
+        sent = await say('/radar 模型 x')
+        assert len(sent) == 1 and '找不到模型' in sent[0], sent
+    with patch.object(radar, '_dispatch', dispatch_with(RuntimeError('boom'))):
+        assert await say('/radar 榜') == ['雷达查询异常，请稍后重试。']
+    with patch.object(radar, '_dispatch', dispatch_with(reply)), patch.object(radar, '_active', {'radar': 99}):
+        assert await say('/radar 榜') == ['雷达系统正忙，请稍后再试。']
+    print('ALL-OK')
+
+run(main())
+"""
+
+
+class RadarDispatchTests(unittest.TestCase):
+    def test_radar_command_through_the_real_event_path(self):
+        from tests.support.dispatch import run_scenarios
+
+        result = run_scenarios(RADAR_SCENARIOS)
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, output[-6000:])
+        self.assertIn("ALL-OK", result.stdout)
 
 
 if __name__ == "__main__":  # pragma: no cover

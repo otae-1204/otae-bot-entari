@@ -28,11 +28,12 @@ from __future__ import annotations
 import asyncio
 
 from arclet.alconna import Alconna, Args, MultiVar
-from arclet.entari import Event, Session
+from arclet.entari import Image, MessageChain, Session, command
+from arclet.entari.command import Match
 from loguru import logger
 from nepattern import AnyString
 
-from otae_bot.compat.entari import ArgVal, Image, get_rest, on_alconna, send
+from otae_bot.messaging.inbound import get_rest
 
 from . import presentation as views
 from .config import RadarConfig
@@ -130,14 +131,14 @@ async def _reply(session: Session, lines: list[str]) -> None:
             # a partial image reply. This only renders local assets and data.
             images = [await render_page(page) for page in lines.pages]
             for png in images:
-                await send(session, [Image(raw=png)])
+                await session.send(MessageChain([Image.of(raw=png)]))
             return
         except asyncio.CancelledError:
             raise
         except Exception as error:  # noqa: BLE001 - image boundary keeps text available
             logger.warning("[radar] card delivery fell back to text: {}", type(error).__name__)
     for chunk in _chunks("\n".join(lines)):
-        await send(session, chunk)
+        await session.send(chunk)
 
 
 async def _run(session: Session, coro, *, timeout: float) -> None:
@@ -146,7 +147,7 @@ async def _run(session: Session, coro, *, timeout: float) -> None:
     if sum(_active.values()) >= max(1, _config.concurrency):
         # _dispatch() is constructed by the caller before admission.
         coro.close()
-        await send(session, "雷达系统正忙，请稍后再试。")
+        await session.send("雷达系统正忙，请稍后再试。")
         return
     # 准入与占位之间不得 await，否则计数会被并发穿透。
     _active[key] = _active.get(key, 0) + 1
@@ -159,23 +160,23 @@ async def _run(session: Session, coro, *, timeout: float) -> None:
         await asyncio.wait_for(execute(), timeout=timeout)
     except asyncio.TimeoutError:
         logger.warning("[radar] command timed out after {:.0f}s", timeout)
-        await send(session, "雷达请求响应超时，请稍后重试或选用轻量指令。")
+        await session.send("雷达请求响应超时，请稍后重试或选用轻量指令。")
         return
     except RadarError as error:
         # 上游响应体原文绝不进用户可见消息（plugin_api §2）。
-        await send(session, format_error(error))
+        await session.send(format_error(error))
         return
     except asyncio.CancelledError:
         raise
     except Exception as error:  # noqa: BLE001 - 边界只记类型名，绝不记载荷
         logger.warning("[radar] command failed: {}", type(error).__name__)
-        await send(session, "雷达查询异常，请稍后重试。")
+        await session.send("雷达查询异常，请稍后重试。")
         return
     finally:
         _active[key] = max(0, _active.get(key, 1) - 1)
 
 
-def _tokens(rest: ArgVal | None) -> list[str]:
+def _tokens(rest: Match | None) -> list[str]:
     """把 rest 拆成位置参数（容忍多个空格）。"""
     raw = get_rest(rest) or ""
     return [token for token in str(raw).split() if token]
@@ -189,11 +190,10 @@ def _split_benchmark(tokens: list[str]) -> tuple[list[str], str | None]:
 
 
 radar_command = Alconna(list(ROOT_ALIASES), Args["rest;?", MultiVar(AnyString)])
-_radar = on_alconna(radar_command, priority=5, block=True)
 
 
-@_radar.handle()
-async def handle_radar(event: Event, rest: ArgVal, session: Session) -> None:
+@command.on(radar_command)
+async def handle_radar(rest: Match[tuple[str, ...]], session: Session) -> None:
     """``/radar`` 总入口：按第一个词分派。"""
     tokens = _tokens(rest)
     if not tokens:
@@ -202,7 +202,7 @@ async def handle_radar(event: Event, rest: ArgVal, session: Session) -> None:
     sub, *args = tokens
     key = _SUBCOMMANDS.get(sub) or _SUBCOMMANDS.get(sub.casefold())
     if key is None:
-        await send(session, format_error(InvalidArgument(f"未知子命令「{sub}」，可发送 /radar 帮助 查看指令列表。", detail="unknown subcommand")))
+        await session.send(format_error(InvalidArgument(f"未知子命令「{sub}」，可发送 /radar 帮助 查看指令列表。", detail="unknown subcommand")))
         return
     timeout = _config.table_timeout if sub in _TABLE_COMMANDS else max(30.0, _config.timeout * 1.5)
     await _run(session, _dispatch(key, args), timeout=timeout)
