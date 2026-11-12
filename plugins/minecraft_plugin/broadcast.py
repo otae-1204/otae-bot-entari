@@ -7,11 +7,11 @@ import logging
 import time
 import traceback
 
-from otae_bot.compat.entari import get_bot
-from arclet.entari import Account as Bot, Session, listen
+from arclet.entari import Account as Bot, MessageChain, Session, Text, listen
 from arclet.entari.event.base import GuildMemberAddedEvent
-from otae_bot.compat.entari import ChainMsg
-from otae_bot.compat.entari import timer
+
+from otae_bot.accounts.ready import get_bot
+from otae_bot.scheduling.jobs import timer
 
 from otae_bot.config.settings import Config
 from otae_bot.delivery import Target, deliver
@@ -335,7 +335,7 @@ async def broadcast():
         if group_messages:
             try:
                 # The default account sends, as before; a send error keeps its traceback.
-                result = await deliver(Target.group(str(group_id)), ChainMsg.text("\n".join(group_messages)), account=bot)
+                result = await deliver(Target.group(str(group_id)), MessageChain([Text("\n".join(group_messages))]), account=bot)
                 result.raise_for_failure()
             except Exception as exc:
                 err_msg = str(exc)
@@ -365,9 +365,9 @@ async def broadcast():
                     suppressed += len(group_errors)
             if lines:
                 suffix = f"\n已折叠 {suppressed} 条重复异常" if suppressed else ""
-                await deliver(target, ChainMsg.text(
+                await deliver(target, MessageChain([Text(
                     f"广播异常摘要（共 {len(lines)} 条）：\n" + "\n---\n".join(lines[-5:]) + suffix
-                ), account=bot)
+                )]), account=bot)
         except Exception:
             pass
 

@@ -41,7 +41,8 @@ def _load_mcsm_draw_module():
 
 
 def _load_minecraft_broadcast_module(name: str):
-    previous_entari_native = sys.modules.get("otae_bot.compat.entari")
+    previous_ready = sys.modules.get("otae_bot.accounts.ready")
+    previous_jobs = sys.modules.get("otae_bot.scheduling.jobs")
     previous_arclet_entari = sys.modules.get("arclet.entari")
     previous_arclet = sys.modules.get("arclet")
     previous_pkg = sys.modules.get("plugins.minecraft_plugin")
@@ -56,10 +57,10 @@ def _load_minecraft_broadcast_module(name: str):
     delivery.deliver = fake_deliver
     sys.modules["otae_bot.delivery"] = delivery
 
-    entari_native = types.ModuleType("otae_bot.compat.entari")
-    entari_native.get_bot = lambda: None
-    entari_native.ChainMsg = types.SimpleNamespace(text=lambda text: types.SimpleNamespace(send=lambda *a, **kw: None))
-    entari_native.timer = types.SimpleNamespace(
+    ready = types.ModuleType("otae_bot.accounts.ready")
+    ready.get_bot = lambda: None
+    jobs = types.ModuleType("otae_bot.scheduling.jobs")
+    jobs.timer = types.SimpleNamespace(
         scheduled_job=lambda *args, **kwargs: (lambda func: func)
     )
 
@@ -67,12 +68,15 @@ def _load_minecraft_broadcast_module(name: str):
     arclet_entari = types.ModuleType("arclet.entari")
     arclet_entari.Account = object
     arclet_entari.Session = object
+    arclet_entari.MessageChain = list
+    arclet_entari.Text = str
     arclet_entari.listen = lambda *args, **kwargs: (lambda func: func)
     event_base = types.ModuleType("arclet.entari.event.base")
     event_base.GuildMemberAddedEvent = object
     sys.modules["arclet.entari.event.base"] = event_base
 
-    sys.modules["otae_bot.compat.entari"] = entari_native
+    sys.modules["otae_bot.accounts.ready"] = ready
+    sys.modules["otae_bot.scheduling.jobs"] = jobs
     sys.modules["arclet"] = arclet
     sys.modules["arclet.entari"] = arclet_entari
     pkg = previous_pkg or types.ModuleType("plugins.minecraft_plugin")
@@ -86,10 +90,14 @@ def _load_minecraft_broadcast_module(name: str):
     try:
         return _load_module(f"plugins.minecraft_plugin.{name}", "plugins/minecraft_plugin/broadcast.py")
     finally:
-        if previous_entari_native is None:
-            sys.modules.pop("otae_bot.compat.entari", None)
-        else:
-            sys.modules["otae_bot.compat.entari"] = previous_entari_native
+        for module_name, previous in (
+            ("otae_bot.accounts.ready", previous_ready),
+            ("otae_bot.scheduling.jobs", previous_jobs),
+        ):
+            if previous is None:
+                sys.modules.pop(module_name, None)
+            else:
+                sys.modules[module_name] = previous
         if previous_arclet_entari is None:
             sys.modules.pop("arclet.entari", None)
         else:
@@ -3212,7 +3220,7 @@ remotePort = {{ $v.Second }}
 
     def test_minecraft_broadcast_interval_command_source_paths(self):
         source = (ROOT / "plugins/minecraft_plugin/handlers.py").read_text(encoding="utf-8")
-        self.assertIn('broadcast_interval = _cmd("broadcastinterval"', source)
+        self.assertIn('broadcast_interval = Alconna(["broadcastinterval"', source)
         self.assertIn('if unit in {"", "m", "分", "分钟"}:', source)
         self.assertIn("return value * 60", source)
         self.assertIn('command_args.lower() in {"reset", "default", "默认", "重置"}', source)
