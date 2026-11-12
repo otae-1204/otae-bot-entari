@@ -10,13 +10,13 @@ from loguru import logger
 
 from otae_bot.adapters.entari import (
     ChainMsg,
-    SendDest,
     event_user_id,
     get_channel_id,
     get_group_id,
     is_group,
     make_image,
 )
+from otae_bot.delivery import Target, deliver
 from otae_bot.endfield_notifications.classification import LABELS
 from otae_bot.endfield_notifications.receipts import ReceiptStore
 from otae_bot.group_features import feature_store, group_scope, scope_from_event
@@ -29,6 +29,20 @@ from .notification_rules import events_for, retain_events
 from .service import AnnouncementService, DeliveryDeferred
 from .source import OfficialAnnouncementSource
 from .store import AnnouncementStore
+
+
+def _target(destination: Destination) -> Target:
+    """The stored subscription's chat; the store keeps its own key format."""
+    if destination.private:
+        return Target.private(
+            destination.target_id, self_id=destination.account_id, platform=destination.platform
+        )
+    return Target.group(
+        destination.target_id,
+        channel_id=destination.channel_id,
+        self_id=destination.account_id,
+        platform=destination.platform,
+    )
 
 
 class AnnouncementRuntime:
@@ -142,18 +156,11 @@ class AnnouncementRuntime:
         if len(pending) != len(jobs) or current_subscription != subscription:
             raise DeliveryDeferred()
         bot = self._delivery_account(destination)
-        result = await ChainMsg([make_image(raw=png)]).send(
-            SendDest(
-                id=destination.target_id
-                if destination.private
-                else destination.channel_id,
-                parent_id="" if destination.private else destination.target_id,
-                private=destination.private,
-                self_id=destination.account_id,
-            ),
-            bot,
+        result = await deliver(
+            _target(destination), ChainMsg([make_image(raw=png)]), account=bot, plugin="endfield"
         )
-        if not result:
+        result.raise_for_failure()
+        if not result.messages:
             raise RuntimeError("Delivery was not acknowledged")
 
     async def command(self, event, args: tuple[str, ...], bot) -> str:

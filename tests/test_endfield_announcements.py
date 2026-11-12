@@ -680,7 +680,8 @@ def test_delivery_uses_bound_account_and_honors_feature_switch(store, monkeypatc
         )
         await runtime.send(destination(), group_jobs)
         first.protocol.send_message.assert_awaited_once()
-        sent_elements = first.protocol.send_message.await_args.args[1]
+        channel, sent_elements = first.protocol.send_message.await_args.args
+        assert channel == "100"
         assert len(sent_elements) == 1
         assert sent_elements[0].src.startswith("data:image/png;base64,")
         other.protocol.send_message.assert_not_awaited()
@@ -692,6 +693,7 @@ def test_delivery_uses_bound_account_and_honors_feature_switch(store, monkeypatc
         assert first.protocol.send_message.await_count == 1
         await runtime.send(destination(private=True), private_jobs)
         first.protocol.send_private_message.assert_awaited_once()
+        assert first.protocol.send_private_message.await_args.args[0] == "100"
         renderer.assert_awaited_once()  # same public digest shares one render
         with pytest.raises(service_module.DeliveryDeferred):
             await runtime.send(destination(bot="missing"), group_jobs)
