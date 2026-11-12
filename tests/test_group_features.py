@@ -13,7 +13,7 @@ from arclet.entari.const import ITEM_ACCOUNT, ITEM_SESSION
 from arclet.letoderea import EVENT, STOP, Scope, Subscriber
 from satori import ChannelType, Role
 
-from otae_bot.adapters import feature_gate
+from otae_bot.adapters import feature_gate, framework_hooks
 from otae_bot.adapters.entari import ArgVal, ChainMsg, SendDest
 from otae_bot.group_features import (
     GroupFeatureStore,
@@ -289,30 +289,36 @@ class GateTests(unittest.IsolatedAsyncioTestCase):
         await subscriber.handle({ITEM_SESSION: self.current})
         self.assertEqual(calls.await_count, 5)
 
-    async def test_install_covers_existing_future_and_reloaded_scopes(self):
-        scope = Scope("test-group-gate")
-        self.addCleanup(scope.dispose)
+    async def test_install_covers_existing_future_and_reloaded_subscribers(self):
         calls = AsyncMock()
 
-        async def callback():
-            await calls()
+        def handler(module):
+            async def callback():
+                await calls()
 
-        existing = scope.register(callback)
-        plugin = SimpleNamespace(path="plugins.hyw.handlers", _scope=scope)
-        with patch.object(feature_gate.plugin_service, "plugins", {plugin.path: plugin}):
-            feature_gate.install_group_feature_gates()
-            feature_gate.install_group_feature_gates()
-            self.assertEqual(len(scope.propagators), 1)
-            future = scope.register(callback)
-            for subscriber in (existing, future):
-                self.assertIs(await subscriber.handle({ITEM_SESSION: self.current}), STOP)
-            reloaded = Scope("test-group-gate-reload")
-            self.addCleanup(reloaded.dispose)
-            plugin._scope = reloaded
-            existing = reloaded.register(callback)
-            await feature_gate.on_plugin_loaded(SimpleNamespace(plugin_id=plugin.path))
-            self.assertIs(await existing.handle({ITEM_SESSION: self.current}), STOP)
+            callback.__module__ = module
+            return callback
+
+        scope = Scope("test-group-gate")
+        self.addCleanup(scope.dispose)
+        existing = scope.register(handler("plugins.hyw.handlers"))
+        with patch.object(framework_hooks, "get_all_subscribers", return_value=[existing]):
+            self.addCleanup(feature_gate.install_group_feature_gates())
+            self.addCleanup(feature_gate.install_group_feature_gates())
+        # Attached once, even when installed twice.
+        self.assertEqual(sum(sub.callable_target.__name__ == "check" for sub in existing._propagates), 1)
+        # Registered later, e.g. by Entari's hot reload into a new plugin scope.
+        reloaded = Scope("test-group-gate-reload")
+        self.addCleanup(reloaded.dispose)
+        future = reloaded.register(handler("plugins.hyw"))
+        for subscriber in (existing, future):
+            self.assertIs(await subscriber.handle({ITEM_SESSION: self.current}), STOP)
         calls.assert_not_awaited()
+        # Protected plugins and the bot's own listeners are never gated.
+        for module in ("plugins.group_manager.handlers", "otae_bot.application"):
+            subscriber = reloaded.register(handler(module))
+            with self.assertRaises(ValueError):
+                subscriber.get_propagator(feature_gate.GroupFeatureGate)
 
     async def test_background_delivery_filters_each_destination_and_keeps_private_messages(self):
         results = []

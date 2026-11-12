@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from arclet.entari import WS, Cleanup, Entari, Startup, listen, load_plugin
-from arclet.entari.event.plugin import PluginLoadedSuccess, PluginUnloaded
+from arclet.entari.event.plugin import PluginUnloaded
 
 from otae_bot.adapters.command_input import install_command_input_normalizers
-from otae_bot.adapters.feature_gate import install_group_feature_gates, on_plugin_loaded
+from otae_bot.adapters.feature_gate import install_group_feature_gates
 from otae_bot.adapters.message_log import install_message_log_redaction
 from otae_bot.adapters.quote_fallback import install_quote_fetch_fallback
 from otae_bot.attendance_registry import on_plugin_unloaded
@@ -39,11 +39,6 @@ def build_networks(clients: list[dict] | None = None) -> list[WS]:
     return [build_network(client) for client in (clients or [{}])]
 
 
-async def _install_usage_after_load(event: PluginLoadedSuccess) -> None:
-    # Hot reload recreates a plugin's scope; count its commands again.
-    install_command_usage_recorders()
-
-
 def create_app() -> Entari:
     # OneBot-only setups must not fall back to the default Satori endpoint.
     app = Entari(*(build_networks() if SATORI_CLIENTS or not ONEBOT_CLIENTS else []))
@@ -58,19 +53,19 @@ def create_app() -> Entari:
     install_recent_alerts()
     install_quote_fetch_fallback()
     install_command_input_normalizers()
+    # Before any plugin loads: both attach to every plugin subscriber registered
+    # from now on, so hot-reloaded plugins are covered without reinstalling.
+    install_group_feature_gates()
+    install_command_usage_recorders()
     listen(Startup)(start_loop_watchdog)
     listen(Cleanup)(close_loop_watchdog)
     listen(Cleanup)(close_shared_resources)
     listen(Cleanup)(close_command_usage)
-    listen(PluginLoadedSuccess)(on_plugin_loaded)
-    listen(PluginLoadedSuccess)(_install_usage_after_load)
     # A game plugin that is unloaded for good must stop advertising its
     # attendance capability to the other game's /ak 签到 or /ef 签到.
     listen(PluginUnloaded)(on_plugin_unloaded)
     for name in discover_plugins():
         load_plugin(name)
-    install_group_feature_gates()
-    install_command_usage_recorders()
     return app
 
 

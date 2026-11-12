@@ -1,7 +1,8 @@
 """Count every matched command across all plugins without touching their handlers.
 
-``CommandUsageRecorder`` is installed on each plugin scope the same way
-``feature_gate.GroupFeatureGate`` is. It runs after Entari's Alconna supplier
+``CommandUsageRecorder`` is attached to every plugin subscriber the same way
+``feature_gate.GroupFeatureGate`` is (``framework_hooks.attach_to_every_subscriber``,
+so later registrations and hot-reloaded plugins are covered too). It runs after Entari's Alconna supplier
 (priority 70) has put ``alc_result`` into the context, so only commands that actually
 matched are counted; plain message listeners (link previews, private dialogs) have no
 ``alc_result`` and are skipped. Group-disabled plugins are stopped earlier by the gate.
@@ -24,11 +25,11 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from arclet.entari.const import ITEM_ACCOUNT, ITEM_SESSION
-from arclet.entari.plugin.service import plugin_service
-from arclet.letoderea import EVENT, STACK, Contexts, Propagator
+from arclet.letoderea import EVENT, STACK, Contexts, Propagator, Subscriber
 from loguru import logger
 
-from otae_bot.group_features import plugin_key
+from otae_bot.adapters.feature_gate import subscriber_plugin
+from otae_bot.adapters.framework_hooks import attach_to_every_subscriber
 
 from .store import CallRecord, UsageStore
 
@@ -220,19 +221,14 @@ class CommandUsageRecorder(Propagator):
         yield record, True, HOOK_PRIORITY
 
 
-def install_command_usage_recorders() -> None:
-    """Cover every plugin scope; safe to call again after a hot reload."""
-    for plugin in tuple(plugin_service.plugins.values()):
-        name = plugin_key(plugin.path)
-        if not name:
-            continue
-        scope = plugin._scope
-        if any(isinstance(item, CommandUsageRecorder) for item in scope.propagators):
-            continue
-        hook = CommandUsageRecorder(name)
-        scope.propagators.append(hook)
-        for slot in tuple(scope.subscribers):
-            slot.subscriber.propagate(hook)
+def _recorder_for(subscriber: Subscriber) -> CommandUsageRecorder | None:
+    name = subscriber_plugin(subscriber)
+    return CommandUsageRecorder(name) if name else None
+
+
+def install_command_usage_recorders():
+    """Cover every plugin subscriber, including later and hot-reloaded ones."""
+    return attach_to_every_subscriber(CommandUsageRecorder, _recorder_for)
 
 
 async def close_command_usage() -> None:

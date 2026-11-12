@@ -216,7 +216,17 @@ from arclet.entari.event.command import CommandExecute
 from otae_bot.config.settings import Config
 from otae_bot.group_features import feature_store, scope_from_event
 from otae_bot.adapters.feature_gate import GroupFeatureGate
+from otae_bot.command_usage.recorder import CommandUsageRecorder
+from arclet.entari.plugin import get_plugin_subscribers
 from unittest.mock import patch
+
+def assert_attached(prefix, *kinds):
+    subscribers = [sub for plg in plugin_service.plugins.values() if plg.path.startswith(prefix)
+                   for sub in get_plugin_subscribers(plg)]
+    assert subscribers, prefix
+    for sub in subscribers:
+        for kind in kinds:
+            sub.get_propagator(kind)  # raises ValueError when missing
 Config.SUPERUSERS = ['test-root']
 
 def group_session(group='100', user='test-root', bot='test-bot', private=False):
@@ -271,10 +281,8 @@ asyncio.get_event_loop().run_until_complete(check_random_wiki_dispatch())
 async def check_group_switches():
     current = group_session()
     scope = scope_from_event(current.account, current.event)
-    # Every scope, including handlers submodules, is guarded before dispatch.
-    for plugin in plugin_service.plugins.values():
-        if plugin.path.startswith('plugins.hyw'):
-            assert any(isinstance(gate, GroupFeatureGate) for gate in plugin._scope.propagators), plugin.path
+    # Every subscriber, including handlers submodules, is guarded before dispatch.
+    assert_attached('plugins.hyw', GroupFeatureGate)
     await run_command(current, '/功能 关闭 hyw')
     assert current.send.await_count == 1, current.send.await_args_list
     assert '关闭' in str(current.send.await_args.args[0]), current.send.await_args_list
@@ -358,6 +366,23 @@ async def check_group_switches():
 
 asyncio.get_event_loop().run_until_complete(check_group_switches())
 
+async def check_usage_recording():
+    from otae_bot.command_usage import recorder as usage
+    current = group_session()
+    scope = scope_from_event(current.account, current.event)
+    with patch.object(usage.usage_recorder, 'add') as add:
+        await run_command(current, '/q 帮助')
+        await run_command(current, '/没有这个指令')
+        feature_store.set_enabled(scope, 'hyw', False)
+        try:
+            await run_command(current, '/q 帮助')
+        finally:
+            feature_store.set_enabled(scope, 'hyw', True)
+    records = [call.args[0] for call in add.call_args_list]
+    assert [(r.plugin, r.ok, r.group_id, r.user_id) for r in records] == [('hyw', True, '100', 'test-root')], records
+
+asyncio.get_event_loop().run_until_complete(check_usage_recording())
+
 async def check_attendance_dispatch():
     # There is no standalone /签到 command; each game's own 签到 also signs the
     # other game, and needs the injected account for that game's group switch.
@@ -402,6 +427,8 @@ async def check_attendance_real_unload_reload():
     assert load_plugin('plugins.arknights')
     await asyncio.sleep(.05)
     assert registry.get('arknights').module is not old.module
+    # The reloaded plugin is gated and counted without reinstalling anything.
+    assert_attached('plugins.arknights', GroupFeatureGate, CommandUsageRecorder)
     assert len(registry) == 2
 
 asyncio.get_event_loop().run_until_complete(check_attendance_real_unload_reload())

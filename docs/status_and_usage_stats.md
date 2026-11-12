@@ -39,8 +39,9 @@
 
 ## 指令是怎么记的
 
-`otae_bot/command_usage/recorder.py` 给每个插件作用域挂一个 `CommandUsageRecorder`（安装方式同
-`feature_gate.GroupFeatureGate`，热重载后会补装）：
+`otae_bot/command_usage/recorder.py` 给每个插件订阅者挂一个 `CommandUsageRecorder`（安装方式同
+`feature_gate.GroupFeatureGate`：`framework_hooks.attach_to_every_subscriber` 在加载插件前装一次，
+之后注册的订阅者、热重载的插件自动带上）：
 
 - 它排在 Entari 的 Alconna 解析（优先级 70）之后，只有上下文里有 `alc_result`、也就是指令真正匹配上时才记。
   B 站链接预览、私聊对话这类消息监听没有 `alc_result`，不计；本群关掉的插件在开关检查那一步就被拦下，也不计。

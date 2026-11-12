@@ -20,6 +20,7 @@ from nepattern import AnyString
 from satori import ChannelType
 from tarina import LRU
 
+from otae_bot.adapters import framework_hooks
 from otae_bot.command_usage import recorder as recorder_module
 from otae_bot.command_usage.recorder import (
     CommandUsageRecorder,
@@ -227,23 +228,32 @@ class RecorderHookTests(unittest.IsolatedAsyncioTestCase):
             await self.command(cancelled).handle({ITEM_SESSION: session(), ITEM_MESSAGE_CONTENT: MessageChain("ef 持有率")})
         self.assertEqual(await self.rows(), [])
 
-    async def test_install_covers_every_plugin_once(self):
-        scope = EventScope("test-command-usage-install")
-        self.addCleanup(scope.dispose)
-
+    async def test_install_covers_every_plugin_subscriber_once_including_later_ones(self):
         async def handler():
             return None
 
-        scope.register(handler)
-        plugins = {
-            "plugins.hyw.handlers": SimpleNamespace(path="plugins.hyw.handlers", _scope=scope),
-            "otae_bot.not_a_plugin": SimpleNamespace(path="otae_bot.not_a_plugin", _scope=EventScope("x")),
-        }
-        with patch.object(recorder_module.plugin_service, "plugins", plugins):
-            install_command_usage_recorders()
-            install_command_usage_recorders()
-        hooks = [item for item in scope.propagators if isinstance(item, CommandUsageRecorder)]
-        self.assertEqual([hook.plugin for hook in hooks], ["hyw"])
+        def in_module(module):
+            async def command():
+                return None
+
+            command.__module__ = module
+            return command
+
+        existing = self.scope.register(in_module("plugins.hyw.handlers"))
+        with patch.object(framework_hooks, "get_all_subscribers", return_value=[existing]):
+            self.addCleanup(install_command_usage_recorders())
+            self.addCleanup(install_command_usage_recorders())
+        later = self.scope.register(in_module("plugins.endfield"))
+        bot_own = self.scope.register(handler)  # defined in tests/, not a plugin
+
+        def hooks(subscriber):
+            return [sub for sub in subscriber._propagates if sub.callable_target.__name__ == "record"]
+
+        self.assertEqual(len(hooks(existing)), 1)
+        self.assertEqual(len(hooks(later)), 1)
+        self.assertEqual(hooks(bot_own), [])
+        self.assertEqual(existing.get_propagator(CommandUsageRecorder).plugin, "hyw")
+        self.assertEqual(later.get_propagator(CommandUsageRecorder).plugin, "endfield")
 
     async def test_write_failures_never_reach_the_command(self):
         self.recorder.add(CallRecord(NOW.timestamp(), "qq", "1", "1", "p", "/x", "", 1, True))

@@ -5,11 +5,11 @@ from __future__ import annotations
 import time
 
 from arclet.entari.const import ITEM_ACCOUNT, ITEM_SESSION
-from arclet.entari.event.plugin import PluginLoadedSuccess
 from arclet.entari.plugin.service import plugin_service
-from arclet.letoderea import EVENT, STOP, Contexts, Propagator
-from arclet.letoderea.subscriber import current_subscriber
+from arclet.letoderea import EVENT, STOP, Contexts, Propagator, Subscriber
 from loguru import logger
+
+from otae_bot.adapters.framework_hooks import attach_to_every_subscriber, running_subscriber
 
 from otae_bot.group_features import (
     PROTECTED_PLUGINS,
@@ -37,24 +37,25 @@ class GroupFeatureGate(Propagator):
         yield check, True, -100
 
 
-def install_group_feature_gates() -> None:
-    """Cover all handler submodules, including future registrations in a scope."""
-    for plugin in tuple(plugin_service.plugins.values()):
-        name = plugin_key(plugin.path)
-        if not name or name in PROTECTED_PLUGINS:
-            continue
-        scope = plugin._scope
-        if any(isinstance(item, GroupFeatureGate) for item in scope.propagators):
-            continue
-        gate = GroupFeatureGate(name)
-        scope.propagators.insert(0, gate)
-        for slot in tuple(scope.subscribers):
-            slot.subscriber.propagate(gate)
+def subscriber_plugin(subscriber: Subscriber | None) -> str:
+    """The ``plugins.<name>`` package a subscriber belongs to ('' if none).
+
+    Entari only accepts handlers defined in the plugin's own modules, and the
+    bot's wrappers (Matcher, on_event, timers) copy the handler's ``__module__``.
+    """
+    return plugin_key(getattr(getattr(subscriber, "callable_target", None), "__module__", "") or "")
 
 
-async def on_plugin_loaded(event: PluginLoadedSuccess):
-    # Also covers Entari hot reload, when a plugin's scopes are recreated.
-    install_group_feature_gates()
+def _gate_for(subscriber: Subscriber) -> GroupFeatureGate | None:
+    name = subscriber_plugin(subscriber)
+    if not name or name in PROTECTED_PLUGINS:
+        return None
+    return GroupFeatureGate(name)
+
+
+def install_group_feature_gates():
+    """Gate every plugin subscriber, including later and hot-reloaded ones."""
+    return attach_to_every_subscriber(GroupFeatureGate, _gate_for)
 
 
 def loaded_group_plugins() -> list[str]:
@@ -75,8 +76,7 @@ _suppressed_logged: dict[tuple[str, str], float] = {}
 def allow_group_delivery(dest, account) -> bool:
     if dest.private:
         return True
-    subscriber = current_subscriber.get(None)
-    name = plugin_key(getattr(getattr(subscriber, "callable_target", None), "__module__", ""))
+    name = subscriber_plugin(running_subscriber())
     # Entari's subscriber context is inherited by background tasks, including
     # the shared scheduler's create_task/to_thread callbacks.
     scope = group_scope(account, dest.parent_id or dest.id)
