@@ -42,7 +42,6 @@ from nepattern import AnyString
 from satori import ChannelType
 
 from otae_bot.adapters import runtime
-from otae_bot.adapters.feature_gate import allow_group_delivery
 
 
 @dataclass
@@ -57,21 +56,6 @@ class ArgVal:
 @dataclass(frozen=True)
 class _Injected:
     provider: Callable[..., Any]
-
-
-@dataclass
-class SendDest:
-    id: str
-    parent_id: str = ""
-    channel: bool = False
-    private: bool = False
-    self_id: str = ""
-    adapter: str = ""
-
-    def __post_init__(self):
-        self.id = str(self.id)
-        self.parent_id = str(self.parent_id)
-        self.self_id = str(self.self_id)
 
 
 def make_image(*, path: str | Path | None = None, url: str | None = None, raw: bytes | BytesIO | None = None, **kwargs):
@@ -147,13 +131,8 @@ class ChainMsg(MessageChain):
                 return cls(content)
         return cls()
 
-    async def send(self, dest: SendDest | None = None, bot: Account | None = None):
-        if dest and bot:
-            if not dest.private and not allow_group_delivery(bot, dest.parent_id or dest.id):
-                return []
-            if dest.private:
-                return await bot.protocol.send_private_message(dest.id, self)
-            return await bot.protocol.send_message(dest.id, self)
+    async def send(self):
+        """Reply in the current session; proactive messages use otae_bot.delivery.deliver."""
         return await _current_session().send(self)
 
     async def finish(self):
@@ -467,8 +446,6 @@ async def _call_event_handler(func: Callable[..., Any], session: Session, accoun
             kwargs[name] = session.event
         elif name == "session":
             kwargs[name] = session
-        elif name == "dest":
-            kwargs[name] = dest_from_event(session.event)
     result = func(**kwargs)
     if inspect.isawaitable(result):
         return await result
@@ -490,8 +467,6 @@ async def _call_handler(func: Callable[..., Any], matcher: Matcher, session: Ses
             kwargs[name] = account
         elif name in {"matcher"}:
             kwargs[name] = matcher
-        elif name in {"dest"}:
-            kwargs[name] = dest_from_event(session.event)
         elif name in {"session"}:
             kwargs[name] = session
         elif anno is ArgVal or name in {"rest", "content", "target_match", "steam_id", "nickname", "group_id", "peek_http_path"}:
@@ -566,19 +541,6 @@ def get_bots() -> list[Account]:
 def get_bot_for_guild(guild_id: str) -> Account | None:
     """An online account known to be in the group (the default one if it is), else None."""
     return runtime.get_bot_for_guild(guild_id)
-
-
-def account_adapter_name(account: Any) -> str:
-    adapter = getattr(account, "adapter", "")
-    getter = getattr(adapter, "get_name", None)
-    if callable(getter):
-        try:
-            return str(getter() or "")
-        except Exception:
-            return ""
-    if isinstance(adapter, str):
-        return adapter
-    return str(adapter or "") if adapter else ""
 
 
 def inject(func: Callable[..., Any]):
@@ -680,11 +642,6 @@ async def finish(session: Session, message: str | MessageChain | list[Any] | Non
     session.stop()
 
 
-async def private_send(account: Account, user_id: str, message: str | MessageChain | list[Any]):
-    msg = MessageChain(message) if isinstance(message, list) else message
-    return await account.protocol.send_private_message(str(user_id), msg)
-
-
 def get_user_id(event: Any) -> str:
     user = getattr(event, "user", None)
     return str(getattr(user, "id", "") or "")
@@ -707,13 +664,6 @@ def get_channel_id(event: Any) -> str:
 
 def is_group(event: Any) -> bool:
     return bool(get_group_id(event))
-
-
-def dest_from_event(event: Any) -> SendDest:
-    group_id = get_group_id(event)
-    if group_id:
-        return SendDest(get_channel_id(event) or group_id, group_id, True, False)
-    return SendDest(get_user_id(event), "", False, True)
 
 
 def get_plaintext(event: Any) -> str:

@@ -24,6 +24,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tests.support.loaders import _load_bili_new_module, _load_module  # noqa: E402
+from otae_bot.delivery import Target  # noqa: E402
 
 logging.disable(logging.CRITICAL)
 
@@ -177,26 +178,6 @@ class CoreLogicTests(unittest.TestCase):
         self.assertIs(notice_hook.event_type, entari_native.NoticeEvent)
         self.assertTrue(callable(notice_hook.finish))
 
-    def test_entari_account_adapter_name_handles_object_string_and_missing(self):
-        entari_native = _load_module("entari_native_adapter_for_test", "otae_bot/adapters/entari.py")
-
-        class AdapterObject:
-            def get_name(self):
-                return "llonebot"
-
-        class AccountWithObject:
-            adapter = AdapterObject()
-
-        class AccountWithString:
-            adapter = "llonebot-string"
-
-        class AccountWithoutAdapter:
-            pass
-
-        self.assertEqual(entari_native.account_adapter_name(AccountWithObject()), "llonebot")
-        self.assertEqual(entari_native.account_adapter_name(AccountWithString()), "llonebot-string")
-        self.assertEqual(entari_native.account_adapter_name(AccountWithoutAdapter()), "")
-
     def test_entari_on_ready_clears_account_on_disconnect(self):
         entari_native = _load_module("entari_native_lifecycle_for_test", "otae_bot/adapters/entari.py")
         captured = []
@@ -242,7 +223,7 @@ class CoreLogicTests(unittest.TestCase):
 
         async def get_target(event, bot):
             calls.append((event, bot))
-            return entari_native.SendDest("10001", "10001", True)
+            return Target.group("10001")
 
         async def handler(target=entari_native.inject(get_target)):
             return target
@@ -251,8 +232,8 @@ class CoreLogicTests(unittest.TestCase):
             entari_native._call_handler(handler, None, session, account, None)
         )
 
-        self.assertIsInstance(result, entari_native.SendDest)
-        self.assertEqual(result.parent_id, "10001")
+        self.assertIsInstance(result, Target)
+        self.assertEqual(result.guild_id, "10001")
         self.assertEqual(calls, [(event, account)])
 
     def test_entari_concurrent_private_prompt_keeps_original_session(self):

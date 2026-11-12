@@ -33,6 +33,21 @@ class ArchitectureTests(unittest.TestCase):
                 for name in names:
                     self.assertFalse(name == "plugins" or name.startswith("plugins."), (path, name))
 
+    def test_proactive_messages_only_go_through_delivery(self):
+        """Plugins send via otae_bot.delivery.deliver, not the Satori send calls or SendDest."""
+        paths = list((ROOT / "plugins").rglob("*.py"))
+        paths.extend(
+            path for path in (ROOT / "otae_bot").rglob("*.py")
+            if not path.is_relative_to(ROOT / "otae_bot/delivery")
+            and not path.is_relative_to(ROOT / "otae_bot/boundary")
+        )
+        for path in paths:
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                if isinstance(node, ast.Attribute):
+                    self.assertNotIn(node.attr, {"send_message", "send_private_message"}, path)
+                elif isinstance(node, ast.ImportFrom):
+                    self.assertNotIn("SendDest", [alias.name for alias in node.names], path)
+
     def test_business_models_and_view_builders_do_not_register_events(self):
         paths = list((ROOT / "plugins/endfield").rglob("models.py"))
         paths.extend((ROOT / "plugins/endfield/catalog/views").glob("*.py"))
