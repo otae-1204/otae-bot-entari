@@ -15,6 +15,7 @@ from arclet.entari import MessageChain
 from loguru import logger
 from satori import ChannelType, Image, MessageObject, Text
 
+from otae_bot.config import settings
 from otae_bot.groups.features import GroupFeatureStore
 from plugins.grok_bot import gateway, handlers
 from plugins.grok_bot.config import GatewayError, GrokConfig, GrokError
@@ -107,31 +108,36 @@ class Links:
 
 class ConfigTests(unittest.TestCase):
     def load(self, **extra):
-        values = {"GROKBOT_GATEWAY_URL": CONFIG.base_url, "GROKBOT_GATEWAY_TOKEN": CONFIG.token,
-                  "GROKBOT_AGENT_ID": AGENT, **extra}
-        with patch("plugins.grok_bot.config._env", side_effect=lambda key, default=None: values.get(key, default)):
-            return GrokConfig.from_env()
+        values = {"gateway_url": CONFIG.base_url, "gateway_token": CONFIG.token, "agent_id": AGENT, **extra}
+        with settings.override({"plugins": {"plugins.grok_bot": values}}), patch("otae_bot.config.model.logger"):
+            return GrokConfig.from_settings()
 
     def test_private_gateway_config_and_redacted_repr(self):
-        config = self.load(GROKBOT_GATEWAY_URL=" http://grok.tailnet.ts.net:1340/ ")
+        config = self.load(gateway_url=" http://grok.tailnet.ts.net:1340/ ")
         self.assertEqual(config.base_url, "http://grok.tailnet.ts.net:1340")
         self.assertEqual(config.agent_id, AGENT)
         self.assertNotIn(CONFIG.token, repr(config))
 
     def test_config_rejects_wrong_endpoint_credentials_and_bounds(self):
         for key, values in {
-            "GROKBOT_GATEWAY_URL": ["", "0.0.0.0:1340", "http://0.0.0.0:1340", "http://host/v1", "https://user:secret@host",
-                                    "http://host?token=secret", "http://host:70000", "ftp://host", "http://[invalid"],
-            "GROKBOT_GATEWAY_TOKEN": ["", "Bearer secret", "secret\nvalue", "中文"],
-            "GROKBOT_AGENT_ID": ["QQBOT", "not-a-uuid"],
-            "GROKBOT_TIMEOUT": [0, 1801, "bad", "NaN"],
-            "GROKBOT_MAX_PENDING": [0, 33, "bad", True, 1.5],
-            "GROKBOT_MAX_CONCURRENT": [0, 17, "bad", True, 1.5],
+            "gateway_url": ["", "0.0.0.0:1340", "http://0.0.0.0:1340", "http://host/v1", "https://user:secret@host",
+                            "http://host?token=secret", "http://host:70000", "ftp://host", "http://[invalid"],
+            "gateway_token": ["", "Bearer secret", "secret\nvalue", "中文"],
+            "agent_id": ["QQBOT", "not-a-uuid"],
+            "timeout": [0, 1801, "29"],
+            "max_pending": [0, 33],
+            "max_concurrent": [0, 17],
         }.items():
             for value in values:
                 with self.subTest(key=key, value=value), self.assertRaises(GrokError) as caught:
                     self.load(**{key: value})
                 self.assertNotIn("secret", str(caught.exception))
+
+    def test_values_of_the_wrong_type_fall_back_to_defaults(self):
+        for key, value in {"timeout": "NaN", "max_pending": True, "max_concurrent": 1.5}.items():
+            with self.subTest(key=key):
+                config = self.load(**{key: value})
+                self.assertEqual(getattr(config, key), getattr(GrokConfig(), key))
 
     def test_gateway_does_not_inherit_any_proxy(self):
         with patch("plugins.grok_bot.gateway.httpx.AsyncClient") as client:
@@ -140,7 +146,7 @@ class ConfigTests(unittest.TestCase):
         self.assertIs(client.call_args.kwargs["follow_redirects"], False)
 
     def test_reference_agent_is_optional_and_default_persona_is_loadable(self):
-        config = self.load(GROKBOT_AGENT_ID="")
+        config = self.load(agent_id="")
         self.assertEqual(config.agent_id, "")
         self.assertEqual(config.max_concurrent, 4)
         self.assertIn("花园多惠", config.persona())
@@ -754,7 +760,7 @@ class HandlerTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(str(target.send.await_args.args[0]), "已经完成的正文")
             return Reply()
 
-        with patch.object(GrokConfig, "from_env", return_value=CONFIG), patch.object(handlers.queue, "run", side_effect=run):
+        with patch.object(GrokConfig, "from_settings", return_value=CONFIG), patch.object(handlers.queue, "run", side_effect=run):
             await handlers.handle_grok(target, result("问题"))
         target.send.assert_awaited_once()
 
@@ -774,11 +780,11 @@ class HandlerTests(unittest.IsolatedAsyncioTestCase):
         for alias in ("grok", "grokbot"):
             self.assertTrue(handlers.grok_command.parse(MessageChain(alias + " 帮助")).matched)
         target = session()
-        with patch.object(GrokConfig, "from_env", side_effect=AssertionError("help needs no config")):
+        with patch.object(GrokConfig, "from_settings", side_effect=AssertionError("help needs no config")):
             await handlers.handle_grok(target, result("帮助"))
         self.assertIn("独立", str(target.send.await_args.args[0]))
         target.reply = SimpleNamespace(origin=MessageObject("quoted", "引用正文"))
-        with patch.object(GrokConfig, "from_env", return_value=CONFIG), patch.object(handlers.queue, "run", AsyncMock(return_value="回答")) as run:
+        with patch.object(GrokConfig, "from_settings", return_value=CONFIG), patch.object(handlers.queue, "run", AsyncMock(return_value="回答")) as run:
             await handlers.handle_grok(target, result("解释一下"))
             self.assertIn("引用正文", run.await_args.args[1])
             await handlers.handle_grok(target, result("x" * 6001))
@@ -789,7 +795,7 @@ class HandlerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_error_logging_is_redacted_and_output_is_plain_text(self):
         target = session()
-        with patch.object(GrokConfig, "from_env", return_value=CONFIG), patch.object(handlers.queue, "run", AsyncMock(side_effect=ValueError("private-token"))), patch.object(handlers.logger, "warning") as warning:
+        with patch.object(GrokConfig, "from_settings", return_value=CONFIG), patch.object(handlers.queue, "run", AsyncMock(side_effect=ValueError("private-token"))), patch.object(handlers.logger, "warning") as warning:
             await handlers.handle_grok(target, result("question"))
         self.assertNotIn("private-token", str(target.send.await_args))
         self.assertNotIn("private-token", str(warning.call_args))

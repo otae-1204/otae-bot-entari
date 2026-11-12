@@ -8,7 +8,7 @@ from .gateway import check
 
 def main() -> int:
     try:
-        message = asyncio.run(check(GrokConfig.from_env()))
+        message = asyncio.run(check(GrokConfig.from_settings()))
     except GrokError as error:
         print(str(error))
         return 1

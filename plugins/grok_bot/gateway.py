@@ -47,7 +47,7 @@ CHUNK_BYTES = 256 * 1024
 CHUNK_TIMEOUT = 45
 # Download budget per cloud attachment: the size read, each chunk, and a cap.
 # Retry backoff is not counted. A started download holds the receiving round
-# open, so GROKBOT_TIMEOUT never cuts it short.
+# open, so plugins.grok_bot.timeout never cuts it short.
 ATTACHMENT_BASE_SECONDS = 30
 ATTACHMENT_CHUNK_SECONDS = 25
 ATTACHMENT_MAX_SECONDS = 300
@@ -363,7 +363,7 @@ class Gateway:
                 retryable=isinstance(error, (httpx.NetworkError, httpx.RemoteProtocolError)), responded=responded,
             ) from error
         if response.status_code in {401, 403}:
-            raise GatewayError("网关鉴权未通过，请管理员检查 GROKBOT_GATEWAY_TOKEN 配置。", not_submitted=True)
+            raise GatewayError("网关鉴权未通过，请管理员检查 plugins.grok_bot.gateway_token 配置。", not_submitted=True)
         if response.status_code in {400, 422}:
             raise GatewayError(
                 f"网关拒绝了当前请求（{command} / HTTP {response.status_code}），请核对网关版本、提交参数与 Bot 实例配额限制。",
@@ -508,11 +508,11 @@ class Gateway:
         for row in rows:
             if isinstance(row, dict) and row.get("id") == self.config.agent_id:
                 if row.get("isGroup"):
-                    raise GrokError("GROKBOT_AGENT_ID 必须配置为单个 Bot 实例，暂不支持指向群组 Bot。")
+                    raise GrokError("plugins.grok_bot.agent_id 必须配置为单个 Bot 实例，暂不支持指向群组 Bot。")
                 if not all(isinstance(row.get(key), bool) for key in ("isRunning", "isComposingMessage")):
                     raise GrokError(PROTOCOL_ERROR)
                 return row
-        raise GrokError("未找到目标 Grok Bot 实例，请管理员检查 GROKBOT_AGENT_ID 配置。")
+        raise GrokError("未找到目标 Grok Bot 实例，请管理员检查 plugins.grok_bot.agent_id 配置。")
 
     async def state(self) -> tuple[dict, bool]:
         calls = [asyncio.create_task(call) for call in (

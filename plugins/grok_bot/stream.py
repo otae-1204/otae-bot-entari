@@ -67,7 +67,7 @@ class LiveConversation:
         await owner.deliver(reply, reply_to=self.can_quote)
 
     def hold(self, until: float) -> None:
-        """A started attachment download gets until its own deadline, plus delivery, past GROKBOT_TIMEOUT."""
+        """A started attachment download gets until its own deadline, plus delivery, past plugins.grok_bot.timeout."""
         until += EMIT_TIMEOUT
         if self.deadline is not None and not self.deadline.expired() and until > self.deadline.when():
             self.deadline.reschedule(until)

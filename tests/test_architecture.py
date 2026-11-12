@@ -324,7 +324,7 @@ async def check_group_switches():
     await run_command(current, '/grok 帮助')
     current.send.assert_awaited_once()
     grok = plugin_service.plugins['plugins.grok_bot'].module
-    with patch.object(grok.GrokConfig, 'from_env', return_value=SimpleNamespace()), \\
+    with patch.object(grok.GrokConfig, 'from_settings', return_value=SimpleNamespace()), \\
          patch.object(grok.queue, 'run', AsyncMock(return_value='已修复')) as repair_run:
         await run_command(admin, '/grok 修复会话')
         repair_run.assert_not_awaited()
@@ -563,7 +563,7 @@ asyncio.get_event_loop().run_until_complete(check_quoted_command_dispatch())
 async def check_grok_quoted_dispatch():
     grok = plugin_service.plugins['plugins.grok_bot'].module
     run = AsyncMock(return_value='Grok 回答')
-    with patch.object(grok.GrokConfig, 'from_env', return_value=SimpleNamespace()), \\
+    with patch.object(grok.GrokConfig, 'from_settings', return_value=SimpleNamespace()), \\
          patch.object(grok.queue, 'run', run), patch.object(Session, 'send', AsyncMock(return_value=[])) as send:
         for alias in ('grok', 'grokbot'):
             run.reset_mock()
@@ -598,7 +598,7 @@ async def check_grok_quoted_dispatch():
         await on_reply(grok.Reply('插入后的回答'), reply_to=False)
         return grok.Reply()
 
-    with patch.object(grok.GrokConfig, 'from_env', return_value=SimpleNamespace()), \\
+    with patch.object(grok.GrokConfig, 'from_settings', return_value=SimpleNamespace()), \\
          patch.object(grok.queue, 'run', interrupted_run), patch.object(Session, 'send', AsyncMock(return_value=[])) as send:
         await publish(quote_event([Quote('quoted-id'), At('quoted-user'), Text(' /grok 追加')]), scope='.commands')
         send.assert_awaited_once()

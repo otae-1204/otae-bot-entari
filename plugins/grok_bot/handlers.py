@@ -106,7 +106,7 @@ async def handle_grok(session: Session, result: Arparma):
             raise GrokError("未检测到有效输入，请附带文字、图片或引用目标消息后再试。")
         if len(text) > 6000:
             raise GrokError("提问文字与引用文本总长度不得超出 6000 字。")
-        config = GrokConfig.from_env()
+        config = GrokConfig.from_settings()
 
         async def progress(message: str):
             await send_text(session, message)

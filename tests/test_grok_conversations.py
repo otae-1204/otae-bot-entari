@@ -529,7 +529,7 @@ class ConcurrentTests(unittest.IsolatedAsyncioTestCase):
         private = session(private=True, user="root")
         other = session(private=True, user="member")
         with patch.object(Config, "SUPERUSERS", ["root"]), patch.object(handlers.queue, "run", return_value="回答") as run, \
-             patch.object(GrokConfig, "from_env", return_value=self.config):
+             patch.object(GrokConfig, "from_settings", return_value=self.config):
             await handlers.handle_grok(private, message("你好"))
             await handlers.handle_grok(other, message("开启"))
             run.assert_not_awaited()
@@ -545,7 +545,7 @@ class ConcurrentTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_only_superuser_can_request_repair_in_the_current_enabled_scope(self):
         with patch.object(Config, "SUPERUSERS", ["root"]), patch.object(handlers.queue, "run", return_value="已修复") as run, \
-             patch.object(GrokConfig, "from_env", return_value=self.config):
+             patch.object(GrokConfig, "from_settings", return_value=self.config):
             for roles in ([], ["admin"], ["owner"]):
                 current = session()
                 current.event.member = SimpleNamespace(roles=roles)
