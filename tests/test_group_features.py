@@ -13,7 +13,7 @@ from arclet.entari.const import ITEM_ACCOUNT, ITEM_SESSION
 from arclet.letoderea import EVENT, STOP, Scope, Subscriber
 from satori import ChannelType, Role
 
-from otae_bot.compat.entari import ArgVal, ChainMsg
+from otae_bot.compat.entari import ChainMsg
 from otae_bot.delivery import Target, deliver
 from otae_bot.groups.features import (
     GroupFeatureStore,
@@ -22,7 +22,8 @@ from otae_bot.groups.features import (
     scope_from_event,
 )
 from otae_bot.pipeline import feature_gate, framework_hooks
-from plugins.group_manager import handlers, permissions
+from plugins.group_manager import permissions
+from tests.support.dispatch import run_scenarios
 
 
 def session(group="100", user="200", bot="300", roles=(), private=False):
@@ -190,69 +191,78 @@ class PermissionTests(unittest.IsolatedAsyncioTestCase):
         current.account.guild_member_get.assert_not_awaited()
 
 
-class HandlerTests(unittest.IsolatedAsyncioTestCase):
-    def setUp(self):
-        directory = tempfile.TemporaryDirectory()
-        self.addCleanup(directory.cleanup)
-        self.store = GroupFeatureStore(Path(directory.name) / "switches.json")
-        self.enterContext(patch.object(handlers, "feature_store", self.store))
-        self.enterContext(patch.object(handlers, "loaded_group_plugins", return_value=[
-            "group_manager", "hyw", "endfield", "request_handler", "steamInfo", "grok_bot"]))
-        self.reply = self.enterContext(patch.object(handlers.feature_cmd, "finish", new_callable=AsyncMock))
-        self.enterContext(patch.object(permissions.Config, "SUPERUSERS", ["root"]))
+GROUP_MANAGER_SCENARIOS = r"""
+from unittest.mock import patch
+from satori import Member, Role, User
+from otae_bot.groups.features import GroupScope
 
-    async def run_command(self, current, text):
-        self.reply.reset_mock()
-        await handlers.handle_group_features(current, ArgVal(text, True))
-        self.reply.assert_awaited_once()
-        return self.reply.await_args.args[0]
+handlers = plugin('plugins.group_manager.handlers')
+store = handlers.feature_store
+default_account.protocol.answers['guild.member.get'] = {'user': {'id': 'member'}, 'roles': []}
+admin = Member(User('admin'), roles=[Role('admin')])
+owner = Member(User('owner'), roles=[Role('owner')])
+SCOPE = GroupScope('qq', 'test-bot', '100')
 
-    async def test_switch_changes_only_current_account_and_group(self):
-        current = session(roles=[Role("admin")])
-        reply = await self.run_command(current, "关闭 HYW")
-        self.assertIn("已成功关闭", reply)
-        scope = scope_from_event(current.account, current.event)
-        self.assertFalse(self.store.is_enabled(scope, "hyw"))
-        for other in (session(group="101"), session(bot="301"), session(private=True)):
-            self.assertTrue(self.store.is_enabled(scope_from_event(other.account, other.event), "hyw"))
-        self.assertIn("[关闭] hyw", await self.run_command(current, "列表"))
-        self.assertIn("已成功开启", await self.run_command(current, "开启 q"))
-        self.assertTrue(self.store.is_enabled(scope, "hyw"))
 
-    async def test_only_superuser_enables_grok_but_group_admin_can_disable(self):
-        root = session(user="root")
-        scope = scope_from_event(root.account, root.event)
-        for role in ("admin", "owner"):
-            for action in ("开启 grok", "enable grokbot", "打开 grok_bot"):
-                # Grok-specific restriction, not the generic "权限不足" refusal: admins may manage.
-                self.assertIn("仅 SuperUser 可开启", await self.run_command(session(roles=[Role(role)]), action))
-                self.assertFalse(self.store.is_enabled(scope, "grok_bot"))
-        self.assertFalse(self.store.path.exists())
-        self.assertIn("已成功开启", await self.run_command(root, "开启 grok"))
-        self.assertTrue(self.store.is_enabled(scope, "grok_bot"))
-        self.assertIn("仅 SuperUser 可开启", await self.run_command(root, "列表"))
-        self.assertIn("已成功关闭", await self.run_command(session(roles=[Role("admin")]), "关闭 grok"))
-        self.assertFalse(self.store.is_enabled(scope, "grok_bot"))
+def one(sent):
+    assert len(sent) == 1, sent
+    return sent[0]
 
-    async def test_private_superuser_and_ordinary_members_cannot_manage(self):
-        self.assertIn("群聊内", await self.run_command(session(user="root", private=True), "关闭 hyw"))
-        for text in ("关闭 hyw", "开启 hyw", "列表"):
-            self.assertIn("权限不足", await self.run_command(session(), text))
-        self.assertFalse(self.store.path.exists())
 
-    async def test_rejects_target_group_unknown_plugin_and_disabling_management(self):
-        current = session(user="root")
-        for text in ("关闭 hyw 101", "关闭 ../../hyw", "关闭 group_manager", "关闭 request_handler"):
-            await self.run_command(current, text)
-        self.assertFalse(self.store.path.exists())
+async def main():
+    with patch('otae_bot.config.settings.Config.SUPERUSERS', ['root']):
+        # 私聊、普通成员都不能管理；三个指令名都能用
+        assert '群聊内' in one(await say('/功能 关闭 hyw', user='root', private=True))
+        for text in ('/功能 关闭 hyw', '/插件 开启 hyw', '/plugin 列表'):
+            assert '权限不足' in one(await say(text, user='member')), text
+        assert not store.path.exists()
+        # 无参数、帮助、看不懂的动作都回帮助
+        for text in ('/功能', '/功能 帮助', '/功能 help', '/功能 关闭', '/功能 删除 hyw'):
+            assert '本群插件管理' in one(await say(text, member=admin, user='admin')), text
+        # 管理员关闭只影响当前账号与当前群
+        reply = one(await say('/功能 关闭 HYW', member=admin, user='admin'))
+        assert '已成功关闭' in reply and '配置已持久化保存' in reply, reply
+        assert not store.is_enabled(SCOPE, 'hyw')
+        for other in (GroupScope('qq', 'test-bot', '101'), GroupScope('qq', 'other-bot', '100')):
+            assert store.is_enabled(other, 'hyw')
+        assert '开关状态未发生改变' in one(await say('/功能 关闭 hyw', user='root'))
+        assert '[关闭] hyw' in one(await say('/功能 列表', member=admin, user='admin'))
+        assert '已成功开启' in one(await say('/功能 开启 q', member=owner, user='owner'))
+        assert store.is_enabled(SCOPE, 'hyw')
+        # 群主/管理员不能开启 grok，只有 SuperUser 可以；管理员可以关闭
+        for member in (admin, owner):
+            for action in ('开启 grok', 'enable grokbot', '打开 grok_bot'):
+                assert '仅 SuperUser 可开启' in one(await say('/功能 ' + action, member=member, user=member.user.id))
+                assert not store.is_enabled(SCOPE, 'grok_bot')
+        assert '已成功开启' in one(await say('/功能 开启 grok', user='root'))
+        assert store.is_enabled(SCOPE, 'grok_bot')
+        assert '仅 SuperUser 可开启' in one(await say('/功能 列表', user='root'))
+        assert '已成功关闭' in one(await say('/功能 关闭 grok', member=admin, user='admin'))
+        assert not store.is_enabled(SCOPE, 'grok_bot')
+        # 跨群、路径、受保护插件都拒绝
+        before = store.path.read_bytes()
+        assert '本群插件管理' in one(await say('/功能 关闭 hyw 101', user='root'))
+        assert '未找到' in one(await say('/功能 关闭 ../../hyw', user='root'))
+        for name in ('group_manager', 'request_handler'):
+            assert '保护插件' in one(await say('/功能 关闭 ' + name, user='root'))
+        assert store.path.read_bytes() == before
+        # 保存失败只报失败，不改状态
+        with patch('otae_bot.groups.features.os.replace', side_effect=OSError('disk full')):
+            reply = one(await say('/功能 关闭 hyw', user='root'))
+        assert '保存失败' in reply and '已成功' not in reply, reply
+        assert store.is_enabled(SCOPE, 'hyw')
+    print('ALL-OK')
 
-    async def test_failed_save_reports_failure_without_success_or_state_change(self):
-        current = session(user="root")
-        with patch("otae_bot.groups.features.os.replace", side_effect=OSError("disk full")):
-            reply = await self.run_command(current, "关闭 hyw")
-        self.assertIn("保存失败", reply)
-        self.assertNotIn("已成功", reply)
-        self.assertTrue(self.store.is_enabled(scope_from_event(current.account, current.event), "hyw"))
+run(main())
+"""
+
+
+class GroupManagerDispatchTests(unittest.TestCase):
+    def test_feature_command_through_the_real_event_path(self):
+        result = run_scenarios(GROUP_MANAGER_SCENARIOS)
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, output[-6000:])
+        self.assertIn("ALL-OK", result.stdout)
 
 
 class GateTests(unittest.IsolatedAsyncioTestCase):

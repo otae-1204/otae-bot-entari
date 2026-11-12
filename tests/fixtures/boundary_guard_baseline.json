@@ -11,7 +11,6 @@
 {"rule": "compat-import", "file": "plugins/changelog/handlers.py", "snippet": "from otae_bot.compat.entari import ArgVal, Image, cmd as _cmd, get_rest, send", "count": 1},
 {"rule": "compat-import", "file": "plugins/endfield/announcements/runtime.py", "snippet": "from otae_bot.compat.entari import (", "count": 1},
 {"rule": "compat-import", "file": "plugins/endfield/handlers.py", "snippet": "from otae_bot.compat.entari import (", "count": 1},
-{"rule": "compat-import", "file": "plugins/group_manager/handlers.py", "snippet": "from otae_bot.compat.entari import ArgVal, Session, cmd, get_rest", "count": 1},
 {"rule": "compat-import", "file": "plugins/help_plugin/handlers.py", "snippet": "from otae_bot.compat.entari import ChainMsg, make_image as ChainImage, ArgVal", "count": 1},
 {"rule": "compat-import", "file": "plugins/help_plugin/handlers.py", "snippet": "from otae_bot.compat.entari import cmd as _cmd, get_rest", "count": 1},
 {"rule": "compat-import", "file": "plugins/mcsm/handlers.py", "snippet": "from otae_bot.compat.entari import (", "count": 1},
