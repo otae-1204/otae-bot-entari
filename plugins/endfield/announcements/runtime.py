@@ -8,7 +8,7 @@ from dataclasses import asdict, replace
 
 from loguru import logger
 
-from otae_bot.adapters.entari import (
+from otae_bot.compat.entari import (
     ChainMsg,
     event_user_id,
     get_channel_id,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from loguru import logger
 
-from otae_bot.adapters.entari import ArgVal, Session, cmd, get_rest
+from otae_bot.compat.entari import ArgVal, Session, cmd, get_rest
 from otae_bot.group_features import (
     PROTECTED_PLUGINS,
     SUPERUSER_ENABLE_PLUGINS,

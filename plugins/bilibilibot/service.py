@@ -11,7 +11,7 @@ import tempfile
 from typing import Iterable
 
 from loguru import logger
-from otae_bot.adapters.entari import make_image
+from otae_bot.compat.entari import make_image
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
 
 from .api import BiliAPIError, BiliApi

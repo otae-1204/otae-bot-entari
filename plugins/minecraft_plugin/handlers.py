@@ -7,12 +7,12 @@ import tempfile
 from typing import Dict, Optional, Any
 
 from arclet.entari import Account as Bot, Event
-from otae_bot.adapters.entari import (
+from otae_bot.compat.entari import (
     ChainMsg, Text, make_image as ChainImage, ArgVal, event_user_id, on_ready,
 )
 from arclet.alconna import Alconna, Args
 
-from otae_bot.adapters.entari import cmd as _cmd, get_rest, get_bot
+from otae_bot.compat.entari import cmd as _cmd, get_rest, get_bot
 from otae_bot.infrastructure.rendering.executor import run_image_render
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
 
@@ -24,7 +24,7 @@ from plugins.minecraft_plugin.broadcast import (
     get_broadcast_snapshot, get_player_online_times,
 )
 from plugins.minecraft_plugin.ping import ping
-from otae_bot.adapters.entari import on_alconna
+from otae_bot.compat.entari import on_alconna
 
 
 

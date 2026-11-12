@@ -7,11 +7,11 @@ import logging
 import time
 import traceback
 
-from otae_bot.adapters.entari import get_bot
+from otae_bot.compat.entari import get_bot
 from arclet.entari import Account as Bot, Session, listen
 from arclet.entari.event.base import GuildMemberAddedEvent
-from otae_bot.adapters.entari import ChainMsg
-from otae_bot.adapters.entari import timer
+from otae_bot.compat.entari import ChainMsg
+from otae_bot.compat.entari import timer
 
 from otae_bot.config.settings import Config, MC_BROADCAST_INTERVAL
 from otae_bot.delivery import Target, deliver

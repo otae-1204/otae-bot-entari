@@ -13,7 +13,7 @@ from arclet.entari.const import ITEM_ACCOUNT, ITEM_SESSION
 from arclet.letoderea import EVENT, STOP, Scope, Subscriber
 from satori import ChannelType, Role
 
-from otae_bot.adapters.entari import ArgVal, ChainMsg
+from otae_bot.compat.entari import ArgVal, ChainMsg
 from otae_bot.delivery import Target, deliver
 from otae_bot.group_features import (
     GroupFeatureStore,

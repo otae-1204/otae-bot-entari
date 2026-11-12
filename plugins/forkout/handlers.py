@@ -21,7 +21,7 @@ from arclet.entari import (
 from PIL import Image
 
 from otae_bot.config.paths import IMAGE_PATH
-from otae_bot.adapters.entari import cmd as _cmd
+from otae_bot.compat.entari import cmd as _cmd
 from otae_bot.infrastructure.http.tls import ashared_ssl_context
 from otae_bot.infrastructure.storage.json_store import JsonStore
 

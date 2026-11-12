@@ -1,6 +1,6 @@
-"""Compatibility import for :mod:`otae_bot.adapters.messages`."""
+"""Compatibility import for :mod:`otae_bot.compat.messages`."""
 
 from importlib import import_module
 import sys
 
-sys.modules[__name__] = import_module("otae_bot.adapters.messages")
+sys.modules[__name__] = import_module("otae_bot.compat.messages")

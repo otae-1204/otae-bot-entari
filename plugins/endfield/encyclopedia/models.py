@@ -1,7 +1,7 @@
 """图鉴查询的数据结构：只放 dataclass。
 
 `tests/test_architecture.py` 对 `models.py` 的禁令照旧生效：不 import
-`arclet.entari`、`otae_bot.adapters`，也不 import 路径含 `rendering` 的模块。
+`arclet.entari`、`otae_bot.compat`，也不 import 路径含 `rendering` 的模块。
 索引 dataclass 放在这里，`draw` / `service` 就不必为了类型去 import 带锁的 `index.py`。
 """
 

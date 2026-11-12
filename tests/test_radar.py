@@ -1202,7 +1202,7 @@ class HandlerTests(unittest.TestCase):
         self.assertEqual(_split_benchmark(["@"]), (["@"], None))
 
     def test_tokens_come_from_the_rest_argument(self):
-        from otae_bot.adapters.entari import ArgVal
+        from otae_bot.compat.entari import ArgVal
 
         from plugins.radar.handlers import _tokens
 

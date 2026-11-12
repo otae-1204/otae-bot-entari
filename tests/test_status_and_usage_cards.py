@@ -13,7 +13,6 @@ from unittest.mock import AsyncMock, patch
 from PIL import Image as PILImage
 from satori import ChannelType
 
-from otae_bot.adapters.entari import ArgVal
 from otae_bot.command_usage.store import (
     CallRecord,
     Scope,
@@ -21,6 +20,7 @@ from otae_bot.command_usage.store import (
     UsageReport,
     UsageStore,
 )
+from otae_bot.compat.entari import ArgVal
 from otae_bot.infrastructure.recent_alerts import Alert
 from plugins.status import handlers as status_handlers
 from plugins.status.collect import Job, Meter, StatusSnapshot

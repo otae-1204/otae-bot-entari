@@ -64,7 +64,7 @@ plugins/radar/
 | 复用对象 | 路径 | 用法 |
 | --- | --- | --- |
 | 共享 HTTP 客户端 + TTL + 磁盘缓存 | `otae_bot/infrastructure/http/client.py` | `fetch_json(url, namespace=...)`；新增 `radar` 命名空间，走 API 池 |
-| 命令注册 | `otae_bot/adapters/entari` 的 `on_alconna` | 与 `plugins/endfield/handlers.py` 同款 |
+| 命令注册 | `otae_bot/compat/entari` 的 `on_alconna` | 与 `plugins/endfield/handlers.py` 同款 |
 | 配置读取 | `otae_bot/config/settings.py` 的 `_env` | 注意：`.env` 加载器会把数字字符串 `json.loads` 成 int/float，数值配置必须用 `_env(name, None)` + `is None` 判空（见 `plugins/hyw/config.py` 的 `_env_int/_env_float`） |
 | 并发闸门 | `plugins/hyw/handlers.py` 的全局并发上限写法 | 雷达查询同样设上限（建议 4），避免上游被群聊打爆 |
 

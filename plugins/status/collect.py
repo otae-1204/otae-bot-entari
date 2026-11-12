@@ -16,9 +16,9 @@ from pathlib import Path
 from arclet.entari.plugin.service import plugin_service
 
 from otae_bot.accounts import runtime
-from otae_bot.adapters.entari import timer
 from otae_bot.command_usage import usage_recorder
 from otae_bot.command_usage.store import TodaySummary
+from otae_bot.compat.entari import timer
 from otae_bot.config.settings import SATORI_CLIENTS
 from otae_bot.group_features import PROTECTED_PLUGINS, plugin_key
 from otae_bot.infrastructure.loop_watchdog import loop_lag_snapshot

@@ -5,12 +5,12 @@ from lxml import etree as _etree
 from urllib.parse import quote_plus
 
 from arclet.alconna import Args
-from otae_bot.adapters.entari import ArgVal, ChainMsg, Text
+from otae_bot.compat.entari import ArgVal, ChainMsg, Text
 from arclet.entari import Event
 
 from otae_bot.infrastructure.http.tls import ashared_ssl_context
 from otae_bot.infrastructure.http.user_agent import get_user_agent
-from otae_bot.adapters.entari import cmd_with_args as _cmd
+from otae_bot.compat.entari import cmd_with_args as _cmd
 
 mod = _cmd("mod", args=Args["rest", str], aliases={"模组"})
 item = _cmd("资料", args=Args["rest", str])

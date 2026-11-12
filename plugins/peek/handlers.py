@@ -5,12 +5,12 @@ import tempfile
 
 import httpx
 from arclet.alconna import Args
-from otae_bot.adapters.entari import (
+from otae_bot.compat.entari import (
     ArgVal, ChainMsg, Text, event_user_id, make_image,
 )
 from arclet.entari import Account as Bot, Event
 
-from otae_bot.adapters.entari import cmd_with_args as _cmd
+from otae_bot.compat.entari import cmd_with_args as _cmd
 from otae_bot.infrastructure.http.tls import ashared_ssl_context
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
 from otae_bot.config.settings import Plugin_Config, Config as GlobalConfig

@@ -18,7 +18,7 @@ import asyncio
 from arclet.entari import Session
 from loguru import logger
 
-from otae_bot.adapters.entari import ArgVal, Image, cmd as _cmd, get_rest, send
+from otae_bot.compat.entari import ArgVal, Image, cmd as _cmd, get_rest, send
 
 from . import formatters, presentation as views
 from .models import Changelog, ChangelogDataError, Release, load_changelog

@@ -12,12 +12,12 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from otae_bot.adapters.entari import listen_message, prompt
+from otae_bot.compat.entari import listen_message, prompt
 from arclet.entari import Account as Bot, Event
-from otae_bot.adapters.entari import Pred
+from otae_bot.compat.entari import Pred
 from loguru import logger
 from arclet.letoderea import ExitState
-from otae_bot.adapters.entari import (
+from otae_bot.compat.entari import (
     ChainMsg, At, ArgVal, event_plain_text, event_user_id,
     make_image as ChainImage, stop_session,
 )
@@ -25,7 +25,7 @@ from otae_bot.delivery import Target, deliver
 
 from arclet.alconna import Args, MultiVar
 from nepattern import AnyString
-from otae_bot.adapters.entari import cmd_with_args as _cmd, get_rest
+from otae_bot.compat.entari import cmd_with_args as _cmd, get_rest
 from otae_bot.infrastructure.rendering.executor import run_image_render
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
 

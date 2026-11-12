@@ -1049,7 +1049,7 @@ class EndfieldForwardSendTests(unittest.TestCase):
     """合并转发：优先 Satori 原生 <message forward>，失败则逐张发普通图片消息。"""
 
     def test_make_forward_nests_pages_with_one_author(self):
-        from otae_bot.adapters.entari import make_forward
+        from otae_bot.compat.entari import make_forward
 
         element = make_forward(
             ["第一页", "第二页"],
@@ -1064,7 +1064,7 @@ class EndfieldForwardSendTests(unittest.TestCase):
         self.assertIn("第二页", dumped)
 
     def test_make_forward_omits_author_without_uin(self):
-        from otae_bot.adapters.entari import make_forward
+        from otae_bot.compat.entari import make_forward
 
         self.assertNotIn("<author", str(make_forward(["仅正文"])))
 

@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 from typing import BinaryIO
 
-from otae_bot.adapters.entari import close_scheduled_jobs
+from otae_bot.compat.entari import close_scheduled_jobs
 from otae_bot.infrastructure.http.client import close_http_client
 from otae_bot.infrastructure.rendering.browser import close_browser
 from otae_bot.infrastructure.rendering.executor import close_image_executor

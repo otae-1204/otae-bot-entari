@@ -6,11 +6,11 @@ from arclet.alconna import Alconna, Args, MultiVar
 from arclet.entari import Cleanup, listen
 from nepattern import AnyString
 from otae_bot.accounts import runtime
-from otae_bot.adapters.entari import close_scheduled_jobs, listen_message, on_ready, get_plaintext
+from otae_bot.compat.entari import close_scheduled_jobs, listen_message, on_ready, get_plaintext
 from arclet.entari import Account as Bot, Event
 from loguru import logger
-from otae_bot.adapters.entari import Pred
-from otae_bot.adapters.entari import (
+from otae_bot.compat.entari import Pred
+from otae_bot.compat.entari import (
     ArgVal,
     ChainMsg,
     get_bot,
@@ -263,7 +263,7 @@ async def _startup():
 
 on_ready(_startup)
 
-from otae_bot.adapters.entari import timer
+from otae_bot.compat.entari import timer
 
 
 timer.add_job(poller.tick_live, "interval", minutes=1, id="bili_live_check", replace_existing=True, misfire_grace_time=90)

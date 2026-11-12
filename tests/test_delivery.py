@@ -12,7 +12,7 @@ from satori import ChannelType
 
 from otae_bot.accounts import runtime
 from otae_bot.pipeline import feature_gate
-from otae_bot.adapters.entari import ChainMsg
+from otae_bot.compat.entari import ChainMsg
 from otae_bot.delivery import FAILED, NO_ACCOUNT, SENT, SUPPRESSED, Target, deliver, is_not_in_group
 from otae_bot.group_features import GroupFeatureStore, GroupScope
 

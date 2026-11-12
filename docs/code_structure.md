@@ -19,7 +19,7 @@ otae_bot/
   group_permissions.py         当前机器人账号、当前群的管理员权限核验
   paths.py                     随源码定位的资源根目录
   config/                      环境变量解析、原有路径配置
-  adapters/                    Entari 会话/命令/定时任务、消息构造
+  compat/                      NoneBot 风格的兼容层：Entari 会话/命令/定时任务、消息构造（逐步清空）
   accounts/                    在线账号登记与各账号所在群（runtime.py）
   pipeline/                    每条事件与订阅器都经过的全局钩子：群开关、指令输入、引用回退、[message] 日志脱敏
   infrastructure/
@@ -60,7 +60,7 @@ tests/                         功能回归、结构约束、真实插件加载�
 
 ## 依赖边界
 
-`application` 负责组装，`adapters` 封装框架和消息协议，`infrastructure`
+`application` 负责组装，`compat` 封装框架和消息协议，`infrastructure`
 提供网络、缓存、存储与渲染能力。公共包不依赖具体功能插件。
 
 插件入口仅加载自己的 `handlers`。只有注册入口/处理器负责注册命令和定时任务；

@@ -81,7 +81,7 @@ class ImageExecutorTests(unittest.IsolatedAsyncioTestCase):
 
 class ManagedSchedulerTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.module = _load_module("entari_native_runtime_for_test", "otae_bot/adapters/entari.py")
+        self.module = _load_module("entari_native_runtime_for_test", "otae_bot/compat/entari.py")
         self.subscribers = []
 
         class Subscriber:

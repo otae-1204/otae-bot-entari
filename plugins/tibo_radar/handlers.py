@@ -13,7 +13,7 @@ from arclet.entari import Account as Bot, Cleanup, Event, listen
 from loguru import logger
 
 from otae_bot.config.settings import Config as GlobalConfig
-from otae_bot.adapters.entari import (
+from otae_bot.compat.entari import (
     ArgVal,
     ChainMsg,
     Text,

@@ -19,8 +19,8 @@ from arclet.letoderea import ExitState
 from loguru import logger
 from PIL import Image
 
-from otae_bot.adapters.entari import ChainMsg, make_image
 from otae_bot.attendance_registry import SIGNED, AttendanceOutcome, build_notice
+from otae_bot.compat.entari import ChainMsg, make_image
 from otae_bot.infrastructure.rendering.executor import run_image_render
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
 

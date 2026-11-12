@@ -32,7 +32,7 @@ from arclet.entari import Event, Session
 from loguru import logger
 from nepattern import AnyString
 
-from otae_bot.adapters.entari import ArgVal, Image, get_rest, on_alconna, send
+from otae_bot.compat.entari import ArgVal, Image, get_rest, on_alconna, send
 
 from . import presentation as views
 from .config import RadarConfig

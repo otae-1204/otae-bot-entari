@@ -7,7 +7,7 @@ from arclet.entari import Account as Bot, Event, Session, listen
 from arclet.entari.event.base import FriendRequestEvent, GuildMemberRequestEvent, GuildRequestEvent
 from loguru import logger
 
-from otae_bot.adapters.entari import (
+from otae_bot.compat.entari import (
     ChainMsg,
     Pred,
     event_chain,

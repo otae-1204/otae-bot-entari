@@ -45,12 +45,12 @@ from plugins.steamInfo.steam import (
 )
 from plugins.steamInfo.models import PlayerSummaries, Player
 from plugins.steamInfo.config import Config
-from otae_bot.adapters.entari import (
+from otae_bot.compat.entari import (
     Text, make_image, ChainMsg, At, ArgVal, event_chain, event_user_id,
 )
 from otae_bot.delivery import Target, deliver
-from otae_bot.adapters.entari import timer
-from otae_bot.adapters.entari import prompt, get_bot, on_ready
+from otae_bot.compat.entari import timer
+from otae_bot.compat.entari import prompt, get_bot, on_ready
 import aiohttp
 import asyncio
 import re
@@ -64,11 +64,11 @@ from urllib.parse import unquote, urlparse
 from loguru import logger
 from PIL import Image as PILImage
 from typing import Union, Optional, List, Dict, Any
-from otae_bot.adapters.entari import inject
+from otae_bot.compat.entari import inject
 from arclet.entari import Event, Account as Bot, Image
 from otae_bot.config.settings import SYSTEM_PROXY, Config as GlobalConfig, _env
 from otae_bot.config.paths import IMAGE_PATH
-from otae_bot.adapters.entari import cmd as _cmd, get_rest
+from otae_bot.compat.entari import cmd as _cmd, get_rest
 from otae_bot.infrastructure.rendering.executor import run_image_render
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
 

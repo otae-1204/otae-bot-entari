@@ -113,7 +113,7 @@ def _nickname(event) -> str:
 
 
 def _group_id(event) -> str:
-    from otae_bot.adapters.entari import get_group_id
+    from otae_bot.compat.entari import get_group_id
 
     return get_group_id(event)
 

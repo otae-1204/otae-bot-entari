@@ -2,10 +2,10 @@
 
 from pathlib import Path
 
-from otae_bot.adapters.entari import ChainMsg, make_image as ChainImage, ArgVal
+from otae_bot.compat.entari import ChainMsg, make_image as ChainImage, ArgVal
 
 from otae_bot.config.paths import IMAGE_PATH
-from otae_bot.adapters.entari import cmd as _cmd, get_rest
+from otae_bot.compat.entari import cmd as _cmd, get_rest
 from otae_bot.infrastructure.rendering.help_runtime import cached_help_image
 
 HELP_IMAGE_DIR = Path(IMAGE_PATH) / "help"

@@ -44,7 +44,7 @@ from otae_bot.hypergryph_captcha import (
     upload_captcha_page,
 )
 from otae_bot.infrastructure.cache import AsyncTTLCache, CacheStats
-from otae_bot.adapters.entari import (
+from otae_bot.compat.entari import (
     ArgVal,
     ChainMsg,
     event_chain,

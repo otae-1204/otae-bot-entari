@@ -14,7 +14,7 @@ from collections.abc import Awaitable, Callable
 from loguru import logger
 from satori.model import Upload
 
-from otae_bot.adapters.entari import ChainMsg, Text, make_image
+from otae_bot.compat.entari import ChainMsg, Text, make_image
 from otae_bot.delivery import Target, deliver
 
 from .models import TiboPost

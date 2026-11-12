@@ -9,7 +9,7 @@ from PIL import Image as PILImage
 from urllib.parse import quote_plus
 
 from arclet.alconna import Args
-from otae_bot.adapters.entari import (
+from otae_bot.compat.entari import (
     ArgVal, ChainMsg, make_image, Reply,
 )
 from arclet.entari import Event
@@ -18,7 +18,7 @@ from otae_bot.config.settings import SYSTEM_PROXY
 from otae_bot.infrastructure.http.tls import ashared_ssl_context
 from otae_bot.infrastructure.rendering.browser import screenshot_web_element
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
-from otae_bot.adapters.entari import cmd_with_args as _cmd
+from otae_bot.compat.entari import cmd_with_args as _cmd
 
 wiki = _cmd("wiki", args=Args["content", str], aliases={"查wiki"})
 etree = _html.etree

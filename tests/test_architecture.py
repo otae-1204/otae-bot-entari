@@ -57,7 +57,7 @@ class ArchitectureTests(unittest.TestCase):
                 if isinstance(node, ast.ImportFrom):
                     module = node.module or ""
                     self.assertFalse(
-                        module.startswith(("arclet.entari", "otae_bot.adapters", "otae_bot.accounts", "otae_bot.pipeline"))
+                        module.startswith(("arclet.entari", "otae_bot.compat", "otae_bot.accounts", "otae_bot.pipeline"))
                         or "rendering" in module.split("."),
                         (path, module),
                     )
@@ -78,7 +78,7 @@ class ArchitectureTests(unittest.TestCase):
             "configs.path_config": "otae_bot.config.paths",
             "utils.http_client": "otae_bot.infrastructure.http.client",
             "utils.async_cache": "otae_bot.infrastructure.cache",
-            "utils.entari_native": "otae_bot.adapters.entari",
+            "utils.entari_native": "otae_bot.compat.entari",
             "utils.runtime": "otae_bot.accounts.runtime",
             "utils.image_executor": "otae_bot.infrastructure.rendering.executor",
             "utils.image_utils": "otae_bot.infrastructure.rendering.browser",
@@ -163,7 +163,7 @@ class ArchitectureTests(unittest.TestCase):
         from arclet.alconna import Alconna
         from arclet.entari import Session
         from arclet.letoderea import ExitState
-        from otae_bot.adapters import entari
+        from otae_bot.compat import entari
 
         session = object.__new__(Session)
         stops = {
@@ -182,7 +182,7 @@ class ArchitectureTests(unittest.TestCase):
             entari._CURRENT_SESSION.reset(token)
 
     def test_scheduler_uses_the_scope_registering_imported_service_methods(self):
-        from otae_bot.adapters import entari
+        from otae_bot.compat import entari
 
         plugin = SimpleNamespace(module=SimpleNamespace(__name__="plugins.demo.handlers"))
         token = entari.current_plugin.set(plugin)
@@ -198,7 +198,7 @@ import sys
 sys.path.insert(0, sys.argv[1])
 from otae_bot.application import create_app
 from otae_bot.plugin_registry import discover_plugins
-from otae_bot.adapters.entari import timer
+from otae_bot.compat.entari import timer
 from arclet.entari.plugin.service import plugin_service
 from arclet.alconna import command_manager
 

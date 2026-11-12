@@ -18,7 +18,7 @@ from arclet.letoderea import ExitState
 from loguru import logger
 from nepattern import AnyString
 
-from otae_bot.adapters.entari import (
+from otae_bot.compat.entari import (
     ArgVal,
     ChainMsg,
     event_user_id,

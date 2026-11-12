@@ -11,8 +11,8 @@ import asyncio
 from arclet.entari import Session
 from loguru import logger
 
-from otae_bot.adapters.entari import Image, get_group_id, send
-from otae_bot.adapters.entari import cmd as _cmd
+from otae_bot.compat.entari import Image, get_group_id, send
+from otae_bot.compat.entari import cmd as _cmd
 from otae_bot.infrastructure.rendering.art_card import render_card
 from otae_bot.permissions import is_superuser
 

@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from otae_bot.accounts import runtime
-from otae_bot.adapters import entari
+from otae_bot.compat import entari
 
 
 def account(self_id, groups=(), *, fail=None):

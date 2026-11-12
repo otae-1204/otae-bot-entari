@@ -41,7 +41,7 @@ def _load_mcsm_draw_module():
 
 
 def _load_minecraft_broadcast_module(name: str):
-    previous_entari_native = sys.modules.get("otae_bot.adapters.entari")
+    previous_entari_native = sys.modules.get("otae_bot.compat.entari")
     previous_arclet_entari = sys.modules.get("arclet.entari")
     previous_arclet = sys.modules.get("arclet")
     previous_pkg = sys.modules.get("plugins.minecraft_plugin")
@@ -56,7 +56,7 @@ def _load_minecraft_broadcast_module(name: str):
     delivery.deliver = fake_deliver
     sys.modules["otae_bot.delivery"] = delivery
 
-    entari_native = types.ModuleType("otae_bot.adapters.entari")
+    entari_native = types.ModuleType("otae_bot.compat.entari")
     entari_native.get_bot = lambda: None
     entari_native.ChainMsg = types.SimpleNamespace(text=lambda text: types.SimpleNamespace(send=lambda *a, **kw: None))
     entari_native.timer = types.SimpleNamespace(
@@ -72,7 +72,7 @@ def _load_minecraft_broadcast_module(name: str):
     event_base.GuildMemberAddedEvent = object
     sys.modules["arclet.entari.event.base"] = event_base
 
-    sys.modules["otae_bot.adapters.entari"] = entari_native
+    sys.modules["otae_bot.compat.entari"] = entari_native
     sys.modules["arclet"] = arclet
     sys.modules["arclet.entari"] = arclet_entari
     pkg = previous_pkg or types.ModuleType("plugins.minecraft_plugin")
@@ -87,9 +87,9 @@ def _load_minecraft_broadcast_module(name: str):
         return _load_module(f"plugins.minecraft_plugin.{name}", "plugins/minecraft_plugin/broadcast.py")
     finally:
         if previous_entari_native is None:
-            sys.modules.pop("otae_bot.adapters.entari", None)
+            sys.modules.pop("otae_bot.compat.entari", None)
         else:
-            sys.modules["otae_bot.adapters.entari"] = previous_entari_native
+            sys.modules["otae_bot.compat.entari"] = previous_entari_native
         if previous_arclet_entari is None:
             sys.modules.pop("arclet.entari", None)
         else:
@@ -169,7 +169,7 @@ def _image_file_path(segment) -> Path:
 
 class CoreLogicTests(unittest.TestCase):
     def test_entari_notice_hook_listens_to_notice_events(self):
-        entari_native = _load_module("entari_native_notice_for_test", "otae_bot/adapters/entari.py")
+        entari_native = _load_module("entari_native_notice_for_test", "otae_bot/compat/entari.py")
 
         message_hook = entari_native.listen_message()
         notice_hook = entari_native.listen_notice()
@@ -179,7 +179,7 @@ class CoreLogicTests(unittest.TestCase):
         self.assertTrue(callable(notice_hook.finish))
 
     def test_entari_on_ready_clears_account_on_disconnect(self):
-        entari_native = _load_module("entari_native_lifecycle_for_test", "otae_bot/adapters/entari.py")
+        entari_native = _load_module("entari_native_lifecycle_for_test", "otae_bot/compat/entari.py")
         captured = []
 
         def fake_listen(event_type):
@@ -213,7 +213,7 @@ class CoreLogicTests(unittest.TestCase):
 
     def test_entari_handler_resolves_injected_async_provider(self):
         entari_native = _load_module(
-            "entari_native_inject_for_test", "otae_bot/adapters/entari.py"
+            "entari_native_inject_for_test", "otae_bot/compat/entari.py"
         )
 
         event = types.SimpleNamespace(guild=types.SimpleNamespace(id="10001"))
@@ -238,7 +238,7 @@ class CoreLogicTests(unittest.TestCase):
 
     def test_entari_concurrent_private_prompt_keeps_original_session(self):
         entari_native = _load_module(
-            "entari_native_session_context_for_test", "otae_bot/adapters/entari.py"
+            "entari_native_session_context_for_test", "otae_bot/compat/entari.py"
         )
         captured = []
 
@@ -305,7 +305,7 @@ class CoreLogicTests(unittest.TestCase):
 
     def test_entari_prompt_retries_early_connection_disconnect_once(self):
         entari_native = _load_module(
-            "entari_native_prompt_retry_for_test", "otae_bot/adapters/entari.py"
+            "entari_native_prompt_retry_for_test", "otae_bot/compat/entari.py"
         )
 
         class FakeSession:
@@ -336,7 +336,7 @@ class CoreLogicTests(unittest.TestCase):
 
     def test_entari_silent_prompt_does_not_send_timeout_message(self):
         entari_native = _load_module(
-            "entari_native_silent_prompt_for_test", "otae_bot/adapters/entari.py"
+            "entari_native_silent_prompt_for_test", "otae_bot/compat/entari.py"
         )
 
         class FakeSession:
