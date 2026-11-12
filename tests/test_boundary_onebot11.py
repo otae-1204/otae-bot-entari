@@ -11,6 +11,7 @@ from unittest.mock import Mock, patch
 from satori import Api, LoginStatus
 from satori.adapters.onebot11 import message as stock_message
 from satori.adapters.onebot11.events.base import events
+from satori.adapters.onebot11.utils import ROLE_MAPPING
 from satori.element import Message, Quote, Text
 from satori.exception import ActionFailed
 from satori.model import Login, MessageObject, User
@@ -224,10 +225,26 @@ class ForwardDecodeTests(unittest.IsolatedAsyncioTestCase):
     async def test_standalone_forward_is_id_only_without_api_calls(self):
         adapter, fake = make_adapter()
         content = await decode([forward("RES-1")], adapter)
-        self.assertEqual(content, '<message id="RES-1" forward/>')
+        self.assertEqual(content, '<message id="RES-1" forward="true"/>')
         self.assertEqual(fake.calls, [])
         (element,) = parse(content)
         self.assertEqual((element.type, element.attrs["id"], element.children), ("message", "RES-1", []))
+
+    async def test_forward_elements_survive_the_client_side_parser(self):
+        # satori's transform() raised on the bare ``forward`` attribute, so Entari lost
+        # every event carrying a merged forward (seen live when one was quoted).
+        from satori import transform
+
+        adapter, _ = make_adapter(
+            get_msg={"message_id": 77, "sender": {"user_id": 9, "nickname": "quoted"},
+                     "message": [forward("OUTER")]},
+            get_forward_msg=forward_store({"OUTER": [node(1, [text("第一条")])]}),
+        )
+        for segments in ([forward("RES-1")], [reply("77"), text(" /q 解释")]):
+            elements = transform(parse(await decode(segments, adapter)))
+            candidates = (elements[0], *getattr(elements[0], "children", []))
+            forwards = [e for e in candidates if type(e) is Message]
+            self.assertTrue(forwards and all(e.forward is True for e in forwards), elements)
 
     async def test_quoted_forward_expands_nested_children(self):
         trees = {
@@ -244,7 +261,7 @@ class ForwardDecodeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((quote.type, quote.attrs["id"]), ("quote", "77"))
         author, outer = quote.children
         self.assertEqual((author.type, author.attrs["id"]), ("author", "9"))
-        self.assertEqual((outer.type, outer.attrs["id"], outer.attrs["forward"]), ("message", "OUTER", True))
+        self.assertEqual((outer.type, outer.attrs["id"], outer.attrs["forward"]), ("message", "OUTER", "true"))
         first, second = outer.children
         self.assertEqual([c.type for c in first.children], ["author", "text"])
         self.assertEqual((first.children[0].attrs, first.children[1].attrs["text"]),
@@ -293,7 +310,7 @@ class ForwardDecodeTests(unittest.IsolatedAsyncioTestCase):
                     get_forward_msg=lambda params, f=failure: f,
                 )
                 content = await decode([reply("5")], adapter)
-                self.assertIn('<message id="GONE" forward/>', content)
+                self.assertIn('<message id="GONE" forward="true"/>', content)
                 self.assertIn("尾巴", content)
 
     async def test_nested_failure_keeps_the_outer_expansion(self):
@@ -325,6 +342,18 @@ class ReplyDecodeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(event.type, "message-created")
         self.assertEqual(event.message.content, '<quote id="123"/>还在')
 
+    async def test_group_event_is_built_from_the_payload_without_api_calls(self):
+        # The stock handler costs two lookups (~0.7 s on LLBot 8.3.2) per group message.
+        adapter, fake = make_adapter()
+        login = Login(sn=0, status=LoginStatus.ONLINE, adapter="onebot", platform="qq-client", user=User(SELF))
+        raw = history_message(9, message=[text("hi")])
+        raw.update(post_type="message", message_type="group", sub_type="normal", group_name="测试群")
+        raw["sender"].update(role="admin", card="名片")
+        event = await events["message.group.normal"](login, adapter, raw)
+        self.assertEqual(fake.calls, [])
+        self.assertEqual((event.guild.name, event.channel.name, event.member.nick), ("测试群", "测试群", "名片"))
+        self.assertEqual([role.id for role in event.member.roles], [ROLE_MAPPING["admin"].id])
+
     async def test_quoted_reply_inside_quote_is_not_chased(self):
         adapter, fake = make_adapter(
             get_msg={"sender": {"user_id": 9, "nickname": "q"}, "message": [reply("1"), text("原文")]},
@@ -354,8 +383,7 @@ class ReplyDecodeTests(unittest.IsolatedAsyncioTestCase):
         result = await adapter.routes[Api.MESSAGE_GET.value](
             request(Api.MESSAGE_GET, {"channel_id": GROUP, "message_id": "-1"}))
         self.assertIsInstance(result, MessageObject)
-        self.assertEqual(result.content, '<quote id="2"/><message id="F" forward/>')
-        self.assertEqual(str(Message("F", True)), '<message id="F" forward/>')
+        self.assertEqual(result.content, '<quote id="2"/><message id="F" forward="true"/>')
         self.assertEqual(str(Quote("2", content=[Text("x")])), '<quote id="2">x</quote>')
 
 

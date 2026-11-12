@@ -8,6 +8,8 @@ against LLBot 8.3.2:
 - ``message.list`` accepts ``next: null`` and LLBot's ``{"messages": [...]}`` history, and
   pages by message_seq;
 - the login declares every routed API in ``features``;
+- group message events are built from the payload, without the stock handler's two
+  extra API calls per message;
 - message decoding: a quote whose ``get_msg`` fails stays a bare ``<quote id/>`` instead
   of turning the whole event INTERNAL, and merged forwards become standard
   ``<message forward id=resid>``, expanded only inside a quote.
@@ -20,11 +22,12 @@ from datetime import datetime
 from typing import Any
 
 from loguru import logger
-from satori import Api
+from satori import Api, EventType
 from satori.adapters.onebot11 import OneBot11ForwardAdapter, OneBot11ForwardConfig
 from satori.adapters.onebot11 import api as stock_api
 from satori.adapters.onebot11 import message as stock_message
 from satori.adapters.onebot11.events import message as stock_message_events
+from satori.adapters.onebot11.events.base import events as stock_events
 from satori.adapters.onebot11.utils import (
     GROUP_AVATAR_URL,
     ROLE_MAPPING,
@@ -34,6 +37,7 @@ from satori.element import Author, Element, Message, Quote
 from satori.model import (
     Channel,
     ChannelType,
+    Event,
     Guild,
     Login,
     Member,
@@ -104,8 +108,16 @@ async def _quote(message_id: str, net: Any) -> Quote:
     return Quote(message_id, content=[author, *body])
 
 
+def _forward_element(resid: str, children: list[Element] | None = None) -> Message:
+    # satori renders a True attribute as a bare ``forward``, and its own parser then fails
+    # on the valueless attribute (conv_bool(True)), losing the whole event. Spell it out.
+    element = Message(resid or None, True, children)
+    element._attrs = {"id": resid, "forward": "true"} if resid else {"forward": "true"}
+    return element
+
+
 async def _forward(resid: str, net: Any, expansion: _Expansion | None, depth: int) -> Message:
-    bare = Message(resid or None, True)
+    bare = _forward_element(resid)
     if expansion is None or depth >= FORWARD_MAX_DEPTH or expansion.left <= 0 or not resid:
         return bare
     try:
@@ -130,7 +142,7 @@ async def _forward(resid: str, net: Any, expansion: _Expansion | None, depth: in
     except Exception as exc:  # noqa: BLE001 - degrade to the id, never fail the message
         logger.warning(f"[boundary] forward {resid[:40]} not expanded: {type(exc).__name__}: {exc}")
         return bare
-    return Message(resid, True, children)
+    return _forward_element(resid, children)
 
 
 async def _decode_for(content: list, net: Any) -> str:
@@ -139,11 +151,47 @@ async def _decode_for(content: list, net: Any) -> str:
     return await stock_message.decode(content, net)
 
 
+async def _group_message(login: Login, net: Any, raw: dict) -> Event:
+    """Group message event built from the payload alone.
+
+    The stock handler calls get_group_info and get_group_member_info for every message
+    (about 0.7 s on LLBot 8.3.2) only to read the group name and the sender's card, both
+    of which LLBot already puts in the event.
+    """
+    sender: dict = raw["sender"]
+    uin, group = sender["user_id"], raw["group_id"]
+    name = raw.get("group_name")
+    if name is None:
+        name = (await net.call_api("get_group_info", {"group_id": group}) or {}).get("group_name")
+    user = User(str(uin), sender.get("nickname"), avatar=USER_AVATAR_URL.format(uin=uin))
+    return Event(
+        EventType.MESSAGE_CREATED,
+        datetime.now(),
+        login=login,
+        user=user,
+        guild=Guild(str(group), name, avatar=GROUP_AVATAR_URL.format(group=group)),
+        channel=Channel(str(group), ChannelType.TEXT, name),
+        member=Member(user, sender.get("card"), user.avatar, roles=_roles(sender.get("role"))),
+        message=MessageObject(str(raw["message_id"]), await _decode_for(raw["message"], net)),
+    )
+
+
+_GROUP_MESSAGE_EVENTS = ("message.group.normal", "message.group.notice", "message_sent.group.normal")
+
+
+async def _group_message_for(login: Login, net: Any, raw: dict) -> Event | None:
+    if isinstance(net, OneBotBoundaryAdapter):
+        return await _group_message(login, net, raw)
+    return await stock_message_events.group(login, net, raw)
+
+
 def _install_decode() -> None:
     # Stock event handlers and message.get bind ``decode`` at import; the only hook
     # short of copying them is rebinding that name. Other adapters keep stock decoding.
     for module in (stock_api, stock_message_events):
         module.decode = _decode_for  # type: ignore[attr-defined]
+    for name in _GROUP_MESSAGE_EVENTS:
+        stock_events[name] = _group_message_for
 
 
 # ── adapter ──
