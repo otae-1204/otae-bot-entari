@@ -1,6 +1,4 @@
 [
-{"rule": "compat-import", "file": "plugins/McWikiQuery/handlers.py", "snippet": "from otae_bot.compat.entari import (", "count": 1},
-{"rule": "compat-import", "file": "plugins/McWikiQuery/handlers.py", "snippet": "from otae_bot.compat.entari import cmd_with_args as _cmd", "count": 1},
 {"rule": "compat-import", "file": "plugins/arknights/handlers.py", "snippet": "from otae_bot.compat.entari import (", "count": 1},
 {"rule": "compat-import", "file": "plugins/bilibilibot/handlers.py", "snippet": "from otae_bot.compat.entari import (", "count": 1},
 {"rule": "compat-import", "file": "plugins/bilibilibot/handlers.py", "snippet": "from otae_bot.compat.entari import Pred", "count": 1},

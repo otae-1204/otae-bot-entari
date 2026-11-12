@@ -8,20 +8,19 @@ from lxml import html as _html
 from PIL import Image as PILImage
 from urllib.parse import quote_plus
 
-from arclet.alconna import Args
-from otae_bot.compat.entari import (
-    ArgVal, ChainMsg, make_image, Reply,
-)
-from arclet.entari import Event
+from pathlib import Path
+
+from arclet.alconna import Alconna, Args
+from arclet.entari import Event, Image, MessageChain, Quote, Session, command
+from arclet.entari.command import Match
 from arclet.letoderea import ExitState
 
 from otae_bot.config.settings import system_proxy
 from otae_bot.infrastructure.http.tls import ashared_ssl_context
 from otae_bot.infrastructure.rendering.browser import screenshot_web_element
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
-from otae_bot.compat.entari import cmd_with_args as _cmd
 
-wiki = _cmd("wiki", args=Args["content", str], aliases={"查wiki"})
+wiki = Alconna(["wiki", "查wiki"], Args["content", str])
 etree = _html.etree
 WIKI_BASE_URL = "https://zh.minecraft.wiki"
 WIKI_CONTENT_SELECTOR = "#content, .mw-body"
@@ -65,7 +64,7 @@ def _image_segment_from_png(png: bytes):
         f.write(png)
         f.flush()
         schedule_temp_file_cleanup(f.name)
-        return make_image(path=f.name)
+        return Image.of(path=Path(f.name))
 
 
 def _image_segments_from_png(png: bytes, max_height: int = WIKI_IMAGE_CHUNK_HEIGHT):
@@ -98,24 +97,25 @@ def _event_message_id(event: Event) -> str | None:
     return None
 
 
-def _reply_segments(event: Event) -> list[Reply]:
+def _reply_segments(event: Event) -> list[Quote]:
     message_id = _event_message_id(event)
-    return [Reply(message_id)] if message_id else []
+    return [Quote(message_id)] if message_id else []
 
 
-def _reply_message(event: Event, *segments) -> ChainMsg:
-    return ChainMsg([*_reply_segments(event), *segments])
+def _reply_message(event: Event, *segments) -> MessageChain:
+    return MessageChain([*_reply_segments(event), *segments])
 
 
-async def _finish_reply(event: Event, text: str):
-    await _reply_message(event, text).finish()
+async def _send_reply(session: Session, text: str):
+    await session.send(_reply_message(session.event, text))
 
 
-@wiki.handle()
-async def handle_wiki(event: Event, content: ArgVal[str]):
+@command.on(wiki)
+async def handle_wiki(session: Session, content: Match[str]):
     keyword = content.result.strip() if content.available else ""
     if not keyword:
-        await _finish_reply(event, "格式：/wiki <搜索内容>")
+        await _send_reply(session, "格式：/wiki <搜索内容>")
+        return
 
     proxy_url = system_proxy()["http"]
 
@@ -126,10 +126,10 @@ async def handle_wiki(event: Event, content: ArgVal[str]):
             path = _extract_first_result_path(resp.text)
 
         if path is None:
-            await _finish_reply(event, f"未找到与「{keyword}」相关的内容。")
+            await _send_reply(session, f"未找到与「{keyword}」相关的内容。")
+            return
 
-        # 使用 ChainMsg 发送回复，不再用 CQ 字符串注入
-        await _reply_message(event, "正在生成 Wiki 页面截图，请稍候……").send()
+        await session.send(_reply_message(session.event, "正在生成 Wiki 页面截图，请稍候……"))
 
         web_url = _wiki_article_url(path)
         try:
@@ -142,25 +142,26 @@ async def handle_wiki(event: Event, content: ArgVal[str]):
             raise
         except Exception:
             logger.exception("McWiki screenshot failed: url={}", web_url)
-            await _finish_reply(event, "页面截取失败，请稍后重试。")
+            await _send_reply(session, "页面截取失败，请稍后重试。")
+            return
 
         try:
-            await _reply_message(event, *_image_segments_from_png(image)).finish()
+            await session.send(_reply_message(session.event, *_image_segments_from_png(image)))
         except ExitState:
             raise
         except Exception:
-            await _finish_reply(event, "发送截图遇到异常，可能是消息触发拦截，请稍后再试。")
+            await _send_reply(session, "发送截图遇到异常，可能是消息触发拦截，请稍后再试。")
 
     except httpx.HTTPStatusError as e:
         status_code = e.response.status_code if e.response else "unknown"
         logger.exception("McWiki search HTTP error: status={}, keyword={}", status_code, keyword)
-        await _finish_reply(event, f"Wiki 搜索请求异常：HTTP {status_code}")
+        await _send_reply(session, f"Wiki 搜索请求异常：HTTP {status_code}")
     except httpx.TimeoutException:
         logger.exception("McWiki search timeout: keyword={}", keyword)
-        await _finish_reply(event, "Wiki 检索超时，请稍后重试。")
+        await _send_reply(session, "Wiki 检索超时，请稍后重试。")
     except httpx.RequestError:
         logger.exception("McWiki search request failed: keyword={}", keyword)
-        await _finish_reply(event, "Wiki 搜索网络异常，请确认网络连接或稍后再试。")
+        await _send_reply(session, "Wiki 搜索网络异常，请确认网络连接或稍后再试。")
     except IndexError:
         logger.exception("McWiki search result parse failed: keyword={}", keyword)
-        await _finish_reply(event, "Wiki 结果解析失败，请稍后再试。")
+        await _send_reply(session, "Wiki 结果解析失败，请稍后再试。")
