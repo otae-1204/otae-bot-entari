@@ -583,7 +583,7 @@ class WiringTests(unittest.TestCase):
     def _create_app(self):
         names = ("install_message_log_redaction", "install_recent_alerts", "install_quote_fetch_fallback",
                  "install_command_input_normalizers", "install_group_feature_gates",
-                 "install_command_usage_recorders", "listen")
+                 "install_command_usage_recorders", "install_outbound_media", "listen")
         patches = {name: Mock() for name in names}
         with (
             patch.multiple(application, **patches),

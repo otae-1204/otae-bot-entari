@@ -11,8 +11,9 @@ sends. The script must end by printing ``ALL-OK``.
 Helpers available to ``body``:
 
 - ``app``: the Entari application; ``plugin(name)``: a loaded plugin module.
-- ``make_account(self_id='test-bot')``: a real ``Account`` with the recording protocol
-  (call it outside coroutines); ``default_account`` is the one ``say`` uses.
+- ``make_account(self_id='test-bot', platform='qq', features=())``: a real ``Account``
+  with the recording protocol and those login ``features`` (call it outside
+  coroutines); ``default_account`` is the one ``say`` uses.
 - ``await say(content, user=..., group=..., private=..., account=...)``:
   publish one ``message-created`` event and return the contents (Satori XML
   strings) sent back while it was handled. ``content`` is a string (Satori
@@ -93,9 +94,10 @@ def run(coro):
     return loop.run_until_complete(coro)
 
 
-def make_account(self_id='test-bot'):
+def make_account(self_id='test-bot', platform='qq', features=()):
     async def build():  # aiohttp wants a running loop for the protocol's client session
-        return Account(Login(user=User(self_id), platform='qq'), ApiInfo(port=5500, token='test-token'), [], Protocol)
+        login = Login(user=User(self_id), platform=platform, features=list(features))
+        return Account(login, ApiInfo(port=5500, token='test-token'), [], Protocol)
     return run(build())
 
 
@@ -113,7 +115,7 @@ def incoming(content, *, user='sender', group='100', private=False, account=None
         channel, guild = Channel('private:' + user, ChannelType.DIRECT), None
     else:
         channel, guild = Channel(group, ChannelType.TEXT), Guild(group)
-    origin = Event('message-created', datetime.now(timezone.utc), Login(user=User(account.self_id), platform='qq'),
+    origin = Event('message-created', datetime.now(timezone.utc), Login(user=User(account.self_id), platform=account.platform),
                    channel=channel, guild=guild, user=User(user), member=member, message=message)
     return account, origin
 

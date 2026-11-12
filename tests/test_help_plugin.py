@@ -77,13 +77,15 @@ class HelpTopicMapTests(unittest.TestCase):
 
 
 HELP_SCENARIOS = r"""
+import base64
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 help_plugin = plugin('plugins.help_plugin.handlers')
 png = Path('help-test.png').resolve()
 png.write_bytes(b'\x89PNG\r\n\x1a\nfake')
-IMAGE = ['<img src="' + png.as_uri() + '"/>']
+# 帮助图按字节发出（data: URL），不带本地路径
+IMAGE = ['<img src="data:image/png;base64,' + base64.b64encode(png.read_bytes()).decode() + '"/>']
 
 
 async def main():

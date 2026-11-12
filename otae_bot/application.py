@@ -19,6 +19,7 @@ from otae_bot.lifecycle import acquire_run_lock, close_shared_resources
 from otae_bot.pipeline.command_input import install_command_input_normalizers
 from otae_bot.pipeline.feature_gate import install_group_feature_gates
 from otae_bot.pipeline.message_log import install_message_log_redaction
+from otae_bot.pipeline.outbound_media import install_outbound_media
 from otae_bot.pipeline.quote_fallback import install_quote_fetch_fallback
 from otae_bot.plugin_registry import discover_plugins
 
@@ -43,6 +44,8 @@ def create_app() -> Entari:
     install_message_log_redaction()
     install_recent_alerts()
     install_quote_fetch_fallback()
+    # Media leave as uploads or inline data, whichever way a message is sent.
+    install_outbound_media()
     install_command_input_normalizers()
     # Before any plugin loads: both attach to every plugin subscriber registered
     # from now on, so hot-reloaded plugins are covered without reinstalling.

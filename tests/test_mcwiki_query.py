@@ -68,7 +68,7 @@ async def main():
                 sent = await say(text)
                 assert len(sent) == 2, sent
                 assert quoted(sent[0], '正在生成 Wiki 页面截图，请稍候……'), sent
-                assert re.fullmatch('<quote id="incoming-[0-9]+"/><img src="file:///[^"]+[.]png"/>', sent[1]), sent
+                assert re.fullmatch('<quote id="incoming-[0-9]+"/><img src="data:image/png;base64,[^"]+"/>', sent[1]), sent
             assert shot.await_args.args == ('https://zh.minecraft.wiki/w/Stone?variant=zh', '#content, .mw-body')
             assert '%E7%9F%B3%E5%A4%B4' in seen[-1], seen
             # 参数是单个 str：缺参数或多出一个词都匹配不上，不回复

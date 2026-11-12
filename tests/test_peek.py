@@ -83,7 +83,7 @@ async def main():
         assert one(await say('/添加窥视 laptop https://laptop', user='root')) == '已成功添加 laptop: https://laptop'
         # 截图：默认目标与指定目标，文字 + 图片一条消息
         sent = one(await say('/peek'))
-        assert re.fullmatch('Screenshot for pc<img src="file:///[^"]+[.]png"/>', sent), sent
+        assert re.fullmatch('Screenshot for pc<img src="data:image/png;base64,[^"]+"/>', sent), sent
         sent = one(await say('/窥视 laptop'))
         assert sent.startswith('Screenshot for laptop<img ') and seen[-1] == 'https://laptop/screenshot', sent
         for result in (httpx.ConnectError('down'), Response(503), Response(204)):
