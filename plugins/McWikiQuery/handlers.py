@@ -13,6 +13,7 @@ from otae_bot.compat.entari import (
     ArgVal, ChainMsg, make_image, Reply,
 )
 from arclet.entari import Event
+from arclet.letoderea import ExitState
 
 from otae_bot.config.settings import system_proxy
 from otae_bot.infrastructure.http.tls import ashared_ssl_context
@@ -137,12 +138,16 @@ async def handle_wiki(event: Event, content: ArgVal[str]):
                 WIKI_CONTENT_SELECTOR,
                 max_height=WIKI_SCREENSHOT_MAX_HEIGHT,
             )
+        except ExitState:
+            raise
         except Exception:
             logger.exception("McWiki screenshot failed: url={}", web_url)
             await _finish_reply(event, "页面截取失败，请稍后重试。")
 
         try:
             await _reply_message(event, *_image_segments_from_png(image)).finish()
+        except ExitState:
+            raise
         except Exception:
             await _finish_reply(event, "发送截图遇到异常，可能是消息触发拦截，请稍后再试。")
 
