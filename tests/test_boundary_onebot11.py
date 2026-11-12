@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 import unittest
 from datetime import datetime
 from pathlib import Path
@@ -464,6 +465,117 @@ class RequestEventTests(unittest.IsolatedAsyncioTestCase):
         raw_event = await events["request.group.add"](LOGIN, adapter, request_event("add"))
         event = GuildMemberRequestEvent(Mock(), raw_event)
         self.assertEqual(handlers._request_id(event), "183643844|1762900000123|1|0")
+
+
+PNG = b"\x89PNG\r\n\x1a\n" + bytes(range(64))
+
+
+class UploadTests(unittest.IsolatedAsyncioTestCase):
+    """upload.create + message.create through the server's request handler, as Entari calls it."""
+
+    def setUp(self):
+        from satori.server import Server
+
+        self.server = Server()
+        self.adapter, self.fake = make_adapter(send_group_msg={"message_id": 7}, upload_group_file={"file_id": "f"})
+        self.server.apply(self.adapter)
+        self.adapter.logins[SELF] = Login(sn=0, status=LoginStatus.ONLINE, adapter="onebot", platform="qq-client",
+                                          user=User(SELF))
+
+    def tearDown(self):
+        self.server._tempdir.cleanup()
+
+    async def _call(self, action: Api, *, json: dict | None = None, form=None):
+        from starlette.requests import Request as StarletteRequest
+
+        headers = [(b"satori-platform", b"qq-client"), (b"satori-user-id", SELF.encode())]
+        req = StarletteRequest({"type": "http", "method": "POST", "path_params": {"action": action.value},
+                                "headers": headers})
+        if form is not None:
+            req._form = form
+        else:
+            req._json = json
+        return await self.server.http_server_handler(req)
+
+    async def _upload(self, data: bytes, mime: str, filename: str) -> str:
+        import io
+        import json
+
+        from starlette.datastructures import FormData, Headers, UploadFile
+
+        upload = UploadFile(io.BytesIO(data), filename=filename, headers=Headers({"content-type": mime}))
+        # The headers entari-plugin-server's direct mode builds: no Content-Disposition.
+        with patch.object(asyncio.get_running_loop(), "call_later") as later:
+            resp = await self._call(Api.UPLOAD_CREATE, form=FormData([("a", upload)]))
+        self.assertEqual(resp.status_code, 200, resp.body)
+        url = json.loads(resp.body)["a"]
+        self.assertTrue(url.startswith(f"internal:qq-client/{SELF}/_tmp/"), url)
+        self.assertTrue(url.endswith(f"-{filename}"), url)
+        delay, unlink, *_ = later.call_args.args
+        self.assertEqual((delay, unlink.__self__), (600, Path(self.server._tempdir.name) / url.rsplit("/", 1)[1]))
+        return url
+
+    async def _send(self, content: str, channel: str = GROUP):
+        return await self._call(Api.MESSAGE_CREATE, json={"channel_id": channel, "content": content})
+
+    def _sent(self, action: str = "send_group_msg") -> list:
+        return [params for name, params in self.fake.calls if name == action]
+
+    def test_upload_create_is_routed_and_declared(self):
+        self.assertIn("upload.create", self.adapter.routes)
+        self.assertIn("upload.create", self.adapter.features)
+
+    async def test_uploaded_image_audio_video_are_sent_inline(self):
+        import base64
+
+        url = await self._upload(PNG, "image/png", "radar.png")
+        resp = await self._send(f'[测试] <img src="{url}"/>')
+        self.assertEqual(resp.status_code, 200, resp.body)
+        (message,) = self._sent()
+        self.assertEqual(message["message"][0], {"type": "text", "data": {"text": "[测试] "}})
+        image = message["message"][1]
+        self.assertEqual(image["type"], "image")
+        self.assertEqual(image["data"]["file"], "base64://" + base64.b64encode(PNG).decode())
+        for tag, kind in (("audio", "record"), ("video", "video")):
+            with self.subTest(tag=tag):
+                media = await self._upload(b"media", "application/octet-stream", f"x.{tag}")
+                await self._send(f'<{tag} src="{media}"/>')
+                sent = self._sent()[-1]["message"][0]
+                self.assertEqual((sent["type"], sent["data"]["file"]), (kind, "base64://bWVkaWE="))
+
+    async def test_proxied_upload_url_and_nested_elements_resolve(self):
+        url = await self._upload(PNG, "image/png", "a.png")
+        proxied = f"http://127.0.0.1:5140/v1/proxy/{url}"
+        await self._send(f'<quote id="1"/><img src="{proxied}"/>')
+        self.assertTrue(self._sent()[0]["message"][-1]["data"]["file"].startswith("base64://iVBORw0KGgo"))
+
+    async def test_uploaded_file_keeps_its_name(self):
+        url = await self._upload(b"hello", "text/plain", "notes.txt")
+        resp = await self._send(f'<file src="{url}"/>')
+        self.assertEqual(resp.status_code, 200, resp.body)
+        (params,) = self._sent("upload_group_file")
+        self.assertEqual(params, {"group_id": int(GROUP), "file": "base64://aGVsbG8=", "name": "notes.txt"})
+
+    async def test_unknown_expired_or_foreign_internal_urls_fail_without_sending(self):
+        url = await self._upload(PNG, "image/png", "gone.png")
+        (Path(self.server._tempdir.name) / url.rsplit("/", 1)[1]).unlink()
+        cases = {
+            url: 404,
+            f"internal:qq-client/{SELF}/_tmp/nope.png": 404,
+            f"internal:qq-client/{SELF}/_tmp/../escape.png": 404,
+            f"internal:qq-client/{SELF}/_api/get_msg": 400,
+        }
+        for src, status in cases.items():
+            with self.subTest(src=src):
+                resp = await self._send(f'text <img src="{src}"/>')
+                self.assertEqual(resp.status_code, status, resp.body)
+                self.assertIn(b"upload" if status == 404 else b"only upload.create", resp.body)
+        self.assertEqual(self._sent(), [])
+
+    async def test_ordinary_urls_are_left_to_the_stock_encoder(self):
+        await self._send('<img src="https://example.com/a.png"/><at id="1"/>')
+        self.assertEqual([seg["type"] for seg in self._sent()[0]["message"]], ["image", "at"])
+        self.assertEqual(self._sent()[0]["message"][0]["data"]["file"], "https://example.com/a.png")
 
 
 class WiringTests(unittest.TestCase):

@@ -14,14 +14,23 @@ against LLBot 8.3.2:
   of turning the whole event INTERNAL, and merged forwards become standard
   ``<message forward id=resid>``, expanded only inside a quote;
 - ``request.group.add`` (someone asks to join) is a ``guild-member-request``, not the
-  stock ``guild-member-added``.
+  stock ``guild-member-added``;
+- ``upload.create`` is routed (and declared) here, since the server's default handler
+  fails in direct mode, and ``message.create`` inlines those uploads: LLBot cannot read
+  the server's ``internal:…/_tmp/…`` URLs.
 """
 
 from __future__ import annotations
 
+import asyncio
+import base64
+import mimetypes
+import secrets
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 from loguru import logger
 from satori import Api, EventType
@@ -37,7 +46,7 @@ from satori.adapters.onebot11.utils import (
     USER_AVATAR_URL,
 )
 from satori.element import Author, Element, Message, Quote
-from satori.exception import ActionFailed
+from satori.exception import ActionFailed, BadRequestException, NotFoundException
 from satori.model import (
     Channel,
     ChannelType,
@@ -50,13 +59,15 @@ from satori.model import (
     PageResult,
     User,
 )
-from satori.parser import escape
-from satori.server import Request
+from satori.parser import Element as RawElement
+from satori.parser import escape, parse
+from satori.server import INTERNAL_URL_PAT, Request
 
 __all__ = ["OneBot11ForwardConfig", "OneBotBoundaryAdapter", "decode", "decode_elements"]
 
 FORWARD_MAX_DEPTH = 3
 FORWARD_MAX_MESSAGES = 200
+_MEDIA_ELEMENTS = frozenset({"img", "image", "audio", "video", "file"})
 
 
 # ── message decoding ──
@@ -274,12 +285,83 @@ class OneBotBoundaryAdapter(OneBot11ForwardAdapter):
         self.route(Api.GUILD_MEMBER_GET)(self._guild_member_get)
         self.route(Api.GUILD_MEMBER_LIST)(self._guild_member_list)
         self.route(Api.MESSAGE_LIST)(self._message_list)
+        self.route(Api.MESSAGE_CREATE)(self._message_create)
+        self.route(Api.UPLOAD_CREATE)(self._upload_create)
         self.logins = _FeatureLogins(self.features)
 
     @property
     def features(self) -> list[str]:
         apis = sorted(path for path in self.routes if not path.startswith("internal/"))
         return [*apis, "guild.plain"]
+
+    async def _upload_create(self, request: Request) -> dict[str, str]:
+        """The server's default upload store (its temp dir, 600 s, same URL shape).
+
+        The default handler reads each part's Content-Disposition, which
+        entari-plugin-server's direct mode never sets (KeyError, HTTP 500); the name and
+        filename are on the parts anyway.
+        """
+        root = Path(self.server._tempdir.name)
+        result: dict[str, str] = {}
+        for name, data in request.params.multi_items():
+            if isinstance(data, str):
+                continue
+            filename = Path(data.filename or "").name
+            filename = filename or f"{name}{mimetypes.guess_extension(data.content_type or '') or '.bin'}"
+            file = root / f"{secrets.token_urlsafe(16)}-{filename}"
+            file.write_bytes(await data.read())
+            result[name] = f"internal:{request.platform}/{request.self_id}/_tmp/{file.name}"
+            asyncio.get_running_loop().call_later(600, file.unlink, True)
+        return result
+
+    async def _message_create(self, request: Request) -> list[MessageObject]:
+        """Stock message.create, with upload.create resources turned into inline data.
+
+        The stock encoder hands ``internal:…/_tmp/…`` to LLBot as ``file``, and LLBot
+        fails with 未知文件类型或路径不存在. Inline base64, not ``file://``: LLBot need not
+        share our filesystem (or user, or container) for it to work.
+        """
+        elements = parse(request.params["content"])
+        await self._inline_uploads(elements)
+        encoder = stock_message.OneBot11MessageEncoder(self.logins[request.self_id], self, request.params["channel_id"])
+        await encoder.render(elements)
+        await encoder.flush()
+        return encoder.results
+
+    async def _inline_uploads(self, elements: list[RawElement]) -> None:
+        for element in elements:
+            if element.type in _MEDIA_ELEMENTS:
+                for key in ("src", "url"):
+                    value = element.attrs.get(key)
+                    if not isinstance(value, str) or (file := self._upload_file(value)) is None:
+                        continue
+                    try:
+                        data = await asyncio.to_thread(file.read_bytes)
+                    except FileNotFoundError:
+                        raise NotFoundException(f"upload {file.name!r} expired while sending") from None
+                    mime = mimetypes.guess_type(file.name)[0] or "application/octet-stream"
+                    element.attrs[key] = f"data:{mime};base64,{base64.b64encode(data).decode()}"
+                    if element.type == "file":
+                        # The stored name is "<22-char id>-<original name>".
+                        element.attrs.setdefault("title", file.name[23:] or file.name)
+            await self._inline_uploads(element.children)
+
+    def _upload_file(self, url: str) -> Path | None:
+        """The stored upload behind an ``internal:`` (or server-proxied) URL; None if not one."""
+        server = self.server
+        proxy = f"http://{server.host}:{server.port}{server.path}/{server.version}/proxy/"
+        if url.startswith(proxy):
+            url = unquote(url[len(proxy):])
+        if not url.startswith("internal:"):
+            return None
+        match = INTERNAL_URL_PAT.match(url)
+        if match is None or not match["path"].startswith("_tmp/"):
+            raise BadRequestException(f"cannot send {url[:80]!r}: only upload.create URLs (internal:…/_tmp/…) resolve")
+        root = Path(server._tempdir.name).resolve()
+        file = (root / match["path"][5:]).resolve()
+        if file.parent != root or not file.is_file():
+            raise NotFoundException(f"upload {match['path'][5:]!r} not found or expired (kept 600 s)")
+        return file
 
     def _member(self, info: dict) -> Member:
         uin = info["user_id"]
