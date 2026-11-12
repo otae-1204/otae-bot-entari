@@ -5,8 +5,9 @@ import unittest
 from arclet.entari.logger import log
 from loguru import logger
 
+from otae_bot.infrastructure.redaction import redact
 from otae_bot.pipeline import message_log
-from otae_bot.pipeline.message_log import install_message_log_redaction, redact, sensitive_input
+from otae_bot.pipeline.message_log import install_message_log_redaction, sensitive_input
 
 
 def entari_line(user_id: str, content: str, nick: str = "某人", scene: str = "[私聊]") -> str:
