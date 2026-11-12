@@ -1045,27 +1045,13 @@ class OwnershipGroupAndCommandTests(unittest.TestCase):
             async def guild_member_list(self, guild_id):
                 raise RuntimeError(guild_id)
 
-        with mock.patch(
-            "plugins.endfield.ownership.service.call_onebot_action",
-            mock.AsyncMock(side_effect=RuntimeError("unsupported")),
-        ):
-            with self.assertRaises(GroupMemberListError):
-                asyncio.run(collect_group_member_ids(BrokenBot(), "group"))
-
-        fallback = mock.AsyncMock(
-            return_value={"status": "ok", "data": [{"user_id": 300}, {"user_id": "400"}]}
-        )
-        with mock.patch("plugins.endfield.ownership.service.call_onebot_action", fallback):
-            self.assertEqual(
-                asyncio.run(collect_group_member_ids(object(), "123")),
-                {"300", "400"},
-            )
-        fallback.assert_awaited_once_with(
-            mock.ANY,
-            "get_group_member_list",
-            group_id=123,
-            no_cache=True,
-        )
+        with self.assertRaises(GroupMemberListError) as caught:
+            asyncio.run(collect_group_member_ids(BrokenBot(), "group"))
+        self.assertEqual(str(caught.exception), "获取当前群成员列表失败")
+        self.assertEqual(caught.exception.standard_error_type, "RuntimeError")
+        with self.assertRaises(GroupMemberListError) as caught:
+            asyncio.run(collect_group_member_ids(object(), "123"))
+        self.assertEqual(str(caught.exception), "当前适配器不支持获取群成员列表")
 
     def test_renderer_is_a_backend_registration_hook(self):
         report = SimpleNamespace(scope="global")

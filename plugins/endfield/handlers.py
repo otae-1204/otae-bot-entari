@@ -802,8 +802,7 @@ async def _handle_ownership_stats(
         except GroupMemberListError as exc:
             logger.warning(
                 "[endfield-ownership] group member listing failed "
-                f"standard_error_type={exc.standard_error_type} "
-                f"fallback_error_type={exc.fallback_error_type}"
+                f"standard_error_type={exc.standard_error_type}"
             )
             return await matcher.finish("获取本群成员列表失败，已终止统计任务。")
         roles = account_store.list_all_roles(member_ids)
@@ -892,8 +891,7 @@ async def _handle_usage_stats(
         except GroupMemberListError as exc:
             logger.warning(
                 "[endfield-usage] group member listing failed "
-                f"standard_error_type={exc.standard_error_type} "
-                f"fallback_error_type={exc.fallback_error_type}"
+                f"standard_error_type={exc.standard_error_type}"
             )
             return await matcher.finish("获取本群成员列表失败，已终止统计任务。")
         roles = account_store.list_all_roles(member_ids)

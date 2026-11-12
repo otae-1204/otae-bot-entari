@@ -12,7 +12,6 @@ from typing import Any, Literal
 
 from loguru import logger
 
-from otae_bot.adapters.onebot import call_onebot_action
 
 from ..account.client import EndfieldAPIError, EndfieldOfficialClient, is_asia_role
 from ..account.crypto import CredentialCipher, CredentialKeyError
@@ -79,11 +78,9 @@ class GroupMemberListError(RuntimeError):
         message: str,
         *,
         standard_error: Exception | None = None,
-        fallback_error: Exception | None = None,
     ):
         super().__init__(message)
         self.standard_error_type = type(standard_error).__name__ if standard_error else "none"
-        self.fallback_error_type = type(fallback_error).__name__ if fallback_error else "none"
 
 
 class OwnershipStatsRendererUnavailable(RuntimeError):
@@ -1118,34 +1115,12 @@ async def collect_group_member_ids(bot: Any, guild_id: str) -> set[str]:
     getter = getattr(bot, "guild_member_list", None)
     if not guild_id:
         raise GroupMemberListError("当前会话缺少群号")
-    standard_error: Exception | None = None
-    if callable(getter):
-        try:
-            members = await _standard_group_members(getter, str(guild_id))
-        except Exception as exc:
-            standard_error = exc
-        else:
-            return _group_member_ids(members)
-
+    if not callable(getter):
+        raise GroupMemberListError("当前适配器不支持获取群成员列表")
     try:
-        result = await call_onebot_action(
-            bot,
-            "get_group_member_list",
-            group_id=_numeric_id(guild_id),
-            no_cache=True,
-        )
-        members = _onebot_group_members(result)
+        members = await _standard_group_members(getter, str(guild_id))
     except Exception as exc:
-        message = (
-            "获取当前群成员列表失败"
-            if standard_error is not None
-            else "当前适配器不支持获取群成员列表"
-        )
-        raise GroupMemberListError(
-            message,
-            standard_error=standard_error,
-            fallback_error=exc,
-        ) from exc
+        raise GroupMemberListError("获取当前群成员列表失败", standard_error=exc) from exc
     return _group_member_ids(members)
 
 
@@ -1170,26 +1145,10 @@ async def _standard_group_members(getter: Callable[..., Any], guild_id: str) -> 
     raise TypeError("群成员接口返回格式异常")
 
 
-def _onebot_group_members(result: Any) -> list[Any]:
-    data = getattr(result, "data", None)
-    if data is not None:
-        result = data
-    elif isinstance(result, Mapping) and "data" in result:
-        result = result["data"]
-    if isinstance(result, Iterable) and not isinstance(result, (str, bytes, Mapping)):
-        return list(result)
-    raise TypeError("OneBot 群成员接口返回格式异常")
-
-
 def _group_member_ids(members: Iterable[Any]) -> set[str]:
     user_ids = {_member_user_id(member) for member in members}
     user_ids.discard("")
     return user_ids
-
-
-def _numeric_id(value: Any) -> int | str:
-    text = str(value or "")
-    return int(text) if text.isdecimal() else text
 
 
 GROUP_ADMIN_ROLE_TOKENS = {
