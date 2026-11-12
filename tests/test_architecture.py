@@ -545,6 +545,103 @@ async def check_minecraft_rejoin_clears_the_kick_mark():
         assert '100' not in broadcast._kicked_groups
 
 asyncio.get_event_loop().run_until_complete(check_minecraft_rejoin_clears_the_kick_mark())
+
+# endfield is one plugin outside, many modules inside: handlers.py registers and
+# dispatches, the per-feature implementations live in sub-packages.
+ENDFIELD_COMMANDS = ['efeq', 'efop', 'efs', 'efwp', '终末地']
+ENDFIELD_FEATURE_MODULES = {
+    '_handle_medal': 'plugins.endfield.medals.handlers',
+    '_handle_archive': 'plugins.endfield.archives.handlers',
+    '_handle_ownership_stats': 'plugins.endfield.ownership.handlers',
+    '_handle_loadout': 'plugins.endfield.catalog.handlers',
+    '_handle_random_wiki': 'plugins.endfield.catalog.handlers',
+    '_render_current_version_calendar': 'plugins.endfield.calendar.handlers',
+    '_handle_challenge': 'plugins.endfield.account.challenge.handlers',
+    '_handle_gacha': 'plugins.endfield.gacha.handlers',
+    '_handle_daily': 'plugins.endfield.account.handlers',
+    '_handle_binding': 'plugins.endfield.account.binding',
+}
+
+def endfield_registrations():
+    from otae_bot.pipeline.feature_gate import subscriber_plugin
+    from arclet.alconna import command_manager
+    by_plugin = {plg.path: get_plugin_subscribers(plg) for plg in plugin_service.plugins.values()
+                 if plg.path.startswith('plugins.endfield')}
+    subscribers = [sub for subs in by_plugin.values() for sub in subs]
+    # Plugin identity: the gate and the usage recorder key on the second path segment.
+    for sub in subscribers:
+        assert sub.callable_target.__module__.startswith('plugins.endfield.'), sub.callable_target
+    assert {subscriber_plugin(sub) for sub in subscribers} == {'endfield'}, subscribers
+    # Only handlers.py registers; importing the feature modules registers nothing twice.
+    assert {path for path, subs in by_plugin.items() if subs} == {'plugins.endfield.handlers'}, by_plugin
+    names = [str(c.name) for c in command_manager.get_commands()
+             if str(c.name) in ENDFIELD_COMMANDS]
+    assert sorted(names) == ENDFIELD_COMMANDS, names
+    return sorted(f'{s.callable_target.__module__}.{s.callable_target.__name__}' for s in subscribers)
+
+async def check_endfield_identity_gate_and_reload():
+    from arclet.entari import Entari, load_plugin
+    from arclet.entari.plugin import unload_plugin_async
+    from otae_bot.command_usage.recorder import resolve_command
+    from otae_bot.hypergryph.attendance_registry import registry
+    before = endfield_registrations()
+    assert len(before) == 14, before
+    assert_attached('plugins.endfield', GroupFeatureGate, CommandUsageRecorder)
+
+    # Usage-stat labels: every root alias shows as /ef with the same sub-command labels.
+    def label(name, word):
+        result = SimpleNamespace(all_matched_args={'rest': (word,)} if word else {})
+        return resolve_command(SimpleNamespace(source=SimpleNamespace(name=name), result=result))
+    for name in ('终末地', 'endfield', 'ef', 'zmd'):
+        assert label(name, '') == ('/ef', '')
+        for word, expected in (('持有率', '持有率'), ('奖章', '奖章'), ('档案', '档案'), ('抽卡', '抽卡'),
+                               ('影拓', '影拓'), ('随机', '随机'), ('配装', '配装'), ('日常', '日常'),
+                               ('绑定', '绑定'), ('版本日历', '版本日历'), ('陈千语', '资料查询')):
+            assert label(name, word) == ('/ef', expected), (name, word, label(name, word))
+
+    # The group switch for endfield gates commands whose implementation is in a sub-module.
+    handlers = plugin_service.plugins['plugins.endfield.handlers'].module
+    for attr, module in ENDFIELD_FEATURE_MODULES.items():
+        assert getattr(handlers, attr, None) is None or getattr(handlers, attr).__module__ == module, attr
+        assert sys.modules[module].__dict__[attr].__module__ == module, (attr, module)
+    current = group_session()
+    scope = scope_from_event(current.account, current.event)
+    commands = {'/ef 奖章': '_handle_medal', '/ef 档案': '_handle_archive', '/ef 持有率': '_handle_ownership_stats',
+                '/ef 配装 陈千语': '_handle_loadout', '/zmd 随机': '_handle_random_wiki'}
+    mocks = {attr: AsyncMock() for attr in commands.values()}
+    with patch.multiple(handlers, **mocks):
+        feature_store.set_enabled(scope, 'endfield', False)
+        try:
+            for text in commands:
+                await run_command(current, text)
+                current.send.assert_not_awaited()
+            assert not any(mock.await_count for mock in mocks.values()), mocks
+        finally:
+            feature_store.set_enabled(scope, 'endfield', True)
+        for text, attr in commands.items():
+            await run_command(current, text)
+            assert mocks[attr].await_count == 1, (text, attr)
+
+    # Unload + reload restores the same registrations once, gated and counted.
+    with patch.object(Entari, 'current', return_value=app):
+        assert await unload_plugin_async('plugins.endfield')
+        await asyncio.sleep(.05)
+    assert not [p for p in plugin_service.plugins if p.startswith('plugins.endfield')]
+    assert registry.get('endfield') is None
+    assert load_plugin('plugins.endfield')
+    await asyncio.sleep(.05)
+    assert endfield_registrations() == before
+    assert_attached('plugins.endfield', GroupFeatureGate, CommandUsageRecorder)
+    assert registry.get('endfield') is not None
+    for name in ('endfield_ownership_refresh', 'endfield_ownership_catalog_refresh', 'endfield_announcement_reminders'):
+        assert name in timer._jobs, (name, sorted(timer._jobs))
+    reloaded = plugin_service.plugins['plugins.endfield.handlers'].module
+    current = group_session()
+    with patch.object(reloaded, '_handle_random_wiki', AsyncMock()) as random_wiki:
+        await run_command(current, '/zmd 随机')
+        random_wiki.assert_awaited_once()
+
+asyncio.get_event_loop().run_until_complete(check_endfield_identity_gate_and_reload())
 print('CONTRACT ' + json.dumps({'plugins': sorted(expected), 'jobs': jobs}, ensure_ascii=False))
 """
         with tempfile.TemporaryDirectory() as directory:

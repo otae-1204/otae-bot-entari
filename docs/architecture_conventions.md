@@ -104,7 +104,7 @@
 3. **每次提交前跑全量测试。** 提交说明里写通过数，以及仍然失败的是哪些已知用例。
 4. **改动收发消息路径必须实测。** 用测试账号在测试群里跑一遍，并且开着双向限制：只接收测试群的消息，只允许向测试群发送。单元测试通过不等于链路通。
 5. **实测发现的问题要补成单元测试**，再修。
-6. **已知不稳定的用例要登记**，不能默默重跑到通过为止。目前有五处：`test_hyw_retry`（与执行顺序有关，单独运行通过）、`test_bilibili_poller` 里的一个用例，`test_browser_render_queue` 和 `test_http_asset_broker` 里各一个计时用例（高负载时偶发），以及 `test_endfield_card_detail_cache.py` 里的 `test_interval_and_lock_waits_are_counted_separately`（计时）。
+6. **已知不稳定的用例要登记**，不能默默重跑到通过为止。目前有六处：`test_hyw_retry`（与执行顺序有关，单独运行通过）、`test_bilibili_poller` 里的一个用例，`test_browser_render_queue` 和 `test_http_asset_broker` 里各一个计时用例（高负载时偶发），`test_endfield_card_detail_cache.py` 里的 `test_interval_and_lock_waits_are_counted_separately`（计时），以及 `test_endfield_daily.py` 里的 `test_accounts_load_in_parallel_in_binding_order_and_fail_independently`（计时，要求 0.6 秒内完成，全量负载下偶发）。
 
 ## 10. 提交与分支
 

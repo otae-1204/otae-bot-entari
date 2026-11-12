@@ -107,9 +107,16 @@ tests/                         功能回归、结构约束、真实插件加载�
 管理命令位于 `plugins/group_manager/`；当前群权限核验由 `otae_bot/groups/permissions.py`
 提供，公告订阅复用同一套规则。用法见 [群内功能管理](group_features.md)。
 
-增加终末地功能时，将模型、解析/服务及绘图放入对应业务域，在 `handlers.py`
-接入命令与交互。涉及静态资料转换时优先使用 `catalog/views`，
-无需为了转换一份数据引入账号客户端或事件注册。
+增加终末地功能时，将模型、解析/服务及绘图放入对应业务域。终末地对外仍是一个插件
+（目录名 `endfield`、一个功能开关、一份指令统计）：`plugins/endfield/handlers.py` 只保留
+`/ef` 与四个快捷指令的注册、`_handle_command` / `_handle_personal_command` 派发、签到能力登记和
+启动/清理钩子；各子指令的实现放在所属子包的 `handlers.py`（`catalog`、`stages`、`calendar`、
+`account`（另有 `account/binding.py`、`account/challenge/handlers.py`）、`gacha`、`usage`、
+`ownership`、`medals`、`archives`）。这些模块不注册任何事件，由派发层 import 调用。
+共享实例在 `state.py`（各 service、账号库、快照库，只此一份），进程内缓存与素材代次在
+`caches.py`，图片/合并转发等回复辅助在 `replies.py`。测试里 patch 某个名字时，要 patch
+实际查找它的模块（通常是被测函数所在的功能模块），而不是 `handlers`。
+涉及静态资料转换时优先使用 `catalog/views`，无需为了转换一份数据引入账号客户端或事件注册。
 
 跨游戏功能通过 `otae_bot` 下的注册表解耦，而不是在插件之间互相导入 `handlers`：
 `/ak 签到` 与 `/ef 签到` 签完本游戏后，只调用 `otae_bot.hypergryph.attendance_registry` 里另一款
