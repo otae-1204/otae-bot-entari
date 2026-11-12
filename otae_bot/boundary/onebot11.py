@@ -12,7 +12,9 @@ against LLBot 8.3.2:
   extra API calls per message;
 - message decoding: a quote whose ``get_msg`` fails stays a bare ``<quote id/>`` instead
   of turning the whole event INTERNAL, and merged forwards become standard
-  ``<message forward id=resid>``, expanded only inside a quote.
+  ``<message forward id=resid>``, expanded only inside a quote;
+- ``request.group.add`` (someone asks to join) is a ``guild-member-request``, not the
+  stock ``guild-member-added``.
 """
 
 from __future__ import annotations
@@ -27,6 +29,7 @@ from satori.adapters.onebot11 import OneBot11ForwardAdapter, OneBot11ForwardConf
 from satori.adapters.onebot11 import api as stock_api
 from satori.adapters.onebot11 import message as stock_message
 from satori.adapters.onebot11.events import message as stock_message_events
+from satori.adapters.onebot11.events import request as stock_request_events
 from satori.adapters.onebot11.events.base import events as stock_events
 from satori.adapters.onebot11.utils import (
     GROUP_AVATAR_URL,
@@ -34,6 +37,7 @@ from satori.adapters.onebot11.utils import (
     USER_AVATAR_URL,
 )
 from satori.element import Author, Element, Message, Quote
+from satori.exception import ActionFailed
 from satori.model import (
     Channel,
     ChannelType,
@@ -46,6 +50,7 @@ from satori.model import (
     PageResult,
     User,
 )
+from satori.parser import escape
 from satori.server import Request
 
 __all__ = ["OneBot11ForwardConfig", "OneBotBoundaryAdapter", "decode", "decode_elements"]
@@ -185,13 +190,51 @@ async def _group_message_for(login: Login, net: Any, raw: dict) -> Event | None:
     return await stock_message_events.group(login, net, raw)
 
 
-def _install_decode() -> None:
+async def _group_add_request(login: Login, net: Any, raw: dict) -> Event:
+    """``request.group.add``: a user asks to join a group the bot manages.
+
+    The stock handler shares one function with ``request.group.invite`` and emits
+    GUILD_MEMBER_ADDED for anything but an invite, so the request looks like a join that
+    already happened and nobody can approve it. ``message.id`` is the OneBot flag that
+    ``guild.member.approve`` hands back to ``set_group_add_request``.
+    """
+    group_id, user_id = str(raw["group_id"]), str(raw["user_id"])
+    # Names only decorate the request; losing them must not lose the request.
+    try:
+        name = (await net.call_api("get_group_info", {"group_id": raw["group_id"]}) or {}).get("group_name")
+    except ActionFailed:
+        name = None
+    try:
+        nickname = (await net.call_api("get_stranger_info", {"user_id": raw["user_id"]}) or {}).get("nickname")
+    except ActionFailed:
+        nickname = None
+    user = User(user_id, nickname, avatar=USER_AVATAR_URL.format(uin=user_id))
+    return Event(
+        EventType.GUILD_MEMBER_REQUEST,
+        datetime.fromtimestamp(raw["time"]),
+        login,
+        user=user,
+        member=Member(user, avatar=user.avatar),
+        guild=Guild(group_id, name, avatar=GROUP_AVATAR_URL.format(group=group_id)),
+        channel=Channel(group_id, ChannelType.TEXT, name),
+        message=MessageObject(str(raw["flag"]), escape(str(raw.get("comment") or ""))),
+    )
+
+
+async def _group_add_request_for(login: Login, net: Any, raw: dict) -> Event:
+    if isinstance(net, OneBotBoundaryAdapter):
+        return await _group_add_request(login, net, raw)
+    return await stock_request_events.request_group_invite(login, net, raw)
+
+
+def _install_handlers() -> None:
     # Stock event handlers and message.get bind ``decode`` at import; the only hook
     # short of copying them is rebinding that name. Other adapters keep stock decoding.
     for module in (stock_api, stock_message_events):
         module.decode = _decode_for  # type: ignore[attr-defined]
     for name in _GROUP_MESSAGE_EVENTS:
         stock_events[name] = _group_message_for
+    stock_events["request.group.add"] = _group_add_request_for
 
 
 # ── adapter ──
@@ -226,7 +269,7 @@ class OneBotBoundaryAdapter(OneBot11ForwardAdapter):
     # ``config`` is the sole annotation of ``__init__``.
     def __init__(self, config: OneBot11ForwardConfig):
         super().__init__(config)
-        _install_decode()
+        _install_handlers()
         self._stock_message_list = self.routes[Api.MESSAGE_LIST.value]
         self.route(Api.GUILD_MEMBER_GET)(self._guild_member_get)
         self.route(Api.GUILD_MEMBER_LIST)(self._guild_member_list)

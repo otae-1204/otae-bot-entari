@@ -387,6 +387,85 @@ class ReplyDecodeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(str(Quote("2", content=[Text("x")])), '<quote id="2">x</quote>')
 
 
+LOGIN = Login(sn=0, status=LoginStatus.ONLINE, adapter="onebot", platform="qq-client", user=User(SELF))
+
+
+def request_event(sub_type: str | None, **extra) -> dict:
+    """LLBot 8.3.2 request payloads (OB11GroupRequest*Event / OB11FriendRequestEvent)."""
+    raw = {"time": 1762900000, "self_id": int(SELF), "post_type": "request", "user_id": 10001,
+           "comment": "问题：暗号\n答案：<b>&</b>", "flag": "183643844|1762900000123|1|0"}
+    if sub_type is None:
+        raw |= {"request_type": "friend", "flag": "u_abc|1762900000", "via": "QQ号查找"}
+    else:
+        raw |= {"request_type": "group", "sub_type": sub_type, "group_id": int(GROUP)}
+    return raw | extra
+
+
+class RequestEventTests(unittest.IsolatedAsyncioTestCase):
+    def _adapter(self, **handlers):
+        return make_adapter(get_group_info={"group_id": int(GROUP), "group_name": "测试群"},
+                            get_stranger_info={"user_id": 10001, "nickname": "alice"}, **handlers)
+
+    async def test_join_request_is_a_guild_member_request_carrying_the_flag(self):
+        adapter, _ = self._adapter()
+        event = await events["request.group.add"](LOGIN, adapter, request_event("add", invitor_id=0))
+        self.assertEqual(event.type, "guild-member-request")
+        self.assertEqual((event.guild.id, event.guild.name), (GROUP, "测试群"))
+        self.assertEqual((event.user.id, event.user.name), ("10001", "alice"))
+        self.assertEqual(event.member.user.id, "10001")
+        self.assertEqual(event.message.id, "183643844|1762900000123|1|0")
+        self.assertEqual(event.message.content, "问题：暗号\n答案：&lt;b&gt;&amp;&lt;/b&gt;")
+        self.assertEqual([e.text for e in event.message.message], ["问题：暗号\n答案：<b>&</b>"])
+
+    async def test_join_request_survives_missing_names_and_comment(self):
+        adapter, _ = make_adapter()  # get_group_info / get_stranger_info both fail
+        event = await events["request.group.add"](LOGIN, adapter, request_event("add", comment=""))
+        self.assertEqual(event.type, "guild-member-request")
+        self.assertEqual((event.guild.id, event.guild.name, event.user.id), (GROUP, None, "10001"))
+        self.assertEqual((event.message.id, event.message.content), ("183643844|1762900000123|1|0", ""))
+
+    async def test_invite_and_friend_requests_keep_stock_mapping(self):
+        adapter, _ = self._adapter()
+        invite = await events["request.group.invite"](LOGIN, adapter, request_event("invite", source_group_id=0))
+        self.assertEqual(invite.type, "guild-request")
+        self.assertEqual((invite.guild.id, invite.guild.name, invite.user.id), (GROUP, "测试群", "10001"))
+        self.assertEqual(invite.message.id, "183643844|1762900000123|1|0")
+        friend = await events["request.friend"](LOGIN, adapter, request_event(None))
+        self.assertEqual(friend.type, "friend-request")
+        self.assertEqual((friend.user.id, friend.message.id), ("10001", "u_abc|1762900000"))
+
+    async def test_other_adapters_keep_the_stock_join_mapping(self):
+        fake = FakeOneBot(get_group_info={"group_name": "g"}, get_stranger_info={"nickname": "n"})
+        net = Mock(call_api=fake)
+        event = await events["request.group.add"](LOGIN, net, request_event("add"))
+        self.assertEqual(event.type, "guild-member-added")
+
+    async def test_approve_routes_pass_the_flag_back(self):
+        adapter, fake = make_adapter(set_group_add_request=lambda _: None, set_friend_add_request=lambda _: None)
+        flag = "183643844|1762900000123|1|0"
+        await adapter.routes[Api.GUILD_MEMBER_APPROVE.value](
+            request(Api.GUILD_MEMBER_APPROVE, {"message_id": flag, "approve": True, "comment": ""}))
+        await adapter.routes[Api.GUILD_APPROVE.value](
+            request(Api.GUILD_APPROVE, {"message_id": flag, "approve": False, "comment": "no"}))
+        await adapter.routes[Api.FRIEND_APPROVE.value](
+            request(Api.FRIEND_APPROVE, {"message_id": "u_abc|1762900000", "approve": True, "comment": ""}))
+        self.assertEqual(fake.calls, [
+            ("set_group_add_request", {"flag": flag, "sub_type": "add", "approve": True, "reason": ""}),
+            ("set_group_add_request", {"flag": flag, "sub_type": "invite", "approve": False, "reason": "no"}),
+            ("set_friend_add_request", {"flag": "u_abc|1762900000", "approve": True}),
+        ])
+
+    async def test_request_handler_reads_the_flag_from_the_boundary_event(self):
+        from arclet.entari.event.base import GuildMemberRequestEvent
+
+        from plugins.request_handler import handlers
+
+        adapter, _ = self._adapter()
+        raw_event = await events["request.group.add"](LOGIN, adapter, request_event("add"))
+        event = GuildMemberRequestEvent(Mock(), raw_event)
+        self.assertEqual(handlers._request_id(event), "183643844|1762900000123|1|0")
+
+
 class WiringTests(unittest.TestCase):
     def _create_app(self, satori: list, onebot: list):
         names = ("install_message_log_redaction", "install_recent_alerts", "install_quote_fetch_fallback",
