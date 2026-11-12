@@ -142,25 +142,34 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(scope_for(session), ("qq", "bot", "g", "c", "u"))
 
 
-class ExpansionTests(unittest.IsolatedAsyncioTestCase):
-    async def test_json_and_xml_cards_keep_public_fields_only(self):
-        from plugins.hyw.messages import expand_special
+def _elements(content: str):
+    from satori.element import transform
+    from satori.parser import parse
 
-        class Element:
-            def __init__(self, tag, attrs):
-                self.tag = tag
-                self.attrs = attrs
-                self.children = []
+    return transform(parse(content))
+
+
+def _forward(*nodes: str, resid: str = "resid-1") -> str:
+    return f'<message id="{resid}" forward="true">' + "".join(f"<message>{node}</message>" for node in nodes) + "</message>"
+
+
+def _node(uid: str, name: str, body: str) -> str:
+    return f'<author id="{uid}" name="{name}"/>{body}'
+
+
+class ExpansionTests(unittest.TestCase):
+    def test_json_and_xml_cards_keep_public_fields_only(self):
+        from xml.sax.saxutils import quoteattr
+
+        from plugins.hyw.messages import expand_special
 
         payload = json.dumps({
             "token": "secret-token",
             "meta": {"title": "夜航", "desc": "一张单曲", "cover": "https://example.com/cover.jpg"},
         })
         xml = '<msg title="分享" url="https://example.com/a"><image src="https://example.com/b.png"/></msg>'
-        text, images, rich = await expand_special(None, [
-            Element("json", {"data": payload}),
-            Element("xml", {"data": xml}),
-        ])
+        text, images, rich = expand_special(_elements(
+            f"<onebot:json data={quoteattr(payload)}/><onebot:xml data={quoteattr(xml)}/>"))
         self.assertTrue(rich)
         self.assertIn("夜航", text)
         self.assertIn("一张单曲", text)
@@ -169,38 +178,27 @@ class ExpansionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("https://example.com/a", text)
         self.assertIn("https://example.com/b.png", images)
 
-    async def test_forward_uses_only_the_given_id(self):
-        from types import SimpleNamespace
+    def test_llonebot_ark_is_read_like_onebot_json(self):
+        from xml.sax.saxutils import quoteattr
 
         from plugins.hyw.messages import expand_special
 
-        action = AsyncMock(return_value={"messages": [{
-            "sender": {"nickname": "甲", "user_id": "1"},
-            "time": 0,
-            "message": [
-                {"type": "text", "data": {"text": "记录正文"}},
-                {"type": "image", "data": {"url": "https://example.com/in.png"}},
-            ],
-        }]})
-
-        class Element:
-            tag = "forward"
-            attrs = {"id": "fwd-1"}
-            children = []
-
-        session = SimpleNamespace(account=SimpleNamespace(self_id="bot"))
-        with patch("otae_bot.adapters.onebot.call_account_action", action):
-            text, images, rich = await expand_special(session, [Element()])
-        action.assert_awaited_once_with(session.account, "get_forward_msg", id="fwd-1")
+        payload = json.dumps({"meta": {"news": {"title": "群分享", "jumpUrl": "https://example.com/n"}}})
+        elements = _elements(f"<llonebot:ark data={quoteattr(payload)}/>")
+        text, _, rich = expand_special(elements)
         self.assertTrue(rich)
-        self.assertIn("记录正文", text)
-        self.assertIn("甲", text)
-        self.assertEqual(images, ["https://example.com/in.png"])
+        self.assertIn("群分享", text)
+        self.assertIn("https://example.com/n", text)
 
-    async def test_satori_forward_with_children_is_read_in_place(self):
+    def test_messages_without_cards_or_forwards_add_nothing(self):
+        from plugins.hyw.messages import expand_special
+
+        self.assertEqual(expand_special(_elements('普通消息<img src="https://example.com/a.png"/><at id="1"/>')),
+                         ("", [], False))
+
+    def test_satori_forward_with_children_is_read_in_place(self):
         from satori import Author, Image, Text
-        from satori.element import Message, transform
-        from satori.parser import parse
+        from satori.element import Message
 
         from plugins.hyw.messages import expand_special
 
@@ -208,47 +206,76 @@ class ExpansionTests(unittest.IsolatedAsyncioTestCase):
             Message(content=[Author("1", "甲"), Text("第一句"), Image(src="https://example.com/a.png")]),
             Message(content=[Author("2", "乙"), Text("第二句")]),
         ])
-        parsed = transform(parse(
-            '<message forward="true"><message><author id="1" name="甲"/>第一句<img src="https://example.com/a.png"/>'
-            '</message><message><author id="2" name="乙"/>第二句</message></message>'
-        ))[0]
-        session = AsyncMock()
-        action = AsyncMock()
-        with patch("otae_bot.adapters.onebot.call_account_action", action):
-            for element in (built, parsed):
-                text, images, rich = await expand_special(session, [element])
-                self.assertTrue(rich)
-                self.assertIn("【聊天记录 开始", text)
-                self.assertLess(text.index("甲（1）"), text.index("第一句"))
-                self.assertLess(text.index("第一句"), text.index("乙（2）"))
-                self.assertIn("第二句", text)
-                self.assertEqual(images, ["https://example.com/a.png"])
-        action.assert_not_awaited()
+        parsed = _elements(_forward(_node("1", "甲", '第一句<img src="https://example.com/a.png"/>'),
+                                    _node("2", "乙", "第二句")))[0]
+        for element in (built, parsed):
+            text, images, rich = expand_special([element])
+            self.assertTrue(rich)
+            self.assertIn("【聊天记录 开始", text)
+            self.assertLess(text.index("甲（1）"), text.index("第一句"))
+            self.assertLess(text.index("第一句"), text.index("乙（2）"))
+            self.assertIn("第二句", text)
+            self.assertEqual(images, ["https://example.com/a.png"])
 
-    async def test_satori_forward_without_children_is_fetched_by_id(self):
+    def test_nested_forwards_and_their_images_are_read_in_order(self):
+        from plugins.hyw.messages import expand_special
+
+        inner = _forward(_node("3", "丙", '里层<img src="https://example.com/inner.png"/>'), resid="resid-2")
+        text, images, _ = expand_special(_elements(_forward(
+            _node("1", "甲", '外层<img src="https://example.com/outer.png"/>'),
+            _node("2", "乙", inner),
+        )))
+        self.assertEqual(text.count("【聊天记录 开始"), 2)
+        self.assertLess(text.index("外层"), text.index("丙（3）"))
+        self.assertLess(text.index("丙（3）"), text.index("里层"))
+        self.assertEqual(images, ["https://example.com/outer.png", "https://example.com/inner.png"])
+
+    def test_forward_without_children_is_left_unread(self):
         from satori.element import Message
 
         from plugins.hyw.messages import expand_special
 
-        session = AsyncMock()
-        action = AsyncMock(return_value={"messages": [{"sender": {"nickname": "丙"}, "content": [
-            {"type": "text", "data": {"text": "按 id 取回"}}]}]})
-        with patch("otae_bot.adapters.onebot.call_account_action", action):
-            text, _, rich = await expand_special(session, [Message("res-1", forward=True)])
-        action.assert_awaited_once_with(session.account, "get_forward_msg", id="res-1")
-        self.assertTrue(rich)
-        self.assertIn("按 id 取回", text)
+        for element in (Message("res-1", forward=True), _elements('<message id="res-1" forward="true"/>')[0]):
+            text, images, rich = expand_special([element])
+            self.assertTrue(rich)
+            self.assertIn("聊天记录读取失败", text)
+            self.assertEqual(images, [])
+
+    def test_limits_apply_to_inline_forwards(self):
+        from plugins.hyw import messages
+
+        deep = "最深处"
+        for level in range(messages._MAX_DEPTH + 1):
+            deep = _forward(_node(str(level), f"层{level}", deep), resid=f"r{level}")
+        text, _, _ = messages.expand_special(_elements(deep))
+        self.assertIn("嵌套过深", text)
+        self.assertNotIn("最深处", text)
+
+        many_images = _forward(*(_node("1", "甲", f'<img src="https://example.com/{i}.png"/>') for i in range(25)))
+        text, images, _ = messages.expand_special(_elements(many_images))
+        self.assertEqual(len(images), messages._MAX_IMAGES)
+        self.assertIn("展开图片达到 20 张上限", text)
+
+        with patch.object(messages, "_MAX_MESSAGES", 3):
+            text, _, _ = messages.expand_special(_elements(_forward(*(_node("1", "甲", f"第{i}条") for i in range(5)))))
+        self.assertIn("第2条", text)
+        self.assertNotIn("第3条", text)
+        self.assertIn("展开消息数量达到", text)
+
+        with patch.object(messages, "_MAX_TEXT", 200):
+            text, _, _ = messages.expand_special(_elements(_forward(_node("1", "甲", "长" * 500))))
+        self.assertIn("展开文本达到上限", text)
+        self.assertLess(len(text.encode()), 400)
 
     def test_xml_entity_declaration_is_not_parsed(self):
-        import asyncio
         from plugins.hyw.messages import expand_special
 
         class Element:
-            tag = "xml"
+            tag = "onebot:xml"
             attrs = {"data": '<!DOCTYPE foo [<!ENTITY x "y">]><msg>&x;</msg>'}
             children = []
 
-        text, images, rich = asyncio.run(expand_special(None, [Element()]))
+        text, images, rich = expand_special([Element()])
         self.assertTrue(rich)
         self.assertIn("实体声明", text)
         self.assertEqual(images, [])
@@ -259,294 +286,128 @@ def _args(*content):
 
 
 QUOTE_ID = "2|875241970|3969610"
-FORWARD = {"status": "ok", "retcode": 0, "data": {"messages": [
-    {"sender": {"nickname": "甲", "user_id": "1"}, "time": 0, "content": [
-        {"type": "text", "data": {"text": "转发正文"}},
-        {"type": "image", "data": {"url": "https://example.com/f.png"}},
-    ]},
-]}}
+QUOTED_FORWARD = '<author id="9" name="转发人"/>' + _forward(
+    _node("1", "甲", '转发正文<img src="https://example.com/f.png"/>'),
+    _node("2", "乙", "第二条"),
+)
 
 
-def _msg(seq, *segments, message_id=None):
-    return {"message_id": message_id or seq * 7, "message_seq": seq, "message": list(segments)}
+class QuoteTests(unittest.IsolatedAsyncioTestCase):
+    """/q 引用：内容随事件送达（边界适配器展开的合并转发也在其中），不再另行查询。"""
 
-
-def _text(value):
-    return {"type": "text", "data": {"text": value}}
-
-
-def _history(*messages, as_list=False):
-    """LLBot get_group_msg_history: no real_id/real_seq, matched on message_seq only."""
-    return {"status": "ok", "retcode": 0, "data": list(messages) if as_list else {"messages": list(messages)}}
-
-
-TARGET_FORWARD = _msg(3969610, {"type": "forward", "data": {"id": "resid-1"}}, message_id=537779999)
-
-
-class SatoriIdTests(unittest.TestCase):
-    def test_group_private_and_invalid_ids(self):
-        from plugins.hyw.messages import parse_satori_id
-
-        self.assertEqual(parse_satori_id("2|875241970|3969610"), (2, "875241970", 3969610))
-        self.assertEqual(parse_satori_id(" 1|u_AbC-123|55 "), (1, "u_AbC-123", 55))
-        for bad in (None, "", "fwd-1", "537779999", "2|875241970", "2|875241970|", "2|875241970|abc",
-                    "x|1|2", "2||3", "2|1|3|4", "２|875241970|3969610", "2|875 241970|3", "2|1|３"):
-            with self.subTest(bad=bad):
-                self.assertIsNone(parse_satori_id(bad))
-
-
-class FakeLLBot:
-    """Stands in for call_account_action: one answer (or exception) per OneBot action."""
-
-    def __init__(self, **answers):
-        self.answers = answers
-        self.calls = []
-
-    async def __call__(self, account, action, **params):
-        self.calls.append((account, action, params))
-        answer = self.answers.get(action)
-        if answer is None:
-            from otae_bot.adapters.onebot import OneBotUnavailable
-            raise OneBotUnavailable(f"{action} not mocked")
-        if isinstance(answer, BaseException):
-            raise answer
-        return answer
-
-    def actions(self):
-        return [(action, params) for _, action, params in self.calls]
-
-
-class UnfetchedQuoteTests(unittest.IsolatedAsyncioTestCase):
-    """Entari 取不到引用（LLBot message.get 500 消息为空）时 reply 为空，event.quote 只剩 Satori id。"""
-
-    HISTORY_CALL = ("get_group_msg_history", {"group_id": 875241970, "message_seq": 3969610, "count": 10})
-
-    def _bot(self, **answers):
-        bot = FakeLLBot(**answers)
-        patcher = patch("otae_bot.adapters.onebot.call_account_action", bot)
-        patcher.start()
-        self.addCleanup(patcher.stop)
-        return bot
-
-    def _session(self, quote_id=QUOTE_ID, channel="875241970", user="otae"):
+    def _session(self, quote_id=QUOTE_ID, *, content=None, reply=True):
         from types import SimpleNamespace
 
-        from satori import Quote
+        from satori import MessageObject, Quote
 
         session = AsyncMock()
-        session.reply = None
         session.send = AsyncMock(return_value=[])
-        session.account = SimpleNamespace(platform="qq", self_id="bot", config=SimpleNamespace(token="SATORI-SECRET"))
+        session.account = SimpleNamespace(platform="qq", self_id="bot")
+        session.reply = None
+        if content is None:
+            quote = Quote(quote_id)
+        elif reply:
+            quote = Quote(quote_id)
+            session.reply = SimpleNamespace(quote=quote, origin=MessageObject(quote_id, content))
+        else:  # Entari had no reply although the quote carries content
+            quote = Quote(quote_id, content=_elements(content))
         session.event = SimpleNamespace(
-            quote=Quote(quote_id), channel=SimpleNamespace(id=channel),
-            guild=SimpleNamespace(id=channel), user=SimpleNamespace(id=user),
+            quote=quote, channel=SimpleNamespace(id="875241970"),
+            guild=SimpleNamespace(id="875241970"), user=SimpleNamespace(id="otae"),
         )
         return session
 
-    async def test_history_is_matched_on_message_seq_not_position(self):
-        from plugins.hyw.messages import expand_quote
-
-        bot = self._bot(get_group_msg_history=_history(
-            _msg(3969601, _text("更早的消息")),
-            _msg(3969610, _text("目标消息"), {"type": "image", "data": {"url": "https://example.com/m.png"}}),
-            _msg(3969612, _text("更晚的消息")),
-        ))
-        session = self._session()
-        failures = []
-        text, images, rich = await expand_quote(session, QUOTE_ID, failures)
-        self.assertEqual(text, "目标消息")
-        self.assertEqual(images, ["https://example.com/m.png"])
-        self.assertTrue(rich)
-        self.assertEqual(bot.actions(), [self.HISTORY_CALL])
-        self.assertIs(bot.calls[0][0], session.account)
-        self.assertEqual(failures, [])
-
-    async def test_history_data_may_be_the_list_itself(self):
-        from plugins.hyw.messages import expand_quote
-
-        self._bot(get_group_msg_history=_history(_msg(3969609, _text("前一条")), _msg(3969610, _text("目标")), as_list=True))
-        text, images, rich = await expand_quote(self._session(), QUOTE_ID, [])
-        self.assertEqual((text, images, rich), ("目标", [], False))
-
-    async def test_no_matching_seq_is_unavailable(self):
-        from plugins.hyw.messages import QuoteUnavailable, expand_quote
-
-        bot = self._bot(get_group_msg_history=_history(_msg(3969608, _text("a")), _msg(3969609, _text("b"))))
-        with self.assertRaises(QuoteUnavailable) as caught:
-            await expand_quote(self._session(), QUOTE_ID, [])
-        self.assertEqual(caught.exception.reason, "get_group_msg_history 返回 2 条，没有 message_seq=3969610")
-        self.assertEqual(bot.actions(), [self.HISTORY_CALL])
-
-    async def test_a_forward_segment_is_expanded_by_its_resid(self):
-        from plugins.hyw.messages import expand_quote
-
-        bot = self._bot(get_group_msg_history=_history(_msg(3969609, _text("前一条")), TARGET_FORWARD), get_forward_msg=FORWARD)
-        text, images, rich = await expand_quote(self._session(), QUOTE_ID, [])
-        self.assertEqual(bot.actions(), [self.HISTORY_CALL, ("get_forward_msg", {"id": "resid-1"})])
-        self.assertIn("【聊天记录 开始", text)
-        self.assertIn("【消息 1】\n发送者：甲（1）", text)
-        self.assertIn("转发正文", text)
-        self.assertNotIn("前一条", text)
-        self.assertEqual(images, ["https://example.com/f.png"])
-        self.assertTrue(rich)
-
-    async def test_a_message_without_forward_is_used_directly(self):
-        from plugins.hyw.messages import expand_quote
-
-        bot = self._bot(get_group_msg_history=_history(_msg(3969610, _text("普通"), _text("消息"))))
-        text, images, _ = await expand_quote(self._session(), QUOTE_ID, [])
-        self.assertEqual((text, images), ("普通消息", []))
-        self.assertEqual(bot.actions(), [self.HISTORY_CALL])
-
-    async def test_a_private_quote_reads_the_friend_history(self):
-        from plugins.hyw.messages import expand_quote
-
-        bot = self._bot(get_friend_msg_history=_history(_msg(77, _text("私聊原文"))))
-        session = self._session(quote_id="1|u_AbC123|77", channel="private:123456", user="123456")
-        text, _, _ = await expand_quote(session, "1|u_AbC123|77", [])
-        self.assertEqual(text, "私聊原文")
-        self.assertEqual(bot.actions(), [("get_friend_msg_history", {"user_id": 123456, "message_seq": 77, "count": 10})])
-
-    async def test_unusable_ids_are_skipped_without_any_call(self):
-        from plugins.hyw.messages import QuoteUnavailable, expand_quote
-
-        bot = self._bot()
-        cases = {
-            "fwd-1": "引用 id 不是 chatType|peerUid|msgSeq 格式",
-            "537779999": "引用 id 不是 chatType|peerUid|msgSeq 格式",
-            "100|875241970|1": "引用 id 的会话无法识别：chatType=100",
-            "2|u_group|1": "引用 id 的会话无法识别：chatType=2",
-            "1|u_AbC123|77": "引用 id 的会话无法识别：chatType=1",  # 私聊但找不到对方 QQ 号
-        }
-        for quote_id, reason in cases.items():
-            with self.subTest(quote_id=quote_id), self.assertRaises(QuoteUnavailable) as caught:
-                await expand_quote(self._session(quote_id, channel="c", user="u"), quote_id, [])
-            self.assertEqual(caught.exception.reason, reason)
-        self.assertEqual(bot.calls, [])
-
-    async def test_q_gets_the_forward_as_context_without_entari_reply(self):
-        from satori import Text
-
+    async def _ask(self, session, *content):
         from plugins.hyw import handlers
 
-        self._bot(get_group_msg_history=_history(_msg(3969600, _text("别的")), TARGET_FORWARD), get_forward_msg=FORWARD)
-        session = self._session()
         request = AsyncMock()
         with patch.object(handlers.HywConfig, "from_env", return_value=_config()), \
              patch.object(handlers, "run_request", request), patch.object(handlers, "logger") as log:
-            await handle_hyw(session, _args(Text("总结一下")))
+            await handle_hyw(session, _args(*content))
+        return request, log
+
+    async def test_q_gets_a_quoted_forward_from_the_event(self):
+        from satori import Text
+
+        request, log = await self._ask(self._session(content=QUOTED_FORWARD), Text("总结一下"))
         request.assert_awaited_once()
         _, _, scope, text, images, prior = request.await_args.args
         self.assertEqual(scope, ("qq", "bot", "875241970", "875241970", "otae"))
         self.assertTrue(text.startswith("总结一下\n\n[引用消息]\n"), text)
-        self.assertIn("转发正文", text)
+        self.assertIn("【消息 1】\n发送者：甲（1）", text)
+        self.assertLess(text.index("转发正文"), text.index("乙（2）"))
         self.assertEqual(images, ["https://example.com/f.png"])
         self.assertEqual(prior, [])
         self.assertIs(request.await_args.kwargs["rich"], True)
         log.warning.assert_not_called()
 
-    async def test_q_still_runs_when_the_account_is_not_in_the_group(self):
+    async def test_quote_content_is_read_even_without_an_entari_reply(self):
         from satori import Text
 
-        from otae_bot.adapters.onebot import OneBotUnavailable
-        from plugins.hyw import handlers
+        request, log = await self._ask(self._session(content=QUOTED_FORWARD, reply=False), Text("总结一下"))
+        self.assertIn("转发正文", request.await_args.args[3])
+        self.assertEqual(request.await_args.args[4], ["https://example.com/f.png"])
+        log.warning.assert_not_called()
 
-        bot = self._bot(get_group_msg_history=OneBotUnavailable(
-            "satori http://127.0.0.1:5500/v1/internal/onebot11/get_group_msg_history: "
-            "HTTP 500: Cannot read properties of undefined (reading 'start')", answered=True))
-        session = self._session()
-        request = AsyncMock()
-        with patch.object(handlers.HywConfig, "from_env", return_value=_config()), \
-             patch.object(handlers, "run_request", request), patch.object(handlers, "logger") as log:
-            await handle_hyw(session, _args(Text("总结一下")))
-        request.assert_awaited_once()
-        self.assertEqual(request.await_args.args[3:], ("总结一下", [], []))
-        self.assertIs(request.await_args.kwargs["rich"], False)
-        self.assertEqual(bot.actions(), [self.HISTORY_CALL])
-        template, channel, quote_id, reason, failures = log.warning.call_args.args
-        self.assertIn("quoted message unavailable", template)
-        self.assertEqual((channel, quote_id), ("875241970", QUOTE_ID))
-        self.assertEqual(reason, "get_group_msg_history 报错，收到事件的号可能不在群 875241970")
-        self.assertEqual(len(failures), 1)
-        self.assertIn("Cannot read properties of undefined (reading 'start')", failures[0])
-        self.assertNotIn("SATORI-SECRET", str(log.warning.call_args))
-
-    async def test_the_warning_names_why_the_quote_was_not_read(self):
+    async def test_a_quoted_plain_message_is_used_directly(self):
         from satori import Text
 
-        from otae_bot.adapters.onebot import OneBotUnavailable
-        from plugins.hyw import handlers
+        request, _ = await self._ask(
+            self._session(content='<author id="9"/>普通消息<img src="https://example.com/m.png"/>'), Text("问"))
+        self.assertEqual(request.await_args.args[3:5], ("问\n\n[引用消息]\n普通消息", ["https://example.com/m.png"]))
+
+    async def test_unread_quotes_answer_without_context_and_say_why(self):
+        from satori import Text
 
         cases = [
-            ("fwd-1", {}, "引用 id 不是 chatType|peerUid|msgSeq 格式"),
-            (QUOTE_ID, {"get_group_msg_history": _history(_msg(1, _text("x")))},
-             "get_group_msg_history 返回 1 条，没有 message_seq=3969610"),
-            (QUOTE_ID, {"get_group_msg_history": _history(TARGET_FORWARD),
-                        "get_forward_msg": OneBotUnavailable("retcode=1200: unexpected end of file", answered=True)},
-             "合并转发展开失败（get_forward_msg resid-1）"),
-            (QUOTE_ID, {"get_group_msg_history": _history(_msg(3969610, {"type": "forward", "data": {}}))},
-             "合并转发展开失败（get_forward_msg 缺少 resid）"),
-            (QUOTE_ID, {"get_group_msg_history": OneBotUnavailable("没有可用通道：账号没配 onebot_url，Satori 连接也没有地址")},
-             "通道不可用，get_group_msg_history 没有送达"),
-            (QUOTE_ID, {"get_group_msg_history": _history(_msg(3969610, {"type": "face", "data": {"id": "1"}}))},
-             "引用的消息里没有可读的文字、图片或转发"),
-            (QUOTE_ID, {"get_group_msg_history": {"status": "ok", "data": None}}, "get_group_msg_history 返回格式无效"),
+            (self._session(content='<author id="9"/><message id="resid-1" forward="true"/>'), "引用的合并转发没有随事件展开"),
+            (self._session(content='<message id="resid-1" forward="true"/>'), "引用的合并转发没有随事件展开"),
+            (self._session(), "引用的消息没有随事件送达"),
+            (self._session(content='<author id="9"/><message id="resid-1" forward="true"/>', reply=False),
+             "引用的合并转发没有随事件展开"),
         ]
-        for quote_id, answers, reason in cases:
+        for session, reason in cases:
             with self.subTest(reason=reason):
-                bot = FakeLLBot(**answers)
-                request = AsyncMock()
-                with patch("otae_bot.adapters.onebot.call_account_action", bot), \
-                     patch.object(handlers.HywConfig, "from_env", return_value=_config()), \
-                     patch.object(handlers, "run_request", request), patch.object(handlers, "logger") as log:
-                    await handle_hyw(self._session(quote_id), _args(Text("总结一下")))
-                self.assertEqual(request.await_args.args[3], "总结一下")
-                self.assertEqual(log.warning.call_args.args[3], reason)
+                request, log = await self._ask(session, Text("总结一下"))
+                request.assert_awaited_once()
+                self.assertEqual(request.await_args.args[3:], ("总结一下", [], []))
+                self.assertIs(request.await_args.kwargs["rich"], False)
+                template, channel, quote_id, logged = log.warning.call_args.args
+                self.assertIn("quoted message unavailable", template)
+                self.assertEqual((channel, quote_id, logged), ("875241970", QUOTE_ID, reason))
 
     async def test_an_unexpected_error_while_reading_still_answers(self):
         from satori import Text
 
         from plugins.hyw import handlers
 
-        request = AsyncMock()
-        with patch.object(handlers, "expand_quote", AsyncMock(side_effect=KeyError("broken"))), \
-             patch.object(handlers.HywConfig, "from_env", return_value=_config()), \
-             patch.object(handlers, "run_request", request), patch.object(handlers, "logger") as log:
-            await handle_hyw(self._session(), _args(Text("总结一下")))
+        # The first call reads the command's own content, the second the quote.
+        with patch.object(handlers, "expand_special", side_effect=[("", [], False), KeyError("broken")]):
+            request, log = await self._ask(self._session(content=QUOTED_FORWARD), Text("总结一下"))
         self.assertEqual(request.await_args.args[3], "总结一下")
         self.assertIn("读取出错", log.warning.call_args.args[3])
         self.assertIn("KeyError", log.warning.call_args.args[3])
 
     async def test_bare_q_on_an_unreadable_quote_asks_for_a_question(self):
-        from plugins.hyw import handlers
-
-        self._bot()
-        session = self._session()
-        request = AsyncMock()
-        with patch.object(handlers.HywConfig, "from_env", return_value=_config()), \
-             patch.object(handlers, "run_request", request), patch.object(handlers, "logger"):
-            await handle_hyw(session, _args())
-        request.assert_not_awaited()
-        self.assertIn("没能读取引用的消息", str(session.send.await_args.args[0]))
+        for session in (self._session(), self._session(content='<message id="resid-1" forward="true"/>')):
+            request, _ = await self._ask(session)
+            request.assert_not_awaited()
+            self.assertIn("没能读取引用的消息", str(session.send.await_args.args[0]))
 
     async def test_follow_up_on_an_own_answer_uses_the_quote_id(self):
         from satori import Text
 
         from plugins.hyw import handlers
 
-        bot = self._bot()
         session = self._session(quote_id="2|875241970|4000000")
         scope = handlers.scope_for(session)
         history = [{"role": "user", "content": "旧问题"}, {"role": "assistant", "content": "旧回答"}]
         handlers.history_store.put(scope, "2|875241970|4000000", history)
         self.addCleanup(handlers.history_store.clear, scope)
-        request = AsyncMock()
-        with patch.object(handlers.HywConfig, "from_env", return_value=_config()), \
-             patch.object(handlers, "run_request", request):
-            await handle_hyw(session, _args(Text("继续")))
+        request, log = await self._ask(session, Text("继续"))
         self.assertEqual(request.await_args.args[3], "继续")
         self.assertEqual(request.await_args.args[5], history)
-        self.assertEqual(bot.calls, [])
+        log.warning.assert_not_called()
 
     async def test_link_uses_the_quote_id(self):
         from plugins.hyw import handlers
@@ -558,110 +419,6 @@ class UnfetchedQuoteTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(handlers.sources.clear_sender, handlers.channel_for(scope), scope[4])
         await handlers.handle_link(session, _args())
         self.assertIn("https://example.com/s", str(session.send.await_args.args[0]))
-
-
-class QuoteChannelEndToEndTests(unittest.IsolatedAsyncioTestCase):
-    """引用合并转发发 /q：真实的 call_account_action，模拟 LLBot 8.2.1 的 Satori 透传返回。"""
-
-    CLIENTS = [
-        {"host": "127.0.0.1", "port": 5500, "token": "satori-a"},
-        {"host": "127.0.0.1", "port": 5550, "token": "satori-b"},
-    ]
-
-    def setUp(self):
-        from otae_bot.adapters import onebot
-
-        self.seen = []
-        self.not_in_group = False
-
-        def llbot(request):
-            self.seen.append(request)
-            body = json.loads(request.content)
-            if request.url.path == "/v1/internal/onebot11/get_group_msg_history":
-                if self.not_in_group:
-                    return httpx.Response(500, json={"message": "Cannot read properties of undefined (reading 'start')"})
-                return httpx.Response(200, json=_history(
-                    _msg(body["message_seq"] - 1, _text("前一条")), TARGET_FORWARD, _msg(body["message_seq"] + 1, _text("后一条"))))
-            if request.url.path == "/v1/internal/onebot11/get_forward_msg":
-                if body != {"id": "resid-1"}:
-                    return httpx.Response(200, json={"status": "failed", "retcode": 1200, "message": "unexpected end of file"})
-                return httpx.Response(200, json=FORWARD)
-            return httpx.Response(404)
-
-        real = httpx.AsyncClient
-
-        def client(**kwargs):
-            return real(transport=httpx.MockTransport(llbot), timeout=kwargs.get("timeout"))
-
-        values = {"SATORI_CLIENTS": self.CLIENTS, "ONEBOT_HTTP_URL": "http://127.0.0.1:3000"}
-        for patcher in (
-            patch.object(onebot.httpx, "AsyncClient", client),
-            patch.object(onebot, "ashared_ssl_context", AsyncMock(return_value=None)),
-            patch.object(onebot, "_env", side_effect=_env(values)),
-        ):
-            patcher.start()
-            self.addCleanup(patcher.stop)
-
-    def _session(self):
-        from types import SimpleNamespace
-
-        from satori import Quote
-        from satori.client.account import ApiInfo
-
-        session = AsyncMock()
-        session.reply = None
-        session.send = AsyncMock(return_value=[])
-        # 收到事件的是 5550 上的第二个号
-        session.account = SimpleNamespace(
-            platform="qq", self_id="222", config=ApiInfo(host="127.0.0.1", port=5550, token="satori-b"))
-        session.event = SimpleNamespace(
-            quote=Quote(QUOTE_ID), channel=SimpleNamespace(id="875241970"),
-            guild=SimpleNamespace(id="875241970"), user=SimpleNamespace(id="otae"),
-        )
-        return session
-
-    async def _ask(self):
-        from satori import Text
-
-        from plugins.hyw import handlers
-
-        request = AsyncMock()
-        with patch.object(handlers.HywConfig, "from_env", return_value=_config()), \
-             patch.object(handlers, "run_request", request), patch.object(handlers, "logger") as log:
-            await handle_hyw(self._session(), _args(Text("总结一下")))
-        request.assert_awaited_once()
-        return request, log
-
-    async def test_q_on_a_quoted_forward_gets_its_records_through_the_receiving_account(self):
-        request, log = await self._ask()
-        text, images = request.await_args.args[3:5]
-        self.assertTrue(text.startswith("总结一下\n\n[引用消息]\n"), text)
-        self.assertIn("发送者：甲（1）", text)
-        self.assertIn("转发正文", text)
-        self.assertNotIn("前一条", text)
-        self.assertEqual(images, ["https://example.com/f.png"])
-        self.assertIs(request.await_args.kwargs["rich"], True)
-        log.warning.assert_not_called()
-        self.assertEqual([str(sent.url) for sent in self.seen], [
-            "http://127.0.0.1:5550/v1/internal/onebot11/get_group_msg_history",
-            "http://127.0.0.1:5550/v1/internal/onebot11/get_forward_msg",
-        ])
-        self.assertEqual(json.loads(self.seen[0].content), {"group_id": 875241970, "message_seq": 3969610, "count": 10})
-        for sent in self.seen:
-            self.assertEqual(sent.headers["authorization"], "Bearer satori-b")
-            self.assertEqual(sent.headers["satori-user-id"], "222")
-            self.assertEqual(sent.headers["satori-platform"], "qq")
-            self.assertNotIn("x-self-id", sent.headers)
-
-    async def test_an_account_outside_the_group_still_gets_an_answer(self):
-        self.not_in_group = True
-        request, log = await self._ask()
-        self.assertEqual(request.await_args.args[3:], ("总结一下", [], []))
-        args = log.warning.call_args.args
-        self.assertEqual(args[3], "get_group_msg_history 报错，收到事件的号可能不在群 875241970")
-        self.assertIn("HTTP 500: Cannot read properties of undefined (reading 'start')", args[4][0])
-        self.assertNotIn("satori-b", str(args))
-        self.assertEqual(len(self.seen), 1)
 
 
 class RetryTests(unittest.TestCase):

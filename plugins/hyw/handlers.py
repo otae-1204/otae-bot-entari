@@ -22,7 +22,7 @@ from otae_bot.infrastructure.http.tls import shared_ssl_context
 
 from .config import HywConfig, HywError
 from .history import HistoryStore, Scope, SourceBook
-from .messages import QuoteUnavailable, expand_quote, expand_special
+from .messages import CARD_TAGS, QuoteUnavailable, expand_special, unread_forward
 
 HELP = """HYW 搜索问答服务
 /q <问题> —— 联网搜索并作答，支持附加至多 4 张图片
@@ -100,8 +100,8 @@ def _card_lines(value, seen: set[str]) -> list[str]:
 
 
 def _element_text(element) -> str:
-    tag = str(getattr(element, "tag", "") or "").removeprefix("onebot:")
-    if tag not in {"json", "xml"}:
+    tag = CARD_TAGS.get(str(getattr(element, "tag", "") or ""))
+    if tag is None:
         return ""
     raw = getattr(element, "attrs", None) or {}
     data = raw.get("data") if isinstance(raw, dict) else None
@@ -473,9 +473,9 @@ async def run_request(session: Session, config: HywConfig, scope: Scope, text: s
     _remember(scope, receipts, history, listed)
 
 
-async def _compose(session: Session, elements) -> tuple[str, list[str], bool]:
+def _compose(elements) -> tuple[str, list[str], bool]:
     text, images = parts_from(elements)
-    extra_text, extra_images, rich = await expand_special(session, elements)
+    extra_text, extra_images, rich = expand_special(elements)
     if extra_text:
         text = f"{text}\n{extra_text}".strip() if text else extra_text
     return text, [*images, *[url for url in extra_images if url not in images]], rich or bool(extra_text or extra_images)
@@ -484,8 +484,8 @@ async def _compose(session: Session, elements) -> tuple[str, list[str], bool]:
 def _unfetched_quote(session: Session):
     """The event's quote when Entari could not turn it into ``session.reply``.
 
-    The Entari adapter keeps ``event.quote`` when ``message.get`` fails (LLBot answers
-    500 "消息为空" for merged forwards), so the quoted Satori id is still available here.
+    Entari looks a quote up with ``message.get`` only when it carries no content; when
+    that fails ``event.quote`` is kept, so the quoted id is still available here.
     """
     from satori import Quote
 
@@ -495,27 +495,30 @@ def _unfetched_quote(session: Session):
     return quote if isinstance(quote, Quote) and quote.id else None
 
 
-async def _quoted_without_reply(session: Session, quote) -> tuple[str, list[str], bool]:
-    if quote.children:
-        return await _compose(session, MessageChain(quote.children))
-    failures: list[str] = []
+def _quoted(session: Session, quote_id, elements) -> tuple[str, list[str], bool] | None:
+    """The quoted message's text, images and richness; None when its content did not arrive.
+
+    The boundary puts the quoted content, a merged forward's messages included, into the
+    event. A bare quote or a forward without its messages means the lookup failed there.
+    """
+    elements = list(elements or [])
     try:
-        text, images, rich = await expand_quote(session, str(quote.id), failures)
+        if not elements:
+            raise QuoteUnavailable("引用的消息没有随事件送达")
+        if unread_forward(elements):
+            raise QuoteUnavailable("引用的合并转发没有随事件展开")
+        return _compose(elements)
     except Exception as error:  # noqa: BLE001 - an unreadable quote must not stop the answer
         reason = error.reason if isinstance(error, QuoteUnavailable) else f"读取出错：{failure_summary(error)}"
         logger.warning(
-            "[hyw] quoted message unavailable, answering without it: channel={} quote={} reason={} failures={}",
-            getattr(getattr(session.event, "channel", None), "id", None), quote.id,
-            _redact(reason), [_redact(item) for item in failures],
+            "[hyw] quoted message unavailable, answering without it: channel={} quote={} reason={}",
+            getattr(getattr(session.event, "channel", None), "id", None), quote_id, _redact(reason),
         )
-        return "", [], False
-    if failures:
-        logger.debug("[hyw] quoted message read after fallbacks: quote={} failures={}", quote.id, failures)
-    return text, images, rich
+        return None
 
 
 async def handle_hyw(session: Session, result: Arparma):
-    text, images, rich = await _compose(session, result.all_matched_args.get("content", []) or [])
+    text, images, rich = _compose(result.all_matched_args.get("content", []) or [])
     scope = scope_for(session)
     quote = _unfetched_quote(session)
     if text.lower() in {"帮助", "help", "--help"} or (not text and not images and not session.reply and not quote):
@@ -550,14 +553,19 @@ async def handle_hyw(session: Session, result: Arparma):
         origin = session.reply.origin
         prior = history_store.get(scope, str(origin.id))
         if not prior:
-            quoted_text, quoted_images, quoted_rich = await _compose(session, MessageChain(origin.message))
-            text = f"{text}\n\n[引用消息]\n{quoted_text}".strip()
-            images = [*images, *[url for url in quoted_images if url not in images]]
-            rich = rich or quoted_rich
+            quoted = _quoted(session, origin.id, origin.message)
+            if quoted is not None:
+                quoted_text, quoted_images, quoted_rich = quoted
+                text = f"{text}\n\n[引用消息]\n{quoted_text}".strip()
+                images = [*images, *[url for url in quoted_images if url not in images]]
+                rich = rich or quoted_rich
+            elif not text and not images:
+                await send_text(session, "没能读取引用的消息，请在 /q 后直接写出问题。")
+                return
     elif quote:
         prior = history_store.get(scope, str(quote.id))
         if not prior:
-            quoted_text, quoted_images, quoted_rich = await _quoted_without_reply(session, quote)
+            quoted_text, quoted_images, quoted_rich = _quoted(session, quote.id, quote.children) or ("", [], False)
             if quoted_text or quoted_images:
                 text = f"{text}\n\n[引用消息]\n{quoted_text}".strip()
                 images = [*images, *[url for url in quoted_images if url not in images]]

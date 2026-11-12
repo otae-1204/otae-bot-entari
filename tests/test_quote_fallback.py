@@ -204,7 +204,7 @@ class InstallTests(unittest.TestCase):
 
 
 DISPATCH_SCRIPT = r'''
-import asyncio, json, sys
+import asyncio, sys
 from datetime import datetime, timezone
 
 import httpx
@@ -213,12 +213,11 @@ sys.path.insert(0, sys.argv[1])
 from otae_bot.application import create_app
 app = create_app()
 
-from arclet.entari import load_plugin
 from arclet.entari.config import EntariConfig
 from arclet.entari.event.base import MessageEvent
 from arclet.entari.plugin.service import plugin_service
 from arclet.letoderea.publisher import _publishers
-from satori import Channel, ChannelType, Event, Guild, Login, MessageObject, Quote, Text, User
+from satori import Channel, ChannelType, Event, Guild, Login, MessageObject, User
 from satori.client.account import Account, ApiInfo
 from satori.exception import NotFoundException, ServerException
 from unittest.mock import AsyncMock, patch
@@ -228,7 +227,6 @@ for builtin in ('$.commands', '$.record_message'):
     plugin_service.plugins[builtin].exec_apply()
 EntariConfig.instance.basic.prefix = ['/']
 hyw = plugin_service.plugins['plugins.hyw'].module
-import otae_bot.adapters.onebot as onebot
 
 # create_app 装好的补丁对真实 publisher 生效
 gather = MessageEvent.__dict__['gather']
@@ -236,19 +234,26 @@ users = sorted(k for k, p in _publishers.items() if p.supplier is gather)
 assert users == ['message-created', 'message-deleted', 'message-updated', 'reaction-added', 'reaction-removed'], users
 
 QUOTE_ID = '2|100|3969610'
-FORWARD = {'status': 'ok', 'retcode': 0, 'data': {'messages': [
-    {'sender': {'nickname': '甲', 'user_id': '1'}, 'time': 0,
-     'content': [{'type': 'text', 'data': {'text': '转发里的第一句'}}]},
-    {'sender': {'nickname': '乙', 'user_id': '2'}, 'time': 1,
-     'content': [{'type': 'image', 'data': {'url': 'https://example.com/in-forward.png'}}]},
-]}}
+# 边界适配器送来的引用：作者 + 原消息内容；被引用的是合并转发时，转发的各条消息就在其中
+FORWARD_QUOTE = (
+    '<quote id="' + QUOTE_ID + '"><author id="9" name="转发人"/>'
+    '<message id="resid-1" forward="true">'
+    '<message><author id="1" name="甲"/>转发里的第一句</message>'
+    '<message><author id="2" name="乙"/><img src="https://example.com/in-forward.png"/></message>'
+    '</message></quote>'
+)
+UNEXPANDED_QUOTE = '<quote id="' + QUOTE_ID + '"><author id="9" name="转发人"/><message id="resid-1" forward="true"/></quote>'
+BARE_QUOTE = '<quote id="' + QUOTE_ID + '"/>'
+
 
 class Protocol:
     def __init__(self, account):
         self.account = account
+        self.gets = []
         self.internal_calls = []
 
     async def message_get(self, channel_id, message_id):
+        self.gets.append(message_id)
         raise ServerException('消息为空')
 
     async def internal(self, action, method='POST', **params):
@@ -258,78 +263,64 @@ class Protocol:
     async def send_message(self, channel, message, at_sender=None, reply_to=None, referrer=None):
         return []
 
-# LLBot 8.2.1 的 Satori 透传 /v1/internal/onebot11/<action>
+
 seen = []
-llbot = {'in_group': True}
-
-def answer(request):
-    seen.append(request)
-    body = json.loads(request.content)
-    if request.url.path == '/v1/internal/onebot11/get_group_msg_history':
-        if not llbot['in_group']:
-            return httpx.Response(500, json={'message': "Cannot read properties of undefined (reading 'start')"})
-        seq = body['message_seq']
-        return httpx.Response(200, json={'status': 'ok', 'retcode': 0, 'data': {'messages': [
-            {'message_id': 1, 'message_seq': seq - 1, 'message': [{'type': 'text', 'data': {'text': '前一条'}}]},
-            {'message_id': 537779999, 'message_seq': seq, 'message': [{'type': 'forward', 'data': {'id': 'resid-1'}}]},
-        ]}})
-    if request.url.path == '/v1/internal/onebot11/get_forward_msg' and body == {'id': 'resid-1'}:
-        return httpx.Response(200, json=FORWARD)
-    return httpx.Response(404)
-
 real_client = httpx.AsyncClient
 
-def client(**kwargs):
-    return real_client(transport=httpx.MockTransport(answer), timeout=kwargs.get('timeout'))
+def client(*args, **kwargs):
+    def answer(request):
+        seen.append(request)
+        return httpx.Response(404)
+    return real_client(transport=httpx.MockTransport(answer))
 
-def incoming(n):
+def incoming(n, quote):
     account = Account(Login(user=User('test-bot'), platform='qq'), ApiInfo(port=5500, token='SECRET-TOKEN'), [], Protocol)
     origin = Event('message-created', datetime.now(timezone.utc), Login(user=User('test-bot'), platform='qq'),
                    channel=Channel('100', ChannelType.TEXT), guild=Guild('100'), user=User('otae'),
-                   message=MessageObject.from_elements('incoming-' + str(n), [Quote(QUOTE_ID), Text('/q 总结一下')]))
+                   message=MessageObject('incoming-' + str(n), quote + '/q 总结一下'))
     return account, origin
 
 async def main():
     request = AsyncMock()
     with patch.object(hyw.HywConfig, 'from_env', return_value=hyw.HywConfig(api_key='test', timeout=5)), \
          patch.dict(hyw.handle_hyw.__globals__, run_request=request), \
-         patch.object(onebot.httpx, 'AsyncClient', client), \
-         patch.object(onebot, 'ashared_ssl_context', AsyncMock(return_value=None)):
-        # 1) 合并转发：Satori message.get 500，事件照常分发；按 seq 找到消息，用 resid 展开
-        account, origin = incoming(1)
+         patch.object(httpx, 'AsyncClient', client):
+        # 1) 引用合并转发：内容随事件送达，不查询 message.get，也不发任何 HTTP
+        account, origin = incoming(1, FORWARD_QUOTE)
         await app.handle_event(account, origin)
         request.assert_awaited_once()
         session, _, _, text, images, prior = request.await_args.args
         assert session.event.quote.id == QUOTE_ID, session.event.quote
-        assert session.reply is None
-        assert '总结一下' in text and '[引用消息]' in text, text
-        assert '转发里的第一句' in text and '甲' in text and '前一条' not in text, text
+        assert session.reply is not None
+        assert text.startswith('总结一下\n\n[引用消息]\n'), text
+        assert '转发里的第一句' in text and '甲（1）' in text and '乙（2）' in text, text
         assert images == ['https://example.com/in-forward.png'], images
         assert request.await_args.kwargs['rich'] is True
+        assert account.protocol.gets == [], account.protocol.gets
         assert account.protocol.internal_calls == [], account.protocol.internal_calls
-        assert [str(sent.url) for sent in seen] == [
-            'http://localhost:5500/v1/internal/onebot11/get_group_msg_history',
-            'http://localhost:5500/v1/internal/onebot11/get_forward_msg',
-        ], seen
-        assert json.loads(seen[0].content) == {'group_id': 100, 'message_seq': 3969610, 'count': 10}, seen[0].content
-        for sent in seen:
-            assert sent.headers['authorization'] == 'Bearer SECRET-TOKEN', sent.headers
-            assert sent.headers['satori-user-id'] == 'test-bot', sent.headers
-            assert sent.headers['satori-platform'] == 'qq', sent.headers
-            assert 'x-self-id' not in sent.headers, sent.headers
         print('FORWARD-OK')
 
-        # 2) 收到事件的号不在群：history 报错，/q 照常执行，只是没有引用上下文
+        # 2) 合并转发没有展开：/q 照常执行，只是没有引用上下文
         request.reset_mock()
-        seen.clear()
-        llbot['in_group'] = False
-        account, origin = incoming(2)
+        account, origin = incoming(2, UNEXPANDED_QUOTE)
         await app.handle_event(account, origin)
         request.assert_awaited_once()
-        text = request.await_args.args[3]
-        assert text == '总结一下', text
-        assert len(seen) == 1, seen
+        assert request.await_args.args[3] == '总结一下', request.await_args.args[3]
+        assert account.protocol.gets == [] and account.protocol.internal_calls == []
+        print('UNEXPANDED-OK')
+
+        # 3) 空引用：Entari 的 message.get 失败，事件照常分发；/q 照常执行，没有引用上下文
+        request.reset_mock()
+        account, origin = incoming(3, BARE_QUOTE)
+        await app.handle_event(account, origin)
+        request.assert_awaited_once()
+        session = request.await_args.args[0]
+        assert session.reply is None and session.event.quote.id == QUOTE_ID
+        assert request.await_args.args[3] == '总结一下', request.await_args.args[3]
+        assert account.protocol.gets == [QUOTE_ID], account.protocol.gets
+        assert account.protocol.internal_calls == [], account.protocol.internal_calls
         print('UNAVAILABLE-OK')
+    assert seen == [], [str(sent.url) for sent in seen]
 
 asyncio.get_event_loop().run_until_complete(main())
 '''
@@ -345,7 +336,7 @@ class DispatchEndToEndTests(unittest.TestCase):
                 package.mkdir(parents=True)
                 (package / "__init__.py").touch()
             env = dict(os.environ)
-            env.update(PYTHONIOENCODING="utf-8", ONEBOT_HTTP_URL="", SATORI_CLIENTS="[]")
+            env.update(PYTHONIOENCODING="utf-8", SATORI_CLIENTS="[]", ONEBOT_CLIENTS="[]")
             result = subprocess.run(
                 [sys.executable, "-X", "utf8", "-c", DISPATCH_SCRIPT, str(ROOT)], cwd=root,
                 capture_output=True, text=True, timeout=120, env=env,
@@ -353,12 +344,14 @@ class DispatchEndToEndTests(unittest.TestCase):
         output = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, output[-6000:])
         self.assertIn("FORWARD-OK", result.stdout)
+        self.assertIn("UNEXPANDED-OK", result.stdout)
         self.assertIn("UNAVAILABLE-OK", result.stdout)
         # record_message 记下了这条消息：事件确实分发了
         self.assertIn("(otae) -> ", result.stdout)
         self.assertIn("quoted message fetch failed", output)
         self.assertIn("quoted message unavailable", output)
-        self.assertIn("可能不在群 100", output)
+        self.assertIn("引用的合并转发没有随事件展开", output)
+        self.assertIn("引用的消息没有随事件送达", output)
         self.assertNotIn("SECRET-TOKEN", output)
 
 
