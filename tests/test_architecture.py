@@ -402,8 +402,8 @@ async def check_attendance_dispatch():
     with patch.object(arknights, '_handle_attendance', recorded):
         await run_command(session, '/ak 签到 1234')
     recorded.assert_awaited_once()
-    assert recorded.await_args.kwargs['bot'] is session.account, recorded.await_args
-    assert recorded.await_args.args[3] == '1234', recorded.await_args
+    assert recorded.await_args.args[0].account is session.account, recorded.await_args
+    assert recorded.await_args.args[2] == '1234', recorded.await_args
     recorded = AsyncMock()
     session = group_session(user='test-root')
     with (patch.object(endfield, '_handle_attendance', recorded),

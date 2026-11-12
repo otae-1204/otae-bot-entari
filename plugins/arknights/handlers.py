@@ -13,20 +13,14 @@ from pathlib import Path
 from typing import Any
 
 from arclet.alconna import Alconna, Args, MultiVar
-from arclet.entari import Cleanup, Event, listen
+from arclet.entari import Cleanup, Image, MessageChain, Session, command, listen
+from arclet.entari.command import Match
 from arclet.letoderea import ExitState
 from loguru import logger
 from nepattern import AnyString
 
-from otae_bot.compat.entari import (
-    ArgVal,
-    ChainMsg,
-    event_user_id,
-    is_group,
-    make_image,
-    on_alconna,
-    prompt,
-)
+from otae_bot.messaging.inbound import event_user_id, is_group
+from otae_bot.messaging.prompts import prompt
 from otae_bot.pipeline.message_log import sensitive_input
 from otae_bot.command_usage import describe_command
 from otae_bot.hypergryph.attendance_delivery import build_delivery, deliver
@@ -113,11 +107,7 @@ describe_command(
     },
 )
 
-_arknights_alconna = on_alconna(
-    Alconna(list(ROOT_ALIASES), Args["rest;?", MultiVar(AnyString)]),
-    priority=5,
-    block=True,
-)
+_arknights_alconna = Alconna(list(ROOT_ALIASES), Args["rest;?", MultiVar(AnyString)])
 
 _store: ArknightsStore | None = None
 _client: ArknightsClient | None = None
@@ -150,8 +140,8 @@ def _rest(match: Any) -> str:
     return str(value).strip() if value is not None else ""
 
 
-async def _prompt_text(message: str, *, timeout: int) -> str | None:
-    answer = await prompt(message, timeout=timeout)
+async def _prompt_text(session: Session, message: str, *, timeout: int) -> str | None:
+    answer = await prompt(session, message, timeout=timeout)
     if answer is None:
         return None
     text = answer.extract_plain_text() if hasattr(answer, "extract_plain_text") else str(answer or "")
@@ -161,15 +151,17 @@ async def _prompt_text(message: str, *, timeout: int) -> str | None:
     return text
 
 
-@_arknights_alconna.handle()
-async def handle_arknights(event: Event, rest: ArgVal, bot=None) -> None:
-    await _dispatch(_arknights_alconna, event, parse_command(_rest(rest)), bot=bot)
+@command.on(_arknights_alconna)
+async def handle_arknights(session: Session, rest: Match[tuple[str, ...]]) -> None:
+    await _dispatch(session, parse_command(_rest(rest)))
 
 
-async def _dispatch(matcher, event: Event, command, bot=None) -> None:
+async def _dispatch(session: Session, command) -> None:
+    event = session.event
     try:
         if command.error:
-            return await matcher.finish(command.error)
+            await session.send(command.error)
+            return
         handled = {
             ACTION_BIND,
             ACTION_ACCOUNTS,
@@ -178,72 +170,80 @@ async def _dispatch(matcher, event: Event, command, bot=None) -> None:
             ACTION_ATTENDANCE,
         }
         if command.action not in handled:
-            return await _finish_arknights_help(matcher)
+            return await _send_arknights_help(session)
 
         user_id = str(event_user_id(event))
         group = is_group(event)
         if requires_private_chat(command.action) and group:
-            return await matcher.finish(PRIVATE_ONLY_NOTICE)
+            await session.send(PRIVATE_ONLY_NOTICE)
+            return
 
         if command.action == ACTION_BIND:
             # The [message] log hides codes and tokens this user sends until the dialog ends.
             with sensitive_input(user_id):
-                return await _handle_bind(matcher, user_id)
+                return await _handle_bind(session, user_id)
         if command.action == ACTION_ACCOUNTS:
-            return await _handle_accounts(matcher, user_id, reveal_uid=not group)
+            return await _handle_accounts(session, user_id, reveal_uid=not group)
         if command.action == ACTION_PRIMARY:
-            return await _handle_primary(matcher, user_id, command.selector, reveal_uid=not group)
+            return await _handle_primary(session, user_id, command.selector, reveal_uid=not group)
         if command.action == ACTION_UNBIND:
-            return await _handle_unbind(matcher, user_id, command.selector, reveal_uid=not group)
-        return await _handle_attendance(matcher, event, user_id, command.selector, bot=bot)
+            return await _handle_unbind(session, user_id, command.selector, reveal_uid=not group)
+        return await _handle_attendance(session, user_id, command.selector)
     except CredentialKeyError as exc:
-        return await matcher.finish(str(exc))
+        await session.send(str(exc))
+        return
     except ArknightsAPIError as exc:
         logger.warning(
             f"[arknights] api request failed operation={exc.operation} code={exc.code or 'unknown'}"
         )
-        return await matcher.finish(str(exc))
+        await session.send(str(exc))
+        return
     except ExitState:
         raise
     except Exception as exc:  # noqa: BLE001 - report instead of crashing the bot
         logger.error(
             f"[arknights] command failed error_type={type(exc).__module__}.{type(exc).__name__}"
         )
-        return await matcher.finish("明日方舟森空岛功能暂时不可用，请稍后重试。")
+        await session.send("明日方舟森空岛功能暂时不可用，请稍后重试。")
+        return
 
 
 # ------------------------------------------------------------------ binding
 
 
-async def _finish_arknights_help(matcher) -> None:
+async def _send_arknights_help(session: Session) -> None:
     # 按页面比例随机挑插画并运行时渲染；渲染不可用时回退到仓库里的静态帮助图。
     image = await cached_help_image("ak")
     if image and Path(image).is_file():
-        return await matcher.finish(ChainMsg([make_image(path=str(image))]))
-    return await matcher.finish(format_help())
+        await session.send(MessageChain([Image.of(path=Path(str(image)))]))
+        return
+    await session.send(format_help())
 
 
-async def _handle_bind(matcher, user_id: str) -> None:
+async def _handle_bind(session: Session, user_id: str) -> None:
     # Resolve the key before prompting: a missing key must not start a dialog.
     cipher = ArknightsCipher.from_settings()
-    method = await _prompt_text(BIND_METHOD_PROMPT, timeout=90)
+    method = await _prompt_text(session, BIND_METHOD_PROMPT, timeout=90)
     if method is None:
-        return await matcher.finish(CANCELLED_TEXT)
+        await session.send(CANCELLED_TEXT)
+        return
     normalized = method.casefold()
     if normalized in {"1", "token", "t"}:
-        account_token = await _bind_token(matcher)
+        account_token = await _bind_token(session)
     elif normalized in {"2", "短信", "手机", "sms", "phone"}:
-        account_token = await _bind_phone(matcher, user_id)
+        account_token = await _bind_phone(session, user_id)
     else:
-        return await matcher.finish("未识别绑定方式，绑定已取消。")
+        await session.send("未识别绑定方式，绑定已取消。")
+        return
     if not account_token:
         return None
 
     roles = await (await _client_instance()).discover_roles(account_token)
     if not roles:
-        return await matcher.finish(
+        await session.send(
             "该鹰角账号下未找到明日方舟角色（支持官服与 B服；请确认已在森空岛绑定角色）。"
         )
+        return
     store = _store_instance()
     previous = {(role.uid, role.game_id) for role in store.list_roles(user_id)}
     bound = store.bind_roles(user_id, account_token, roles, cipher)
@@ -260,39 +260,39 @@ async def _handle_bind(matcher, user_id: str) -> None:
         for role in roles
     )
     lines.append("可在私聊使用 /ak 签到 立即签到，或 /ak 账号 查看编号。")
-    return await matcher.finish("\n".join(lines))
+    await session.send("\n".join(lines))
 
 
-async def _bind_token(matcher) -> str | None:
-    await matcher.send(TOKEN_GUIDE)
-    raw = await _prompt_text(TOKEN_PROMPT, timeout=150)
+async def _bind_token(session: Session) -> str | None:
+    await session.send(TOKEN_GUIDE)
+    raw = await _prompt_text(session, TOKEN_PROMPT, timeout=150)
     if raw is None:
-        await matcher.finish(CANCELLED_TEXT)
+        await session.send(CANCELLED_TEXT)
         return None
     token = extract_account_token(raw)
     if not token:
-        await matcher.finish("未识别到有效 Token，绑定已取消。")
+        await session.send("未识别到有效 Token，绑定已取消。")
         return None
     return token
 
 
-async def _bind_phone(matcher, user_id: str) -> str | None:
-    phone = await _prompt_text(PHONE_PROMPT, timeout=90)
+async def _bind_phone(session: Session, user_id: str) -> str | None:
+    phone = await _prompt_text(session, PHONE_PROMPT, timeout=90)
     if phone is None:
-        await matcher.finish(CANCELLED_TEXT)
+        await session.send(CANCELLED_TEXT)
         return None
     if not PHONE_PATTERN.fullmatch(phone):
-        await matcher.finish("手机号格式不正确，绑定已取消。")
+        await session.send("手机号格式不正确，绑定已取消。")
         return None
     client = await _client_instance()
-    if not await _send_phone_code(matcher, client, user_id, phone):
+    if not await _send_phone_code(session, client, user_id, phone):
         return None
-    code = await _prompt_text(CODE_PROMPT, timeout=120)
+    code = await _prompt_text(session, CODE_PROMPT, timeout=120)
     if code is None:
-        await matcher.finish(CANCELLED_TEXT)
+        await session.send(CANCELLED_TEXT)
         return None
     if not CODE_PATTERN.fullmatch(code):
-        await matcher.finish("验证码格式不正确，绑定已取消。")
+        await session.send("验证码格式不正确，绑定已取消。")
         return None
     return await client.token_by_phone_code(phone, code)
 
@@ -303,7 +303,7 @@ def _bind_log(user_id: str, step: str, **fields) -> None:
     logger.info(f"[arknights-bind] user={user_id} step={step}{details}")
 
 
-async def _send_phone_code(matcher, client: ArknightsClient, user_id: str, phone: str) -> bool:
+async def _send_phone_code(session: Session, client: ArknightsClient, user_id: str, phone: str) -> bool:
     """Send the SMS code; when Hypergryph asks for a GeeTest check, let the user solve it first."""
     captcha = None
     for attempt in range(1, CAPTCHA_ROUNDS + 2):
@@ -314,33 +314,33 @@ async def _send_phone_code(matcher, client: ArknightsClient, user_id: str, phone
             _bind_log(user_id, "captcha_required", attempt=attempt)
             if attempt > CAPTCHA_ROUNDS:
                 break
-            captcha = await _solve_captcha(matcher, user_id, required)
+            captcha = await _solve_captcha(session, user_id, required)
             if captcha is None:
                 return False
     _bind_log(user_id, "abort", at="captcha", reason="rounds")
-    await matcher.finish(CAPTCHA_GIVE_UP)
+    await session.send(CAPTCHA_GIVE_UP)
     return False
 
 
-async def _solve_captcha(matcher, user_id: str, required: HypergryphCaptchaRequired) -> dict[str, str] | None:
+async def _solve_captcha(session: Session, user_id: str, required: HypergryphCaptchaRequired) -> dict[str, str] | None:
     html = render_geetest_html(gt=required.gt, challenge=required.challenge, new_captcha=required.new_captcha)
     try:
         link = await upload_captcha_page(html)
     except CaptchaPageUploadError:
         _bind_log(user_id, "abort", at="captcha", reason="upload")
-        await matcher.finish(CAPTCHA_UPLOAD_FAILED)
+        await session.send(CAPTCHA_UPLOAD_FAILED)
         return None
     _bind_log(user_id, "captcha_page_sent")
-    await matcher.send(f"{CAPTCHA_GUIDE}\n{link}")
-    paste = await _prompt_text(CAPTCHA_PROMPT, timeout=CAPTCHA_TIMEOUT_SECONDS)
+    await session.send(f"{CAPTCHA_GUIDE}\n{link}")
+    paste = await _prompt_text(session, CAPTCHA_PROMPT, timeout=CAPTCHA_TIMEOUT_SECONDS)
     if paste is None:
-        await matcher.finish(CANCELLED_TEXT)
+        await session.send(CANCELLED_TEXT)
         return None
     try:
         captcha = parse_captcha_paste(paste)
     except CaptchaPasteError as exc:
         _bind_log(user_id, "abort", at="captcha", reason="format")
-        await matcher.finish(f"{exc}绑定已取消。")
+        await session.send(f"{exc}绑定已取消。")
         return None
     _bind_log(user_id, "captcha_received")
     return captcha
@@ -349,33 +349,37 @@ async def _solve_captcha(matcher, user_id: str, required: HypergryphCaptchaRequi
 # ------------------------------------------------------------- account admin
 
 
-async def _handle_accounts(matcher, user_id: str, *, reveal_uid: bool) -> None:
+async def _handle_accounts(session: Session, user_id: str, *, reveal_uid: bool) -> None:
     roles = _store_instance().list_roles(user_id)
-    return await matcher.finish(format_accounts(roles, reveal_uid=reveal_uid))
+    await session.send(format_accounts(roles, reveal_uid=reveal_uid))
 
 
-async def _handle_primary(matcher, user_id: str, selector: str, *, reveal_uid: bool) -> None:
+async def _handle_primary(session: Session, user_id: str, selector: str, *, reveal_uid: bool) -> None:
     if not selector.strip():
-        return await matcher.finish(PRIMARY_NEEDS_SELECTOR)
+        await session.send(PRIMARY_NEEDS_SELECTOR)
+        return
     store = _store_instance()
     resolution = store.set_primary(user_id, selector)
     if not resolution.resolved or resolution.role is None:
-        return await matcher.finish(format_selector_failure(resolution, reveal_uid=reveal_uid))
+        await session.send(format_selector_failure(resolution, reveal_uid=reveal_uid))
+        return
     role = resolution.role
-    return await matcher.finish(
+    await session.send(
         f"已将 {role.nickname}（{role.server_label} · UID {role.masked_uid}）设为主账号。"
     )
 
 
-async def _handle_unbind(matcher, user_id: str, selector: str, *, reveal_uid: bool) -> None:
+async def _handle_unbind(session: Session, user_id: str, selector: str, *, reveal_uid: bool) -> None:
     if not selector.strip():
-        return await matcher.finish(UNBIND_NEEDS_SELECTOR)
+        await session.send(UNBIND_NEEDS_SELECTOR)
+        return
     store = _store_instance()
     resolution = store.unbind(user_id, selector)
     if not resolution.resolved or resolution.role is None:
-        return await matcher.finish(format_selector_failure(resolution, reveal_uid=reveal_uid))
+        await session.send(format_selector_failure(resolution, reveal_uid=reveal_uid))
+        return
     role = resolution.role
-    return await matcher.finish(
+    await session.send(
         f"已解绑 {role.nickname}（{role.server_label} · UID {role.masked_uid}）。"
         "如该凭据已无其他角色引用，加密凭据已同步清理。"
     )
@@ -384,13 +388,16 @@ async def _handle_unbind(matcher, user_id: str, selector: str, *, reveal_uid: bo
 # ---------------------------------------------------------------- attendance
 
 
-async def _handle_attendance(matcher, event: Event, user_id: str, selector: str, *, bot=None) -> None:
+async def _handle_attendance(session: Session, user_id: str, selector: str) -> None:
+    event = session.event
+    bot = session.account
     group = is_group(event)
     cipher = ArknightsCipher.from_settings()
     store = _store_instance()
     roles, resolution = store.resolve_roles(user_id, selector)
     if not roles:
-        return await matcher.finish(format_selector_failure(resolution, reveal_uid=not group))
+        await session.send(format_selector_failure(resolution, reveal_uid=not group))
+        return
     view = await sign_roles(store, await _client_instance(), cipher, roles)
     outcomes = [
         signed_outcome(
@@ -410,8 +417,7 @@ async def _handle_attendance(matcher, event: Event, user_id: str, selector: str,
             enabled=lambda feature: feature_store.is_enabled(scope, feature),
         )
     )
-    await deliver(matcher.send, await build_delivery(outcomes))
-    return await matcher.finish()
+    await deliver(session.send, await build_delivery(outcomes))
 
 
 async def _attendance_png(view: AttendanceCardView) -> bytes | None:

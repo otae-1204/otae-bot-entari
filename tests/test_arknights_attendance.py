@@ -1421,16 +1421,12 @@ class ArknightsRendererTests(unittest.TestCase):
 
 
 class _FakeMatcher:
-    """``messages`` keeps everything shown to the user, ``sent`` only ``send()``."""
+    """Records what ``session.send`` shows the user; ``fail_sends`` makes the first sends raise."""
 
     def __init__(self, *, fail_sends: int = 0):
         self.messages: list = []
         self.sent: list = []
         self.fail_sends = fail_sends
-
-    async def finish(self, message=None):
-        if message is not None:
-            self.messages.append(message)
 
     async def send(self, message=None):
         if self.fail_sends > 0:
@@ -1453,6 +1449,11 @@ def _event(*, private: bool, group_id: str = "100", user_id: str = "7"):
             type=ChannelType.DIRECT if private else ChannelType.TEXT,
         ),
     )
+
+
+def _session(matcher: _FakeMatcher, *, private: bool) -> SimpleNamespace:
+    """The command session: its event, no account, and ``send`` recorded by ``matcher``."""
+    return SimpleNamespace(event=_event(private=private), account=None, send=matcher.send)
 
 
 class ArknightsHandlerTests(unittest.IsolatedAsyncioTestCase):
@@ -1520,7 +1521,7 @@ class ArknightsHandlerTests(unittest.IsolatedAsyncioTestCase):
         answers = list(answers)
         prompts: list[tuple[str, bool, str]] = []
 
-        async def prompt(message, timeout):
+        async def prompt(_session, message, timeout):
             reply = answers.pop(0)
             # What Entari's [message] logger would print for this private reply.
             record = {"message": f"[QQ] 博士(7) -> {reply!r}"}
@@ -1547,7 +1548,7 @@ class ArknightsHandlerTests(unittest.IsolatedAsyncioTestCase):
             mock.patch.object(self.handlers, "_client_instance", mock.AsyncMock(return_value=client)),
             mock.patch.object(self.handlers.ArknightsCipher, "from_settings", return_value=cipher),
         ):
-            await self.handlers._dispatch(matcher, _event(private=True), commands_module.parse_command("绑定"))
+            await self.handlers._dispatch(_session(matcher, private=True), commands_module.parse_command("绑定"))
         self.assertEqual(answers, [])
         self.assertFalse(message_log.is_sensitive("7"))
         return matcher, prompts, client
@@ -1613,43 +1614,43 @@ class ArknightsHandlerTests(unittest.IsolatedAsyncioTestCase):
         upload = mock.AsyncMock(side_effect=hypergryph_captcha.CaptchaPageUploadError("0x0.st:http_503"))
         with mock.patch.object(self.handlers, "upload_captcha_page", upload):
             matcher, _prompts, client = await self._bind("2", "13812345678", send_phone_code=send)
-        self.assertEqual(matcher.last_text(), hypergryph_captcha.CAPTCHA_UPLOAD_FAILED)
-        self.assertEqual(matcher.sent, [])
+        # Only the failure notice: no captcha link was sent.
+        self.assertEqual(matcher.messages, [hypergryph_captcha.CAPTCHA_UPLOAD_FAILED])
         send.assert_awaited_once()
         client.token_by_phone_code.assert_not_awaited()
 
     async def test_a_failed_binding_still_ends_the_sensitive_dialog(self):
         from otae_bot.pipeline import message_log
 
-        async def prompt(message, timeout):
+        async def prompt(_session, message, timeout):
             raise RuntimeError("prompt broke")
 
         with mock.patch.object(self.handlers, "prompt", prompt), mock.patch.object(
             self.handlers.ArknightsCipher, "from_settings", return_value=crypto.ArknightsCipher(b"k" * 32)
         ):
             matcher = _FakeMatcher()
-            await self.handlers._dispatch(matcher, _event(private=True), commands_module.parse_command("绑定"))
+            await self.handlers._dispatch(_session(matcher, private=True), commands_module.parse_command("绑定"))
         self.assertIn("暂时不可用", matcher.last_text())
         self.assertFalse(message_log.is_sensitive("7"))
 
     async def test_binding_is_refused_in_a_group_chat(self):
         matcher = _FakeMatcher()
         await self.handlers._dispatch(
-            matcher, _event(private=False), commands_module.parse_command("绑定")
+            _session(matcher, private=False), commands_module.parse_command("绑定")
         )
         self.assertEqual(len(matcher.messages), 1)
         self.assertIn("仅支持私聊", matcher.last_text())
 
         matcher = _FakeMatcher()
         await self.handlers._dispatch(
-            matcher, _event(private=False), commands_module.parse_command("解绑 甲")
+            _session(matcher, private=False), commands_module.parse_command("解绑 甲")
         )
         self.assertIn("仅支持私聊", matcher.last_text())
 
     async def test_unbind_without_a_selector_is_refused(self):
         matcher = _FakeMatcher()
         await self.handlers._dispatch(
-            matcher, _event(private=True), commands_module.parse_command("解绑")
+            _session(matcher, private=True), commands_module.parse_command("解绑")
         )
         self.assertIn("请指定要解绑的角色", matcher.last_text())
 
@@ -1659,7 +1660,7 @@ class ArknightsHandlerTests(unittest.IsolatedAsyncioTestCase):
             self.handlers, "cached_help_image", mock.AsyncMock(return_value=None)
         ):
             await self.handlers._dispatch(
-                matcher, _event(private=True), commands_module.parse_command("")
+                _session(matcher, private=True), commands_module.parse_command("")
             )
         self.assertIn("/ak 签到", matcher.last_text())
 
@@ -1670,11 +1671,11 @@ class ArknightsHandlerTests(unittest.IsolatedAsyncioTestCase):
             self.handlers, "cached_help_image", mock.AsyncMock(return_value=image)
         ) as cached:
             await self.handlers._dispatch(
-                matcher, _event(private=True), commands_module.parse_command("帮助")
+                _session(matcher, private=True), commands_module.parse_command("帮助")
             )
         cached.assert_awaited_once_with("ak")
         self.assertEqual(len(matcher.messages), 1)
-        self.assertIsInstance(matcher.messages[0], self.handlers.ChainMsg)
+        self.assertIsInstance(matcher.messages[0], self.handlers.MessageChain)
 
     def _bound_store(self):
         directory = tempfile.TemporaryDirectory()
@@ -1725,7 +1726,7 @@ class ArknightsHandlerTests(unittest.IsolatedAsyncioTestCase):
         matcher = _FakeMatcher()
         with self._patch_runtime(store, cipher, client):
             await self.handlers._dispatch(
-                matcher, _event(private=True), commands_module.parse_command("签到")
+                _session(matcher, private=True), commands_module.parse_command("签到")
             )
         self.assertEqual(client.calls, ["10001234", "20005678"])
         text = matcher.last_text()
@@ -1744,7 +1745,7 @@ class ArknightsHandlerTests(unittest.IsolatedAsyncioTestCase):
         matcher = _FakeMatcher()
         with self._patch_runtime(store, cipher, client):
             await self.handlers._dispatch(
-                matcher, _event(private=False), commands_module.parse_command("签到")
+                _session(matcher, private=False), commands_module.parse_command("签到")
             )
         text = matcher.last_text()
         self.assertIn("签到失败", text)
@@ -1759,7 +1760,7 @@ class ArknightsHandlerTests(unittest.IsolatedAsyncioTestCase):
         matcher = _FakeMatcher()
         with self._patch_runtime(store, cipher, client):
             await self.handlers._dispatch(
-                matcher, _event(private=True), commands_module.parse_command("签到 甲 乙")
+                _session(matcher, private=True), commands_module.parse_command("签到 甲 乙")
             )
         self.assertIn("未找到", matcher.last_text())
         self.assertEqual(client.calls, [])
@@ -1773,7 +1774,7 @@ class ArknightsHandlerTests(unittest.IsolatedAsyncioTestCase):
         with self._patch_runtime(store, cipher, client, card=None):
             # draw_attendance_card returns None -> text fallback.
             await self.handlers._dispatch(
-                matcher, _event(private=True), commands_module.parse_command("签到 1234")
+                _session(matcher, private=True), commands_module.parse_command("签到 1234")
             )
         text = matcher.last_text()
         self.assertIn("明日方舟森空岛签到结果", text)
@@ -1789,7 +1790,7 @@ class ArknightsHandlerTests(unittest.IsolatedAsyncioTestCase):
         matcher = _FakeMatcher()
         with self._patch_runtime(store, cipher, client, card=b"\x89PNG-card"):
             await self.handlers._dispatch(
-                matcher, _event(private=True), commands_module.parse_command("签到 1234")
+                _session(matcher, private=True), commands_module.parse_command("签到 1234")
             )
         self.assertEqual(self.images, [b"\x89PNG-card"])
         self.assertEqual(len(matcher.messages), 1)
@@ -1804,7 +1805,7 @@ class ArknightsHandlerTests(unittest.IsolatedAsyncioTestCase):
         matcher = _FakeMatcher(fail_sends=1)
         with self._patch_runtime(store, cipher, client, card=b"\x89PNG-card"):
             await self.handlers._dispatch(
-                matcher, _event(private=False), commands_module.parse_command("签到")
+                _session(matcher, private=False), commands_module.parse_command("签到")
             )
         self.assertEqual(client.calls, ["10001234", "20005678"])  # each role signed once
         self.assertEqual(self.images, [b"\x89PNG-card"])
@@ -1823,7 +1824,7 @@ class ArknightsHandlerTests(unittest.IsolatedAsyncioTestCase):
                 matcher = _FakeMatcher()
                 with self._patch_runtime(store, cipher, client):
                     await self.handlers._dispatch(
-                        matcher, _event(private=True), commands_module.parse_command(text)
+                        _session(matcher, private=True), commands_module.parse_command(text)
                     )
                 self.assertIn("未找到", matcher.last_text())
         self.assertEqual(client.calls, [])
@@ -1848,7 +1849,7 @@ class ArknightsHandlerTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(command=text), _ak_key(""):
                 matcher = _FakeMatcher()
                 await self.handlers._dispatch(
-                    matcher, _event(private=True), commands_module.parse_command(text)
+                    _session(matcher, private=True), commands_module.parse_command(text)
                 )
             self.assertIn("未配置", matcher.last_text())
             self.assertIn("ARKNIGHTS_CREDENTIAL_KEY", matcher.last_text())
@@ -1872,6 +1873,112 @@ class ArknightsCleanupTests(unittest.IsolatedAsyncioTestCase):
         client.close.assert_awaited_once()
         self.assertIsNone(handlers._store)
         self.assertIsNone(handlers._client)
+
+
+
+ARKNIGHTS_SCENARIOS = r"""
+import asyncio
+from unittest.mock import AsyncMock, patch
+from plugins.arknights import crypto
+from plugins.arknights.commands import PRIVATE_ONLY_NOTICE, format_help
+from plugins.arknights.store import RoleCandidate
+
+ak = plugin('plugins.arknights.handlers')
+CIPHER = crypto.ArknightsCipher(b'k' * 32)
+TOKEN = 'hgAccountToken0123456789abcdefXYZ'
+real_prompt = ak.prompt
+
+
+def short_prompt(*args, timeout):
+    return real_prompt(*args, timeout=0.3)
+
+
+def sent_to(user):
+    return [content for channel, content in default_account.protocol.sent if channel == 'private:' + user]
+
+
+async def dialog(user, first, *answers):
+    # 第一条指令在后台等待 prompt，之后的消息逐条回答
+    before = len(sent_to(user))
+    task = asyncio.create_task(say(first, private=True, user=user))
+    for answer in answers:
+        await asyncio.sleep(0.1)
+        await say(answer, private=True, user=user)
+    await asyncio.wait_for(task, 5)
+    return sent_to(user)[before:]
+
+
+async def main():
+    with patch.object(ak, 'cached_help_image', AsyncMock(return_value=None)):
+        # 帮助文案按 str 发出（尖括号经 Satori XML 解析），各名字回复一致
+        first = await say('/ak')
+        assert len(first) == 1 and first[0].startswith(format_help().split('<')[0]), first
+        for text in ('/明日方舟', '/arknights help', '/ak 帮助'):
+            assert await say(text) == first, text
+    with patch.object(ak, 'cached_help_image', AsyncMock(return_value='assets/image/help/ak.png')):
+        sent = await say('/ak h')
+        assert len(sent) == 1 and sent[0].startswith('<img'), sent
+    # 群聊拒绝绑定/解绑；未配置密钥的报错
+    assert await say('/ak 绑定') == [PRIVATE_ONLY_NOTICE]
+    assert await say('/ak 解绑 甲') == [PRIVATE_ONLY_NOTICE]
+    sent = await say('/ak 绑定', private=True, user='1')
+    assert len(sent) == 1 and '未配置凭据密钥' in sent[0], sent
+    sent = await say('/ak 签到', private=True, user='1')
+    assert len(sent) == 1 and '未配置凭据密钥' in sent[0], sent
+
+    client = AsyncMock()
+    client.discover_roles = AsyncMock(return_value=[RoleCandidate('10001234', '1', '甲', '官服')])
+    with patch.object(ak.ArknightsCipher, 'from_settings', return_value=CIPHER), \
+         patch.object(ak, '_client_instance', AsyncMock(return_value=client)):
+        # 多步绑定：方式 → Token
+        sent = await dialog('7', '/ak 绑定', '1', '{"code":0,"data":{"content":"' + TOKEN + '"}}')
+        assert sent[0] == ak.BIND_METHOD_PROMPT and sent[1] == ak.TOKEN_GUIDE and sent[2] == ak.TOKEN_PROMPT, sent
+        assert len(sent) == 4 and sent[3].startswith('绑定完成：新增 1 个角色；当前共 1 个角色。'), sent
+        client.discover_roles.assert_awaited_once_with(TOKEN)
+        # 取消、无法识别的方式、无效 Token、手机号格式
+        assert await dialog('7', '/ak bind', '取消') == [ak.BIND_METHOD_PROMPT, ak.CANCELLED_TEXT]
+        assert await dialog('7', '/ak 绑定', '3') == [ak.BIND_METHOD_PROMPT, '未识别绑定方式，绑定已取消。']
+        assert await dialog('7', '/ak 绑定', 't', '{"data": {}}') == [
+            ak.BIND_METHOD_PROMPT, ak.TOKEN_GUIDE, ak.TOKEN_PROMPT, '未识别到有效 Token，绑定已取消。']
+        assert await dialog('7', '/ak 绑定', '2', '123') == [
+            ak.BIND_METHOD_PROMPT, ak.PHONE_PROMPT, '手机号格式不正确，绑定已取消。']
+        # 等待超时：prompt 发出「等待超时」后，绑定以取消文案结束
+        with patch.object(ak, 'prompt', short_prompt):
+            sent = await dialog('7', '/ak 绑定')
+        assert sent[0] == ak.BIND_METHOD_PROMPT and sent[-1] == ak.CANCELLED_TEXT and len(sent) == 3, sent
+        assert '超时' in sent[1], sent
+
+        # 账号、主账号、解绑
+        sent = await say('/ak 账号', private=True, user='7')
+        assert len(sent) == 1 and '甲' in sent[0] and '10001234' in sent[0], sent
+        sent = await say('/ak 账号', user='7')
+        assert len(sent) == 1 and '甲' in sent[0] and '10001234' not in sent[0], sent
+        sent = await say('/ak 主账号', private=True, user='7')
+        assert len(sent) == 1 and sent[0].startswith('请指定要设为主账号的角色：/ak 主账号'), sent
+        sent = await say('/ak primary 甲', private=True, user='7')
+        assert len(sent) == 1 and sent[0].startswith('已将 甲（') and sent[0].endswith('设为主账号。'), sent
+        sent = await say('/ak 主账号 乙', private=True, user='7')
+        assert len(sent) == 1 and not sent[0].startswith('已将'), sent
+        sent = await say('/ak 解绑', private=True, user='7')
+        assert len(sent) == 1 and sent[0].startswith('请指定要解绑的角色'), sent
+        sent = await say('/ak unbind 甲', private=True, user='7')
+        assert len(sent) == 1 and sent[0].startswith('已解绑 甲（'), sent
+        sent = await say('/ak 签到', private=True, user='7')
+        assert len(sent) == 1, sent
+    print('ALL-OK')
+
+run(main())
+"""
+
+
+class ArknightsDispatchTests(unittest.TestCase):
+    def test_ak_command_and_bind_dialog_through_the_real_event_path(self):
+        from tests.support.dispatch import run_scenarios
+
+        result = run_scenarios(ARKNIGHTS_SCENARIOS)
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, output[-6000:])
+        self.assertIn("ALL-OK", result.stdout)
 
 
 if __name__ == "__main__":

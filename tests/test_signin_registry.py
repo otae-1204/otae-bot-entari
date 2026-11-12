@@ -713,7 +713,8 @@ class CrossGameCommandTests(unittest.IsolatedAsyncioTestCase):
         return stack, client
 
     async def _ak(self, matcher, text: str, *, private: bool = False):
-        await self.arknights._dispatch(matcher, _event(private=private), self.parse_ak(text), bot=BOT)
+        session = SimpleNamespace(event=_event(private=private), account=BOT, send=matcher.send)
+        await self.arknights._dispatch(session, self.parse_ak(text))
 
     async def test_ak_selector_picks_one_arknights_role_and_endfield_signs_every_role(self):
         endfield_calls = self._other_game("endfield", color="blue")
@@ -727,7 +728,6 @@ class CrossGameCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.features.asked, ["endfield"])
         # One message, one stacked image: the requested game on top.
         self.assertEqual(len(matcher.sent), 1)
-        self.assertEqual(matcher.finished, [None])
         top, bottom, size = _rows(self.images[0])
         self.assertEqual((top, bottom, size), (RED, BLUE, (32, 48)))
         self.assertNotIn("终末地", str(matcher.sent[0]))
