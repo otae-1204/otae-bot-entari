@@ -53,6 +53,7 @@
 5. **发送要有降级顺序**，并且每一级失败只记一条日志。例如：合并转发 → 逐张图片 → 文字说明。
 6. **监听事件用事件类**，不用类名字符串比较。〔守卫〕
 7. **不长期保存消息 ID。** 不同接入方式的消息 ID 格式不同；需要跨重启引用消息的功能要单独设计。
+8. **媒体只以上传或内联数据离开 bot，绝不带本地路径。** 插件只交字节（`otae_bot.messaging.media` 的 `png` / `image` / `file` / `image_file`）或公网 URL；出站管线 `otae_bot/pipeline/outbound_media.py` 在每次发送前按账号 `features` 决定：有 `upload.create` 就上传换 URL，否则（或上传失败）内联 `data:`。插件不写临时文件、不直接调 `upload.create`。〔守卫 R9〕
 
 ## 5. 框架使用约定
 
