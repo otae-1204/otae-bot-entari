@@ -327,7 +327,7 @@ class DispatchEndToEndTests(unittest.TestCase):
                 package.mkdir(parents=True)
                 (package / "__init__.py").touch()
             env = dict(os.environ)
-            env.update(PYTHONIOENCODING="utf-8", SATORI_CLIENTS="[]", ONEBOT_CLIENTS="[]")
+            env.update(PYTHONIOENCODING="utf-8")
             result = subprocess.run(
                 [sys.executable, "-X", "utf8", "-c", DISPATCH_SCRIPT, str(ROOT)], cwd=root,
                 capture_output=True, text=True, timeout=120, env=env,

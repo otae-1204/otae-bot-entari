@@ -7,7 +7,6 @@ import contextvars
 import hashlib
 import json
 import logging
-import os
 import re
 import sqlite3
 import time
@@ -19,6 +18,7 @@ from urllib.parse import urlsplit
 import httpx
 from loguru import logger
 
+from otae_bot.config.settings import core_settings
 from otae_bot.infrastructure.cache import AsyncTTLCache, CacheStats
 from .asset_policy import (
     DIRECT_FAILURES,
@@ -53,20 +53,19 @@ DEFAULT_MAX_RESOURCE_BYTES = 10 * 1024 * 1024
 STALE_RETRY_SECONDS = 60.0
 
 
-def _cache_budget(name: str, default_mib: int) -> int:
-    return max(1, int(os.environ.get(name, default_mib))) * 1024 * 1024
+def _mib(value: int) -> int:
+    return max(1, int(value)) * 1024 * 1024
 
 
-API_CACHE_MAX_BYTES = _cache_budget("OTAE_HTTP_API_CACHE_MIB", 8)
-TABLE_CACHE_MAX_BYTES = _cache_budget("OTAE_HTTP_TABLE_CACHE_MIB", 64)
+_cache_settings = core_settings().http_cache
+API_CACHE_MAX_BYTES = _mib(_cache_settings.api_mib)
+TABLE_CACHE_MAX_BYTES = _mib(_cache_settings.table_mib)
 # 当前版本的 I18nTextTable_CN（解析后计量约 45 MiB）单独一个常驻槽，不和其它表在 LRU 里互挤。
-I18N_CACHE_MAX_BYTES = _cache_budget("OTAE_HTTP_I18N_CACHE_MIB", 64)
+I18N_CACHE_MAX_BYTES = _mib(_cache_settings.i18n_mib)
 # 小图池：要装得下一张账号卡的两百多张图标。
-ASSET_CACHE_MAX_BYTES = _cache_budget("OTAE_HTTP_ASSET_CACHE_MIB", 64)
+ASSET_CACHE_MAX_BYTES = _mib(_cache_settings.asset_mib)
 # 超过这个体积的图（立绘、横幅）只要磁盘上有副本就不进内存池，命中时直接读磁盘。
-ASSET_LARGE_ENTRY_BYTES = (
-    max(1, int(os.environ.get("OTAE_HTTP_ASSET_LARGE_ENTRY_KIB", "1024"))) * 1024
-)
+ASSET_LARGE_ENTRY_BYTES = max(1, _cache_settings.asset_large_entry_kib) * 1024
 HTTP_CACHE_MAX_BYTES = (
     API_CACHE_MAX_BYTES
     + TABLE_CACHE_MAX_BYTES

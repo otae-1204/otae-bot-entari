@@ -4,6 +4,7 @@ import asyncio
 import json
 import sys
 import unittest
+from unittest.mock import patch
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
@@ -183,9 +184,9 @@ class TiboRadarTests(unittest.TestCase):
         self.assertTrue(asyncio.run(_is_subscription_manager(object(), admin_event, "group-1", "admin-1")))
         self.assertFalse(asyncio.run(_is_subscription_manager(object(), regular_event, "group-1", "member-1")))
 
+    @patch.object(GlobalConfig, "SUPERUSERS", ["root"])
     def test_subscription_manager_accepts_superuser(self):
-        configured = GlobalConfig.SUPERUSERS
-        superuser_id = str(configured[0] if isinstance(configured, (list, tuple)) else configured)
+        superuser_id = "root"
         event = SimpleNamespace(
             guild=SimpleNamespace(id="group-1"),
             user=SimpleNamespace(id=superuser_id),

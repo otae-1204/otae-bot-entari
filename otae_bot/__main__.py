@@ -1,7 +1,7 @@
 """Support ``python -m otae_bot`` alongside the existing bot.py entrypoint."""
 
-from otae_bot.application import main
+from otae_bot.launcher import run
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(run())

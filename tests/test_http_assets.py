@@ -6,17 +6,17 @@
 from __future__ import annotations
 
 import asyncio
-import re
+import dataclasses
 import time
 import unittest
 from dataclasses import dataclass
-from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
 import httpcore
 import httpx
 
+from otae_bot.config.core import HttpAssetSettings
 from otae_bot.infrastructure.http import asset_policy
 from otae_bot.infrastructure.http import assets as http_assets
 from otae_bot.infrastructure.http import client as http_client
@@ -155,17 +155,17 @@ class AssetSettingsTests(unittest.TestCase):
     def test_env_parsing_and_bounds(self):
         settings = load_asset_settings(
             {
-                "OTAE_HTTP_ASSET_CONNECT_TIMEOUT": "3",
-                "OTAE_HTTP_ASSET_READ_TIMEOUT": "abc",
-                "OTAE_HTTP_ASSET_RETRIES": "99",
-                "OTAE_HTTP_ASSET_CONCURRENCY": "0",
-                "OTAE_HTTP_ASSET_BREAKER_THRESHOLD": "5",
-                "OTAE_HTTP_ASSET_BREAKER_COOLDOWN": "60",
-                "OTAE_HTTP_ASSET_RENDER_BUDGET": "0",
-                "OTAE_HTTP_ASSET_PROXY": "http://127.0.0.1:7897",
-                "OTAE_HTTP_ASSET_PROXY_HOSTS": "BBS.hycdn.cn, *.example.test",
-                "OTAE_HTTP_ASSET_TRUST_ENV": "true",
-                "OTAE_HTTP_ASSET_HOST_REWRITE": "bbs.hycdn.cn=mirror.test",
+                "connect_timeout": "3",
+                "read_timeout": "abc",
+                "retries": "99",
+                "concurrency": "0",
+                "breaker_threshold": "5",
+                "breaker_cooldown": "60",
+                "render_budget": "0",
+                "proxy": "http://127.0.0.1:7897",
+                "proxy_hosts": "BBS.hycdn.cn, *.example.test",
+                "trust_env": "true",
+                "host_rewrite": "bbs.hycdn.cn=mirror.test",
             }
         )
         self.assertEqual(settings.connect_timeout, 3.0)
@@ -183,7 +183,7 @@ class AssetSettingsTests(unittest.TestCase):
             "https://mirror.test:8443/image/a.png?x=1",
         )
 
-    def test_every_setting_is_documented_in_env_example(self):
+    def test_every_setting_is_declared_in_the_core_settings_model(self):
         class Recorder(dict):
             def __init__(self):
                 super().__init__()
@@ -195,28 +195,28 @@ class AssetSettingsTests(unittest.TestCase):
 
         environ = Recorder()
         load_asset_settings(environ)
-        template = (Path(__file__).resolve().parents[1] / ".env.example").read_text(encoding="utf-8")
-        documented = set(re.findall(r"^(OTAE_HTTP_ASSET_[A-Z_]+)=", template, re.MULTILINE))
+        declared = {item.name for item in dataclasses.fields(HttpAssetSettings)}
         self.assertGreaterEqual(len(environ.read), 11)
-        self.assertEqual(sorted(environ.read - documented), [])
+        self.assertEqual(sorted(environ.read - declared), [])
+        self.assertEqual(sorted(declared - environ.read), [])
 
     def test_rewrite_accepts_json_and_rejects_bad_proxy_scheme(self):
         settings = load_asset_settings(
             {
-                "OTAE_HTTP_ASSET_HOST_REWRITE": '{"bbs.hycdn.cn": "mirror.test"}',
-                "OTAE_HTTP_ASSET_PROXY": "ftp://127.0.0.1:21",
+                "host_rewrite": '{"bbs.hycdn.cn": "mirror.test"}',
+                "proxy": "ftp://127.0.0.1:21",
             }
         )
         self.assertEqual(settings.host_rewrites, (("bbs.hycdn.cn", "mirror.test"),))
         self.assertEqual(settings.proxy, "")
-        bare = load_asset_settings({"OTAE_HTTP_ASSET_PROXY": "127.0.0.1:7897"})
+        bare = load_asset_settings({"proxy": "127.0.0.1:7897"})
         self.assertEqual(bare.proxy, "http://127.0.0.1:7897")
 
     def test_proxy_hosts_route_only_listed_hosts_through_proxy(self):
         settings = load_asset_settings(
             {
-                "OTAE_HTTP_ASSET_PROXY": "http://127.0.0.1:7897",
-                "OTAE_HTTP_ASSET_PROXY_HOSTS": "bbs.hycdn.cn,*.example.test",
+                "proxy": "http://127.0.0.1:7897",
+                "proxy_hosts": "bbs.hycdn.cn,*.example.test",
             }
         )
         client = http_client._build_asset_client(settings)
@@ -234,7 +234,7 @@ class AssetSettingsTests(unittest.TestCase):
 
     def test_proxy_without_hosts_routes_every_asset_through_proxy(self):
         client = http_client._build_asset_client(
-            load_asset_settings({"OTAE_HTTP_ASSET_PROXY": "http://127.0.0.1:7897"})
+            load_asset_settings({"proxy": "http://127.0.0.1:7897"})
         )
         try:
             transport = client._transport_for_url(httpx.URL("https://web.hycdn.cn/a.png"))
@@ -249,11 +249,11 @@ class ProxyModeSettingsTests(unittest.TestCase):
         self.assertEqual((defaults.proxy_mode, defaults.direct_cooldown), ("fallback", 300.0))
         self.assertFalse(proxied_host("bbs.hycdn.cn", defaults))  # 没配代理：行为不变
         always = load_asset_settings(
-            {"OTAE_HTTP_ASSET_PROXY_MODE": "ALWAYS", "OTAE_HTTP_ASSET_DIRECT_COOLDOWN": "60"}
+            {"proxy_mode": "ALWAYS", "direct_cooldown": "60"}
         )
         self.assertEqual((always.proxy_mode, always.direct_cooldown), ("always", 60.0))
         with mock.patch.object(asset_policy, "logger") as log:
-            bad = load_asset_settings({"OTAE_HTTP_ASSET_PROXY_MODE": "sometimes"})
+            bad = load_asset_settings({"proxy_mode": "sometimes"})
         self.assertEqual(bad.proxy_mode, "fallback")
         log.warning.assert_called_once()
 

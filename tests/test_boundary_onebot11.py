@@ -20,6 +20,8 @@ from satori.server import Request
 
 from otae_bot import application
 from otae_bot.boundary import ONEBOT11_ADAPTER, SERVER_PLUGIN, server_plugin_config
+from otae_bot.config import settings
+from tests.support.config import loaded_config_file
 from otae_bot.boundary.onebot11 import (
     FORWARD_MAX_DEPTH,
     FORWARD_MAX_MESSAGES,
@@ -578,43 +580,58 @@ class UploadTests(unittest.IsolatedAsyncioTestCase):
 
 
 class WiringTests(unittest.TestCase):
-    def _create_app(self, satori: list, onebot: list):
+    def _create_app(self):
         names = ("install_message_log_redaction", "install_recent_alerts", "install_quote_fetch_fallback",
                  "install_command_input_normalizers", "install_group_feature_gates",
                  "install_command_usage_recorders", "listen")
         patches = {name: Mock() for name in names}
         with (
             patch.multiple(application, **patches),
-            patch.object(application, "SATORI_CLIENTS", satori),
-            patch.object(application, "ONEBOT_CLIENTS", onebot),
             patch.object(application, "Entari") as entari,
-            patch.object(application, "WS", side_effect=lambda **values: values),
             patch.object(application, "discover_plugins", return_value=("plugins.demo",)),
             patch.object(application, "load_plugin") as load_plugin,
         ):
             application.create_app()
         return entari, load_plugin
 
-    def test_without_onebot_clients_app_is_built_as_before(self):
-        clients = [{"host": "one", "port": 5501, "token": "test-token"}]
-        entari, load_plugin = self._create_app(clients, [])
-        entari.assert_called_once_with({"host": "one", "port": 5501, "path": "", "token": "test-token"})
+    def test_connections_come_from_entari_yml(self):
+        yml = (
+            "basic:\n  network:\n"
+            "    - {type: ws, host: one, port: 5501, token: \"${{ env.T1 :- }}\"}\n"
+            "    - {type: ws, host: two, port: 5502, path: /satori}\n"
+        )
+        with loaded_config_file(yml, "T1=test-token\n") as (config, _):
+            entari, load_plugin = self._create_app()
+        entari.from_config.assert_called_once_with(config)
         self.assertEqual([c.args for c in load_plugin.call_args_list], [("plugins.demo",)])
-        entari, _ = self._create_app([], [])
-        entari.assert_called_once_with({"host": "localhost", "port": 5500, "path": "", "token": None})
+        self.assertEqual([n.dump()["token"] for n in config.basic.network], ["test-token", None])
 
-    def test_onebot_clients_load_the_server_plugin_without_default_network(self):
-        onebot = [{"endpoint": "ws://127.0.0.1:3001", "token": "test-token"}]
-        entari, load_plugin = self._create_app([], onebot)
+    def test_without_a_loaded_configuration_the_app_has_no_connection(self):
+        with settings.override({}):
+            entari, load_plugin = self._create_app()
         entari.assert_called_once_with()
+        self.assertEqual([c.args for c in load_plugin.call_args_list], [("plugins.demo",)])
+
+    def test_server_section_loads_the_boundary_before_plugins(self):
+        yml = (
+            "basic:\n  network: []\n"
+            "plugins:\n  server:\n    host: 0.0.0.0\n    port: 5140\n    adapters:\n"
+            "      - endpoint: ws://127.0.0.1:3001\n        access_token: ${{ env.ONEBOT_TOKEN_1 :- }}\n"
+        )
+        with loaded_config_file(yml, "ONEBOT_TOKEN_1=test-token\n") as (_, root):
+            entari, load_plugin = self._create_app()
+            declared = settings.server_declaration()
+        entari.from_config.assert_called_once()
         name, config = load_plugin.call_args_list[0].args
         self.assertEqual(name, SERVER_PLUGIN)
         self.assertTrue(config["direct_adapter"])
+        self.assertEqual(config["host"], "127.0.0.1")
         self.assertEqual(config["adapters"], [{"$path": ONEBOT11_ADAPTER, "endpoint": "ws://127.0.0.1:3001",
                                                 "access_token": "test-token"}])
         self.assertEqual(load_plugin.call_args_list[1].args, ("plugins.demo",))
-        entari, _ = self._create_app([{"host": "one", "port": 5501}], onebot)
-        entari.assert_called_once_with({"host": "one", "port": 5501, "path": "", "token": None})
+        # The forced values and the fresh token never reach the loaded file's data.
+        self.assertNotIn("token", declared)
+        self.assertEqual(declared["host"], "0.0.0.0")
 
     def test_server_listens_on_a_private_unix_socket(self):
         import os
@@ -623,12 +640,14 @@ class WiringTests(unittest.TestCase):
         if os.name == "nt":
             self.skipTest("unix sockets only")
         with tempfile.TemporaryDirectory() as directory:
-            config = server_plugin_config([{"endpoint": "ws://h:1"}], Path(directory))
+            config = server_plugin_config({"adapters": [{"endpoint": "ws://h:1"}]}, Path(directory))
             socket_dir = Path(directory) / "satori-server"
             self.assertEqual(config["options"]["uds"], str(socket_dir / "satori.sock"))
             self.assertEqual(socket_dir.stat().st_mode & 0o777, 0o700)
         self.assertIsNone(config["adapters"][0]["access_token"])
+        self.assertEqual(config["adapters"][0]["$path"], ONEBOT11_ADAPTER)
         self.assertTrue(config["token"])
+        self.assertFalse(config["options"]["access_log"])
 
 
 if __name__ == "__main__":

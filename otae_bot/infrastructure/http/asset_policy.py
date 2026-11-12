@@ -3,15 +3,15 @@
 素材与 API 请求分走两条通道（见 client.py）：一个图床不可达时，素材请求只占自己的
 并发槽位，签到、绑定等 API 请求不受影响。这里只放策略与状态，不发网络请求。
 
-配置全部来自环境变量（.env 由 otae_bot.config.settings 载入 os.environ），首次使用时
+配置来自 entari.yml 的 otae.http_asset 段（otae_bot.config），首次使用时
 读取；默认值保持原有安全行为：不走代理、trust_env=False、不改写主机。配置了代理时
 默认「先直连、连不上再走代理」（PROXY_MODE=fallback）。
 """
 
 from __future__ import annotations
 
+import dataclasses
 import json
-import os
 import time
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -23,8 +23,10 @@ from urllib.parse import urlsplit, urlunsplit
 import httpx
 from loguru import logger
 
+from otae_bot.config.settings import core_settings
 
-ENV_PREFIX = "OTAE_HTTP_ASSET_"
+
+SETTINGS_PREFIX = "otae.http_asset."
 _PROXY_SCHEMES = ("http", "https", "socks5", "socks5h")
 PROXY_MODES = ("always", "fallback")
 # 内容地址固定（路径带哈希）的图床：磁盘缓存按这里的秒数算新鲜期，不再每 10 分钟校验。
@@ -65,21 +67,25 @@ class AssetFetchSettings:
         return self.retries + 1
 
 
-def _number(environ: Mapping[str, str], name: str, default, cast, minimum, maximum=None):
-    raw = str(environ.get(ENV_PREFIX + name, "") or "").strip()
+def _text(value: object) -> str:
+    return "" if value is None else str(value)
+
+
+def _number(values: Mapping[str, object], name: str, default, cast, minimum, maximum=None):
+    raw = _text(values.get(name.lower())).strip()
     if not raw:
         return default
     try:
         value = cast(raw)
     except ValueError:
-        logger.warning(f"[http-assets] {ENV_PREFIX}{name} is not a number; using {default}")
+        logger.warning(f"[http-assets] {SETTINGS_PREFIX}{name.lower()} is not a number; using {default}")
         return default
     value = max(minimum, value)
     return value if maximum is None else min(maximum, value)
 
 
-def _flag(environ: Mapping[str, str], name: str, default: bool) -> bool:
-    raw = str(environ.get(ENV_PREFIX + name, "") or "").strip().lower()
+def _flag(values: Mapping[str, object], name: str, default: bool) -> bool:
+    raw = _text(values.get(name.lower())).strip().lower()
     if not raw:
         return default
     return raw in {"1", "true", "yes", "on"}
@@ -105,7 +111,7 @@ def _rewrites(raw: str) -> tuple[tuple[str, str], ...]:
         try:
             mapping = json.loads(raw)
         except json.JSONDecodeError:
-            logger.warning(f"[http-assets] {ENV_PREFIX}HOST_REWRITE is not valid JSON; ignored")
+            logger.warning(f"[http-assets] {SETTINGS_PREFIX}host_rewrite is not valid JSON; ignored")
             return ()
         if isinstance(mapping, dict):
             pairs = [(str(key), str(value)) for key, value in mapping.items()]
@@ -130,7 +136,7 @@ def _proxy(raw: str) -> str:
         raw = f"http://{raw}"  # 与 httpx 处理 HTTP(S)_PROXY 的方式一致，如 127.0.0.1:7897
     if urlsplit(raw).scheme.lower() not in _PROXY_SCHEMES:
         # 不把取值写进日志：代理地址可能带口令。
-        logger.warning(f"[http-assets] {ENV_PREFIX}PROXY has an unsupported scheme; ignored")
+        logger.warning(f"[http-assets] {SETTINGS_PREFIX}proxy has an unsupported scheme; ignored")
         return ""
     return raw
 
@@ -141,7 +147,7 @@ def _proxy_mode(raw: str, default: str) -> str:
         return default
     if raw not in PROXY_MODES:
         logger.warning(
-            f"[http-assets] {ENV_PREFIX}PROXY_MODE must be one of {'/'.join(PROXY_MODES)}; using {default}"
+            f"[http-assets] {SETTINGS_PREFIX}proxy_mode must be one of {'/'.join(PROXY_MODES)}; using {default}"
         )
         return default
     return raw
@@ -163,7 +169,7 @@ def _host_max_age(raw: str, default) -> tuple[tuple[str, float], ...]:
         except ValueError:
             value = None
         if value is None:
-            logger.warning(f"[http-assets] {ENV_PREFIX}HOST_MAX_AGE entry ignored: {item.strip()[:64]}")
+            logger.warning(f"[http-assets] {SETTINGS_PREFIX}host_max_age entry ignored: {item.strip()[:64]}")
             continue
         if value > 0:
             pairs[suffix] = min(value, 365 * 86400.0)
@@ -187,15 +193,21 @@ def _host_concurrency(raw: str, default) -> tuple[tuple[str, int], ...]:
             value = None
         if value is None or value < 1:
             logger.warning(
-                f"[http-assets] {ENV_PREFIX}HOST_CONCURRENCY entry ignored: {item.strip()[:64]}"
+                f"[http-assets] {SETTINGS_PREFIX}host_concurrency entry ignored: {item.strip()[:64]}"
             )
             continue
         pairs[suffix] = min(value, 64)
     return tuple(pairs.items())
 
 
-def load_asset_settings(environ: Mapping[str, str] | None = None) -> AssetFetchSettings:
-    env = os.environ if environ is None else environ
+def _configured() -> dict[str, object]:
+    configured = dataclasses.asdict(core_settings().http_asset)
+    return {name: value for name, value in configured.items() if value is not None}
+
+
+def load_asset_settings(values: Mapping[str, object] | None = None) -> AssetFetchSettings:
+    """Parse ``otae.http_asset`` (or ``values``, keyed like it); bad entries fall back to defaults."""
+    env = _configured() if values is None else values
     defaults = AssetFetchSettings()
     return AssetFetchSettings(
         connect_timeout=_number(env, "CONNECT_TIMEOUT", defaults.connect_timeout, float, 0.5, 60.0),
@@ -205,17 +217,17 @@ def load_asset_settings(environ: Mapping[str, str] | None = None) -> AssetFetchS
         breaker_threshold=_number(env, "BREAKER_THRESHOLD", defaults.breaker_threshold, int, 0),
         breaker_cooldown=_number(env, "BREAKER_COOLDOWN", defaults.breaker_cooldown, float, 1.0),
         render_budget=_number(env, "RENDER_BUDGET", defaults.render_budget, float, 0.0),
-        proxy=_proxy(str(env.get(ENV_PREFIX + "PROXY", "") or "")),
-        proxy_hosts=_hosts(str(env.get(ENV_PREFIX + "PROXY_HOSTS", "") or "")),
-        proxy_mode=_proxy_mode(str(env.get(ENV_PREFIX + "PROXY_MODE", "") or ""), defaults.proxy_mode),
+        proxy=_proxy(_text(env.get("proxy"))),
+        proxy_hosts=_hosts(_text(env.get("proxy_hosts"))),
+        proxy_mode=_proxy_mode(_text(env.get("proxy_mode")), defaults.proxy_mode),
         direct_cooldown=_number(env, "DIRECT_COOLDOWN", defaults.direct_cooldown, float, 1.0, 86400.0),
         trust_env=_flag(env, "TRUST_ENV", defaults.trust_env),
-        host_rewrites=_rewrites(str(env.get(ENV_PREFIX + "HOST_REWRITE", "") or "")),
+        host_rewrites=_rewrites(_text(env.get("host_rewrite"))),
         host_max_age=_host_max_age(
-            str(env.get(ENV_PREFIX + "HOST_MAX_AGE", "") or ""), defaults.host_max_age
+            _text(env.get("host_max_age")), defaults.host_max_age
         ),
         host_concurrency=_host_concurrency(
-            str(env.get(ENV_PREFIX + "HOST_CONCURRENCY", "") or ""), defaults.host_concurrency
+            _text(env.get("host_concurrency")), defaults.host_concurrency
         ),
         hard_deadline=_number(env, "HARD_DEADLINE", defaults.hard_deadline, float, 1.0, 3600.0),
         queue_limit=_number(env, "QUEUE_LIMIT", defaults.queue_limit, int, 0, 100000),
@@ -239,7 +251,7 @@ def asset_settings() -> AssetFetchSettings:
 
 
 def configure_asset_settings(settings: AssetFetchSettings | None) -> None:
-    """Replace the cached settings (None re-reads the environment on next use)."""
+    """Replace the cached settings (None re-reads the configuration on next use)."""
     global _settings, _breaker, _direct_routes
     with _settings_lock:
         _settings = settings

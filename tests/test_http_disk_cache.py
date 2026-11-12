@@ -727,11 +727,11 @@ class ClientRevalidationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(load_asset_settings({}).host_max_age, (("hycdn.cn", 604800.0),))
         with mock.patch.object(asset_policy, "logger") as log:
             custom = load_asset_settings(
-                {"OTAE_HTTP_ASSET_HOST_MAX_AGE": "example.test=60, *.cdn.test=120,broken,zero.test=0"}
+                {"host_max_age": "example.test=60, *.cdn.test=120,broken,zero.test=0"}
             )
         self.assertEqual(custom.host_max_age, (("example.test", 60.0), ("cdn.test", 120.0)))
         log.warning.assert_called_once()
-        self.assertEqual(load_asset_settings({"OTAE_HTTP_ASSET_HOST_MAX_AGE": "off"}).host_max_age, ())
+        self.assertEqual(load_asset_settings({"host_max_age": "off"}).host_max_age, ())
         default = AssetFetchSettings()
         self.assertEqual(host_max_age("bbs.hycdn.cn", default), 604800.0)
         self.assertEqual(host_max_age("web.hycdn.cn", default), 604800.0)

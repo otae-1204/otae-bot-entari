@@ -51,6 +51,9 @@ BOUNDARY_WIRING = "otae_bot/application.py"  # the single exception: it loads th
 LOWER_LAYERS = ("otae_bot/infrastructure/", "otae_bot/config/")
 LOWER_ALLOWED = ("otae_bot.infrastructure", "otae_bot.config")
 LOWER_FORBIDDEN = ("arclet.entari", "arclet.letoderea", "satori", "plugins")
+# otae_bot/config is where settings bind to Entari's config API; nothing else of Entari.
+CONFIG_LAYER = "otae_bot/config/"
+CONFIG_FRAMEWORK_API = "arclet.entari.config"
 
 # R1: always flagged wherever they appear (outside docstrings).
 KNOWN_ACTIONS = frozenset({
@@ -290,7 +293,8 @@ class _Scanner(ast.NodeVisitor):
         if not in_boundary and rel != BOUNDARY_WIRING and any(_within(n, BOUNDARY_MODULES) for n in names):
             self.add("L2", node)
         if rel.startswith(LOWER_LAYERS) and any(
-                _within(n, LOWER_FORBIDDEN)
+                (_within(n, LOWER_FORBIDDEN)
+                 and not (rel.startswith(CONFIG_LAYER) and _within(n, CONFIG_FRAMEWORK_API)))
                 or (_within(n, "otae_bot") and n != "otae_bot" and not _within(n, LOWER_ALLOWED))
                 for n in names):
             self.add("L3", node)

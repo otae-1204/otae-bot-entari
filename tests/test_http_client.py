@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import sqlite3
 import tempfile
 import unittest
@@ -49,11 +50,11 @@ class SharedSslContextTests(unittest.IsolatedAsyncioTestCase):
 
     def test_cert_env_only_affects_trust_env_contexts(self):
         with mock.patch.object(tls.httpx, "create_ssl_context", side_effect=lambda **_: object()):
-            with mock.patch.dict(tls.os.environ):
-                tls.os.environ.pop("SSL_CERT_FILE", None)
+            with mock.patch.dict(os.environ):
+                os.environ.pop("SSL_CERT_FILE", None)
                 plain = tls.shared_ssl_context(trust_env=True)
                 ignored = tls.shared_ssl_context(trust_env=False)
-            with mock.patch.dict(tls.os.environ, {"SSL_CERT_FILE": "custom.pem"}):
+            with mock.patch.dict(os.environ, {"SSL_CERT_FILE": "custom.pem"}):
                 custom = tls.shared_ssl_context(trust_env=True)
                 self.assertIs(tls.shared_ssl_context(trust_env=False), ignored)
         self.assertIsNot(plain, custom)

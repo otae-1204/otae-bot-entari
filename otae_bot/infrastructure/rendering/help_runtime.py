@@ -23,11 +23,12 @@ from loguru import logger
 
 from otae_bot.infrastructure.rendering import art_frame, help_cards
 from otae_bot.infrastructure.rendering.browser import screenshot_web_element
+from otae_bot.config.core import CoreSettings
 from otae_bot.config.root import PROJECT_ROOT
+from otae_bot.config.settings import core_settings
 
 #: Runtime cache location; override with ``OTAE_HELP_CACHE_PATH``.
-CACHE_PATH_ENV = "OTAE_HELP_CACHE_PATH"
-DEFAULT_CACHE_PATH = "data/cache/help-cards"
+DEFAULT_CACHE_PATH = CoreSettings().help_cache_path
 
 #: Matches the offline pipeline in ``scripts/render/render_help_cards.py``.
 DEVICE_SCALE_FACTOR = 1
@@ -38,7 +39,7 @@ _locks: dict[str, asyncio.Lock] = {}
 
 def cache_dir() -> Path:
     """Directory holding runtime-rendered help PNGs."""
-    configured = Path(os.getenv(CACHE_PATH_ENV, DEFAULT_CACHE_PATH))
+    configured = Path(core_settings().help_cache_path)
     return configured if configured.is_absolute() else PROJECT_ROOT / configured
 
 
@@ -151,4 +152,4 @@ async def _render(
     return help_cards.finalize_png(png, help_cards.spec_digest(page, art, theme))
 
 
-__all__ = ["CACHE_PATH_ENV", "cached_help_image", "cache_dir", "find_page", "shipped_help_image"]
+__all__ = ["cached_help_image", "cache_dir", "find_page", "shipped_help_image"]

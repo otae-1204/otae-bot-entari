@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import atexit
 import hashlib
-import os
 import re
 import sqlite3
 import time
@@ -38,6 +37,8 @@ from threading import Condition, Lock, RLock, Thread, current_thread
 from urllib.parse import urlsplit
 
 from loguru import logger
+
+from otae_bot.config.settings import core_settings
 
 
 # PRAGMA user_version：0 = 最初的 10 列；2 = 增加 size 列与 (accessed_at, size) 索引。
@@ -857,22 +858,15 @@ def _flush_at_exit():
 atexit.register(_flush_at_exit)
 
 
+_cache_settings = core_settings().http_cache
 public_images = PublicImageDiskCache(
-    Path(
-        os.environ.get(
-            "OTAE_PUBLIC_IMAGE_CACHE_PATH", "data/cache/public-images-v1.sqlite3"
-        )
-    ),
-    max(0, int(os.environ.get("OTAE_PUBLIC_IMAGE_CACHE_MIB", "256"))) * 1024 * 1024,
+    Path(_cache_settings.public_image_path),
+    max(0, _cache_settings.public_image_mib) * 1024 * 1024,
 )
 
 # Separate disposable database and budget; the on-disk record format is shared.
 public_tables = PublicImageDiskCache(
-    Path(
-        os.environ.get(
-            "OTAE_PUBLIC_TABLE_CACHE_PATH", "data/cache/akedata-tables-v1.sqlite3"
-        )
-    ),
-    max(0, int(os.environ.get("OTAE_PUBLIC_TABLE_CACHE_MIB", "256"))) * 1024 * 1024,
+    Path(_cache_settings.public_table_path),
+    max(0, _cache_settings.public_table_mib) * 1024 * 1024,
     max_entries=512,
 )

@@ -8,11 +8,12 @@ which freezes the event loop. Pass ``verify=shared_ssl_context()`` instead.
 from __future__ import annotations
 
 import asyncio
-import os
 import ssl
 import threading
 
 import httpx
+
+from otae_bot.config.settings import environment
 
 _contexts: dict[tuple[str | None, str | None], ssl.SSLContext] = {}
 _lock = threading.Lock()
@@ -22,7 +23,7 @@ def _key(trust_env: bool) -> tuple[str | None, str | None]:
     # Mirrors httpx: trust_env only changes the context through these variables.
     if not trust_env:
         return (None, None)
-    return (os.environ.get("SSL_CERT_FILE"), os.environ.get("SSL_CERT_DIR"))
+    return (environment("SSL_CERT_FILE") or None, environment("SSL_CERT_DIR") or None)
 
 
 def shared_ssl_context(*, trust_env: bool = True) -> ssl.SSLContext:

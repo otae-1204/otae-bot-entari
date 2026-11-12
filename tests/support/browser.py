@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import unittest
 from unittest.mock import patch
 
+from otae_bot.config import settings
 from otae_bot.infrastructure.rendering import browser
 
 
@@ -77,7 +77,7 @@ class FakeBrowserHarness:
     def __init__(self, test, *, concurrency: int = 1, screenshot=None, evaluate=None):
         self.browsers: list[FakeBrowser] = []
         self.playwrights: list[FakePlaywright] = []
-        test.enterContext(patch.dict(os.environ, {browser.CONCURRENCY_ENV: str(concurrency)}))
+        test.enterContext(settings.override({"otae": {"browser": {"concurrency": concurrency}}}))
         test.enterContext(patch.object(browser, "_start_playwright", self._start))
         test.enterContext(patch.object(browser, "_launch_browser", self._launch))
         if screenshot is not None:

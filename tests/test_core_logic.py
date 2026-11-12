@@ -2934,13 +2934,13 @@ remotePort = {{ $v.Second }}
     def test_image_utils_playwright_proxy_keeps_scheme(self):
         import otae_bot.infrastructure.rendering.browser as image_utils
 
-        with patch.object(image_utils, "SYSTEM_PROXY", {"http": "http://127.0.0.1:7890/"}):
+        with patch.object(image_utils, "system_proxy", return_value={"http": "http://127.0.0.1:7890/"}):
             self.assertEqual(
                 image_utils._playwright_proxy_conf(),
                 {"server": "http://127.0.0.1:7890"},
             )
 
-        with patch.object(image_utils, "SYSTEM_PROXY", {"http": "127.0.0.1:7890"}):
+        with patch.object(image_utils, "system_proxy", return_value={"http": "127.0.0.1:7890"}):
             self.assertEqual(
                 image_utils._playwright_proxy_conf(),
                 {"server": "http://127.0.0.1:7890"},

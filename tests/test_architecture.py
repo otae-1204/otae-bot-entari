@@ -121,18 +121,6 @@ class ArchitectureTests(unittest.TestCase):
                     application.main()
         lock.close.assert_called_once_with()
 
-    def test_network_configuration_preserves_defaults_and_multiple_clients(self):
-        with patch.object(application, "WS", side_effect=lambda **values: values):
-            self.assertEqual(application.build_networks([]), [
-                {"host": "localhost", "port": 5500, "path": "", "token": None},
-            ])
-            networks = application.build_networks([
-                {"host": "one", "port": "5501", "token": "test-token"},
-                {"host": "two", "port": 5502, "path": "/satori", "token": ""},
-            ])
-        self.assertEqual(networks[0], {"host": "one", "port": 5501, "path": "", "token": "test-token"})
-        self.assertEqual(networks[1], {"host": "two", "port": 5502, "path": "/satori", "token": None})
-
     def test_every_way_the_bot_stops_a_handler_is_an_entari_exit_state(self):
         # Handlers re-raise ``except ExitState`` before ``except Exception``; every
         # stop/finish helper must raise something that clause recognises.

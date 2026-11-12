@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 基于 Entari / Satori 的 QQ 机器人：`otae_bot/` 是应用骨架与共享代码，`plugins/` 下 21 个功能插件。
-外部经 Satori（`SATORI_CLIENTS`）或由边界层内嵌的 OneBot 11 服务端（`ONEBOT_CLIENTS`）接入。完整约定见 `docs/architecture_conventions.md`。
+外部经 Satori（`entari.yml` 的 `basic.network`）或由边界层内嵌的 OneBot 11 服务端（`plugins.server`）接入。完整约定见 `docs/architecture_conventions.md`。
 
 ## 不可违反的规则
 
@@ -21,7 +21,7 @@
 |---|---|---|
 | 插件 | `plugins/<名字>/` | 其他插件、`otae_bot.boundary`、平台协议 |
 | 核心 | `otae_bot/{groups,hypergryph,command_usage,delivery,pipeline,accounts}` | `plugins`、`boundary` |
-| 基础设施 | `otae_bot/{infrastructure,config}` | Entari、satori、`plugins`、其他 `otae_bot` 包 |
+| 基础设施 | `otae_bot/{infrastructure,config}` | Entari（`config` 例外：只可用 `arclet.entari.config`）、satori、`plugins`、其他 `otae_bot` 包 |
 | 边界 | `otae_bot/boundary/` | `plugins`、核心包 |
 
 `otae_bot/application.py` 负责装配，是唯一可以 import `otae_bot.boundary` 的非边界模块。
@@ -32,7 +32,7 @@
 - 守卫：`.venv/bin/python -m tests.support.boundary_guard --report` 查看清单；`--write` 重写基线 `tests/fixtures/boundary_guard_baseline.json`。基线只许缩小，不能靠 `--write` 放行新违规。规则 R1–R7 管协议边界，L1–L4 管分层。
 - 已知失败：`tests/test_hyw_retry.py`（与执行顺序有关，全量时 4 个用例 + 2 个子测试失败，单独跑通过）；`tests/test_changelog.py::DataIntegrityTests` 的 3 个（分支上有未被 `changelog.json` 收录的提交时失败）。
 - 不稳定：`tests/test_bilibili_poller.py::test_video_and_dynamic_targets_are_staggered_and_backed_off`；负载下也见过 `test_browser_render_queue` 与 `test_http_asset_broker` 的计时用例偶发失败。失败时单独重跑确认，并在提交说明里写明。
-- 启动冒烟：`SATORI_CLIENTS='[{"host":"127.0.0.1","port":1,"path":"","token":"x"}]' timeout -s INT 25 .venv/bin/python bot.py`，应加载 21 个插件，除连接失败外无 ERROR/Traceback。
+- 启动冒烟：仓库根的 `entari.yml` 里 `basic.network` 只留一条指向 `127.0.0.1:1` 的 ws，然后 `timeout -s INT 25 .venv/bin/python bot.py`，应加载 21 个插件，除连接失败外无 ERROR/Traceback。
 
 ## 提交与分支
 

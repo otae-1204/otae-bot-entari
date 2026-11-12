@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from otae_bot.config import settings  # noqa: E402
 from otae_bot.infrastructure.rendering import (  # noqa: E402
     art_card,
     art_frame,
@@ -257,7 +258,7 @@ class HelpRuntimeCacheTests(unittest.IsolatedAsyncioTestCase):
         return help_cards.finalize_png(_png(), help_cards.spec_digest(page, art, theme))
 
     def _settings(self, directory: str):
-        return patch.dict(os.environ, {help_runtime.CACHE_PATH_ENV: directory})
+        return settings.override({"otae": {"help_cache_path": directory}})
 
     async def test_render_is_reused_from_the_cache(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -312,12 +313,11 @@ class HelpRuntimeCacheTests(unittest.IsolatedAsyncioTestCase):
                                      help_cards.HELP_IMAGE_DIR / "main.png")
                 self.assertIsNone(await help_runtime.cached_help_image("nope"))
 
-    async def test_cache_dir_honours_the_environment(self):
+    async def test_cache_dir_honours_the_setting(self):
         with tempfile.TemporaryDirectory() as directory:
             with self._settings(directory):
                 self.assertEqual(help_runtime.cache_dir(), Path(directory))
-        with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop(help_runtime.CACHE_PATH_ENV, None)
+        with settings.override({}):
             self.assertEqual(help_runtime.cache_dir(),
                              help_runtime.PROJECT_ROOT / help_runtime.DEFAULT_CACHE_PATH)
 

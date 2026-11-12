@@ -10,13 +10,12 @@ in different slots run in parallel and a slow card no longer holds up everyone e
 
 from typing import Any, Literal, TypeVar
 from otae_bot.config.paths import TEMP_PATH
-from otae_bot.config.settings import SYSTEM_PROXY
+from otae_bot.config.settings import core_settings, system_proxy
 import base64
 from pathlib import Path
 import asyncio
 import heapq
 import itertools
-import os
 import sys
 import threading
 import time
@@ -32,7 +31,6 @@ from loguru import logger
 
 # 一次截图等渲染槽位超过这么久就记一条告警（槽位是跨用户、跨插件共用的）。
 QUEUE_WAIT_WARNING_SECONDS = 1.0
-CONCURRENCY_ENV = "OTAE_BROWSER_CONCURRENCY"
 DEFAULT_RENDER_CONCURRENCY = 2
 MAX_RENDER_CONCURRENCY = 4
 # 一个 context 用满这么多次就关掉换新，避免长期复用累积状态与内存。
@@ -81,22 +79,16 @@ def screenshot_timing() -> Iterator[ScreenshotTiming]:
         _timing.reset(token)
 
 
-def _render_concurrency(environ: Mapping[str, str] | None = None) -> int:
-    env = os.environ if environ is None else environ
-    raw = str(env.get(CONCURRENCY_ENV, "") or "").strip()
-    if not raw:
-        return DEFAULT_RENDER_CONCURRENCY
-    try:
-        value = int(raw)
-    except ValueError:
-        logger.warning(f"[browser] {CONCURRENCY_ENV} is not a number; using {DEFAULT_RENDER_CONCURRENCY}")
-        return DEFAULT_RENDER_CONCURRENCY
-    return max(1, min(MAX_RENDER_CONCURRENCY, value))
+def _render_concurrency(configured: int | None = None) -> int:
+    """``otae.browser.concurrency`` clamped to 1..MAX_RENDER_CONCURRENCY."""
+    value = core_settings().browser.concurrency if configured is None else configured
+    return max(1, min(MAX_RENDER_CONCURRENCY, int(value)))
 
 
 def _playwright_proxy_conf():
-    if isinstance(SYSTEM_PROXY, dict) and SYSTEM_PROXY.get("http"):
-        proxy_url = SYSTEM_PROXY["http"].rstrip("/")
+    proxy = system_proxy()
+    if proxy.get("http"):
+        proxy_url = proxy["http"].rstrip("/")
         if "://" not in proxy_url:
             proxy_url = f"http://{proxy_url}"
         return {"server": proxy_url}

@@ -1,7 +1,7 @@
 """Run otae Bot Entari from the project directory."""
 
-from otae_bot.application import main
+from otae_bot.launcher import run
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(run())

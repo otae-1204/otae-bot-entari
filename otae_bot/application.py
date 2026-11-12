@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from arclet.entari import WS, Cleanup, Entari, Startup, listen, load_plugin
+from arclet.entari import Cleanup, Entari, Startup, listen, load_plugin
 from arclet.entari.event.plugin import PluginUnloaded
+from loguru import logger
 
 from otae_bot.command_usage import close_command_usage, install_command_usage_recorders
-from otae_bot.config.settings import ONEBOT_CLIENTS, SATORI_CLIENTS
+from otae_bot.config.settings import loaded_config, server_declaration
 from otae_bot.hypergryph.attendance_registry import on_plugin_unloaded
 from otae_bot.infrastructure.http.tls import prewarm_shared_ssl_context
 from otae_bot.infrastructure.loop_watchdog import (
@@ -22,33 +23,23 @@ from otae_bot.pipeline.quote_fallback import install_quote_fetch_fallback
 from otae_bot.plugin_registry import discover_plugins
 
 
-def build_network(client: dict | None = None) -> WS:
-    client = client or {}
-    return WS(
-        host=str(client.get("host", "localhost")),
-        port=int(client.get("port", 5500)),
-        path=str(client.get("path", "")),
-        token=str(client.get("token", "")) or None,
-    )
-
-
-def build_networks(clients: list[dict] | None = None) -> list[WS]:
-    """Build one connection per configured LLOneBot endpoint."""
-    if clients is None:
-        clients = SATORI_CLIENTS
-    return [build_network(client) for client in (clients or [{}])]
-
-
 def create_app() -> Entari:
-    # OneBot-only setups must not fall back to the default Satori endpoint.
-    app = Entari(*(build_networks() if SATORI_CLIENTS or not ONEBOT_CLIENTS else []))
-    if ONEBOT_CLIENTS:
+    # Connections, log level and prefix come from entari.yml (see bot.py, which loads it
+    # before anything else); without a loaded configuration the app has no connection.
+    config = loaded_config()
+    app = Entari.from_config(config) if config is not None else Entari()
+    server = server_declaration()
+    if server is not None:
+        # Loaded here, before Entari would load `server` from the file with its own
+        # defaults (a TCP listener): the boundary forces loopback/unix socket and a fresh token.
         from otae_bot.boundary import SERVER_PLUGIN, server_plugin_config
 
-        loaded = load_plugin(SERVER_PLUGIN, server_plugin_config(ONEBOT_CLIENTS))
+        loaded = load_plugin(SERVER_PLUGIN, server_plugin_config(server))
         if not loaded:
             # Without it the configured accounts never come online; fail loudly.
-            raise RuntimeError(f"ONEBOT_CLIENTS is set but {SERVER_PLUGIN} failed to load: {loaded.error!r}")
+            raise RuntimeError(f"plugins.server is declared but {SERVER_PLUGIN} failed to load: {loaded.error!r}")
+    if config is not None and not config.basic.network and server is None:
+        logger.warning("[config] entari.yml declares no connection (basic.network / plugins.server)")
     install_message_log_redaction()
     install_recent_alerts()
     install_quote_fetch_fallback()

@@ -98,6 +98,11 @@ def g(cmd, self, store):
                    "from . import storage\nfrom ..cache import x\nimport satori_like\nimport httpx\n")
         self.assertEqual(_layering("otae_bot/infrastructure/rendering/pages.py", allowed), [])
         self.assertEqual(_layering("otae_bot/delivery/send.py", "from arclet.entari import Session\n"), [])
+        # Only otae_bot/config may bind to Entari's config API, and only to that.
+        config_api = "from arclet.entari.config import EntariConfig\nimport arclet.entari.config.model\n"
+        self.assertEqual(_layering("otae_bot/config/settings.py", config_api), [])
+        self.assertEqual(_layering("otae_bot/infrastructure/http/client.py", config_api).count(
+            "infrastructure-upward-import"), 2)
 
     def test_core_does_not_import_plugins(self):
         source = "from plugins.a import x\nimport plugins\nfrom plugins import a\n"

@@ -406,11 +406,11 @@ class AssetQueueSettingsTests(unittest.TestCase):
         )
         settings = load_asset_settings(
             {
-                "OTAE_HTTP_ASSET_HOST_CONCURRENCY": "slow.test=3, *.cdn.test=1, bad, zero.test=0",
-                "OTAE_HTTP_ASSET_HARD_DEADLINE": "0.1",
-                "OTAE_HTTP_ASSET_QUEUE_LIMIT": "50",
-                "OTAE_HTTP_ASSET_PREFETCH_DAILY_MB": "64",
-                "OTAE_HTTP_ASSET_PREFETCH": "off",
+                "host_concurrency": "slow.test=3, *.cdn.test=1, bad, zero.test=0",
+                "hard_deadline": "0.1",
+                "queue_limit": "50",
+                "prefetch_daily_mb": "64",
+                "prefetch": "off",
             }
         )
         self.assertEqual(settings.host_concurrency, (("slow.test", 3), ("cdn.test", 1)))
@@ -418,7 +418,7 @@ class AssetQueueSettingsTests(unittest.TestCase):
             (settings.hard_deadline, settings.queue_limit, settings.prefetch_daily_mb, settings.prefetch),
             (1.0, 50, 64, False),
         )
-        self.assertEqual(load_asset_settings({"OTAE_HTTP_ASSET_HOST_CONCURRENCY": "off"}).host_concurrency, ())
+        self.assertEqual(load_asset_settings({"host_concurrency": "off"}).host_concurrency, ())
 
     def test_host_limit_uses_the_longest_suffix_within_the_total(self):
         settings = AssetFetchSettings(

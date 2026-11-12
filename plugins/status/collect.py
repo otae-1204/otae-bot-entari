@@ -19,7 +19,7 @@ from otae_bot.accounts import runtime
 from otae_bot.command_usage import usage_recorder
 from otae_bot.command_usage.store import TodaySummary
 from otae_bot.compat.entari import timer
-from otae_bot.config.settings import SATORI_CLIENTS
+from otae_bot.config.settings import network_endpoints
 from otae_bot.groups.features import PROTECTED_PLUGINS, plugin_key
 from otae_bot.infrastructure.loop_watchdog import loop_lag_snapshot
 from otae_bot.infrastructure.recent_alerts import Alert, recent_alerts
@@ -243,7 +243,7 @@ async def collect(*, detail: bool) -> StatusSnapshot:
         today=today,
     )
     if detail:
-        snapshot.endpoints = [f"{c.get('host', 'localhost')}:{c.get('port', 5500)}" for c in (SATORI_CLIENTS or [{}])]
+        snapshot.endpoints = network_endpoints()
         snapshot.jobs = _jobs()
         snapshot.alerts = recent_alerts(5)
         snapshot.runtime_info = await asyncio.to_thread(_runtime_info)
