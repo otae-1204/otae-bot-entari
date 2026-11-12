@@ -30,7 +30,7 @@ from otae_bot.attendance_registry import (
     register_attendance_capability,
     signed_outcome,
 )
-from otae_bot.group_features import feature_store, scope_from_event
+from otae_bot.groups.features import feature_store, scope_from_event
 from otae_bot.hypergryph_captcha import (
     CAPTCHA_GIVE_UP,
     CAPTCHA_GUIDE,

@@ -172,7 +172,7 @@ class EftHelperRegistrationTests(unittest.TestCase):
     """The abandoned eft_helper package must not be advertised as switchable."""
 
     def test_empty_plugin_is_not_registered_as_group_feature(self):
-        from otae_bot.group_features import PLUGIN_NAMES
+        from otae_bot.groups.features import PLUGIN_NAMES
 
         init = ROOT / "plugins/eft_helper/__init__.py"
         self.assertEqual(init.read_bytes().strip(), b"", "eft_helper gained an entrypoint; re-check this test")

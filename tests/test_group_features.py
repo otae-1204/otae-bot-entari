@@ -15,7 +15,7 @@ from satori import ChannelType, Role
 
 from otae_bot.compat.entari import ArgVal, ChainMsg
 from otae_bot.delivery import Target, deliver
-from otae_bot.group_features import (
+from otae_bot.groups.features import (
     GroupFeatureStore,
     GroupScope,
     resolve_plugin,
@@ -82,7 +82,7 @@ class StoreTests(unittest.TestCase):
         self.store.set_enabled(self.scope, "hyw", False)
         before = self.path.read_bytes()
         with (
-            patch("otae_bot.group_features.os.replace", side_effect=OSError("disk full")),
+            patch("otae_bot.groups.features.os.replace", side_effect=OSError("disk full")),
             self.assertRaises(OSError),
         ):
             self.store.set_enabled(self.scope, "hyw", True)
@@ -248,7 +248,7 @@ class HandlerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_failed_save_reports_failure_without_success_or_state_change(self):
         current = session(user="root")
-        with patch("otae_bot.group_features.os.replace", side_effect=OSError("disk full")):
+        with patch("otae_bot.groups.features.os.replace", side_effect=OSError("disk full")):
             reply = await self.run_command(current, "关闭 hyw")
         self.assertIn("保存失败", reply)
         self.assertNotIn("已成功", reply)

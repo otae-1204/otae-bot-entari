@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from otae_bot.group_features import GroupFeatureStore, GroupScope
+from otae_bot.groups.features import GroupFeatureStore, GroupScope
 from otae_bot.pipeline import feature_gate
 from plugins.steamInfo import handlers
 

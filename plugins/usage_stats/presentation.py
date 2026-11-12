@@ -7,7 +7,7 @@ from html import escape
 from pathlib import Path
 
 from otae_bot.command_usage.store import UsageReport
-from otae_bot.group_features import plugin_label
+from otae_bot.groups.features import plugin_label
 from otae_bot.infrastructure.rendering.art_card import ArtCard
 
 ASSETS = Path(__file__).parent / "assets"

@@ -16,7 +16,7 @@ import httpx
 from satori import ChannelType
 
 from otae_bot.config.settings import Config
-from otae_bot.group_features import GroupFeatureStore
+from otae_bot.groups.features import GroupFeatureStore
 from plugins.grok_bot import conversations, handlers
 from plugins.grok_bot.config import GatewayError, GrokConfig, GrokError
 from plugins.grok_bot.conversations import (

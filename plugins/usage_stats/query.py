@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from otae_bot.group_features import resolve_plugin
+from otae_bot.groups.features import resolve_plugin
 
 DEFAULT_DAYS = 7
 MAX_DAYS = 90

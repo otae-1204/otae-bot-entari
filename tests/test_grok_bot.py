@@ -15,7 +15,7 @@ from arclet.entari import MessageChain
 from loguru import logger
 from satori import ChannelType, Image, MessageObject, Text
 
-from otae_bot.group_features import GroupFeatureStore
+from otae_bot.groups.features import GroupFeatureStore
 from plugins.grok_bot import gateway, handlers
 from plugins.grok_bot.config import GatewayError, GrokConfig, GrokError
 from plugins.grok_bot.conversations import ConversationScope

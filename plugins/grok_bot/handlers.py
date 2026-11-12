@@ -8,8 +8,8 @@ from arclet.entari.plugin import current_plugin, keeping
 from loguru import logger
 from satori import Image, Text
 
-from otae_bot.group_features import feature_store
-from otae_bot.permissions import is_superuser
+from otae_bot.groups.features import feature_store
+from otae_bot.groups.superusers import is_superuser
 
 from .config import GrokConfig, GrokError
 from .conversations import scope_from_session

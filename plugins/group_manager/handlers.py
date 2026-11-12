@@ -5,7 +5,7 @@ from __future__ import annotations
 from loguru import logger
 
 from otae_bot.compat.entari import ArgVal, Session, cmd, get_rest
-from otae_bot.group_features import (
+from otae_bot.groups.features import (
     PROTECTED_PLUGINS,
     SUPERUSER_ENABLE_PLUGINS,
     feature_store,
@@ -13,7 +13,7 @@ from otae_bot.group_features import (
     resolve_plugin,
     scope_from_event,
 )
-from otae_bot.permissions import is_superuser
+from otae_bot.groups.superusers import is_superuser
 from otae_bot.pipeline.feature_gate import loaded_group_plugins
 
 from .permissions import can_manage

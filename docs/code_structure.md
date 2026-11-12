@@ -12,11 +12,13 @@ otae_bot/
   application.py               创建 Entari、连接配置、启动协调
   lifecycle.py                 单实例锁、共享资源释放
   plugin_registry.py           按原顺序发现顶层插件
-  group_features.py            按机器人账号和群保存插件开关
   attendance_registry.py       双游戏签到：游戏注册表与调度循环（不导入插件）
   attendance_delivery.py       双游戏签到：结果卡拼接、发送与文字回退
   hypergryph_captcha.py        鹰角短信风控的极验：验证页、结果解析、临时页面上传（双游戏共用）
-  group_permissions.py         当前机器人账号、当前群的管理员权限核验
+  groups/
+    features.py                按机器人账号和群保存插件开关
+    permissions.py             当前机器人账号、当前群的管理员权限核验
+    superusers.py              配置的超级用户判断
   paths.py                     随源码定位的资源根目录
   config/                      环境变量解析、原有路径配置
   compat/                      NoneBot 风格的兼容层：Entari 会话/命令/定时任务、消息构造（逐步清空）
@@ -91,7 +93,7 @@ tests/                         功能回归、结构约束、真实插件加载�
 热重载后重新安装。`ChainMsg.send(dest, bot)` 根据 Entari 订阅器上下文识别
 所属插件，对群推送应用同一开关。后台任务应通过共享 `timer` 注册，
 并使用 `ChainMsg.send` 发送群消息，以保留插件归属和目标群过滤。
-管理命令位于 `plugins/group_manager/`；当前群权限核验由 `otae_bot/group_permissions.py`
+管理命令位于 `plugins/group_manager/`；当前群权限核验由 `otae_bot/groups/permissions.py`
 提供，公告订阅复用同一套规则。用法见 [群内功能管理](group_features.md)。
 
 增加终末地功能时，将模型、解析/服务及绘图放入对应业务域，在 `handlers.py`

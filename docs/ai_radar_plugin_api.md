@@ -540,7 +540,7 @@ def format_error(error: RadarError) -> str
 
 > **实现注记（2026-09-14，用户要求）**：上表是设计阶段的完整命令面；实现时命令面**收窄为「只看智商相关」**，只保留 10 个——榜 / 模型 / 对比 / 推荐 / 预警 / 性价比 / 趋势 + 频道 / 档位 / 帮助。
 > 被摘掉的 5 个（题 / 好题 / 贡献者 / 流水 / 实时）**只摘命令面**：`service.py` / `provider.py` / `formatters.py` 里的对应能力（`task_detail` / `task_ranking` / `top_contributors` / `recent_events` / `fleet_pulse` / `flag_race` / `who_solved`）**原样保留**，供前端经 `RadarService` 取数。
-> 另：根命令别名实现为 `/radar`、`/智商雷达`（`/雷达` 归 `tibo_radar`，见 `otae_bot/group_features.py`）。差异明细见 `docs/ai_radar_frontend_api.md` §19。
+> 另：根命令别名实现为 `/radar`、`/智商雷达`（`/雷达` 归 `tibo_radar`，见 `otae_bot/groups/features.py`）。差异明细见 `docs/ai_radar_frontend_api.md` §19。
 
 **handler 职责边界**：
 

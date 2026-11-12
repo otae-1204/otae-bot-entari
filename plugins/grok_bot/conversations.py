@@ -19,7 +19,7 @@ from uuid import UUID, uuid4
 from loguru import logger
 from satori import ChannelType
 
-from otae_bot.group_features import GroupScope
+from otae_bot.groups.features import GroupScope
 
 from .config import GatewayError, GrokConfig, GrokError
 from .gateway import PROTOCOL_ERROR, Gateway, lost_in_transit, make_client

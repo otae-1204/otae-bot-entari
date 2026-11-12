@@ -20,7 +20,7 @@ from otae_bot.command_usage import usage_recorder
 from otae_bot.command_usage.store import TodaySummary
 from otae_bot.compat.entari import timer
 from otae_bot.config.settings import SATORI_CLIENTS
-from otae_bot.group_features import PROTECTED_PLUGINS, plugin_key
+from otae_bot.groups.features import PROTECTED_PLUGINS, plugin_key
 from otae_bot.infrastructure.loop_watchdog import loop_lag_snapshot
 from otae_bot.infrastructure.recent_alerts import Alert, recent_alerts
 from otae_bot.infrastructure.rendering.browser import (
@@ -172,7 +172,7 @@ def _plugins() -> list[tuple[str, bool]]:
 
 
 def _job_label(job_id: str) -> str:
-    from otae_bot.group_features import plugin_label
+    from otae_bot.groups.features import plugin_label
 
     parts = job_id.split(".")
     plugin = parts[1] if len(parts) > 2 and parts[0] == "plugins" else ""

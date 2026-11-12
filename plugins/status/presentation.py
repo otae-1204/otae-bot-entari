@@ -5,7 +5,7 @@ from __future__ import annotations
 from html import escape
 from pathlib import Path
 
-from otae_bot.group_features import PLUGIN_NAMES, plugin_label
+from otae_bot.groups.features import PLUGIN_NAMES, plugin_label
 from otae_bot.infrastructure.rendering.art_card import ArtCard
 
 from .collect import ADMIN_PLUGINS, StatusSnapshot

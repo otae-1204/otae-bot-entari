@@ -254,7 +254,7 @@ from arclet.entari.const import ITEM_ACCOUNT, ITEM_SESSION
 from arclet.letoderea import EVENT, STOP, post
 from arclet.entari.event.command import CommandExecute
 from otae_bot.config.settings import Config
-from otae_bot.group_features import feature_store, scope_from_event
+from otae_bot.groups.features import feature_store, scope_from_event
 from otae_bot.pipeline.feature_gate import GroupFeatureGate
 from otae_bot.command_usage.recorder import CommandUsageRecorder
 from arclet.entari.plugin import get_plugin_subscribers
@@ -516,7 +516,7 @@ from datetime import datetime, timezone
 from itertools import count
 from arclet.entari import MessageCreatedEvent, load_plugin
 from arclet.letoderea import publish
-from otae_bot.group_features import GroupScope
+from otae_bot.groups.features import GroupScope
 from satori import At, Author, Channel, Event, Guild, Image, Login, MessageObject, Quote, Text, User
 # Entari 0.19: built-in niche plugins only run their body when the app starts.
 plugin_service.plugins['$.commands'].exec_apply()

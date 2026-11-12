@@ -14,7 +14,7 @@ from otae_bot.accounts import runtime
 from otae_bot.pipeline import feature_gate
 from otae_bot.compat.entari import ChainMsg
 from otae_bot.delivery import FAILED, NO_ACCOUNT, SENT, SUPPRESSED, Target, deliver, is_not_in_group
-from otae_bot.group_features import GroupFeatureStore, GroupScope
+from otae_bot.groups.features import GroupFeatureStore, GroupScope
 
 
 def account(self_id, groups=(), *, platform="qq", send=None):

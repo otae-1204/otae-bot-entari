@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from loguru import logger
 
-from otae_bot.group_features import feature_store
+from otae_bot.groups.features import feature_store
 
 from . import conversations
 from .config import GatewayError, GrokConfig, GrokError

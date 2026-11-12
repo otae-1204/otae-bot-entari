@@ -17,7 +17,7 @@ from arclet.entari import MessageChain
 from PIL import Image as PILImage
 from satori import File, Image, MessageObject, Text
 
-from otae_bot.group_features import GroupFeatureStore
+from otae_bot.groups.features import GroupFeatureStore
 from plugins.grok_bot import conversations, gateway, handlers, media
 from plugins.grok_bot.config import GrokConfig, GrokError
 from plugins.grok_bot.conversations import ConversationScope, SessionStore

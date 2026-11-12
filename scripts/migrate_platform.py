@@ -95,7 +95,7 @@ def _string_list(raw: str, lengths: tuple[int, ...]) -> list[str]:
 
 
 def migrate_switches(data: Any, rename: Rename, report: Report) -> Any:
-    """otae_bot/group_features.py GroupFeatureStore (versions 1 and 2)."""
+    """otae_bot/groups/features.py GroupFeatureStore (versions 1 and 2)."""
     if not isinstance(data, dict) or data.get("version") not in (1, 2):
         raise StoreError("版本不是 1 或 2")
     sections = ["disabled", "enabled"] if data["version"] == 2 else ["disabled"]

@@ -11,7 +11,7 @@ from loguru import logger
 
 from otae_bot.pipeline.framework_hooks import attach_to_every_subscriber, running_subscriber
 
-from otae_bot.group_features import (
+from otae_bot.groups.features import (
     PROTECTED_PLUGINS,
     feature_store,
     group_scope,

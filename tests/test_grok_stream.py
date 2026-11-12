@@ -15,7 +15,7 @@ from uuid import uuid4
 import httpx
 from satori import ChannelType, File, Image, Text
 
-from otae_bot.group_features import GroupFeatureStore
+from otae_bot.groups.features import GroupFeatureStore
 from plugins.grok_bot import conversations, gateway, handlers, stream
 from plugins.grok_bot.config import GrokConfig, GrokError
 from plugins.grok_bot.conversations import ConversationScope, SessionStore

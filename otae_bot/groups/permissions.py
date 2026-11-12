@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from loguru import logger
 
 from otae_bot.config.settings import Config
-from otae_bot.group_features import GroupScope, scope_from_event
+from otae_bot.groups.features import GroupScope, scope_from_event
 
 ADMIN_ROLES = {
     "admin",

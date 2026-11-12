@@ -13,8 +13,8 @@ from loguru import logger
 
 from otae_bot.compat.entari import Image, get_group_id, send
 from otae_bot.compat.entari import cmd as _cmd
+from otae_bot.groups.superusers import is_superuser
 from otae_bot.infrastructure.rendering.art_card import render_card
-from otae_bot.permissions import is_superuser
 
 from .collect import collect
 from .presentation import build_card, format_text

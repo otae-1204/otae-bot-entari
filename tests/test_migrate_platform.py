@@ -18,7 +18,7 @@ import pytest
 from otae_bot.command_usage.store import CallRecord, Scope, UsageStore
 from otae_bot.endfield_notifications.classification import Event
 from otae_bot.endfield_notifications.receipts import ReceiptStore
-from otae_bot.group_features import GroupFeatureStore, GroupScope
+from otae_bot.groups.features import GroupFeatureStore, GroupScope
 from plugins.grok_bot.conversations import ConversationScope, SessionStore
 from plugins.tibo_radar.store import TiboStore
 
