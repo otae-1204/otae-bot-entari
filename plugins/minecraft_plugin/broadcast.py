@@ -10,10 +10,11 @@ import traceback
 from otae_bot.adapters.entari import get_bot
 from arclet.entari import Account as Bot, Session, listen
 from arclet.entari.event.base import GuildMemberAddedEvent
-from otae_bot.adapters.entari import ChainMsg, SendDest, account_adapter_name
+from otae_bot.adapters.entari import ChainMsg
 from otae_bot.adapters.entari import timer
 
 from otae_bot.config.settings import Config, MC_BROADCAST_INTERVAL
+from otae_bot.delivery import Target, deliver
 from .data_source import PlayerGameTimeManager
 from .ping import ping
 from .broadcast_utils import (
@@ -330,8 +331,9 @@ async def broadcast():
 
         if group_messages:
             try:
-                target = SendDest(str(group_id), str(group_id), True, False, "", account_adapter_name(bot))
-                await ChainMsg.text("\n".join(group_messages)).send(target, bot)
+                # The default account sends, as before; a send error keeps its traceback.
+                result = await deliver(Target.group(str(group_id)), ChainMsg.text("\n".join(group_messages)), account=bot)
+                result.raise_for_failure()
             except Exception as exc:
                 err_msg = str(exc)
                 # 检测 bot 被移出群 / 群解散（含 content bytes 中的中文错误）
@@ -346,7 +348,7 @@ async def broadcast():
 
     if errors:
         try:
-            target = SendDest(superuser, "", False, True, "", account_adapter_name(bot))
+            target = Target.private(superuser)
             grouped = group_errors_by_group(errors)
             now_ts = int(time.time())
             lines: list[str] = []
@@ -360,9 +362,9 @@ async def broadcast():
                     suppressed += len(group_errors)
             if lines:
                 suffix = f"\n已折叠 {suppressed} 条重复异常" if suppressed else ""
-                await ChainMsg.text(
+                await deliver(target, ChainMsg.text(
                     f"广播异常摘要（共 {len(lines)} 条）：\n" + "\n---\n".join(lines[-5:]) + suffix
-                ).send(target, bot)
+                ), account=bot)
         except Exception:
             pass
 

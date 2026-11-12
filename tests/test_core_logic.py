@@ -46,12 +46,18 @@ def _load_minecraft_broadcast_module(name: str):
     previous_pkg = sys.modules.get("plugins.minecraft_plugin")
     previous_ping = sys.modules.get("plugins.minecraft_plugin.ping")
     previous_event_base = sys.modules.get("arclet.entari.event.base")
+    previous_delivery = sys.modules.get("otae_bot.delivery")
+
+    delivery = types.ModuleType("otae_bot.delivery")
+    delivery.Target = types.SimpleNamespace(group=lambda *a, **kw: (a, kw), private=lambda *a, **kw: (a, kw))
+    async def fake_deliver(*args, **kwargs):
+        return None
+    delivery.deliver = fake_deliver
+    sys.modules["otae_bot.delivery"] = delivery
 
     entari_native = types.ModuleType("otae_bot.adapters.entari")
     entari_native.get_bot = lambda: None
     entari_native.ChainMsg = types.SimpleNamespace(text=lambda text: types.SimpleNamespace(send=lambda *a, **kw: None))
-    entari_native.SendDest = lambda *args, **kwargs: (args, kwargs)
-    entari_native.account_adapter_name = lambda bot: ""
     entari_native.timer = types.SimpleNamespace(
         scheduled_job=lambda *args, **kwargs: (lambda func: func)
     )
@@ -103,6 +109,10 @@ def _load_minecraft_broadcast_module(name: str):
             sys.modules.pop("arclet.entari.event.base", None)
         else:
             sys.modules["arclet.entari.event.base"] = previous_event_base
+        if previous_delivery is None:
+            sys.modules.pop("otae_bot.delivery", None)
+        else:
+            sys.modules["otae_bot.delivery"] = previous_delivery
 
 
 def _load_steam_data_source():
