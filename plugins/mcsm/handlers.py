@@ -2191,6 +2191,8 @@ async def _cmd_instance_action(
             result = await client.send_command(uuid, daemon_id, extra)
         else:
             result = await client._instance_action(action, uuid, daemon_id)
+    except ExitState:
+        raise
     except Exception as e:
         await _finish_notice(mcsm, "操作失败", (str(e),), "error")
         return
