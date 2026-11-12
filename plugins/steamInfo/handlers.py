@@ -46,9 +46,9 @@ from plugins.steamInfo.steam import (
 from plugins.steamInfo.models import PlayerSummaries, Player
 from plugins.steamInfo.config import Config
 from otae_bot.adapters.entari import (
-    Text, make_image, ChainMsg, SendDest, At, ArgVal, event_chain, event_user_id,
-    account_adapter_name,
+    Text, make_image, ChainMsg, At, ArgVal, event_chain, event_user_id,
 )
+from otae_bot.delivery import Target, deliver
 from otae_bot.adapters.entari import timer
 from otae_bot.adapters.entari import prompt, get_bot, on_ready
 import aiohttp
@@ -159,7 +159,7 @@ except FileNotFoundError as e:
     )
 
 
-async def get_target(event: Event, bot: Bot) -> Optional[SendDest]:
+async def get_target(event: Event, bot: Bot) -> Optional[Target]:
     guild = getattr(event, "guild", None)
     channel = getattr(event, "channel", None)
     guild_id = str(getattr(guild, "id", "") or "")
@@ -168,20 +168,13 @@ async def get_target(event: Event, bot: Bot) -> Optional[SendDest]:
     if not guild_id:
         return None
 
-    return SendDest(
-        channel_id or guild_id,
-        guild_id,
-        True,
-        False,
-        "",
-        account_adapter_name(bot),
-    )
+    return Target.group(guild_id, channel_id=channel_id)
 
 
-def _parent_id(target: Optional[SendDest]) -> str:
+def _parent_id(target: Optional[Target]) -> str:
     if target is None:
         return ""
-    return target.parent_id or target.id
+    return target.guild_id
 
 
 def _display_name(parent_id: str, player: Player) -> str:
@@ -751,11 +744,10 @@ async def broadcast_steam_info(parent_id: str, steam_info: PlayerSummaries):
     else:
         uni_msg = ChainMsg([Text("\n".join(msg))])
 
+    # The default account sends, as before; a switched-off group counts as done.
+    result = await deliver(Target.group(parent_id), uni_msg, account=bot)
     try:
-        await uni_msg.send(
-            SendDest(parent_id, parent_id, True, False,
-                   "", account_adapter_name(bot)), bot
-        )
+        result.raise_for_failure()
         return True
     except Exception as exc:
         if _is_steam_broadcast_send_failure(exc):
@@ -917,7 +909,7 @@ async def steam_cache_handle(event: Event, rest: ArgVal[str]):
 async def bind_handle(
     event: Event,
     rest: ArgVal[str],
-    target: Optional[SendDest] = inject(get_target),
+    target: Optional[Target] = inject(get_target),
 ):
     parent_id = _parent_id(target)
     if not parent_id:
@@ -946,7 +938,7 @@ async def bind_handle(
 
 
 @unbind.handle()
-async def unbind_handle(event: Event, target: Optional[SendDest] = inject(get_target)):
+async def unbind_handle(event: Event, target: Optional[Target] = inject(get_target)):
     parent_id = _parent_id(target)
     if not parent_id:
         await unbind.finish("请在群聊或频道中使用 Steam 相关指令。")
@@ -975,7 +967,7 @@ async def info_handle(
     bot: Bot,
     event: Event,
     rest: ArgVal[str],
-    target: Optional[SendDest] = inject(get_target),
+    target: Optional[Target] = inject(get_target),
 ):
     parent_id = _parent_id(target)
     if not parent_id or target is None:
@@ -1030,7 +1022,7 @@ async def info_handle(
         draw_data,
     )
 
-    await ChainMsg([image]).send(target, bot)
+    (await deliver(target, ChainMsg([image]), account=bot)).raise_for_failure()
     await info.finish()
 
 
@@ -1038,7 +1030,7 @@ async def info_handle(
 async def check_handle(
     bot: Bot,
     rest: ArgVal[str],
-    target: Optional[SendDest] = inject(get_target),
+    target: Optional[Target] = inject(get_target),
 ):
     if get_rest(rest) != "":
         return None
@@ -1070,7 +1062,7 @@ async def check_handle(
         steam_status_data,
     )
 
-    await ChainMsg([image]).send(target, bot)
+    (await deliver(target, ChainMsg([image]), account=bot)).raise_for_failure()
 
 
 @game.handle()
@@ -1078,7 +1070,7 @@ async def game_handle(
     bot: Bot,
     event: Event,
     rest: ArgVal[str],
-    target: Optional[SendDest] = inject(get_target),
+    target: Optional[Target] = inject(get_target),
 ):
     parent_id = _parent_id(target)
     if not parent_id or target is None:
@@ -1212,7 +1204,7 @@ async def game_handle(
         image_rows,
     )
 
-    await ChainMsg([image]).send(target, bot)
+    (await deliver(target, ChainMsg([image]), account=bot)).raise_for_failure()
     await game.finish()
 
 
@@ -1221,7 +1213,7 @@ async def update_parent_info_handle(
     bot: Bot,
     event: Event,
     rest: ArgVal[str],
-    target: Optional[SendDest] = inject(get_target),
+    target: Optional[Target] = inject(get_target),
 ):
     parent_id = _parent_id(target)
     if not parent_id:
@@ -1244,7 +1236,7 @@ async def update_parent_info_handle(
 
 
 @enable.handle()
-async def enable_handle(target: Optional[SendDest] = inject(get_target)):
+async def enable_handle(target: Optional[Target] = inject(get_target)):
     parent_id = _parent_id(target)
     if not parent_id:
         await enable.finish("请在群聊或频道中使用 Steam 相关指令。")
@@ -1256,7 +1248,7 @@ async def enable_handle(target: Optional[SendDest] = inject(get_target)):
 
 
 @disable.handle()
-async def disable_handle(target: Optional[SendDest] = inject(get_target)):
+async def disable_handle(target: Optional[Target] = inject(get_target)):
     parent_id = _parent_id(target)
     if not parent_id:
         await disable.finish("请在群聊或频道中使用 Steam 相关指令。")
@@ -1271,7 +1263,7 @@ async def disable_handle(target: Optional[SendDest] = inject(get_target)):
 async def set_nickname_handle(
     event: Event,
     rest: ArgVal[str],
-    target: Optional[SendDest] = inject(get_target),
+    target: Optional[Target] = inject(get_target),
 ):
     parent_id = _parent_id(target)
     if not parent_id:
