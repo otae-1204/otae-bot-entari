@@ -28,6 +28,7 @@ from arclet.entari.const import ITEM_ACCOUNT, ITEM_SESSION
 from arclet.letoderea import EVENT, STACK, Contexts, Propagator, Subscriber
 from loguru import logger
 
+from otae_bot.messaging.inbound import get_group_id
 from otae_bot.pipeline.feature_gate import subscriber_plugin
 from otae_bot.pipeline.framework_hooks import attach_to_every_subscriber
 
@@ -112,12 +113,6 @@ def _nickname(event) -> str:
     return _first(getattr(user, "name", None), getattr(user, "nick", None))
 
 
-def _group_id(event) -> str:
-    from otae_bot.compat.entari import get_group_id
-
-    return get_group_id(event)
-
-
 class UsageRecorder:
     """Buffers records in memory and writes them to SQLite off the event loop."""
 
@@ -187,7 +182,7 @@ class CommandUsageRecorder(Propagator):
                 platform = str(getattr(account, "platform", "") or "")
                 user = getattr(event, "user", None)
                 user_id = str(getattr(user, "id", "") or "")
-                group_id = _group_id(event)
+                group_id = get_group_id(event)
                 name, nickname = _group_card(event), _nickname(event)
                 plugin = self.plugin
                 started, wall = time.perf_counter(), time.time()

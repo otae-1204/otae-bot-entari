@@ -1,5 +1,4 @@
 [
-{"rule": "compat-import", "file": "otae_bot/command_usage/recorder.py", "snippet": "from otae_bot.compat.entari import get_group_id", "count": 1},
 {"rule": "compat-import", "file": "otae_bot/hypergryph/attendance_delivery.py", "snippet": "from otae_bot.compat.entari import ChainMsg, make_image", "count": 1},
 {"rule": "compat-import", "file": "plugins/McModQuery/handlers.py", "snippet": "from otae_bot.compat.entari import ArgVal, ChainMsg, Text", "count": 1},
 {"rule": "compat-import", "file": "plugins/McModQuery/handlers.py", "snippet": "from otae_bot.compat.entari import cmd_with_args as _cmd", "count": 1},
