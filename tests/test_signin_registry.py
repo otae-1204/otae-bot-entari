@@ -644,7 +644,7 @@ class CrossGameCommandTests(unittest.IsolatedAsyncioTestCase):
         self.registry = registry_module.AttendanceRegistry()
         self.enterContext(mock.patch.object(registry_module, "registry", self.registry))
         self.images: list[bytes] = []
-        self.enterContext(mock.patch.object(delivery_module, "png_image", self._image))
+        self.enterContext(mock.patch.object(delivery_module, "png", self._image))
         self.features = _FakeFeatureStore()
 
     def _image(self, data: bytes) -> str:

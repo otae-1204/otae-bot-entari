@@ -11,7 +11,6 @@ from arclet.entari import (
     Account,
     At,
     Event,
-    Image as EntariImage,
     MessageChain,
     MessageCreatedEvent,
     Quote,
@@ -26,6 +25,7 @@ from PIL import Image
 from otae_bot.config.paths import IMAGE_PATH
 from otae_bot.infrastructure.http.tls import ashared_ssl_context
 from otae_bot.infrastructure.storage.json_store import JsonStore
+from otae_bot.messaging import media
 
 
 _FORKOUT_TEXT_RE = re.compile(r"/(?:forkout|叉出去|叉|[Xx])(?=$|\s)")
@@ -153,7 +153,8 @@ async def _send_fork_image(session: Session, path: str, reply_id: str | None = N
     segments = []
     if reply_id:
         segments.append(Quote(reply_id))
-    segments.append(EntariImage.of(path=Path(path)))
+    # Read each time: the result file is rewritten for every fork.
+    segments.append(media.image(Path(path).read_bytes()))
     await session.send(MessageChain(segments))
     session.stop()
 

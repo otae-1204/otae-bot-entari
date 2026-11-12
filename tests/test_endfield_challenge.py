@@ -10,6 +10,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from arclet.entari import Image
+
 import plugins.endfield.account.challenge.handlers as challenge_handlers
 import plugins.endfield.usage.handlers as usage_handlers
 import plugins.endfield.gacha.handlers as gacha_handlers
@@ -1080,7 +1082,7 @@ class EndfieldForwardSendTests(unittest.TestCase):
 
         async def run():
             with patch.object(endfield_plugin, "send_forward", send_forward):
-                with patch.object(endfield_plugin, "_png_image", lambda png: png):
+                with patch.object(endfield_plugin, "png", lambda png: png):
                     return await endfield_plugin._send_forward_pngs(
                         session,
                         SimpleNamespace(self_id="10001"),
@@ -1101,18 +1103,18 @@ class EndfieldForwardSendTests(unittest.TestCase):
         pages = (b"page-1", b"page-2", b"page-3")
 
         def image(png):
-            return endfield_plugin.Image(src=f"file:///tmp/{png.decode()}.png")
+            return Image(src=f"https://pages.invalid/{png.decode()}.png")
 
         async def run():
             with patch.object(endfield_plugin, "send_forward", send_forward):
-                with patch.object(endfield_plugin, "_png_image", image):
+                with patch.object(endfield_plugin, "png", image):
                     return await endfield_plugin._send_forward_pngs(
                         session, SimpleNamespace(self_id="10001"), pages,
                     )
 
         self.assertEqual(asyncio.run(run()), "images")
         self.assertEqual([[item.src for item in call.args[0]] for call in session.send.await_args_list],
-                         [["file:///tmp/page-1.png"], ["file:///tmp/page-2.png"], ["file:///tmp/page-3.png"]])
+                         [["https://pages.invalid/page-1.png"], ["https://pages.invalid/page-2.png"], ["https://pages.invalid/page-3.png"]])
 
 
 class EndfieldGachaDeliveryTests(unittest.TestCase):
@@ -1136,8 +1138,8 @@ class EndfieldGachaDeliveryTests(unittest.TestCase):
                 patch("otae_bot.config.model.logger"),
                 patch.object(replies, "send_forward", satori),
                 patch.object(gacha_handlers, "_finish_pngs", finish_pngs),
-                patch.object(gacha_handlers, "_png_image", lambda png: replies.Image(src=f"file:///tmp/{png.decode()}.png")),
-                patch.object(replies, "_png_image", lambda png: replies.Image(src=f"file:///tmp/{png.decode()}.png")),
+                patch.object(gacha_handlers, "png", lambda png: Image(src=f"https://pages.invalid/{png.decode()}.png")),
+                patch.object(replies, "png", lambda png: Image(src=f"https://pages.invalid/{png.decode()}.png")),
                 patch.object(gacha_handlers, "FORWARD_MAX_NODES", max_nodes or gacha_handlers.FORWARD_MAX_NODES),
             ):
                 await gacha_handlers._finish_gacha_pngs(session, self.EVENT, self.BOT, pngs)
@@ -1160,7 +1162,7 @@ class EndfieldGachaDeliveryTests(unittest.TestCase):
         satori.assert_awaited_once()
         self.assertIs(satori.await_args.args[0], session)
         nodes = satori.await_args.args[1]
-        self.assertEqual([node.src for node in nodes], [f"file:///tmp/p{index}.png" for index in range(1, 5)])
+        self.assertEqual([node.src for node in nodes], [f"https://pages.invalid/p{index}.png" for index in range(1, 5)])
         self.assertEqual(satori.await_args.kwargs, {"name": "终末地抽卡分析", "uin": "10001"})
         session.send.assert_not_awaited()
 
@@ -1168,7 +1170,7 @@ class EndfieldGachaDeliveryTests(unittest.TestCase):
         session, satori, _ = self._run(self._pages(5), satori=AsyncMock(side_effect=RuntimeError("no forward")))
         satori.assert_awaited_once()
         self.assertEqual([[item.src for item in call.args[0]] for call in session.send.await_args_list],
-                         [[f"file:///tmp/p{index}.png"] for index in range(1, 6)])
+                         [[f"https://pages.invalid/p{index}.png"] for index in range(1, 6)])
 
     def test_forward_and_image_messages_failing_send_batches_of_three(self):
         send = AsyncMock(side_effect=[RuntimeError("no images"), None, None])
@@ -1181,8 +1183,8 @@ class EndfieldGachaDeliveryTests(unittest.TestCase):
         self.assertIn("共 4 页", str(first))
         self.assertIn("分 2 条", str(first))
         self.assertEqual([getattr(item, "src", "") for item in first][1:],
-                         ["file:///tmp/p1.png", "file:///tmp/p2.png", "file:///tmp/p3.png"])
-        self.assertEqual([item.src for item in second], ["file:///tmp/p4.png"])
+                         ["https://pages.invalid/p1.png", "https://pages.invalid/p2.png", "https://pages.invalid/p3.png"])
+        self.assertEqual([item.src for item in second], ["https://pages.invalid/p4.png"])
 
     def test_exit_exception_from_forward_is_not_swallowed(self):
         from arclet.letoderea import STOP
@@ -1210,7 +1212,7 @@ class EndfieldGachaDeliveryTests(unittest.TestCase):
         session, _, _ = self._run(self._pages(5), satori=satori, max_nodes=2)
         self.assertEqual(satori.await_count, 3)
         self.assertEqual([[item.src for item in call.args[0]] for call in session.send.await_args_list],
-                         [["file:///tmp/p3.png"], ["file:///tmp/p4.png"]])
+                         [["https://pages.invalid/p3.png"], ["https://pages.invalid/p4.png"]])
 
     def test_gacha_handler_receives_event_and_bot(self):
         import plugins.endfield.handlers as handlers
@@ -1231,7 +1233,7 @@ class EndfieldGachaDeliveryTests(unittest.TestCase):
             with (
                 patch.object(challenge_handlers, "_finish_pngs", finish_pngs),
                 patch.object(replies, "send_forward", satori),
-                patch.object(replies, "_png_image", lambda png: replies.Image(src=f"file:///tmp/{png.decode()}.png")),
+                patch.object(replies, "png", lambda png: Image(src=f"https://pages.invalid/{png.decode()}.png")),
             ):
                 await challenge_handlers._finish_challenge_pages(session, self.EVENT, self.BOT, pngs, "/ef 影拓 历史 第N页")
 
@@ -1242,7 +1244,7 @@ class EndfieldGachaDeliveryTests(unittest.TestCase):
         asyncio.run(run(session, (b"1", b"2", b"3")))
         self.assertEqual(satori.await_args.kwargs["name"], "Endfield")
         self.assertEqual([[item.src for item in call.args[0]] for call in session.send.await_args_list],
-                         [[f"file:///tmp/{index}.png"] for index in (1, 2, 3)])
+                         [[f"https://pages.invalid/{index}.png"] for index in (1, 2, 3)])
 
         # 逐张图片也发不出去：改发文字提示（这条走同一个会话发送）。
         session = SimpleNamespace(send=AsyncMock(side_effect=[RuntimeError("no images"), None]))

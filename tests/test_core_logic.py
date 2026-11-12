@@ -6,6 +6,7 @@ import unittest
 import importlib.util
 import json
 import asyncio
+import base64
 import logging
 import tarfile
 import threading
@@ -13,7 +14,6 @@ import time
 import types
 import sqlite3
 import zipfile
-from urllib.parse import unquote, urlparse
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -163,15 +163,13 @@ async def _run_scheduled_cleanup_case(path: Path):
         await asyncio.sleep(0)
 
 
-def _image_file_path(segment) -> Path:
+def _image_bytes(segment) -> bytes:
+    """Images leave plugins as bytes (``data:`` URLs), never as local paths."""
     src = str(getattr(segment, "src", "") or "")
-    parsed = urlparse(src)
-    if parsed.scheme != "file":
-        raise AssertionError(f"expected file image src, got {src!r}")
-    file_path = unquote(parsed.path)
-    if file_path.startswith("/") and len(file_path) > 2 and file_path[2] == ":":
-        file_path = file_path[1:]
-    return Path(file_path)
+    header, _, payload = src.partition(",")
+    if not (header.startswith("data:image/") and header.endswith(";base64")):
+        raise AssertionError(f"expected an inline image src, got {src[:80]!r}")
+    return base64.b64decode(payload)
 
 
 class CoreLogicTests(unittest.TestCase):
@@ -2744,17 +2742,6 @@ remotePort = {{ $v.Second }}
             {"timeout": 15, "follow_redirects": True},
         )
 
-    def test_mcwiki_image_segment_uses_temp_file(self):
-        wiki_module = _load_module("mcwiki_image_for_test", "plugins/McWikiQuery/handlers.py")
-
-        segment = wiki_module._image_segment_from_png(b"png-data")
-        path = _image_file_path(segment)
-        try:
-            self.assertTrue(path.exists())
-            self.assertEqual(path.read_bytes(), b"png-data")
-        finally:
-            path.unlink(missing_ok=True)
-
     def test_mcwiki_splits_tall_images(self):
         wiki_module = _load_module("mcwiki_split_image_for_test", "plugins/McWikiQuery/handlers.py")
         from PIL import Image as PILImage
@@ -2764,17 +2751,14 @@ remotePort = {{ $v.Second }}
         source.save(buf, format="PNG")
 
         segments = wiki_module._image_segments_from_png(buf.getvalue(), max_height=10)
-        paths = [_image_file_path(segment) for segment in segments]
-        try:
-            self.assertEqual(len(paths), 3)
-            sizes = []
-            for path in paths:
-                with PILImage.open(path) as image:
-                    sizes.append(image.size)
-            self.assertEqual(sizes, [(8, 10), (8, 10), (8, 1)])
-        finally:
-            for path in paths:
-                path.unlink(missing_ok=True)
+        self.assertEqual(len(segments), 3)
+        sizes = []
+        for segment in segments:
+            with PILImage.open(BytesIO(_image_bytes(segment))) as image:
+                sizes.append(image.size)
+        self.assertEqual(sizes, [(8, 10), (8, 10), (8, 1)])
+        short = wiki_module._image_segments_from_png(buf.getvalue())
+        self.assertEqual([_image_bytes(segment) for segment in short], [buf.getvalue()])
 
     def test_mcwiki_reply_message_uses_event_message_id(self):
         wiki_module = _load_module("mcwiki_reply_for_test", "plugins/McWikiQuery/handlers.py")
@@ -2811,17 +2795,10 @@ remotePort = {{ $v.Second }}
             "https://search.mcmod.cn/s?key=%E6%9A%AE%E8%89%B2+forest&filter=3&mold=0",
         )
 
-    def test_peek_helpers_use_stable_image_paths(self):
+    def test_peek_helpers_join_endpoints(self):
         peek_module = _load_module("peek_helpers_for_test", "plugins/peek/handlers.py")
 
         self.assertEqual(peek_module._join_endpoint("http://example.com/", "/screenshot"), "http://example.com/screenshot")
-        segment = peek_module._image_segment_from_bytes(b"png-data")
-        path = _image_file_path(segment)
-        try:
-            self.assertTrue(path.exists())
-            self.assertEqual(path.read_bytes(), b"png-data")
-        finally:
-            path.unlink(missing_ok=True)
 
     def test_image_utils_playwright_proxy_keeps_scheme(self):
         import otae_bot.infrastructure.rendering.browser as image_utils

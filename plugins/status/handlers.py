@@ -9,12 +9,13 @@ from __future__ import annotations
 import asyncio
 
 from arclet.alconna import Alconna, Args, MultiVar
-from arclet.entari import Image, MessageChain, Session, command
+from arclet.entari import MessageChain, Session, command
 from loguru import logger
 from nepattern import AnyString
 
 from otae_bot.groups.superusers import is_superuser
 from otae_bot.infrastructure.rendering.art_card import render_card
+from otae_bot.messaging import media
 from otae_bot.messaging.inbound import get_group_id
 
 from .collect import collect
@@ -33,7 +34,7 @@ async def handle_status(session: Session) -> None:
     snapshot = await collect(detail=detail)
     try:
         png = await render_card(build_card(snapshot, detail=detail))
-        await session.send(MessageChain([Image.of(raw=png)]))
+        await session.send(MessageChain([media.png(png)]))
         return
     except asyncio.CancelledError:
         raise

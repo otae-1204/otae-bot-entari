@@ -1472,7 +1472,7 @@ class ArknightsHandlerTests(unittest.IsolatedAsyncioTestCase):
             mock.patch.object(attendance_registry, "registry", attendance_registry.AttendanceRegistry())
         )
         self.images: list[bytes] = []
-        self.enterContext(mock.patch.object(attendance_delivery, "png_image", self._image))
+        self.enterContext(mock.patch.object(attendance_delivery, "png", self._image))
 
     def _image(self, data: bytes) -> str:
         self.images.append(data)

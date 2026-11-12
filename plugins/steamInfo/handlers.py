@@ -54,7 +54,6 @@ import aiohttp
 import asyncio
 import re
 import time
-import tempfile
 import base64
 from io import BytesIO
 from pathlib import Path
@@ -70,7 +69,7 @@ from nepattern import AnyString
 from otae_bot.config.settings import Config as GlobalConfig, system_proxy
 from otae_bot.config.paths import IMAGE_PATH
 from otae_bot.infrastructure.rendering.executor import run_image_render
-from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
+from otae_bot.messaging.media import png
 
 # alconna/aptimer 已在 bot.py 中预加载，localstore 由 import 自动加载
 
@@ -265,15 +264,7 @@ async def _resolve_parent_info(
 
 
 def _to_image_segment(image: PILImage.Image):
-    return _image_bytes_to_segment(image_to_bytes(image))
-
-
-def _image_bytes_to_segment(data: bytes):
-    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
-        f.write(data)
-        f.flush()
-        schedule_temp_file_cleanup(f.name)
-        return Image.of(path=Path(f.name))
+    return png(image_to_bytes(image))
 
 
 def _render_image_bytes(renderer, *args, **kwargs) -> bytes:
@@ -282,7 +273,7 @@ def _render_image_bytes(renderer, *args, **kwargs) -> bytes:
 
 async def _render_image_segment(renderer, *args, **kwargs):
     data = await run_image_render(_render_image_bytes, renderer, *args, **kwargs)
-    return _image_bytes_to_segment(data)
+    return png(data)
 
 
 def _render_start_gaming_cards(entries: list[tuple[PILImage.Image, str, str]]) -> bytes:
@@ -723,7 +714,7 @@ async def broadcast_steam_info(parent_id: str, steam_info: PlayerSummaries):
         else:
             image_data = await run_image_render(_render_start_gaming_cards, entries)
             uni_msg = MessageChain(
-                [Text("\n".join(msg)), _image_bytes_to_segment(image_data)])
+                [Text("\n".join(msg)), png(image_data)])
     else:
         uni_msg = MessageChain([Text("\n".join(msg))])
 

@@ -16,12 +16,13 @@ from __future__ import annotations
 import asyncio
 
 from arclet.alconna import Alconna, Args, MultiVar
-from arclet.entari import Image, MessageChain, Session, command
+from arclet.entari import MessageChain, Session, command
 from arclet.entari.command import Match
 from loguru import logger
 from nepattern import AnyString
 
 from otae_bot.infrastructure.changelog import Changelog, ChangelogDataError, Release, load_changelog
+from otae_bot.messaging import media
 from otae_bot.messaging.inbound import get_rest
 
 from . import formatters, presentation as views
@@ -76,7 +77,7 @@ async def _reply(session: Session, reply: list[str]) -> None:
             # 先把所有页渲染完再发，避免渲染失败留下半张图。
             images = [await render_page(page) for page in reply.pages]
             for png in images:
-                await session.send(MessageChain([Image.of(raw=png)]))
+                await session.send(MessageChain([media.png(png)]))
             return
         except asyncio.CancelledError:
             raise

@@ -13,12 +13,13 @@ from pathlib import Path
 from typing import Any
 
 from arclet.alconna import Alconna, Args, MultiVar
-from arclet.entari import Cleanup, Image, MessageChain, Session, command, listen
+from arclet.entari import Cleanup, MessageChain, Session, command, listen
 from arclet.entari.command import Match
 from arclet.letoderea import ExitState
 from loguru import logger
 from nepattern import AnyString
 
+from otae_bot.messaging import media
 from otae_bot.messaging.inbound import event_user_id, is_group
 from otae_bot.messaging.prompts import prompt
 from otae_bot.pipeline.message_log import sensitive_input
@@ -215,7 +216,7 @@ async def _send_arknights_help(session: Session) -> None:
     # 按页面比例随机挑插画并运行时渲染；渲染不可用时回退到仓库里的静态帮助图。
     image = await cached_help_image("ak")
     if image and Path(image).is_file():
-        await session.send(MessageChain([Image.of(path=Path(str(image)))]))
+        await session.send(MessageChain([media.image_file(image)]))
         return
     await session.send(format_help())
 

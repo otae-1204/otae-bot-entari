@@ -3,12 +3,9 @@
 import asyncio
 import base64
 import re
-import tempfile
 from typing import Dict, Optional, Any
 
-from pathlib import Path
-
-from arclet.entari import Event, Image, MessageChain, Session, command
+from arclet.entari import Event, MessageChain, Session, command
 from arclet.entari.command import Match
 from arclet.alconna import Alconna, Args, MultiVar
 from nepattern import AnyString
@@ -16,7 +13,7 @@ from nepattern import AnyString
 from otae_bot.accounts.ready import get_bot, on_ready
 from otae_bot.messaging.inbound import event_user_id, get_rest
 from otae_bot.infrastructure.rendering.executor import run_image_render
-from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
+from otae_bot.messaging.media import png
 
 from otae_bot.config.settings import Config
 from plugins.minecraft_plugin.config import minecraft_settings
@@ -66,16 +63,6 @@ async def _get_group_name(event: Event, group_id: str) -> str:
         pass
 
     return str(group_id)
-
-
-def _to_image(output) -> Image:
-    """将 BytesIO 写入临时文件，返回 Satori 兼容的 Image 段。"""
-    import tempfile
-    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
-        f.write(output.getvalue())
-        f.flush()
-        schedule_temp_file_cleanup(f.name)
-        return Image.of(path=Path(f.name))
 
 
 def _draw_server_list_from_responses(responses: list[dict], group_name: str):
@@ -163,7 +150,7 @@ async def handle_ping_command(session: Session, rest: Match[tuple[str, ...]]):
         if len(responses) == 1:
             # draw_server_players 会处理离线状态
             output = await run_image_render(draw_server_players, responses[0])
-            await session.send(MessageChain([_to_image(output)]))
+            await session.send(MessageChain([png(output.getvalue())]))
             return
 
         # 多个服务器全部传入，draw_server_info 会处理离线状态
@@ -173,7 +160,7 @@ async def handle_ping_command(session: Session, rest: Match[tuple[str, ...]]):
             responses,
             group_name,
         )
-        await session.send(MessageChain([_to_image(output)]))
+        await session.send(MessageChain([png(output.getvalue())]))
         return
 
     # 优先按已保存的地址、名称或昵称查找
@@ -185,7 +172,7 @@ async def handle_ping_command(session: Session, rest: Match[tuple[str, ...]]):
                 "data": r.get("data", {}), "name": server.get("name", "未知"),
                 "nickname": server.get("nickname")}
         output = await run_image_render(draw_server_players, info)
-        await session.send(MessageChain([_to_image(output)]))
+        await session.send(MessageChain([png(output.getvalue())]))
         return
 
     # 鐩存帴鎸夊湴鍧€ ping
@@ -193,7 +180,7 @@ async def handle_ping_command(session: Session, rest: Match[tuple[str, ...]]):
     info = {"status": r.get("status"), "address": command_args,
             "data": r.get("data", {}), "name": "Unknown Server", "nickname": None}
     output = await run_image_render(_draw_ping_result, info)
-    await session.send(MessageChain([_to_image(output)]))
+    await session.send(MessageChain([png(output.getvalue())]))
 
 
 # ── add_server
@@ -560,4 +547,4 @@ async def handle_online_command(session: Session, rest: Match[tuple[str, ...]]):
     }
 
     output = await run_image_render(draw_player_leaderboard, server_info)
-    await session.send(MessageChain([_to_image(output)]))
+    await session.send(MessageChain([png(output.getvalue())]))

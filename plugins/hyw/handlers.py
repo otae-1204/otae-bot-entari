@@ -12,12 +12,13 @@ from pathlib import Path
 
 import httpx
 from arclet.alconna import Alconna, AllParam, Args, Arparma
-from arclet.entari import Image, MessageChain, Session, command
+from arclet.entari import MessageChain, Session, command
 from loguru import logger
 from PIL import Image as PILImage
 from PIL import ImageOps, UnidentifiedImageError
 
 from otae_bot.infrastructure.http.tls import shared_ssl_context
+from otae_bot.messaging import media
 
 from .config import HywConfig, HywError
 from .history import HistoryStore, Scope, SourceBook
@@ -465,7 +466,7 @@ async def run_request(session: Session, config: HywConfig, scope: Scope, text: s
             card_failed = True
             logger.warning("[hyw] card png could not be converted, sending text instead: req={}", request_id)
         if jpeg:
-            receipts = await session.send(MessageChain([Image.of(raw=jpeg)]), reply_to=True) or []
+            receipts = await session.send(MessageChain([media.image(jpeg, "image/jpeg")]), reply_to=True) or []
     if not receipts:
         body = result.display_text or result.text
         receipts = await send_text(session, f"{RENDER_FAILED}\n\n{body}" if card_failed else body)

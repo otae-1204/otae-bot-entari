@@ -9,14 +9,11 @@ sent once instead; the attendance requests themselves are never repeated.
 
 from __future__ import annotations
 
-import tempfile
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from io import BytesIO
-from pathlib import Path
 from typing import Any
 
-from arclet.entari import Image as ImageElement
 from arclet.entari import MessageChain
 from arclet.letoderea import ExitState
 from loguru import logger
@@ -28,7 +25,7 @@ from otae_bot.hypergryph.attendance_registry import (
     build_notice,
 )
 from otae_bot.infrastructure.rendering.executor import run_image_render
-from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
+from otae_bot.messaging.media import png
 
 MAX_IMAGE_PIXELS = 32_000_000
 MAX_IMAGE_HEIGHT = 16384
@@ -119,7 +116,7 @@ async def deliver(send: Callable[[Any], Awaitable[Any]], delivery: AttendanceDel
             if delivery.text:
                 await send(delivery.text)
             return
-        parts = [png_image(delivery.png)]
+        parts = [png(delivery.png)]
         if delivery.text:
             parts.append("\n" + delivery.text)
         await send(MessageChain(parts))
@@ -137,25 +134,11 @@ async def deliver(send: Callable[[Any], Awaitable[Any]], delivery: AttendanceDel
             logger.warning(f"[attendance] text delivery failed error_type={type(retry_exc).__name__}")
 
 
-def png_image(png: bytes):
-    """Persist one PNG to a temp file and wrap it as an image element.
-
-    LLOneBot resolves ``file://`` locally, so a temp file avoids inlining a
-    base64 data URI for every card, matching the two game plugins.
-    """
-    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as file:
-        file.write(png)
-        file.flush()
-        schedule_temp_file_cleanup(file.name)
-        return ImageElement.of(path=Path(file.name))
-
-
 __all__ = [
     "MAX_IMAGE_HEIGHT",
     "MAX_IMAGE_PIXELS",
     "AttendanceDelivery",
     "build_delivery",
     "deliver",
-    "png_image",
     "stack_cards",
 ]

@@ -85,7 +85,7 @@ class BuildDeliveryTests(IsolatedAsyncioTestCase):
 
 class DeliverTests(IsolatedAsyncioTestCase):
     def setUp(self):
-        self.enterContext(mock.patch.object(delivery_module, "png_image", lambda data: f"<image {len(data)}>"))
+        self.enterContext(mock.patch.object(delivery_module, "png", lambda data: f"<image {len(data)}>"))
         self.sent: list = []
         self.failures = 0
 

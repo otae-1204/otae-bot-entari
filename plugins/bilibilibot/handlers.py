@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from arclet.alconna import Alconna, Args, MultiVar
-from arclet.entari import Cleanup, Image, MessageChain, MessageCreatedEvent, Session, Text, command, listen
+from arclet.entari import Cleanup, MessageChain, MessageCreatedEvent, Session, Text, command, listen
 from arclet.entari.command import Match
 from nepattern import AnyString
 from otae_bot.accounts import runtime
 from otae_bot.accounts.ready import get_bot, on_ready
+from otae_bot.messaging import media
 from otae_bot.messaging.inbound import event_plain_text
 from otae_bot.scheduling.jobs import close_scheduled_jobs, timer
 from arclet.entari import Account as Bot, Event
@@ -90,7 +91,7 @@ async def _send(row, png: bytes) -> None:
     rejected, last_error = [], None
     for sender in senders:
         # Bytes go straight to the adapter: no temporary file to clean up.
-        result = await deliver(target, MessageChain([Image.of(raw=png)]), account=sender)
+        result = await deliver(target, MessageChain([media.png(png)]), account=sender)
         if result.status == FAILED:
             if target.is_private or not result.not_in_group:
                 result.raise_for_failure()

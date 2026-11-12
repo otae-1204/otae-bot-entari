@@ -7,7 +7,7 @@ from time import perf_counter
 
 import aiohttp
 from arclet.alconna import Alconna, Args, MultiVar
-from arclet.entari import Cleanup, Event, Image, MessageChain, Session, command, listen
+from arclet.entari import Cleanup, Event, MessageChain, Session, command, listen
 from arclet.entari.command import Match
 from arclet.letoderea import ExitState
 from loguru import logger
@@ -24,6 +24,7 @@ from otae_bot.hypergryph.attendance_registry import (
 )
 from otae_bot.groups.features import feature_store, scope_from_event
 from otae_bot.accounts.ready import on_ready
+from otae_bot.messaging import media
 from otae_bot.messaging.inbound import event_user_id, is_group
 from otae_bot.messaging.prompts import prompt_silently
 from otae_bot.scheduling.jobs import timer
@@ -618,7 +619,7 @@ async def _finish_endfield_help(session) -> None:
     # 按页面比例随机挑插画并运行时渲染；渲染不可用时回退到仓库里的静态帮助图。
     image = await cached_help_image("endfield") or ENDFIELD_HELP_IMAGE_PATH
     if image and Path(image).is_file():
-        await session.send(MessageChain([Image.of(path=Path(image))]))
+        await session.send(MessageChain([media.image_file(image)]))
         return
     await session.send(format_help())
 

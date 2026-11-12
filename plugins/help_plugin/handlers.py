@@ -3,11 +3,12 @@
 from pathlib import Path
 
 from arclet.alconna import Alconna, Args, MultiVar
-from arclet.entari import Image, MessageChain, Session, command
+from arclet.entari import MessageChain, Session, command
 from arclet.entari.command import Match
 from nepattern import AnyString
 
 from otae_bot.config.paths import IMAGE_PATH
+from otae_bot.messaging import media
 from otae_bot.messaging.inbound import get_rest
 from otae_bot.infrastructure.rendering.help_runtime import cached_help_image
 
@@ -89,7 +90,7 @@ async def handle_help_command(session: Session, rest: Match[tuple[str, ...]]):
     topic = TOPIC_MAP.get(command_args.lower()) if command_args else "main"
     chosen = await cached_help_image(topic) if topic else None
     if chosen:
-        await session.send(MessageChain([Image.of(path=Path(chosen))]))
+        await session.send(MessageChain([media.image_file(chosen)]))
         return
 
     # 无匹配图片 → 提示

@@ -10,6 +10,7 @@ from arclet.entari import MessageChain, Session, Text
 from arclet.letoderea import ExitState
 from loguru import logger
 
+from otae_bot.messaging.media import png
 from otae_bot.messaging.prompts import prompt
 
 from ..account.crypto import CredentialCipher
@@ -18,7 +19,7 @@ from ..catalog.commands import ParsedEndfieldCommand
 from ..catalog.models import GachaHistoryItemView, GachaHistoryView
 from ..config import endfield_settings, EndfieldSettings
 from ..rendering.cards import draw_gacha_analysis_cards, draw_gacha_history_card
-from ..replies import _finish_png, _finish_pngs, _png_image, _send_forward_pngs
+from ..replies import _finish_png, _finish_pngs, _send_forward_pngs
 from ..state import account_store, gacha_asset_cache, official_client
 from .assets import apply_gacha_metadata
 from .service import EndfieldGachaService, filter_xhh_import_six_stars, format_timestamp, ROLE_TASKS
@@ -77,7 +78,7 @@ async def _finish_gacha_pngs(session, event, bot, pngs: tuple[bytes, ...]) -> No
     )
     for index, batch in enumerate(batches):
         prefix = [Text(notice)] if index == 0 else []
-        await session.send(MessageChain([*prefix, *(_png_image(png) for png in batch)]))
+        await session.send(MessageChain([*prefix, *(png(page) for page in batch)]))
     logger.info(
         f"[endfield-gacha] deliver mode=batches pages={len(pngs)} forwarded={sent} batches={len(batches)} "
         f"elapsed={perf_counter() - started:.2f}s"

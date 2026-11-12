@@ -1,24 +1,21 @@
 """Minecraft Wiki 查询插件 — 搜索并截图 wiki 页面."""
 
 import httpx
-import tempfile
 from io import BytesIO
 from loguru import logger
 from lxml import html as _html
 from PIL import Image as PILImage
 from urllib.parse import quote_plus
 
-from pathlib import Path
-
 from arclet.alconna import Alconna, Args
-from arclet.entari import Event, Image, MessageChain, Quote, Session, command
+from arclet.entari import Event, MessageChain, Quote, Session, command
 from arclet.entari.command import Match
 from arclet.letoderea import ExitState
 
 from otae_bot.config.settings import system_proxy
 from otae_bot.infrastructure.http.tls import ashared_ssl_context
 from otae_bot.infrastructure.rendering.browser import screenshot_web_element
-from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
+from otae_bot.messaging.media import png as png_image
 
 wiki = Alconna(["wiki", "查wiki"], Args["content", str])
 etree = _html.etree
@@ -59,19 +56,11 @@ def _extract_first_result_path(html_text: str) -> str | None:
     return src[0] if src else None
 
 
-def _image_segment_from_png(png: bytes):
-    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
-        f.write(png)
-        f.flush()
-        schedule_temp_file_cleanup(f.name)
-        return Image.of(path=Path(f.name))
-
-
 def _image_segments_from_png(png: bytes, max_height: int = WIKI_IMAGE_CHUNK_HEIGHT):
     image = PILImage.open(BytesIO(png))
     width, height = image.size
     if height <= max_height:
-        return [_image_segment_from_png(png)]
+        return [png_image(png)]
 
     segments = []
     for top in range(0, height, max_height):
@@ -79,7 +68,7 @@ def _image_segments_from_png(png: bytes, max_height: int = WIKI_IMAGE_CHUNK_HEIG
         part = image.crop((0, top, width, bottom))
         buf = BytesIO()
         part.save(buf, format="PNG")
-        segments.append(_image_segment_from_png(buf.getvalue()))
+        segments.append(png_image(buf.getvalue()))
     return segments
 
 

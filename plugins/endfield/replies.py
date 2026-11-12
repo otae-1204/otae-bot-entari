@@ -2,16 +2,13 @@
 
 from __future__ import annotations
 
-import tempfile
-from pathlib import Path
-
-from arclet.entari import Image, MessageChain
+from arclet.entari import MessageChain
 from arclet.letoderea import ExitState
 from loguru import logger
 
 from otae_bot.config.settings import Config
-from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
 from otae_bot.messaging.forward import send_forward
+from otae_bot.messaging.media import png
 
 
 _FORWARD_SENDER_NAME = "Endfield"
@@ -41,7 +38,7 @@ async def _send_forward_pngs(
     uin = str(getattr(bot, "self_id", "") or getattr(bot, "id", "") or "") or None
     images: list = []
     try:
-        images = [_png_image(png) for png in pngs]
+        images = [png(page) for page in pngs]
         await send_forward(session, images, name=sender_name, uin=uin)
         return "satori"
     except ExitState:
@@ -52,7 +49,7 @@ async def _send_forward_pngs(
             f"sending {len(pngs)} pages as images: {type(exc).__name__}: {exc}"
         )
     if len(images) != len(pngs):
-        images = [_png_image(png) for png in pngs]
+        images = [png(page) for page in pngs]
     for image in images:
         await session.send(MessageChain([image]))
     return "images"
@@ -72,17 +69,4 @@ async def _finish_png(session, png: bytes) -> None:
 
 
 async def _finish_pngs(session, pngs: tuple[bytes, ...]) -> None:
-    await session.send(MessageChain([_png_image(png) for png in pngs]))
-
-
-def _png_image(png: bytes):
-    """Persist one PNG to a temp file and wrap it as an image element.
-
-    LLOneBot resolves ``file://`` locally, so a temp file avoids inflating the
-    payload with a base64 data URI for every page of a merged forward.
-    """
-    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as file:
-        file.write(png)
-        file.flush()
-        schedule_temp_file_cleanup(file.name)
-        return Image.of(path=Path(file.name))
+    await session.send(MessageChain([png(page) for page in pngs]))

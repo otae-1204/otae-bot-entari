@@ -1,17 +1,14 @@
 """远程屏幕窥视插件 - 查询远程服务器桌面截图。"""
 
-import tempfile
-from pathlib import Path
-
 import httpx
 from arclet.alconna import Alconna, Args
-from arclet.entari import Event, Image, MessageChain, Session, Text, command
+from arclet.entari import Event, MessageChain, Session, Text, command
 from arclet.entari.command import Match
 
 from otae_bot.infrastructure.http.tls import ashared_ssl_context
-from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
 from otae_bot.config.settings import Config as GlobalConfig
 from otae_bot.messaging.inbound import event_user_id
+from otae_bot.messaging.media import image
 from plugins.peek.store import PeekState
 
 state = PeekState()
@@ -44,14 +41,6 @@ def _get_group_id(event: Event) -> str:
 
 def _join_endpoint(base_url: str, endpoint: str) -> str:
     return base_url.rstrip("/") + endpoint
-
-
-def _image_segment_from_bytes(content: bytes):
-    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
-        f.write(content)
-        f.flush()
-        schedule_temp_file_cleanup(f.name)
-        return Image.of(path=Path(f.name))
 
 
 # helpers
@@ -109,7 +98,7 @@ async def handle_peek(
     if response.status_code == 200:
         await session.send(MessageChain([
             Text(f"Screenshot for {nickname}"),
-            _image_segment_from_bytes(response.content),
+            image(response.content),
         ]))
     else:
         await session.send("获取屏幕截图失败，目标服务可能未启动。")

@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-import tempfile
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Iterable
 
 from arclet.alconna import Alconna, Args, MultiVar
-from arclet.entari import Account as Bot, Cleanup, Event, Image, MessageChain, Session, Text, command, listen
+from arclet.entari import Account as Bot, Cleanup, Event, MessageChain, Session, Text, command, listen
 from arclet.entari.command import Match
 from loguru import logger
 from nepattern import AnyString
@@ -17,9 +15,9 @@ from nepattern import AnyString
 from otae_bot.config.settings import Config as GlobalConfig
 from otae_bot.accounts.ready import get_bot, on_ready
 from otae_bot.messaging.inbound import event_user_id, get_channel_id, get_group_id, get_rest
+from otae_bot.messaging.media import png as png_image
 from otae_bot.scheduling.jobs import timer
 from otae_bot.delivery import Target
-from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
 
 from plugins.tibo_radar.client import TiboRadarClient
 from plugins.tibo_radar.config import tibo_radar_settings
@@ -52,14 +50,6 @@ client = TiboRadarClient(
     codexradar_enabled=CODEXRADAR_ENABLED,
 )
 service = TiboRadarService(store, client)
-
-
-def _image_segment(png: bytes):
-    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as handle:
-        handle.write(png)
-        handle.flush()
-        schedule_temp_file_cleanup(handle.name, delay_seconds=60)
-        return Image.of(path=Path(handle.name))
 
 
 def _post_links(posts: Iterable[TiboPost]) -> list[str]:
@@ -325,7 +315,7 @@ def _overview_sections() -> tuple[list[CardSection], list[str]]:
 
 async def _send_card(session: Session, title: str, subtitle: str, sections: list[CardSection], links: list[str], *, page: str = ""):
     png = await render_card(title, subtitle, sections, page=page)
-    segments = [_image_segment(png)]
+    segments = [png_image(png)]
     deduped = list(dict.fromkeys(link for link in links if link))
     if deduped:
         segments.append(Text("来源链接：\n" + "\n".join(deduped)))
@@ -457,7 +447,7 @@ async def handle_tibo(rest: Match[tuple[str, ...]], session: Session):
                 subtitle=f"最近 {len(page_posts)} 条 · 英文原文 + 中文翻译 + 模型解读 · 北京时间倒序",
                 page=f"{page_index}/{len(pages)}" if len(pages) > 1 else "",
             )
-            segments = [_image_segment(png)]
+            segments = [png_image(png)]
             deduped = list(dict.fromkeys(link for link in [*_post_links(page_posts), *_source_links()] if link))
             if deduped:
                 segments.append(Text("来源链接：\n" + "\n".join(deduped)))

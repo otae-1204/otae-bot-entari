@@ -6,7 +6,7 @@ import asyncio
 import time
 from dataclasses import asdict, replace
 
-from arclet.entari import Image, MessageChain
+from arclet.entari import MessageChain
 from loguru import logger
 
 from otae_bot.delivery import Target, deliver
@@ -15,6 +15,7 @@ from otae_bot.groups.permissions import can_manage
 from otae_bot.hypergryph.endfield_notifications.classification import LABELS
 from otae_bot.hypergryph.endfield_notifications.receipts import ReceiptStore
 from otae_bot.infrastructure.cache import AsyncTTLCache
+from otae_bot.messaging import media
 from otae_bot.messaging.inbound import (
     event_user_id,
     get_channel_id,
@@ -156,7 +157,7 @@ class AnnouncementRuntime:
             raise DeliveryDeferred()
         bot = self._delivery_account(destination)
         result = await deliver(
-            _target(destination), MessageChain([Image.of(raw=png)]), account=bot, plugin="endfield"
+            _target(destination), MessageChain([media.png(png)]), account=bot, plugin="endfield"
         )
         result.raise_for_failure()
         if not result.messages:

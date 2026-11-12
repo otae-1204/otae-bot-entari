@@ -12,19 +12,19 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from arclet.entari import (
-    Account as Bot, At, Event, Image, MessageChain, MessageCreatedEvent, Session, Text, command, listen,
+    Account as Bot, At, Event, MessageChain, MessageCreatedEvent, Session, Text, command, listen,
 )
 from arclet.entari.command import Match
 from loguru import logger
 from arclet.letoderea import ExitState
 from otae_bot.delivery import Target, deliver
 from otae_bot.messaging.inbound import event_chain, event_plain_text, event_user_id, get_rest
+from otae_bot.messaging.media import png
 from otae_bot.messaging.prompts import prompt
 
 from arclet.alconna import Alconna, Args, MultiVar
 from nepattern import AnyString
 from otae_bot.infrastructure.rendering.executor import run_image_render
-from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
 
 from otae_bot.config.settings import Config as GlobalConfig
 
@@ -231,16 +231,6 @@ def _help_tip() -> str:
     return "发送 /help mcsm 获取 MCSM 详细指令说明。"
 
 
-def _to_image_segment(output: BytesIO) -> Image:
-    """Write PNG bytes to a temporary file and return a Satori-compatible image segment."""
-    output.seek(0)
-    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
-        f.write(output.getvalue())
-        f.flush()
-        schedule_temp_file_cleanup(f.name)
-        return Image.of(path=Path(f.name))
-
-
 async def _finish_image_or_text(
     session: Session,
     renderer: Callable[..., BytesIO],
@@ -250,7 +240,7 @@ async def _finish_image_or_text(
 ) -> None:
     try:
         output = await run_image_render(renderer, *args, **kwargs)
-        message = MessageChain([_to_image_segment(output)])
+        message = MessageChain([png(output.getvalue())])
     except Exception as exc:
         logger.warning(f"[MCSM] render image failed, fallback to text: {exc}")
         await session.send(fallback)
@@ -276,7 +266,7 @@ async def _finish_dm_image_or_text(
 ) -> None:
     try:
         output = await run_image_render(renderer, *args, **kwargs)
-        message = MessageChain([_to_image_segment(output)])
+        message = MessageChain([png(output.getvalue())])
     except Exception as exc:
         logger.warning(f"[MCSM] render DM image failed, fallback to text: {exc}")
         await session.send(MessageChain([Text(str(fallback))]))
