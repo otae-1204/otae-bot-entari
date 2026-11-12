@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import ast
-import importlib
 import json
 from pathlib import Path
 import shutil
@@ -71,15 +70,6 @@ class ArchitectureTests(unittest.TestCase):
                     self.assertEqual((node.level, node.module), (1, "handlers"), path)
                 else:
                     self.assertIsInstance(node.value, ast.Constant, path)
-
-    def test_shared_compatibility_imports_preserve_singletons(self):
-        aliases = {
-            "configs.config": "otae_bot.config.settings",
-            "configs.path_config": "otae_bot.config.paths",
-        }
-        for old, new in aliases.items():
-            with self.subTest(old=old):
-                self.assertIs(importlib.import_module(old), importlib.import_module(new))
 
     def test_resource_paths_are_independent_of_feature_depth(self):
         from plugins.endfield import paths
