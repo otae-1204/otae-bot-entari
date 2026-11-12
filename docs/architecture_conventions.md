@@ -25,7 +25,7 @@
 
 - 插件之间不互相 import。需要共享的东西下沉到 `otae_bot`。〔守卫〕
 - 装配应用的 `otae_bot/application.py` 是唯一可以 import `otae_bot.boundary` 的非边界模块。
-- `otae_bot/compat`（NoneBot 风格兼容层）只减不增：新代码不得使用，改到哪个插件就顺手把那个插件迁到 Entari 原生写法。〔守卫 C1〕
+- 插件直接用 Entari 原生写法（`command.on`、`listen`、`Session`），不再写 NoneBot 风格的封装；原兼容层 `otae_bot/compat` 已删除，不得重建。〔守卫 C1〕
 
 ## 3. 边界层
 
@@ -104,7 +104,7 @@
 3. **每次提交前跑全量测试。** 提交说明里写通过数，以及仍然失败的是哪些已知用例。
 4. **改动收发消息路径必须实测。** 用测试账号在测试群里跑一遍，并且开着双向限制：只接收测试群的消息，只允许向测试群发送。单元测试通过不等于链路通。
 5. **实测发现的问题要补成单元测试**，再修。
-6. **已知不稳定的用例要登记**，不能默默重跑到通过为止。目前有四处：`test_hyw_retry`（与执行顺序有关，单独运行通过）、`test_bilibili_poller` 里的一个用例，以及 `test_browser_render_queue` 和 `test_http_asset_broker` 里各一个计时用例（高负载时偶发）。
+6. **已知不稳定的用例要登记**，不能默默重跑到通过为止。目前有五处：`test_hyw_retry`（与执行顺序有关，单独运行通过）、`test_bilibili_poller` 里的一个用例，`test_browser_render_queue` 和 `test_http_asset_broker` 里各一个计时用例（高负载时偶发），以及 `test_endfield_card_detail_cache.py` 里的 `test_interval_and_lock_waits_are_counted_separately`（计时）。
 
 ## 10. 提交与分支
 

@@ -22,8 +22,9 @@ otae_bot/
     permissions.py             当前机器人账号、当前群的管理员权限核验
     superusers.py              配置的超级用户判断
   config/                      环境变量解析、原有路径配置；root.py 定位随源码的资源根目录
-  compat/                      NoneBot 风格的兼容层：Entari 会话/命令/定时任务、消息构造（逐步清空）
-  accounts/                    在线账号登记与各账号所在群（runtime.py）
+  accounts/                    在线账号登记与各账号所在群（runtime.py），上线钩子与选号（ready.py）
+  messaging/                   事件取值与命令文本（inbound.py）、多步对话 prompt（prompts.py）、合并转发（forward.py）
+  scheduling/                  定时任务：任务 ID、重叠跳过、运行统计、关停（jobs.py）
   pipeline/                    每条事件与订阅器都经过的全局钩子：群开关、指令输入、引用回退、[message] 日志脱敏
   infrastructure/
     cache.py                   有界异步缓存
@@ -65,8 +66,15 @@ tests/                         功能回归、结构约束、真实插件加载�
 
 ## 依赖边界
 
-`application` 负责组装，`compat` 封装框架和消息协议，`infrastructure`
-提供网络、缓存、存储与渲染能力。公共包不依赖具体功能插件。
+`application` 负责组装，插件直接用 Entari 公开接口（命令、监听、会话），
+`accounts`、`messaging`、`scheduling` 提供多账号、消息取值/对话/转发与定时任务这几样
+共享工具，`infrastructure` 提供网络、缓存、存储与渲染能力。公共包不依赖具体功能插件。
+
+插件写法：命令用 `command.on(Alconna([名字, *别名], Args[...]))` 注册，处理函数声明
+`session: Session` 与按参数名注入的 `Match[...]`；回复一律 `await session.send(...)` 并返回
+`None`（命令处理函数返回非 None 时 Entari 会发送它并阻断后续监听）；提前结束用 `return`，
+在嵌套函数里中止整个处理用 `session.stop()`；消息监听用 `listen(MessageCreatedEvent)`，
+条件写在处理函数开头；多步对话用 `otae_bot.messaging.prompts.prompt(session, ...)`。
 
 插件入口仅加载自己的 `handlers`。只有注册入口/处理器负责注册命令和定时任务；
 业务模型和纯转换函数不注册事件，也不实例化机器人。Entari 会将相对导入的
