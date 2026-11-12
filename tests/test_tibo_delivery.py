@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -67,25 +68,15 @@ def test_repeated_updates_deliver_without_restart(radar):
     assert bot.protocol.send_message.await_count == 5
 
 
-def test_upload_is_fresh_each_cycle_and_uses_bridge_url(radar):
+def test_image_is_handed_over_as_bytes_every_cycle(radar):
+    # Uploading (or inlining) is the outbound pipeline's job, fresh for every send.
     bot = account()
-    bot.protocol.upload_create = AsyncMock(side_effect=[["internal:one"], ["internal:two"]])
     for index in (1, 2):
         radar.upsert_post(post(index))
         notify(bot)
     calls = bot.protocol.send_message.await_args_list
-    assert calls[0].args[1][0].src == "internal:one"
-    assert calls[1].args[1][0].src == "internal:two"
-    assert bot.protocol.upload_create.await_count == 2
-    assert bot.protocol.upload_create.await_args.args[0].file == PNG
-
-
-def test_unsupported_upload_falls_back_to_inline_image(radar):
-    bot = account()
-    bot.protocol.upload_create = AsyncMock(side_effect=NotImplementedError)
-    radar.upsert_post(post(1))
-    notify(bot)
-    assert bot.protocol.send_message.await_args.args[1][0].src.startswith("data:")
+    inline = "data:image/png;base64," + base64.b64encode(PNG).decode()
+    assert [call.args[1][0].src for call in calls] == [inline, inline]
     assert radar.subscription("group").last_delivery_mode == "image"
 
 
@@ -228,16 +219,22 @@ def test_source_outage_does_not_initialize_empty_subscription(tmp_path, monkeypa
 
 def test_real_renderer_and_entari_protocol_across_three_cycles(radar, monkeypatch):
     from arclet.entari.session import EntariProtocol
+    from arclet.letoderea import Scope, use
+
+    from otae_bot.pipeline import outbound_media
     from plugins.tibo_radar.draw_xfeed import render_xfeed
 
     bot = account()
     sent = []
 
+    uploads = []
+
     async def api(action, params, **kwargs):
         if kwargs.get("multipart"):
-            payload = next(iter(params.values()))
+            (key, payload), = [(k, v) for k, v in params.items() if isinstance(v, dict)]
             assert payload["value"].startswith(b"\x89PNG\r\n\x1a\n")
-            return {"file": f"internal:tibo/{len(sent)}.png"}
+            uploads.append(params["channel_id"])
+            return {key: f"internal:tibo/{len(sent)}.png"}
         assert 'src="internal:tibo/' in params["content"]
         sent.append(params["content"])
         return [{"id": str(len(sent)), "content": params["content"]}]
@@ -250,6 +247,10 @@ def test_real_renderer_and_entari_protocol_across_three_cycles(radar, monkeypatc
         # Entari binds its event bus at import time; this isolated test owns a
         # fresh asyncio.run loop instead of the application's normal loop.
         monkeypatch.setattr(events._EventSystem, "loop", asyncio.get_running_loop())
+        scope = Scope.of("test-tibo-outbound-media")
+        with scope.context():
+            use(outbound_media.publisher, outbound_media.rewrite_outbound_media)
+        bot.self_info = SimpleNamespace(features=["message.create", "upload.create"])
         bot.protocol = EntariProtocol(bot)
         bot.protocol.call_api = api
         try:
@@ -258,10 +259,12 @@ def test_real_renderer_and_entari_protocol_across_three_cycles(radar, monkeypatc
                 await handlers._notify_subscriptions(bot)
                 assert radar.subscription("group").last_notified_post_id == post(index).post_id
         finally:
+            await scope.cleanup()
             await bot.protocol.session.close()
 
     asyncio.run(run())
     assert len(sent) == 3
+    assert uploads == ["channel"] * 3
 
 
 def test_cycle_lock_covers_startup_and_scheduler(radar, monkeypatch):

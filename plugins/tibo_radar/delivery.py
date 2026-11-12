@@ -1,9 +1,11 @@
 """Bounded, acknowledged delivery for background radar notifications.
 
-No bot session or local temporary-file path is required.  A failed image may
-degrade to a readable text digest; neither path advances a cursor without a
-message receipt.  Exception bodies are deliberately not logged (bridges may
-include entire base64 payloads or request credentials in them).
+No bot session is required.  The image is handed over as bytes; the outbound
+pipeline uploads it through the sending account (``upload.create``) or sends
+it inline, fresh for every send.  A failed image may degrade to a readable text
+digest; neither path advances a cursor without a message receipt.  Exception
+bodies are deliberately not logged (bridges may include entire base64 payloads
+or request credentials in them).
 """
 
 from __future__ import annotations
@@ -11,11 +13,11 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 
-from arclet.entari import Image, MessageChain, Text
+from arclet.entari import MessageChain, Text
 from loguru import logger
-from satori.model import Upload
 
 from otae_bot.delivery import Target, deliver
+from otae_bot.messaging.media import png as png_image
 
 from .models import TiboPost
 
@@ -29,26 +31,6 @@ async def _send(message: MessageChain, target: Target, bot, timeout: float) -> N
     result.raise_for_failure()
     if not any(getattr(receipt, "id", None) for receipt in result.messages):
         raise DeliveryNotAcknowledged("no message receipt; delivery cursor retained")
-
-
-async def _image(png: bytes, bot, timeout: float):
-    # Uploaded URLs belong to the current bridge, not the bot's filesystem.
-    # Never cache them across cycles/reconnects: bridge-local URLs may expire.
-    upload = getattr(bot.protocol, "upload_create", None)
-    if callable(upload):
-        try:
-            urls = await asyncio.wait_for(
-                upload(Upload(png, "image/png", "tibo-radar.png")), timeout
-            )
-            if isinstance(urls, (list, tuple)) and urls and isinstance(urls[0], str) and urls[0]:
-                return Image(src=urls[0])
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            logger.debug("[tibo_radar] image upload unavailable error_type={}", type(exc).__name__)
-    # Compatibility for bridges without upload.create. Image.of(raw=...) emits
-    # an inline data URL and never assumes a shared disk with the QQ client.
-    return Image.of(raw=png)
 
 
 def _clip(text: str, limit: int) -> str:
@@ -86,10 +68,8 @@ async def deliver_page(
     try:
         png = await asyncio.wait_for(render(), timeout)
         image_bytes = len(png)
-        stage = "upload"
-        segment = await _image(png, bot, timeout)
         stage = "image_send"
-        segments = [segment]
+        segments = [png_image(png)]
         if links:
             segments.append(Text("源帖链接：\n" + "\n".join(links)))
         await _send(MessageChain(segments), target, bot, timeout)
