@@ -3,7 +3,8 @@
 基于 Entari / Satori 的 QQ 机器人。启动与公共设施位于 `otae_bot/`，
 功能插件位于 `plugins/`，可写数据仍使用原有的 `data/`、`configs/` 和资源目录。
 
-代码结构、模块职责及扩展方式见 [代码结构说明](docs/code_structure.md)。
+代码结构、模块职责及扩展方式见 [代码结构说明](docs/code_structure.md)；
+写代码、改代码与上线必须遵守的约定见 [架构规范](docs/architecture_conventions.md)。
 
 End 插件的公共资料默认优先 AKEData；账号接口仍用官方，缺失资料保留兼容回退。
 覆盖范围、缓存变化与实测见 [AKE 迁移记录](docs/endfield_ake_migration_execution.md)。
