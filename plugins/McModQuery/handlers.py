@@ -4,16 +4,15 @@ import httpx
 from lxml import etree as _etree
 from urllib.parse import quote_plus
 
-from arclet.alconna import Args
-from otae_bot.compat.entari import ArgVal, ChainMsg, Text
-from arclet.entari import Event
+from arclet.alconna import Alconna, Args
+from arclet.entari import MessageChain, Session, Text, command
+from arclet.entari.command import Match
 
 from otae_bot.infrastructure.http.tls import ashared_ssl_context
 from otae_bot.infrastructure.http.user_agent import get_user_agent
-from otae_bot.compat.entari import cmd_with_args as _cmd
 
-mod = _cmd("mod", args=Args["rest", str], aliases={"模组"})
-item = _cmd("资料", args=Args["rest", str])
+mod = Alconna(["mod", "模组"], Args["rest", str])
+item = Alconna(["资料"], Args["rest", str])
 
 
 def _parse_search_results(html_text: str, count: int = 3):
@@ -51,11 +50,11 @@ def _search_url(keyword: str, *, filter_args: str = "") -> str:
     return f"https://search.mcmod.cn/s?key={query}{filter_args}"
 
 
-@mod.handle()
-async def handle_mod(rest: ArgVal[str]):
+@command.on(mod)
+async def handle_mod(session: Session, rest: Match[str]):
     text = rest.result.strip() if rest.available else ""
     if not text:
-        await mod.finish("格式：/mod <模组名> [数量]")
+        await session.send("格式：/mod <模组名> [数量]")
         return
     content = text.split(" ")
     name = "".join(content[:-1]) if content[-1].isdigit() else "".join(content)
@@ -67,30 +66,34 @@ async def handle_mod(rest: ArgVal[str]):
     try:
         html_text = await _fetch_search_html(name)
     except httpx.TimeoutException:
-        await mod.finish("MC 百科搜索请求超时，请稍后再试。")
+        await session.send("MC 百科搜索请求超时，请稍后再试。")
+        return
     except httpx.HTTPError:
-        await mod.finish("MC 百科搜索请求失败，请稍后重试。")
+        await session.send("MC 百科搜索请求失败，请稍后重试。")
+        return
 
     hrefs, titles = _parse_search_results(html_text, count)
     msg = _build_result_msg(name, hrefs, titles, f"MC 百科相关模组结果如下（仅展示前 {len(hrefs)} 项）：\n")
-    await ChainMsg.text(msg).finish()
+    await session.send(MessageChain([Text(msg)]))
 
 
-@item.handle()
-async def handle_item(rest: ArgVal[str]):
+@command.on(item)
+async def handle_item(session: Session, rest: Match[str]):
     text = rest.result.strip() if rest.available else ""
     if not text:
-        await item.finish("格式：/资料 <资料名>")
+        await session.send("格式：/资料 <资料名>")
         return
     name = "".join(text.split(" "))
 
     try:
         html_text = await _fetch_search_html(name, filter_args="&filter=3&mold=0")
     except httpx.TimeoutException:
-        await item.finish("MC 百科搜索请求超时，请稍后再试。")
+        await session.send("MC 百科搜索请求超时，请稍后再试。")
+        return
     except httpx.HTTPError:
-        await item.finish("MC 百科搜索请求失败，请稍后重试。")
+        await session.send("MC 百科搜索请求失败，请稍后重试。")
+        return
 
     hrefs, titles = _parse_search_results(html_text, 5)
     msg = _build_result_msg(name, hrefs, titles, f"MC 百科相关资料结果如下（仅展示前 {len(hrefs)} 项）：\n")
-    await ChainMsg.text(msg).finish()
+    await session.send(MessageChain([Text(msg)]))
