@@ -147,14 +147,14 @@ class ArchitectureTests(unittest.TestCase):
             entari._CURRENT_SESSION.reset(token)
 
     def test_scheduler_uses_the_scope_registering_imported_service_methods(self):
-        from otae_bot.compat import entari
+        from otae_bot.scheduling import jobs
 
         plugin = SimpleNamespace(module=SimpleNamespace(__name__="plugins.demo.handlers"))
-        token = entari.current_plugin.set(plugin)
+        token = jobs.current_plugin.set(plugin)
         try:
-            self.assertEqual(entari._plugin_module("plugins.demo.service"), "plugins.demo.handlers")
+            self.assertEqual(jobs._plugin_module("plugins.demo.service"), "plugins.demo.handlers")
         finally:
-            entari.current_plugin.reset(token)
+            jobs.current_plugin.reset(token)
 
     def test_all_plugins_load_in_real_entari_without_connecting(self):
         script = """
@@ -163,7 +163,7 @@ import sys
 sys.path.insert(0, sys.argv[1])
 from otae_bot.application import create_app
 from otae_bot.plugin_registry import discover_plugins
-from otae_bot.compat.entari import timer
+from otae_bot.scheduling.jobs import timer
 from arclet.entari.plugin.service import plugin_service
 from arclet.alconna import command_manager
 

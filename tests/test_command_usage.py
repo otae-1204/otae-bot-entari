@@ -264,7 +264,7 @@ class RecorderHookTests(unittest.IsolatedAsyncioTestCase):
 
 class FrameworkSnapshotTests(unittest.IsolatedAsyncioTestCase):
     async def test_scheduler_records_last_outcome(self):
-        from otae_bot.compat.entari import _ManagedJob, _Scheduler
+        from otae_bot.scheduling.jobs import _ManagedJob, _Scheduler
 
         scheduler = _Scheduler()
         job = _ManagedJob("plugins.demo.handlers.tick", None, set(), 1, interval_seconds=60)
