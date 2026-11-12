@@ -11,7 +11,7 @@ from otae_bot.adapters.message_log import install_message_log_redaction
 from otae_bot.adapters.quote_fallback import install_quote_fetch_fallback
 from otae_bot.attendance_registry import on_plugin_unloaded
 from otae_bot.command_usage import close_command_usage, install_command_usage_recorders
-from otae_bot.config.settings import SATORI_CLIENTS
+from otae_bot.config.settings import ONEBOT_CLIENTS, SATORI_CLIENTS
 from otae_bot.infrastructure.http.tls import prewarm_shared_ssl_context
 from otae_bot.infrastructure.loop_watchdog import (
     close_loop_watchdog,
@@ -45,7 +45,15 @@ async def _install_usage_after_load(event: PluginLoadedSuccess) -> None:
 
 
 def create_app() -> Entari:
-    app = Entari(*build_networks())
+    # OneBot-only setups must not fall back to the default Satori endpoint.
+    app = Entari(*(build_networks() if SATORI_CLIENTS or not ONEBOT_CLIENTS else []))
+    if ONEBOT_CLIENTS:
+        from otae_bot.boundary import SERVER_PLUGIN, server_plugin_config
+
+        loaded = load_plugin(SERVER_PLUGIN, server_plugin_config(ONEBOT_CLIENTS))
+        if not loaded:
+            # Without it the configured accounts never come online; fail loudly.
+            raise RuntimeError(f"ONEBOT_CLIENTS is set but {SERVER_PLUGIN} failed to load: {loaded.error!r}")
     install_message_log_redaction()
     install_recent_alerts()
     install_quote_fetch_fallback()

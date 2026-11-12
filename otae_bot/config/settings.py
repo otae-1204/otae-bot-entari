@@ -61,6 +61,8 @@ class Config:
 
 
 SATORI_CLIENTS: List[dict] = _env("SATORI_CLIENTS", [])
+# OneBot 11 forward WebSocket endpoints served in-process through otae_bot.boundary.
+ONEBOT_CLIENTS: List[dict] = _env("ONEBOT_CLIENTS", [])
 
 
 # ── 全局代理 ──
