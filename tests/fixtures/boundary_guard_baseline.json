@@ -1,3 +1,7 @@
 [
+{"rule": "direct-env-read", "file": "plugins/hyw/handlers.py", "snippet": "os.environ.pop(\"DDGS_PROXY\", None)", "count": 2},
+{"rule": "direct-env-read", "file": "plugins/hyw/handlers.py", "snippet": "os.environ[\"DDGS_PROXY\"] = config.search_proxy", "count": 1},
+{"rule": "direct-env-read", "file": "plugins/hyw/handlers.py", "snippet": "os.environ[\"DDGS_PROXY\"] = previous_search_proxy", "count": 1},
+{"rule": "direct-env-read", "file": "plugins/hyw/handlers.py", "snippet": "previous_search_proxy = os.environ.get(\"DDGS_PROXY\")", "count": 1},
 {"rule": "framework-private", "file": "otae_bot/pipeline/framework_hooks.py", "snippet": "from arclet.letoderea.scope import global_propagators", "count": 1}
 ]

@@ -72,6 +72,13 @@ def g(cmd, self, store):
 '''
         self.assertEqual(_scan_source(source), [])
 
+    def test_direct_environment_reads_are_flagged_outside_the_config_package(self):
+        source = ('import os\nfrom os import getenv\nkey = os.getenv("X")\nproxy = os.environ.get("Y")\n'
+                  'os.environ["Z"] = "1"\nname = os.name\nos.path.join("a")\n')
+        self.assertEqual(_scan_source(source, "plugins/a/handlers.py").count("direct-env-read"), 4)
+        self.assertEqual(_scan_source(source, "otae_bot/infrastructure/http/tls.py").count("direct-env-read"), 4)
+        self.assertEqual(_scan_source(source, "otae_bot/config/settings.py"), [])
+
     def test_plugins_do_not_import_other_plugins(self):
         source = "from plugins.b.store import x\nfrom plugins import b\nfrom ..b import y\nimport plugins.b.draw\n"
         self.assertEqual(_layering("plugins/a/handlers.py", source), ["plugin-cross-import"] * 4)

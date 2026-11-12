@@ -2,7 +2,7 @@
 
 Inside the bot only Satori should exist; OneBot actions, HTTP side channels,
 framework private APIs and platform-name branching belong to the boundary
-(rules R1-R7). Imports must follow the layering in
+(rules R1-R8). Imports must follow the layering in
 ``docs/architecture_conventions.md`` (rules L1-L4). The checks are AST
 heuristics run over ``otae_bot/`` and ``plugins/``.
 
@@ -38,6 +38,7 @@ RULES = {
     "R5": "numeric-id",
     "R6": "platform-name",
     "R7": "event-class-name",
+    "R8": "direct-env-read",
     "L1": "plugin-cross-import",
     "L2": "boundary-import",
     "L3": "infrastructure-upward-import",
@@ -54,6 +55,10 @@ LOWER_FORBIDDEN = ("arclet.entari", "arclet.letoderea", "satori", "plugins")
 # otae_bot/config is where settings bind to Entari's config API; nothing else of Entari.
 CONFIG_LAYER = "otae_bot/config/"
 CONFIG_FRAMEWORK_API = "arclet.entari.config"
+
+# R8: settings come from otae_bot.config (entari.yml / .env); only it reads the environment.
+ENV_READERS = frozenset({"getenv", "environ", "getenvb", "environb"})
+ENV_EXEMPT = ("otae_bot/config/",)
 
 # R1: always flagged wherever they appear (outside docstrings).
 KNOWN_ACTIONS = frozenset({
@@ -301,9 +306,11 @@ class _Scanner(ast.NodeVisitor):
         if rel.startswith("otae_bot/") and any(_within(n, "plugins") for n in names):
             self.add("L4", node)
 
-    # R3, R4: imports
+    # R3, R4, R8: imports
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         self._layering(node)
+        if node.module == "os" and any(a.name in ENV_READERS for a in node.names):
+            self._env_read(node)
         module = node.module or ""
         if module.startswith(ONEBOT_MODULES) or any(f"{module}.{a.name}".startswith(ONEBOT_MODULES) for a in node.names):
             self.add("R3", node)
@@ -325,8 +332,14 @@ class _Scanner(ast.NodeVisitor):
         if node.id in ONEBOT_HTTP_NAMES:
             self.add("R3", node)
 
-    # R4: private attributes of plugins, scopes and events
+    def _env_read(self, node: ast.AST) -> None:
+        if not self.rel.startswith(ENV_EXEMPT):
+            self.add("R8", node)
+
+    # R4: private attributes of plugins, scopes and events; R8: os.environ / os.getenv
     def visit_Attribute(self, node: ast.Attribute) -> None:
+        if node.attr in ENV_READERS and isinstance(node.value, ast.Name) and node.value.id == "os":
+            self._env_read(node)
         if node.attr in ONEBOT_HTTP_NAMES:
             self.add("R3", node)
         if node.attr in {"_scope", "_origin"} or node.attr in SCOPE_LISTS:
