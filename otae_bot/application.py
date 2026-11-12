@@ -5,10 +5,6 @@ from __future__ import annotations
 from arclet.entari import WS, Cleanup, Entari, Startup, listen, load_plugin
 from arclet.entari.event.plugin import PluginUnloaded
 
-from otae_bot.adapters.command_input import install_command_input_normalizers
-from otae_bot.adapters.feature_gate import install_group_feature_gates
-from otae_bot.adapters.message_log import install_message_log_redaction
-from otae_bot.adapters.quote_fallback import install_quote_fetch_fallback
 from otae_bot.attendance_registry import on_plugin_unloaded
 from otae_bot.command_usage import close_command_usage, install_command_usage_recorders
 from otae_bot.config.settings import ONEBOT_CLIENTS, SATORI_CLIENTS
@@ -19,6 +15,10 @@ from otae_bot.infrastructure.loop_watchdog import (
 )
 from otae_bot.infrastructure.recent_alerts import install_recent_alerts
 from otae_bot.lifecycle import acquire_run_lock, close_shared_resources
+from otae_bot.pipeline.command_input import install_command_input_normalizers
+from otae_bot.pipeline.feature_gate import install_group_feature_gates
+from otae_bot.pipeline.message_log import install_message_log_redaction
+from otae_bot.pipeline.quote_fallback import install_quote_fetch_fallback
 from otae_bot.plugin_registry import discover_plugins
 
 

@@ -255,7 +255,7 @@ from arclet.letoderea import EVENT, STOP, post
 from arclet.entari.event.command import CommandExecute
 from otae_bot.config.settings import Config
 from otae_bot.group_features import feature_store, scope_from_event
-from otae_bot.adapters.feature_gate import GroupFeatureGate
+from otae_bot.pipeline.feature_gate import GroupFeatureGate
 from otae_bot.command_usage.recorder import CommandUsageRecorder
 from arclet.entari.plugin import get_plugin_subscribers
 from unittest.mock import patch

@@ -10,7 +10,8 @@ from unittest.mock import AsyncMock, patch
 from arclet.letoderea import ExitState, Subscriber
 from satori import ChannelType
 
-from otae_bot.adapters import feature_gate, runtime
+from otae_bot.adapters import runtime
+from otae_bot.pipeline import feature_gate
 from otae_bot.adapters.entari import ChainMsg
 from otae_bot.delivery import FAILED, NO_ACCOUNT, SENT, SUPPRESSED, Target, deliver, is_not_in_group
 from otae_bot.group_features import GroupFeatureStore, GroupScope

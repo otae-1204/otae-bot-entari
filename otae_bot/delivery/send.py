@@ -17,8 +17,8 @@ from arclet.letoderea import ExitState
 from loguru import logger
 
 from otae_bot.adapters import runtime
-from otae_bot.adapters.feature_gate import allow_group_delivery
 from otae_bot.delivery.target import Target
+from otae_bot.pipeline.feature_gate import allow_group_delivery
 
 SENT = "sent"
 SUPPRESSED = "suppressed"

@@ -28,8 +28,8 @@ from arclet.entari.const import ITEM_ACCOUNT, ITEM_SESSION
 from arclet.letoderea import EVENT, STACK, Contexts, Propagator, Subscriber
 from loguru import logger
 
-from otae_bot.adapters.feature_gate import subscriber_plugin
-from otae_bot.adapters.framework_hooks import attach_to_every_subscriber
+from otae_bot.pipeline.feature_gate import subscriber_plugin
+from otae_bot.pipeline.framework_hooks import attach_to_every_subscriber
 
 from .store import CallRecord, UsageStore
 

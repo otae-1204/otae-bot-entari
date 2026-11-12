@@ -14,9 +14,9 @@ from loguru import logger
 
 from otae_bot.adapters.entari import ArgVal, Image, get_group_id, get_rest, send
 from otae_bot.adapters.entari import cmd as _cmd
-from otae_bot.adapters.feature_gate import loaded_group_plugins
 from otae_bot.command_usage import Scope, usage_recorder
 from otae_bot.infrastructure.rendering.art_card import render_card
+from otae_bot.pipeline.feature_gate import loaded_group_plugins
 
 from .presentation import build_card, format_text
 from .query import parse_query

@@ -9,7 +9,7 @@ from loguru import logger
 
 import plugins.endfield.handlers as endfield
 from otae_bot import hypergryph_captcha
-from otae_bot.adapters import message_log
+from otae_bot.pipeline import message_log
 from plugins.endfield.account.client import ACCOUNT_PROVIDER_CN
 from plugins.endfield.account.store import RoleCandidate
 from plugins.endfield.catalog import commands as commands_module

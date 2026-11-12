@@ -1520,7 +1520,7 @@ class ArknightsHandlerTests(unittest.IsolatedAsyncioTestCase):
 
     async def _bind(self, *answers, phone_code=None, send_phone_code=None):
         """Run /ak 绑定 with scripted replies, recording sensitivity per prompt."""
-        from otae_bot.adapters import message_log
+        from otae_bot.pipeline import message_log
 
         answers = list(answers)
         prompts: list[tuple[str, bool, str]] = []
@@ -1624,7 +1624,7 @@ class ArknightsHandlerTests(unittest.IsolatedAsyncioTestCase):
         client.token_by_phone_code.assert_not_awaited()
 
     async def test_a_failed_binding_still_ends_the_sensitive_dialog(self):
-        from otae_bot.adapters import message_log
+        from otae_bot.pipeline import message_log
 
         async def prompt(message, timeout):
             raise RuntimeError("prompt broke")

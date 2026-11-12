@@ -12,7 +12,7 @@ from datetime import datetime
 
 from loguru import logger
 
-from otae_bot.adapters.message_log import redact
+from otae_bot.pipeline.message_log import redact
 
 CAPACITY = 50
 MAX_LENGTH = 160

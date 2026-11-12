@@ -15,8 +15,8 @@ from arclet.letoderea import Propagator, Subscriber
 from loguru import logger
 from satori import At, Author, ChannelType, MessageObject, Text, select
 
-from otae_bot.adapters.framework_hooks import attach_to_every_subscriber
-from otae_bot.adapters.quote_fallback import UnavailableMessage
+from otae_bot.pipeline.framework_hooks import attach_to_every_subscriber
+from otae_bot.pipeline.quote_fallback import UnavailableMessage
 
 QUOTE_AUTHOR_TIMEOUT = 5
 # Alconna only splits on ASCII spaces. Some clients send NBSP or the CJK

@@ -20,7 +20,6 @@ from nepattern import AnyString
 from satori import ChannelType
 from tarina import LRU
 
-from otae_bot.adapters import framework_hooks
 from otae_bot.command_usage import recorder as recorder_module
 from otae_bot.command_usage.recorder import (
     CommandUsageRecorder,
@@ -30,6 +29,7 @@ from otae_bot.command_usage.recorder import (
     resolve_command,
 )
 from otae_bot.command_usage.store import CallRecord, Scope, UsageStore
+from otae_bot.pipeline import framework_hooks
 
 NOW = datetime(2026, 10, 27, 15, 0, 0)
 

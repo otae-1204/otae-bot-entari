@@ -26,7 +26,7 @@ from satori import Channel, ChannelType, Event, Guild, Login, MessageObject, Quo
 from satori.client.account import Account, ApiInfo
 from satori.exception import ServerException
 
-from otae_bot.adapters import quote_fallback
+from otae_bot.pipeline import quote_fallback
 from otae_bot.plugin_registry import discover_plugins
 
 ROOT = Path(__file__).resolve().parents[1]

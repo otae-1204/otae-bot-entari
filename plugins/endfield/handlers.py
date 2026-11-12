@@ -60,7 +60,7 @@ from otae_bot.adapters.entari import (
     send_forward,
     timer,
 )
-from otae_bot.adapters.message_log import sensitive_input
+from otae_bot.pipeline.message_log import sensitive_input
 from otae_bot.command_usage import describe_command
 from otae_bot.infrastructure.rendering.help_runtime import cached_help_image
 from otae_bot.infrastructure.http.asset_policy import asset_render_budget

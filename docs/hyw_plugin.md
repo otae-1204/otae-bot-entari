@@ -63,7 +63,7 @@ QQ 卡片是扩展元素 `<onebot:json data>` / `<onebot:xml data>`，LLBot 原�
 三者都读；消息里没有这些元素时什么也不做。
 
 适配器取不到引用时，引用只剩 `<quote id/>`；Entari 会再试 `message.get`，失败时由
-`otae_bot/adapters/quote_fallback.py` 让事件照常分发（记 `[entari] quoted message fetch failed …`）。
+`otae_bot/pipeline/quote_fallback.py` 让事件照常分发（记 `[entari] quoted message fetch failed …`）。
 合并转发没展开时只剩没有子元素的 `<message id forward="true"/>`。这两种情况 `/q` 照常回答问题，
 只是不带引用内容，并记一条 warning：
 

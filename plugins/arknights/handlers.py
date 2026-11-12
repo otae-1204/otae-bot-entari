@@ -27,7 +27,7 @@ from otae_bot.adapters.entari import (
     on_alconna,
     prompt,
 )
-from otae_bot.adapters.message_log import sensitive_input
+from otae_bot.pipeline.message_log import sensitive_input
 from otae_bot.command_usage import describe_command
 from otae_bot.attendance_delivery import build_delivery, deliver
 from otae_bot.attendance_registry import (

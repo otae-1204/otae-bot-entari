@@ -14,9 +14,9 @@ from arclet.entari.message import Reply
 from arclet.letoderea import Scope, Subscriber
 from satori import At, Author, ChannelType, Image, MessageObject, Quote, Text, User
 
-from otae_bot.adapters import command_input, framework_hooks
-from otae_bot.adapters.command_input import strip_reply_mentions
-from otae_bot.adapters.quote_fallback import UnavailableMessage
+from otae_bot.pipeline import command_input, framework_hooks
+from otae_bot.pipeline.command_input import strip_reply_mentions
+from otae_bot.pipeline.quote_fallback import UnavailableMessage
 
 
 def quoted(author="other"):

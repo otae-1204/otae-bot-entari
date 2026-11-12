@@ -81,12 +81,12 @@ Token 150 秒、选择角色每次 120 秒。超时时 Entari 会先发送一条
 ### `[message]` 日志脱敏
 
 Entari 内置的 `record_message` 插件会把收到的每条消息写进 `[message]` 日志。
-`otae_bot/adapters/message_log.py` 在启动时给这个日志加了脱敏：
+`otae_bot/pipeline/message_log.py` 在启动时给这个日志加了脱敏：
 
 - 所有消息中的大陆手机号显示为 `138****1234`；
 - 绑定（以及小黑盒抽卡记录导入）对话进行期间，该用户发来的 4～8 位数字验证码显示为 `******`，
   16 个字符以上、像 Token 的字符串显示为 `<已隐藏>`（发回的极验结果也因此被遮盖）；
 - 序号、“取消”、10 位角色 UID 等其他内容照常记录，其他用户和对话结束后的消息不受影响。
 
-插件的交互流程可以用 `otae_bot.adapters.message_log.sensitive_input(user_id)`
+插件的交互流程可以用 `otae_bot.pipeline.message_log.sensitive_input(user_id)`
 包住需要用户输入凭据的对话。
