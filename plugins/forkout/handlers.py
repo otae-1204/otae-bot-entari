@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 import httpx
+from arclet.alconna import Alconna, Args, MultiVar
 from arclet.entari import (
     Account,
     At,
@@ -16,23 +17,22 @@ from arclet.entari import (
     Quote,
     Session,
     Text,
+    command,
     listen,
 )
+from nepattern import AnyString
 from PIL import Image
 
 from otae_bot.config.paths import IMAGE_PATH
-from otae_bot.compat.entari import cmd as _cmd
 from otae_bot.infrastructure.http.tls import ashared_ssl_context
 from otae_bot.infrastructure.storage.json_store import JsonStore
 
 
 _FORKOUT_TEXT_RE = re.compile(r"/(?:forkout|叉出去|叉|[Xx])(?=$|\s)")
 
-fork_rank = _cmd(
-    "forkrank",
-    aliases={"叉排行", "被叉排行榜", "叉人排行", "Xrank", "XR", "xrank", "xr"},
-    priority=5,
-    block=True,
+fork_rank = Alconna(
+    ["forkrank", "叉排行", "被叉排行榜", "叉人排行", "Xrank", "XR", "xrank", "xr"],
+    Args["rest;?", MultiVar(AnyString)],
 )
 
 imgpath = IMAGE_PATH + "forkout/"
@@ -200,11 +200,13 @@ async def handle_forkout(session: Session, account: Account):
     await _send_fork_image(session, fork_img, reply_id)
 
 
-@fork_rank.handle()
-async def handle_fork_rank(event: Event, bot: Account):
+@command.on(fork_rank)
+async def handle_fork_rank(session: Session):
+    event, bot = session.event, session.account
     group_id = _get_group_id(event)
     if not group_id:
-        await fork_rank.finish("该指令仅支持在群聊或频道中使用。")
+        await session.send("该指令仅支持在群聊或频道中使用。")
+        return
 
     prefix = f"{group_id}."
     records: list[tuple[str, int]] = []
@@ -214,7 +216,8 @@ async def handle_fork_rank(event: Event, bot: Account):
             records.append((uid, count))
 
     if not records:
-        await fork_rank.finish("本群暂无被叉记录。")
+        await session.send("本群暂无被叉记录。")
+        return
 
     records.sort(key=lambda x: x[1], reverse=True)
     top = records[:15]
@@ -232,4 +235,4 @@ async def handle_fork_rank(event: Event, bot: Account):
         medal = {1: "1ST", 2: "2ND", 3: "3RD"}.get(i, f"{i}.")
         lines.append(f"{medal} {names[uid]} - 被叉 {count} 次")
 
-    await fork_rank.finish("\n".join(lines))
+    await session.send("\n".join(lines))
