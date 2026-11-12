@@ -13,13 +13,15 @@ import tempfile
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from io import BytesIO
+from pathlib import Path
 from typing import Any
 
+from arclet.entari import Image as ImageElement
+from arclet.entari import MessageChain
 from arclet.letoderea import ExitState
 from loguru import logger
 from PIL import Image
 
-from otae_bot.compat.entari import ChainMsg, make_image
 from otae_bot.hypergryph.attendance_registry import (
     SIGNED,
     AttendanceOutcome,
@@ -120,7 +122,7 @@ async def deliver(send: Callable[[Any], Awaitable[Any]], delivery: AttendanceDel
         parts = [png_image(delivery.png)]
         if delivery.text:
             parts.append("\n" + delivery.text)
-        await send(ChainMsg(parts))
+        await send(MessageChain(parts))
     except ExitState:
         raise
     except Exception as exc:  # noqa: BLE001 - preserve results when image delivery fails
@@ -145,7 +147,7 @@ def png_image(png: bytes):
         file.write(png)
         file.flush()
         schedule_temp_file_cleanup(file.name)
-        return make_image(path=file.name)
+        return ImageElement.of(path=Path(file.name))
 
 
 __all__ = [
