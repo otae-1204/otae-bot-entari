@@ -44,7 +44,7 @@ from plugins.steamInfo.steam import (
     STEAM_ID_OFFSET,
 )
 from plugins.steamInfo.models import PlayerSummaries, Player
-from plugins.steamInfo.config import Config
+from plugins.steamInfo.config import load_config
 from otae_bot.compat.entari import (
     Text, make_image, ChainMsg, At, ArgVal, event_chain, event_user_id,
 )
@@ -66,7 +66,7 @@ from PIL import Image as PILImage
 from typing import Union, Optional, List, Dict, Any
 from otae_bot.compat.entari import inject
 from arclet.entari import Event, Account as Bot, Image
-from otae_bot.config.settings import SYSTEM_PROXY, Config as GlobalConfig, _env
+from otae_bot.config.settings import Config as GlobalConfig, system_proxy
 from otae_bot.config.paths import IMAGE_PATH
 from otae_bot.compat.entari import cmd as _cmd, get_rest
 from otae_bot.infrastructure.rendering.executor import run_image_render
@@ -100,30 +100,7 @@ set_nickname = _cmd("steamnickname", aliases={"steam昵称"}, priority=5, block=
 steam_cache = _cmd("steamcache", aliases={"steam缓存"}, priority=5, block=True)
 
 
-def _env_bool(key: str, default: bool = False) -> bool:
-    value = _env(key, default)
-    if isinstance(value, bool):
-        return value
-    return str(value).strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _env_int(key: str, default: int) -> int:
-    try:
-        return int(_env(key, default))
-    except (TypeError, ValueError):
-        return default
-
-
-config = Config(
-    steam_api_key=str(_env("STEAM_API_KEY", "") or ""),
-    steam_api_keys=str(_env("STEAM_API_KEYS", "") or ""),
-    proxy=str(_env("HTTP_PROXY", "") or "") or None,
-    steam_request_interval=_env_int("STEAM_REQUEST_INTERVAL", 120),
-    steam_disable_broadcast_on_startup=_env_bool("STEAM_DISABLE_BROADCAST_ON_STARTUP", False),
-    steam_llm_api_key=str(_env("STEAM_LLM_API_KEY", "") or ""),
-    steam_llm_base_url=str(_env("STEAM_LLM_BASE_URL", "https://api.deepseek.com") or "https://api.deepseek.com"),
-    steam_llm_model=str(_env("STEAM_LLM_MODEL", "deepseek-v4-flash") or "deepseek-v4-flash"),
-)
+config = load_config()
 
 
 _steam_data_dir = Path("data") / "steam_info_entari"
@@ -191,9 +168,8 @@ def _steam_api_keys():
 def _steam_proxy() -> Optional[str]:
     if config.proxy:
         return config.proxy
-    if isinstance(SYSTEM_PROXY, dict):
-        return SYSTEM_PROXY.get("http") or SYSTEM_PROXY.get("https")
-    return None
+    proxy = system_proxy()
+    return proxy["http"] or proxy["https"]
 
 
 def _steam_proxy_candidates() -> List[Optional[str]]:
