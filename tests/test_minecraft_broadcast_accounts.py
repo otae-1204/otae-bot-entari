@@ -230,3 +230,89 @@ def test_rejoin_is_recognised_for_the_account_that_received_the_event(world):
         assert not broadcast._is_bot_added(ir, event)
 
     run(world, scenario)
+
+
+def cached_players(group=GROUP, addr=MC):
+    return getattr(broadcast, "__BroadcastInfo")[group][addr]["players"]
+
+
+def test_a_failed_send_keeps_the_change_and_sends_it_once_later(world):
+    async def scenario():
+        bot = qq("3898438488", [GROUP, OTHER])
+        await online(world, bot)
+        bot.protocol.reject = RuntimeError("send timeout")
+        world.players[MC] = []  # Alice left.
+        await broadcast.broadcast()
+        assert sent(world) == []
+        assert cached_players() == {"Alice": 0}  # Not committed: the change is still pending.
+        assert world.manager.data_manager.playtimes == []
+        retry_at = broadcast._retry_at[GROUP]
+        assert retry_at == world.now + broadcast.MC_BROADCAST_INTERVAL
+
+        bot.protocol.reject = None
+        world.now = retry_at - 1
+        await broadcast.broadcast()
+        assert sent(world) == []  # Still backing off.
+        world.now = retry_at
+        await broadcast.broadcast()
+        assert len(sent(world)) == 1 and "Alice" in sent(world)[0][1]
+        assert cached_players() == {}
+        assert [entry[0] for entry in world.manager.data_manager.playtimes] == ["Alice"]
+
+        world.now += broadcast.MC_BROADCAST_INTERVAL
+        await broadcast.broadcast()
+        assert len(sent(world)) == 1  # Nothing is sent twice.
+        assert GROUP not in broadcast._send_failures
+
+    run(world, scenario)
+
+
+def test_without_an_account_in_the_group_the_change_waits_for_one(world):
+    async def scenario():
+        await online(world, ir_panel())
+        world.players[MC] = ["Alice", "Bob"]
+        await broadcast.broadcast()
+        assert sent(world) == [] and cached_players() == {"Alice": 0}
+        await online(world, qq("3898438488", [GROUP]))
+        world.now = broadcast._retry_at[GROUP]
+        await broadcast.broadcast()
+        assert [sender for sender, _ in sent(world)] == ["3898438488"]
+        assert set(cached_players()) == {"Alice", "Bob"}
+
+    run(world, scenario)
+
+
+def test_repeated_failures_back_off_up_to_a_cap(world):
+    waits = [broadcast._defer_group(GROUP, 0) for _ in range(8)]
+    interval = broadcast.MC_BROADCAST_INTERVAL
+    assert waits[:3] == [interval, 2 * interval, 4 * interval]
+    assert max(waits) == max(interval, broadcast.RETRY_BACKOFF_MAX_SECONDS)
+    broadcast._group_delivered(GROUP)
+    assert GROUP not in broadcast._retry_at and GROUP not in broadcast._send_failures
+
+
+def test_a_delivery_switched_off_for_the_group_is_not_retried(world, monkeypatch, tmp_path):
+    from arclet.letoderea import Subscriber
+
+    from otae_bot.groups.features import GroupFeatureStore, GroupScope
+    from otae_bot.pipeline import feature_gate
+
+    store = GroupFeatureStore(tmp_path / "switches.json")
+    monkeypatch.setattr(feature_gate, "feature_store", store)
+
+    async def scenario():
+        bot = qq("3898438488", [GROUP])
+        await online(world, bot)
+        store.set_enabled(GroupScope("llonebot", "3898438488", GROUP), "minecraft_plugin", False)
+
+        async def job():  # As the scheduler runs it: inside the plugin's subscriber.
+            await broadcast.broadcast()
+
+        job.__module__ = "plugins.minecraft_plugin.broadcast"
+        world.players[MC] = ["Alice", "Bob"]
+        await Subscriber(job).handle({})
+        assert bot.protocol.sent == []
+        assert set(cached_players()) == {"Alice", "Bob"}
+        assert GROUP not in broadcast._retry_at
+
+    run(world, scenario)

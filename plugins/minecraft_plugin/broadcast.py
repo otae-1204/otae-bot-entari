@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from dataclasses import dataclass, field
 import traceback
 
 from arclet.entari import MessageChain, Session, Text, listen
@@ -42,6 +43,10 @@ _last_error_digest_at: dict[str, int] = {}
 ERROR_DIGEST_COOLDOWN = 600
 BROADCAST_TICK_SECONDS = 30
 _last_broadcast_at: dict[str, int] = {}
+# 发送失败的群：连续失败次数与下次重试时间。未发出的变化不进缓存，下次重新比对补发。
+_send_failures: dict[str, int] = {}
+_retry_at: dict[str, int] = {}
+RETRY_BACKOFF_MAX_SECONDS = 1800
 
 
 # ── 监听 bot 重新入群 → 清除踢出标记 ──
@@ -86,19 +91,24 @@ def _check_player_changes_simple(
     group_id: int,
     server_identifier: str | None = None,
 ) -> list:
-    """对比新旧玩家列表，生成变化消息."""
+    """对比新旧玩家列表，生成变化消息（同时记下离开玩家的游戏时长）."""
     messages, playtime_deltas = build_player_change_messages(
         server_name, previous_players, current_players, int(time.time())
     )
+    _record_playtimes(group_id, server_identifier or server_name, playtime_deltas)
+    return messages
+
+
+def _record_playtimes(group_id, server_identifier: str, playtime_deltas: dict[str, int]) -> None:
+    if not playtime_deltas:
+        return
     data_manager = getattr(_bm, "data_manager", None) if _bm is not None else None
     player_game_time_manager = PlayerGameTimeManager(data_manager)
-    identifier = server_identifier or server_name
     for player, duration in playtime_deltas.items():
         player_game_time_manager.add_player_gametime(
             player_name=player, group_id=group_id,
-            server_name=identifier, gametime=duration,
+            server_name=server_identifier, gametime=duration,
         )
-    return messages
 
 
 _bm = None  # BroadcastManager 引用，由 init_broadcast 设置
@@ -159,6 +169,8 @@ def _get_group_broadcast_interval(group_id: str) -> int:
 
 def _is_group_broadcast_due(group_id: str, now: int) -> bool:
     gid = str(group_id)
+    if now < _retry_at.get(gid, 0):
+        return False
     last = _last_broadcast_at.get(gid)
     if last is None:
         return True
@@ -167,6 +179,25 @@ def _is_group_broadcast_due(group_id: str, now: int) -> bool:
 
 def _mark_group_broadcasted(group_id: str, now: int) -> None:
     _last_broadcast_at[str(group_id)] = now
+
+
+def _defer_group(group_id: str, now: int) -> int:
+    """发送失败：变化留在缓存外等下次重试，连续失败时等待翻倍，最长 RETRY_BACKOFF_MAX_SECONDS."""
+    gid = str(group_id)
+    failures = _send_failures.get(gid, 0) + 1
+    _send_failures[gid] = failures
+    interval = max(1, _get_group_broadcast_interval(gid))
+    wait = min(interval * 2 ** min(failures - 1, 10), max(interval, RETRY_BACKOFF_MAX_SECONDS))
+    _retry_at[gid] = now + wait
+    return wait
+
+
+def _group_delivered(group_id: str) -> None:
+    gid = str(group_id)
+    failures = _send_failures.pop(gid, 0)
+    _retry_at.pop(gid, None)
+    if failures:
+        logger.info(f"[MC_Server] 群 {gid} 播报恢复：此前连续失败 {failures} 次，积压的变化已发出")
 
 
 async def init_broadcast(bm):
@@ -295,9 +326,105 @@ def _digest_account(group_ids) -> object | None:
     return None
 
 
+@dataclass
+class _ServerCheck:
+    """一台服务器本轮的结果：要写回缓存的状态、要播报的变化与离开玩家的时长."""
+
+    addr: str
+    update: dict
+    messages: list[str] = field(default_factory=list)
+    playtimes: dict[str, int] = field(default_factory=dict)
+
+
+def _hidden_update(online_players: int) -> dict:
+    return {"players": {}, "players_hidden": True, "online_players": online_players}
+
+
+async def _check_server(group_id: str, addr: str, server_info: dict, now: int) -> _ServerCheck | None:
+    """Ping 一台服务器并与缓存比对；只计算，不写缓存."""
+    server_address = server_info.get("address", addr)
+    if not server_address:
+        return None
+    server_name = server_info.get("name", addr)
+
+    server_status = await ping(server_address, server_type="java")
+    current_players = None
+    current_players_hidden = False
+    current_online_players = 0
+    if server_status.get("status") == "success":
+        data = server_status.get("data", {})
+        current_players_hidden = bool(data.get("players_hidden"))
+        current_online_players = int(data.get("online_players", 0) or 0)
+        current_players = data.get("players", [])
+
+    previous_players = server_info.get("players", {})
+    previous_players_hidden = bool(server_info.get("players_hidden"))
+
+    if current_players_hidden:
+        return _ServerCheck(addr, _hidden_update(current_online_players))
+
+    if previous_players_hidden and current_players is not None:
+        return _ServerCheck(addr, {
+            "players": {p: now for p in current_players},
+            "players_hidden": False,
+            "online_players": current_online_players,
+        })
+
+    if previous_players is not None and current_players is None:
+        for _ in range(3):
+            await asyncio.sleep(1)
+            confirm = await safe_ping(server_address)
+            if confirm.get("status") == "success":
+                data = confirm.get("data", {})
+                if data.get("players_hidden"):
+                    current_players_hidden = True
+                    current_online_players = int(data.get("online_players", 0) or 0)
+                    break
+                current_players = data.get("players", [])
+                current_online_players = int(data.get("online_players", 0) or 0)
+                break
+
+    if current_players_hidden:
+        return _ServerCheck(addr, _hidden_update(current_online_players))
+
+    messages, playtimes = build_player_change_messages(
+        server_name, previous_players, current_players, int(time.time())
+    )
+    if current_players is not None:
+        prev = previous_players or {}
+        update = {
+            "players": {p: prev.get(p, now) for p in current_players},
+            "players_hidden": False,
+            "online_players": current_online_players,
+        }
+    else:
+        update = {"players": None, "players_hidden": False, "online_players": 0}
+    return _ServerCheck(addr, update, messages, playtimes)
+
+
+async def _commit_checks(group_id: str, checks: list[_ServerCheck]) -> None:
+    """把结果写回缓存并记录游戏时长；期间被删掉的服务器跳过."""
+    committed: list[_ServerCheck] = []
+    async with _broadcast_lock:
+        servers = __BroadcastInfo.get(group_id) or {}
+        for check in checks:
+            entry = servers.get(check.addr)
+            if entry is None:
+                continue
+            entry.update(check.update)
+            committed.append(check)
+    for check in committed:
+        _record_playtimes(group_id, check.addr, check.playtimes)
+
+
 @timer.scheduled_job("interval", seconds=BROADCAST_TICK_SECONDS, misfire_grace_time=30, max_instances=1)
 async def broadcast():
-    """定时轮询所有服务器，检测玩家变化并播报（同时同步 DB 配置）."""
+    """定时轮询所有服务器，检测玩家变化并播报（同时同步 DB 配置）.
+
+    有变化的服务器，状态在播报发出（或按群开关、被移出群有意不发）之后才写回
+    缓存；发送失败或没有在群账号时不写，下次到期重新比对，未发出的变化一并
+    补发，已发出的不会重复。连续失败的群按 _defer_group 退避。
+    """
     await _sync_server_list()
 
     errors: list[str] = []
@@ -321,101 +448,46 @@ async def broadcast():
         if not _is_group_broadcast_due(str(group_id), now):
             continue
         _mark_group_broadcasted(str(group_id), now)
-        group_messages: list[str] = []
+        checks: list[_ServerCheck] = []
         for addr, server_info in group_servers.items():
             try:
-                server_address = server_info.get("address", addr)
-                if not server_address:
-                    continue
-                server_name = server_info.get("name", addr)
-
-                server_status = await ping(server_address, server_type="java")
-                current_players = None
-                current_players_hidden = False
-                current_online_players = 0
-                if server_status.get("status") == "success":
-                    data = server_status.get("data", {})
-                    current_players_hidden = bool(data.get("players_hidden"))
-                    current_online_players = int(data.get("online_players", 0) or 0)
-                    current_players = data.get("players", [])
-
-                previous_players = server_info.get("players", {})
-                previous_players_hidden = bool(server_info.get("players_hidden"))
-
-                if current_players_hidden:
-                    async with _broadcast_lock:
-                        __BroadcastInfo[group_id][addr]["players"] = {}
-                        __BroadcastInfo[group_id][addr]["players_hidden"] = True
-                        __BroadcastInfo[group_id][addr]["online_players"] = current_online_players
-                    continue
-
-                if previous_players_hidden and current_players is not None:
-                    async with _broadcast_lock:
-                        __BroadcastInfo[group_id][addr]["players"] = {
-                            p: now for p in current_players
-                        }
-                        __BroadcastInfo[group_id][addr]["players_hidden"] = False
-                        __BroadcastInfo[group_id][addr]["online_players"] = current_online_players
-                    continue
-
-                if previous_players is not None and current_players is None:
-                    for _ in range(3):
-                        await asyncio.sleep(1)
-                        confirm = await safe_ping(server_address)
-                        if confirm.get("status") == "success":
-                            data = confirm.get("data", {})
-                            if data.get("players_hidden"):
-                                current_players_hidden = True
-                                current_online_players = int(data.get("online_players", 0) or 0)
-                                break
-                            current_players = data.get("players", [])
-                            current_online_players = int(data.get("online_players", 0) or 0)
-                            break
-
-                if current_players_hidden:
-                    async with _broadcast_lock:
-                        __BroadcastInfo[group_id][addr]["players"] = {}
-                        __BroadcastInfo[group_id][addr]["players_hidden"] = True
-                        __BroadcastInfo[group_id][addr]["online_players"] = current_online_players
-                    continue
-
-                group_messages.extend(
-                    _check_player_changes_simple(
-                        server_name, previous_players, current_players, group_id, addr
-                    )
-                )
-
-                async with _broadcast_lock:
-                    if current_players is not None:
-                        prev = previous_players or {}
-                        __BroadcastInfo[group_id][addr]["players"] = {
-                            p: prev.get(p, now) for p in current_players
-                        }
-                        __BroadcastInfo[group_id][addr]["players_hidden"] = False
-                        __BroadcastInfo[group_id][addr]["online_players"] = current_online_players
-                    else:
-                        __BroadcastInfo[group_id][addr]["players"] = None
-                        __BroadcastInfo[group_id][addr]["players_hidden"] = False
-                        __BroadcastInfo[group_id][addr]["online_players"] = 0
-
+                check = await _check_server(group_id, addr, server_info, now)
             except (ExitState, asyncio.CancelledError):
                 raise
             except Exception:
                 errors.append(f"群 {group_id} 服务器 {addr}: {traceback.format_exc()}")
+                continue
+            if check is not None:
+                checks.append(check)
 
-        if group_messages:
-            try:
-                outcome, failure = await _send_group(str(group_id), "\n".join(group_messages))
-            except (ExitState, asyncio.CancelledError):
-                raise
-            except Exception as exc:
-                logger.warning(f"[MC_Server] 群 {group_id} 播报发送失败：{type(exc).__name__}")
-                outcome, failure = FAILED, exc
-            if outcome == FAILED:
-                detail = "".join(traceback.format_exception(failure)) if failure is not None else ""
-                errors.append(f"群 {group_id} 发送消息失败: {detail}")
-            elif outcome == NO_ACCOUNT:
-                errors.append(f"群 {group_id} 发送消息失败: 没有在线账号在该群内")
+        # 没有要播报的变化：直接写回（人数、隐藏状态等）。
+        await _commit_checks(group_id, [check for check in checks if not check.messages])
+        changed = [check for check in checks if check.messages]
+        if not changed:
+            continue
+        group_messages = [line for check in changed for line in check.messages]
+        try:
+            outcome, failure = await _send_group(str(group_id), "\n".join(group_messages))
+        except (ExitState, asyncio.CancelledError):
+            raise
+        except Exception as exc:
+            logger.warning(f"[MC_Server] 群 {group_id} 播报发送失败：{type(exc).__name__}")
+            outcome, failure = FAILED, exc
+        if outcome in (SENT, KICKED):
+            # 被移出群：与原来一样丢弃这次变化，该群暂停到重新入群。
+            await _commit_checks(group_id, changed)
+            _group_delivered(str(group_id))
+            continue
+        wait = _defer_group(str(group_id), now)
+        logger.warning(
+            f"[MC_Server] 群 {group_id} 的 {len(group_messages)} 条变化未发出，"
+            f"{wait} 秒后重试（连续失败 {_send_failures[str(group_id)]} 次）"
+        )
+        if outcome == FAILED:
+            detail = "".join(traceback.format_exception(failure)) if failure is not None else ""
+            errors.append(f"群 {group_id} 发送消息失败: {detail}")
+        else:
+            errors.append(f"群 {group_id} 发送消息失败: 没有在线账号在该群内")
 
     if errors:
         bot = _digest_account(snapshot)
