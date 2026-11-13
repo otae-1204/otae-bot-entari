@@ -13,6 +13,9 @@ AKEData 是明日方舟：终末地的同人数据站，数据**直接来自游�
 - **站点**：`www.akedata.wiki` / `cf.akedata.top`（前端页面，走 service worker，**不要从这抓数据**）
 - **数据 CDN**：`data.akedata.wiki`（裸 JSON，**直接打这里**）
 
+- 参考项目：[NagiYume/AKEData](https://github.com/NagiYume/AKEData/)。
+- 站点「设置 → Game data」可切换数据源域名与数据版本，便于在浏览器里对照（摘自已删除的旧笔记，未核对）。
+
 请求建议带这两个头（部分资源校验 Referer）：
 ```
 User-Agent: <你的应用名>
