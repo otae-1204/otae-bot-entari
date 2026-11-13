@@ -45,8 +45,8 @@ from plugins.steamInfo.steam import (
 )
 from plugins.steamInfo.models import PlayerSummaries, Player
 from plugins.steamInfo.config import load_config
-from otae_bot.accounts.ready import get_bot, on_ready
-from otae_bot.delivery import Target, deliver
+from otae_bot.accounts.ready import on_ready
+from otae_bot.delivery import NO_ACCOUNT, Target, deliver, resolve_account
 from otae_bot.messaging.inbound import event_chain, event_user_id, get_rest
 from otae_bot.messaging.prompts import prompt
 from otae_bot.scheduling.jobs import timer
@@ -642,8 +642,6 @@ async def broadcast_steam_info(parent_id: str, steam_info: PlayerSummaries):
     if disable_parent_data.is_disabled(parent_id):
         return True
 
-    bot = get_bot()
-
     play_data = steam_info_data.compare(parent_id, steam_info["response"])
 
     msg = []
@@ -679,6 +677,14 @@ async def broadcast_steam_info(parent_id: str, steam_info: PlayerSummaries):
 
     if msg == []:
         return True
+
+    # 在该群里的在线账号（与 deliver 选号同一规则），用来取群名与头像。
+    target = Target.group(parent_id)
+    bot = await resolve_account(target)
+    if bot is None:
+        # 不更新缓存，下次轮询重新比对补发；不停用该群的播报。
+        logger.warning(f"[steamInfo] no online account is in group {parent_id}; broadcast deferred")
+        return False
 
     if config.steam_broadcast_type == "all":
         steam_status_data = []
@@ -718,8 +724,11 @@ async def broadcast_steam_info(parent_id: str, steam_info: PlayerSummaries):
     else:
         uni_msg = MessageChain([Text("\n".join(msg))])
 
-    # The default account sends, as before; a switched-off group counts as done.
-    result = await deliver(Target.group(parent_id), uni_msg, account=bot)
+    # deliver picks an online account listed in the group; a switched-off group counts as done.
+    result = await deliver(target, uni_msg)
+    if result.status == NO_ACCOUNT:
+        logger.warning(f"[steamInfo] no online account is in group {parent_id}; broadcast deferred")
+        return False
     try:
         result.raise_for_failure()
         return True

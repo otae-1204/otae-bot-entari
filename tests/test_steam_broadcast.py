@@ -4,13 +4,18 @@ import asyncio
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
 
 import pytest
+from arclet.letoderea import Subscriber
 
+from otae_bot.accounts import runtime
+from otae_bot.accounts.ready import get_bot
 from otae_bot.groups.features import GroupFeatureStore, GroupScope
 from otae_bot.pipeline import feature_gate
 from plugins.steamInfo import handlers
+from tests.support.satori_accounts import make_account, pin_event_loop
+
+GROUP = "100"
 
 
 class Disabled:
@@ -29,11 +34,8 @@ class Disabled:
 
 @pytest.fixture
 def steam(monkeypatch):
-    bot = SimpleNamespace(self_id="9", platform="qq", protocol=SimpleNamespace(
-        send_message=AsyncMock(return_value=[SimpleNamespace(id="m")])))
     disabled = Disabled()
     entry = {"type": "start", "player": {"steamid": "1", "gameextrainfo": "Factorio"}}
-    monkeypatch.setattr(handlers, "get_bot", lambda: bot)
     monkeypatch.setattr(handlers, "disable_parent_data", disabled)
     monkeypatch.setattr(handlers, "config", SimpleNamespace(steam_broadcast_type="none"))
     monkeypatch.setattr(handlers, "steam_info_data", SimpleNamespace(compare=lambda *_: [entry]))
@@ -41,46 +43,78 @@ def steam(monkeypatch):
     directory = tempfile.TemporaryDirectory()
     store = GroupFeatureStore(Path(directory.name) / "switches.json")
     monkeypatch.setattr(feature_gate, "feature_store", store)
-    yield SimpleNamespace(bot=bot, disabled=disabled, store=store)
+    runtime.clear_account()
+    yield SimpleNamespace(disabled=disabled, store=store)
+    runtime.clear_account()
     directory.cleanup()
 
 
-def broadcast():
-    return asyncio.run(handlers.broadcast_steam_info("100", {"response": {"players": []}}))
+def broadcast(*accounts, before=None, as_job=False):
+    """Bring (self_id, platform, groups[, reject]) accounts online, run one Steam broadcast.
+
+    Returns (result, {self_id: [(channel, content), ...]}).
+    """
+    async def scenario():
+        with pin_event_loop():
+            bots = []
+            for self_id, platform, groups, *reject in accounts:
+                bot = make_account(self_id, platform=platform, guilds=groups)
+                bot.protocol.reject = reject[0] if reject else None
+                runtime.set_account(bot)
+                bots.append(bot)
+            await runtime.refresh_guilds()
+            if before is not None:
+                before(bots)
+            if as_job:
+                async def job():
+                    return await handlers.broadcast_steam_info(GROUP, {"response": {"players": []}})
+
+                job.__module__ = "plugins.steamInfo.handlers"
+                result = await Subscriber(job).handle({})
+            else:
+                result = await handlers.broadcast_steam_info(GROUP, {"response": {"players": []}})
+            return result, {bot.self_id: bot.protocol.sent for bot in bots}
+
+    return asyncio.run(scenario())
 
 
-def test_broadcast_goes_to_the_group_through_the_default_account(steam):
-    assert broadcast() is True
-    channel, message = steam.bot.protocol.send_message.await_args.args
-    assert (channel, str(message)) == ("100", "Alice 开始玩 Factorio 了")
+QQ = ("9", "llonebot", [GROUP])
+IR = ("ir-7f3a", "ir_web", ["folder-root"])  # The Ir panel: "guilds" are folders, not QQ groups.
 
 
-def test_switched_off_group_is_skipped_but_counts_as_done(steam):
-    steam.store.set_enabled(GroupScope("qq", "9", "100"), "steamInfo", False)
-    assert asyncio.run(_as_steam_job()) is True
-    steam.bot.protocol.send_message.assert_not_awaited()
+def test_broadcast_goes_to_the_group_through_an_account_in_it(steam):
+    def check_default(bots):
+        assert get_bot() is bots[-1]  # Ir logged in last: it is the default account.
+
+    result, sent = broadcast(QQ, IR, before=check_default)
+    assert result is True
+    assert sent == {"9": [(GROUP, "Alice 开始玩 Factorio 了")], "ir-7f3a": []}
+
+
+def test_without_an_account_in_the_group_the_broadcast_waits_and_is_not_disabled(steam):
+    # Ir would have answered with an error the disable rule recognises.
+    result, sent = broadcast(("ir-7f3a", "ir_web", ["folder-root"], RuntimeError("message_create failed")))
+    assert result is False
+    assert sent == {"ir-7f3a": []}
     assert not steam.disabled.parents
 
 
-async def _as_steam_job():
-    from arclet.letoderea import Subscriber
-
-    async def job():
-        return await handlers.broadcast_steam_info("100", {"response": {"players": []}})
-
-    job.__module__ = "plugins.steamInfo.handlers"
-    return await Subscriber(job).handle({})
+def test_switched_off_group_is_skipped_but_counts_as_done(steam):
+    steam.store.set_enabled(GroupScope("llonebot", "9", GROUP), "steamInfo", False)
+    result, sent = broadcast(QQ, as_job=True)
+    assert result is True and sent == {"9": []}
+    assert not steam.disabled.parents
 
 
 def test_kicked_group_disables_its_broadcast(steam):
-    steam.bot.protocol.send_message.side_effect = RuntimeError("发送失败：已被移出该群")
-    assert broadcast() is False
-    assert steam.disabled.parents == {"100"} and steam.disabled.saved == 1
+    result, _ = broadcast(("9", "llonebot", [GROUP], RuntimeError("发送失败：已被移出该群")))
+    assert result is False
+    assert steam.disabled.parents == {GROUP} and steam.disabled.saved == 1
 
 
 def test_other_send_errors_keep_the_broadcast(steam):
-    steam.bot.protocol.send_message.side_effect = RuntimeError("timeout")
-    assert broadcast() is False
+    result, _ = broadcast(("9", "llonebot", [GROUP], RuntimeError("timeout")))
+    assert result is False
     assert not steam.disabled.parents
 
 
