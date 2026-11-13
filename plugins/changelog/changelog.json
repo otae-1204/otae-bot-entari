@@ -1,15 +1,84 @@
 {
   "schema": 2,
-  "head": "2f45bba",
+  "head": "5adcfd3",
   "generated_from": {
     "first_commit": "8e1b455",
     "first_date": "2026-06-17",
     "last_date": "2026-11-13",
-    "commit_count": 509,
+    "commit_count": 530,
     "merge_commit_count": 36,
-    "version_count": 56
+    "version_count": 57
   },
   "releases": [
+    {
+      "version": "v2.0.1",
+      "date": "2026-11-13",
+      "from": "2026-11-13",
+      "to": "2026-11-13",
+      "title": "文档整理",
+      "summary": "重写说明文档，修好部署与配置转换脚本。",
+      "tags": [
+        "文档"
+      ],
+      "highlights": [
+        {
+          "kind": "docs",
+          "date": "2026-11-13",
+          "text": "重写 README 与运维、开发文档。",
+          "commits": [
+            "853efb6",
+            "c0447f4",
+            "4f520d3",
+            "f0c97ac",
+            "b193b65",
+            "67acfd3",
+            "93d4034",
+            "aa303b6",
+            "300849c",
+            "9460412",
+            "052475a",
+            "9732346",
+            "19dddfe",
+            "6b4f57c",
+            "5adcfd3"
+          ]
+        },
+        {
+          "kind": "docs",
+          "date": "2026-11-13",
+          "text": "补全各插件的功能说明。",
+          "commits": [
+            "649c983",
+            "f5fb424"
+          ]
+        },
+        {
+          "kind": "docs",
+          "date": "2026-11-13",
+          "text": "历史文档归档并还原原文。",
+          "commits": [
+            "caabb8e",
+            "e2f0ba6"
+          ]
+        },
+        {
+          "kind": "fix",
+          "date": "2026-11-13",
+          "text": "部署脚本默认预演，不再覆盖数据。",
+          "commits": [
+            "d44807e"
+          ]
+        },
+        {
+          "kind": "fix",
+          "date": "2026-11-13",
+          "text": "配置转换保留旧的 OneBot 地址。",
+          "commits": [
+            "5fd5d4f"
+          ]
+        }
+      ]
+    },
     {
       "version": "v2.0.0",
       "date": "2026-11-13",
