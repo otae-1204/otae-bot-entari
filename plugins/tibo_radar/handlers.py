@@ -17,7 +17,7 @@ from otae_bot.accounts.ready import get_bot, on_ready
 from otae_bot.messaging.inbound import event_user_id, get_channel_id, get_group_id, get_rest
 from otae_bot.messaging.media import png as png_image
 from otae_bot.scheduling.jobs import timer
-from otae_bot.delivery import Target
+from otae_bot.delivery import Target, resolve_account
 
 from plugins.tibo_radar.client import TiboRadarClient
 from plugins.tibo_radar.config import tibo_radar_settings
@@ -170,6 +170,21 @@ def _account_connected(bot: Bot | None) -> bool:
     return connected is None or connected.is_set()
 
 
+async def _unbound_account(group_id: str, preferred: Bot | None) -> Bot | None:
+    """Sender for a subscription not yet bound to an account: one listed in the group.
+
+    The same choice ``deliver`` makes for the group: the cycle's account when it
+    is in the group, else another online account that is; never one that is
+    not, such as the most recent login on another platform.
+    """
+    if preferred is not None:
+        target = Target.group(group_id, self_id=getattr(preferred, "self_id", ""),
+                              platform=getattr(preferred, "platform", ""))
+    else:
+        target = Target.group(group_id)
+    return await resolve_account(target)
+
+
 async def _notify_subscriptions(bot: Bot, *, initialize_baselines: bool = True) -> None:
     _remember_account(bot)
     if _notification_lock.locked():
@@ -186,7 +201,14 @@ async def _deliver_subscriptions(bot: Bot, *, initialize_baselines: bool) -> Non
     if not subscriptions:
         return
     for subscription in subscriptions:
-        delivery_bot = _delivery_accounts.get(subscription.account_key) if subscription.account_key else bot
+        if subscription.account_key:
+            delivery_bot = _delivery_accounts.get(subscription.account_key)
+        else:
+            delivery_bot = await _unbound_account(subscription.group_id, bot)
+            if delivery_bot is None:
+                logger.warning("[tibo_radar] subscription deferred group={}: no online account in the group",
+                               subscription.group_id)
+                continue
         if not _account_connected(delivery_bot):
             logger.debug("[tibo_radar] subscription deferred group={}: bound account unavailable", subscription.group_id)
             continue

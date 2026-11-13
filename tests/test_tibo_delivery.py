@@ -49,6 +49,11 @@ def radar(tmp_path, monkeypatch):
     monkeypatch.setattr(handlers, "_delivery_accounts", {})
     monkeypatch.setattr(handlers, "SUBSCRIPTION_BATCH", 20)
     monkeypatch.setattr(handlers, "SUBSCRIPTION_MAX_PAGES", 1)
+
+    async def in_every_group(group_id, preferred):
+        return preferred  # Delivery tests; which account is in the group: test_tibo_accounts.py.
+
+    monkeypatch.setattr(handlers, "_unbound_account", in_every_group)
     yield store
     store.close()
 

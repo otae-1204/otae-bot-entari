@@ -59,6 +59,7 @@ def make_account(self_id: str, *, platform: str = "llonebot", guilds: list[str] 
     login = Login(user=User(self_id), platform=platform, features=list(features))
     account = Account(login, ApiInfo(port=5500, token="t"), [], RecordingProtocol)
     account.protocol.guilds = None if guilds is None else list(guilds)
+    account.connected.set()  # As after the connection's READY.
     return account
 
 
