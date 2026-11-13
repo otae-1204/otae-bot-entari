@@ -11,7 +11,7 @@ from otae_bot.messaging.inbound import event_plain_text
 from otae_bot.scheduling.jobs import close_scheduled_jobs, timer
 from arclet.entari import Account as Bot, Event
 from loguru import logger
-from otae_bot.delivery import FAILED, Target, deliver
+from otae_bot.delivery import FAILED, NO_ACCOUNT, Target, deliver
 
 from plugins.bilibilibot.api import BiliApi
 from plugins.bilibilibot.config import bili_settings
@@ -88,6 +88,16 @@ async def _send(row, png: bytes) -> None:
             raise LookupError(f"no online account is in group {group}")
     card = row.card()
     target = _target(row.subscriber_type, row.subscriber_id)
+    if target.is_private:
+        # The row does not record the user's platform: deliver tries the online
+        # accounts in turn instead of pinning the latest login (maybe the Ir panel).
+        result = await deliver(target, MessageChain([media.png(png)]))
+        if result.status == NO_ACCOUNT:
+            raise SenderUnavailable("no online account")
+        result.raise_for_failure()
+        if card.card_type == "live_on" and card.url.strip():
+            (await deliver(target, MessageChain([Text(card.url.strip())]), account=result.account)).raise_for_failure()
+        return
     rejected, last_error = [], None
     for sender in senders:
         # Bytes go straight to the adapter: no temporary file to clean up.

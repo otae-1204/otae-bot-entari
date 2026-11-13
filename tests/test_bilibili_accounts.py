@@ -168,7 +168,7 @@ def test_every_account_rejected_is_reported_once_and_counts_as_one_failure(accou
     asyncio.run(scenario())
 
 
-def test_other_errors_and_private_chats_do_not_switch_account(accounts, transport):
+def test_other_group_errors_do_not_switch_account(accounts, transport):
     async def scenario():
         bot1, bot2 = account("1194397508", [GROUP]), account("3898438488", [GROUP])
         await online(bot2, bot1)
@@ -176,13 +176,43 @@ def test_other_errors_and_private_chats_do_not_switch_account(accounts, transpor
         with pytest.raises(RuntimeError, match="send timeout"):
             await handlers._send(row(), PNG)
         assert transport.messages == []
-        transport.reject["1194397508"] = RuntimeError(MSGINFO)
-        with pytest.raises(RuntimeError, match="msgInfo"):
-            await handlers._send(row(subscriber_type="user", subscriber_id="7"), PNG)
-        assert transport.messages == []
-        transport.reject.clear()
+
+    asyncio.run(scenario())
+
+
+def test_a_private_row_tries_the_online_accounts_in_turn(accounts, transport):
+    async def scenario():
+        bot1, bot2 = account("1194397508", [GROUP]), account("3898438488", [GROUP])
+        await online(bot2, bot1)
         await handlers._send(row(subscriber_type="user", subscriber_id="7", card_type="video"), PNG)
         assert [(sender, recipient) for sender, recipient, _ in transport.messages] == [("1194397508", "7")]
+        transport.messages.clear()
+        # The row does not record the user's platform: a failed account hands over to the next.
+        transport.reject["1194397508"] = RuntimeError("user not found")
+        await handlers._send(row(subscriber_type="user", subscriber_id="7"), PNG)
+        assert [(sender, recipient) for sender, recipient, _ in transport.messages] == [
+            ("3898438488", "7"), ("3898438488", "7"),  # Image and live link from the same account.
+        ]
+        transport.reject["3898438488"] = RuntimeError("send timeout")
+        with pytest.raises(RuntimeError, match="send timeout"):
+            await handlers._send(row(subscriber_type="user", subscriber_id="7"), PNG)
+
+    asyncio.run(scenario())
+
+
+def test_a_private_row_is_not_pinned_to_the_ir_panel_logged_in_last(accounts):
+    from tests.support.satori_accounts import make_account, pin_event_loop
+
+    async def scenario():
+        with pin_event_loop():
+            qq = make_account("3898438488", platform="llonebot", guilds=[GROUP])
+            ir = make_account("ir-7f3a", platform="ir_web", guilds=["folder-root"])
+            ir.protocol.reject = RuntimeError("user not found")
+            await online(qq, ir)
+            assert handlers.get_bot() is ir
+            await handlers._send(row(subscriber_type="user", subscriber_id="7", card_type="video"), PNG)
+            assert [channel for channel, _ in qq.protocol.sent] == ["private:7"]
+            assert ir.protocol.sent == []
 
     asyncio.run(scenario())
 
