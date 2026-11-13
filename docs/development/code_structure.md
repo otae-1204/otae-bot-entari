@@ -1,128 +1,85 @@
 # 代码结构
 
-用户提供的 Entari 框架参考保存在 [框架参考资料](references/README.md)，
-其中示例版本与本项目固定的 Entari 0.19.4 有差异，使用前需核对。
+本文只描述目录和各模块的职责。分层规则、依赖方向和守卫见 [架构规范](architecture_conventions.md)；
+新增插件的写法见 [新增插件](adding_a_plugin.md)，测试见 [测试](testing.md)。
 
-本轮以 `5704fd6` 为基线调整职责边界。聊天命令、权限判断、API 请求、
-缓存参数、数据库结构和配置项保持原有语义。
+## 启动链
+
+| 文件 | 作用 |
+|---|---|
+| `bot.py` | 启动入口，调用 `otae_bot.launcher.run()` |
+| `otae_bot/__main__.py` | 同上，支持 `python -m otae_bot` |
+| `otae_bot/launcher.py` | 先 `load_config()` 读 `entari.yml`，再 import `application`（插件在 import 时就读配置）；缺 `entari.yml` 时提示并返回 2 |
+| `otae_bot/application.py` | 装配：创建 `EventLoginEntari`；有 `plugins: server:` 时加载内嵌 OneBot 服务端；安装全局钩子；按目录加载全部插件 |
+| `otae_bot/lifecycle.py` | 单实例锁 `.runtime/bot.lock`；退出时释放共享资源 |
+| `otae_bot/plugin_registry.py` | `discover_plugins()`：`plugins/` 下含 `__init__.py` 的目录，按名字排序 |
+
+`application.py` 是唯一可以 import `otae_bot.boundary` 的非边界模块。
+
+## otae_bot/
+
+| 目录 | 层 | 内容 |
+|---|---|---|
+| `boundary/` | 边界 | 进程内 OneBot 11 接入：`__init__.py` 生成 `entari-plugin-server` 的配置（POSIX 下只建 unix socket、令牌每次随机）；`onebot11.py` 继承上游 OneBot 11 适配器，只替换对 LLBot 实测有问题的部分 |
+| `pipeline/` | 核心 | 所有事件和订阅器都经过的全局钩子，见下节 |
+| `delivery/` | 核心 | `deliver(Target, message)`：主动消息唯一出口，选发送账号、应用群开关、不抛异常而返回 `DeliveryResult`；`target.py` 的 `Target` 只装不透明 ID |
+| `accounts/` | 核心 | `runtime.py` 在线账号登记（按 platform + self_id）与各账号所在群；`ready.py` 的 `on_ready` 和后台选号；`event_login.py` 见下 |
+| `messaging/` | 核心 | `media.py`（`png` / `image` / `file` / `image_file`，只从字节构造媒体）；`inbound.py` 事件取值；`prompts.py` 多步对话；`forward.py` 合并转发 |
+| `scheduling/` | 核心 | `jobs.py` 的 `timer`：定时任务的 ID、重叠跳过、运行统计、关停 |
+| `groups/` | 核心 | `features.py` 按账号和群保存插件开关，`PLUGIN_NAMES` 是插件中文名与别名；`permissions.py` 群管理员核验；`superusers.py` |
+| `hypergryph/` | 核心 | `/ak` 与 `/ef` 共用：跨游戏签到（`attendance_registry.py`、`attendance_delivery.py`）、通行证极验（`captcha.py`）、终末地官方内容分类与推送回执（`endfield_notifications/`） |
+| `command_usage/` | 核心 | 指令调用统计：`recorder.py` 挂到每个订阅器上记录，`store.py` 存 SQLite；`/指令统计` 和 `/status` 读取 |
+| `config/` | 基础设施 | `settings.py`（`load_config`、`plugin_settings`、`core_settings`、测试用 `override`）；`model.py` 的 `Settings` 基类；`core.py` 的 `otae:` 段；`root.py` 资源根目录；`paths.py` 旧资源路径常量 |
+| `infrastructure/` | 基础设施 | `storage/`（`JsonStore`、`SQLiteHelper`、`Plugin_Data`）；`http/`（共享 HTTP 客户端 `fetch_json` / `fetch_bytes`、素材通道、磁盘缓存、TLS）；`rendering/`（共享浏览器与渲染队列、Pillow、OpenCV、渲染线程池、帮助卡片与插画外框）；`cache.py`、`changelog.py`、`errors.py`、`loop_watchdog.py`、`recent_alerts.py`、`redaction.py` |
+
+`accounts/event_login.py`：satori-python 1.3.10 起按 `Login.identifier` 匹配账号，而符合 Satori
+规范的服务端在非登录事件里只给不完整的 `login`，事件会被当成未知账号丢弃；`EventLoginEntari`
+在同一连接上找回对应账号后再交给原有 `post`。
+
+### pipeline/
+
+| 文件 | 作用 |
+|---|---|
+| `framework_hooks.py` | 唯一使用框架私有接口的地方：Letoderea 的 `global_propagators`（另有 `current_subscriber`），注释写明缺的上游接口 |
+| `feature_gate.py` | 群功能开关，作用于指令、监听器和 `deliver` |
+| `command_input.py` | 在 Entari 判断前缀前整理引用和空白 |
+| `quote_fallback.py` | 引用消息取不到时事件照常派发 |
+| `outbound_media.py` | 每次发送前按账号 `features` 把媒体上传或内联为 `data:`，不带本地路径 |
+| `message_log.py` | `[message]` 日志里的手机号、验证码、令牌脱敏 |
+
+这些钩子和指令统计都在 `application.create_app()` 里、加载插件之前统一安装一次，
+之后注册的订阅器（包括热重载的插件）自动覆盖。
+
+## plugins/
+
+20 个目录，每个是一个插件。目录名就是数据键（群功能开关、指令统计、`/功能` 参数），不得重命名。
 
 ```text
-bot.py                          原有启动命令
-otae_bot/
-  application.py               创建 Entari、连接配置、启动协调
-  lifecycle.py                 单实例锁、共享资源释放
-  plugin_registry.py           按原顺序发现顶层插件
-  hypergryph/                  /ak 与 /ef 共用的鹰角领域代码（不导入插件）
-    attendance_registry.py     双游戏签到：游戏注册表与调度循环
-    attendance_delivery.py     双游戏签到：结果卡拼接、发送与文字回退
-    captcha.py                 鹰角短信风控的极验：验证页、结果解析、临时页面上传
-    endfield_notifications/    终末地官方内容分类与推送回执
-  groups/
-    features.py                按机器人账号和群保存插件开关
-    permissions.py             当前机器人账号、当前群的管理员权限核验
-    superusers.py              配置的超级用户判断
-  config/                      环境变量解析、原有路径配置；root.py 定位随源码的资源根目录
-  accounts/                    在线账号登记与各账号所在群（runtime.py），上线钩子与选号（ready.py）
-  messaging/                   事件取值与命令文本（inbound.py）、多步对话 prompt（prompts.py）、合并转发（forward.py）
-  scheduling/                  定时任务：任务 ID、重叠跳过、运行统计、关停（jobs.py）
-  pipeline/                    每条事件与订阅器都经过的全局钩子：群开关、指令输入、引用回退、[message] 日志脱敏
-  infrastructure/
-    cache.py                   有界异步缓存
-    http/                      HTTP 连接池、资源缓存、User-Agent
-    storage/                   JSON、SQLite、旧数据迁移
-    rendering/                 浏览器截图、Pillow、OpenCV、渲染线程池、帮助卡片取图几何
-plugins/
-  <plugin>/__init__.py          Entari 注册入口
-  <plugin>/handlers.py          命令路由、交互流程和后台任务接线
-  endfield/
-    paths.py                   插件资源定位
-    providers/                 Warfarin、AkeData、数据源规则、素材 URL
-    catalog/                   查询命令、别名、公开资料模型和获取协调
-      views/                   干员、武器、装备、配装、奖章的纯数据转换
-      random_wiki.py           从公开资料目录随机选择条目，不依赖账号数据
-    account/                   账号 API、加密、持久化、账号卡片
-      detail/                  档案详情
-      base/                    帝江号、基建
-      exploration/             地区探索统计、森空岛图标和分页图片
-      investment/              当前档案可见养成投入
-      currency/                资源流水
-      challenge/               挑战记录模型、解析、绘图、翻译
-    gacha/                     抽卡同步、分析、素材、小黑盒导入、分析图（draw.py）
-    stages/                    公开关卡模型、来源和卡片
-    calendar/                  AkeData 与官方版本日历
-    announcements/             官网公告采集、订阅与定时提醒
-    medals/                    奖章快照存储
-    ownership/                 持有率聚合与渲染
-    rendering/                 共享卡片、HTML、素材处理
-entari.example.yml             配置模板（复制为 entari.yml，不进 Git）；密钥在 .env
-assets/                        原有共享资源
-data/                          运行数据（不入库）
-scripts/                       启动/部署/安装脚本、generate_changelog.py、migrate_platform.py 与 help_pages.json；
-  preview/  render/            卡片预览与离线出图（render_help_cards.py 生成 assets/image/help）
-  endfield/                    终末地数据导出、聚合、校验、基准与解包工具
-  ops/                         一次性修复、冒烟与排障脚本
-tests/                         功能回归、结构约束、真实插件加载检查
+McModQuery  McWikiQuery  arknights  bilibilibot  changelog  eft_helper  endfield
+forkout  group_manager  help_plugin  hyw  mcsm  minecraft_plugin  peek  radar
+request_handler  status  steamInfo  tibo_radar  usage_stats
 ```
 
-## 依赖边界
+- `__init__.py` 只有 `from .handlers import *`（`tests/test_architecture.py` 检查）。
+  `eft_helper` 的 `__init__.py` 为空，不注册任何指令，也不在 `PLUGIN_NAMES` 里。
+- 拆出 `service.py` 的只有 bilibilibot、endfield（按子功能各一个）、radar、tibo_radar。
+- `endfield/` 按功能分子包：`account/`、`announcements/`、`catalog/`、`encyclopedia/`、`gacha/`、
+  `medals/`、`ownership/`、`stages/`、`usage/`、`providers/` 等。
 
-`application` 负责组装，插件直接用 Entari 公开接口（命令、监听、会话），
-`accounts`、`messaging`、`scheduling` 提供多账号、消息取值/对话/转发与定时任务这几样
-共享工具，`infrastructure` 提供网络、缓存、存储与渲染能力。公共包不依赖具体功能插件。
+## 其他目录
 
-插件写法：命令用 `command.on(Alconna([名字, *别名], Args[...]))` 注册，处理函数声明
-`session: Session` 与按参数名注入的 `Match[...]`；回复一律 `await session.send(...)` 并返回
-`None`（命令处理函数返回非 None 时 Entari 会发送它并阻断后续监听）；提前结束用 `return`，
-在嵌套函数里中止整个处理用 `session.stop()`；消息监听用 `listen(MessageCreatedEvent)`，
-条件写在处理函数开头；多步对话用 `otae_bot.messaging.prompts.prompt(session, ...)`。
-
-插件入口仅加载自己的 `handlers`。只有注册入口/处理器负责注册命令和定时任务；
-业务模型和纯转换函数不注册事件，也不实例化机器人。Entari 会将相对导入的
-处理器作为子模块跟踪，调度适配器使用注册时的插件上下文确定任务归属。
-
-终末地的公开关卡资料位于 `stages`；玩家挑战记录位于 `account/challenge`。
-公开资料无需账号绑定。`catalog/service.py` 负责请求、回退与缓存，
-`catalog/views` 负责从已获取的数据构造视图，现有计算函数仍从 service 显式导出。
-挑战记录的绘图模块也保留原合并模块的数据类型和解析函数导出，方便迁移调用方。
-
-## 兼容和数据路径
-
-- `python bot.py`、Windows 启动/部署脚本和 Satori 多端点配置继续可用。
-- `entari.yml`、`.env`、`data/` 和数据库按工作目录读取；请在项目根目录启动。
-- 源码附带资源统一通过 `otae_bot.config.root` 和 `plugins.endfield.paths` 定位，
-  不随功能模块的目录深度变化。没有搬迁图片、字体、别名 JSON 或运行数据。
-- 旧的 `utils.*`、`configs.config`、`configs.path_config` 转发模块已删除，
-  仓库内一律直接导入 `otae_bot.*`。
-- 新代码使用 `otae_bot.*` 和按业务域组织的终末地模块路径；终末地旧平铺模块路径
-  已更新到所有仓库内调用方、脚本和测试。
-
-## 扩展方式
-
-增加普通插件时，在 `plugins/<name>/` 提供入口、处理器及需要的业务模块，
-顶层自动发现规则无需修改。纯资源目录没有 `__init__.py` 时不会被注册为插件。
-应用会为插件及其子模块的 Entari scope 安装群开关检查，覆盖命令和事件监听；
-热重载后重新安装。`ChainMsg.send(dest, bot)` 根据 Entari 订阅器上下文识别
-所属插件，对群推送应用同一开关。后台任务应通过共享 `timer` 注册，
-并使用 `ChainMsg.send` 发送群消息，以保留插件归属和目标群过滤。
-管理命令位于 `plugins/group_manager/`；当前群权限核验由 `otae_bot/groups/permissions.py`
-提供，公告订阅复用同一套规则。用法见 [群内功能管理](group_features.md)。
-
-增加终末地功能时，将模型、解析/服务及绘图放入对应业务域。终末地对外仍是一个插件
-（目录名 `endfield`、一个功能开关、一份指令统计）：`plugins/endfield/handlers.py` 只保留
-`/ef` 与四个快捷指令的注册、`_handle_command` / `_handle_personal_command` 派发、签到能力登记和
-启动/清理钩子；各子指令的实现放在所属子包的 `handlers.py`（`catalog`、`stages`、`calendar`、
-`account`（另有 `account/binding.py`、`account/challenge/handlers.py`）、`gacha`、`usage`、
-`ownership`、`medals`、`archives`）。这些模块不注册任何事件，由派发层 import 调用。
-共享实例在 `state.py`（各 service、账号库、快照库，只此一份），进程内缓存与素材代次在
-`caches.py`，图片/合并转发等回复辅助在 `replies.py`。测试里 patch 某个名字时，要 patch
-实际查找它的模块（通常是被测函数所在的功能模块），而不是 `handlers`。
-涉及静态资料转换时优先使用 `catalog/views`，无需为了转换一份数据引入账号客户端或事件注册。
-
-跨游戏功能通过 `otae_bot` 下的注册表解耦，而不是在插件之间互相导入 `handlers`：
-`/ak 签到` 与 `/ef 签到` 签完本游戏后，只调用 `otae_bot.hypergryph.attendance_registry` 里另一款
-游戏登记的能力，再用 `otae_bot.hypergryph.attendance_delivery` 拼图发送；终末地与明日方舟在各自
-加载时注册，插件卸载时由 `application.py` 清理。详见 [双游戏签到合并](unified_signin.md)。
-
-运行 `python -m pytest tests/test_architecture.py` 检查依赖边界、
-单实例锁、关闭顺序及真实 Entari 插件加载。其余回归测试的运行方式和基线限制
-见 [验证记录](refactor_validation.md)。
+| 目录 | 内容 |
+|---|---|
+| `scripts/` | 根目录：`convert_config.py`（旧部署转换）、`generate_changelog.py`、`migrate_platform.py`、`help_pages.json`、`tibo_help_pages.json`、Windows 启停与部署脚本 |
+| `scripts/ops/` | 运维小工具（`smoke_bilibili_tick.py`、`_probe_dispatch.py`、`_regroup_changelog.py` 等） |
+| `scripts/render/` | 出图脚本（`render_help_cards.py`、各类终末地卡片预览） |
+| `scripts/preview/` | 卡片预览与回放（雷达、B 站、状态、更新日志等） |
+| `scripts/endfield/` | 终末地数据检查、基准、素材提取、抽卡统计导出 |
+| `tests/` | `test_*.py`；`support/`（`dispatch.py`、`config.py`、`boundary_guard.py` 等）；`fixtures/`（含守卫基线） |
+| `vendor/hyw-frontier/` | 不发布到 PyPI 的 hyw 依赖源码，`requirements.txt` 以可编辑方式安装 |
+| `assets/` | 随源码的资源：图片、字体、音频、文本、`json/`、`sql/` |
+| `data/` | 运行时数据，`data/<插件目录名>/`，另有 `data/cache/`；不进 Git |
+| `.runtime/` | 运行时文件：`entari.yml` 的副本（Entari 退出时改写的是它）、`bot.lock`、`satori-server/` socket 目录 |
+| `docs/` | `development/`、`operations/`、`features/`、`reference/`、`history/`、`adr/` |
+| `output/` | 预览与检查脚本的输出；不进 Git |
+| `archive/` | 已停用代码的归档包，见 `archive/README.md`；不加载、不测试 |
