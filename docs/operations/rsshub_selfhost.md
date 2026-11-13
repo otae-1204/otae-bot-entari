@@ -1,7 +1,5 @@
 # RSSHub 自建部署手册
 
-> 配置已迁到 `entari.yml`（密钥仍在 `.env`）。本页出现的旧环境变量名与新键的对应见 README「配置」一节的对照表。
-
 > 面向运维：在服务器上部署一个私有 RSSHub 实例，供 otae Bot 的 bilibilibot 插件作为 B站数据的备用数据源。
 >
 > 相关代码：`plugins/bilibilibot/api/rsshub.py`、`plugins/bilibilibot/api/space.py`
@@ -334,35 +332,37 @@ done
 
 ## 8. 接入机器人
 
-在机器人项目的 `.env` 中配置（文件：`<项目根>/.env`，第 52 行附近）：
+在机器人项目的 `entari.yml` 中配置 `plugins.bilibilibot.rsshub_base_urls`（YAML 列表，不是 `.env`）：
 
 **同机部署**：
 
-```dotenv
-BILI_RSSHUB_BASE_URLS=http://127.0.0.1:1200
+```yaml
+plugins:
+  plugins.bilibilibot:
+    rsshub_base_urls: ["http://127.0.0.1:1200"]
 ```
 
 **跨机部署**：
 
-```dotenv
-BILI_RSSHUB_BASE_URLS=http://<RSSHub服务器IP>:1200
+```yaml
+    rsshub_base_urls: ["http://<RSSHub服务器IP>:1200"]
 ```
 
-**多个实例（用逗号分隔，靠前的优先参与竞争）**：
+**多个实例（靠前的优先参与竞争）**：
 
-```dotenv
-BILI_RSSHUB_BASE_URLS=http://127.0.0.1:1200,https://rss.materium.io
+```yaml
+    rsshub_base_urls: ["http://127.0.0.1:1200", "https://rss.materium.io"]
 ```
 
 ### 配置说明
 
 - 插件会**同时**向所有实例（配置的 + 内置的）发起请求，**取第一个成功返回的结果**，其余立即取消。因此配置多个实例是**冗余容错**，不是轮询。
 - 地址**结尾不要加斜杠**（代码会处理，但保持规范）。
-- 内置实例无法通过环境变量移除，但自建实例因**有缓存、响应快**，通常会在竞争中胜出。
+- 配置的地址排在前面，`plugins/bilibilibot/api/rsshub.py` 的 `DEFAULT_BASE_URLS` 总会补在后面（`merge_base_urls`），无法通过配置移除；自建实例因**有缓存、响应快**，通常会在竞争中胜出。
 
 ### 生效方式
 
-配置在**模块导入期**读取，修改 `.env` 后**必须重启机器人**：
+配置在**模块导入期**读取，修改 `entari.yml` 后**必须重启机器人**：
 
 ```powershell
 .\scripts\stop.bat
@@ -420,7 +420,7 @@ curl -fsS http://127.0.0.1:1200/ > /dev/null && echo OK || echo FAIL
 | 路由返回 **404** | 路由不存在或 UID 无效 | 用有效 UID 重试；确认 RSSHub 版本 |
 | 响应 > 8 秒 | 缓存未命中 + B站响应慢 | 确认 `CACHE_TYPE` 已生效；连测 2–3 次看缓存是否命中 |
 | 首次请求慢、后续快 | **正常**，缓存预热 | 无需处理 |
-| 机器人侧仍报失败 | `.env` 未生效 / 网络不通 | 确认已重启机器人；在机器人服务器上执行第 7 节 `curl` 测试 |
+| 机器人侧仍报失败 | `entari.yml` 未生效 / 网络不通 | 确认已重启机器人；在机器人服务器上执行第 7 节 `curl` 测试 |
 | Redis 连接错误 | Redis 容器异常 | `docker compose logs redis`；`docker compose restart` |
 
 ---
@@ -465,7 +465,7 @@ RSSHub 是用**这台服务器自己的 IP** 去访问 B站的。B站的风控�
 - [ ] 未设置 `ACCESS_KEY`（否则插件无法访问）
 - [ ] 端口访问已按第 6 节限制来源
 - [ ] 健康检查已加入监控告警
-- [ ] 已提供最终访问地址给机器人侧，并已在 `.env` 配置 `BILI_RSSHUB_BASE_URLS`
+- [ ] 已提供最终访问地址给机器人侧，并已在 `entari.yml` 配置 `plugins.bilibilibot.rsshub_base_urls`
 - [ ] 机器人重启后，日志中不再出现 `all RSSHub instances unavailable`
 
 ---
@@ -477,5 +477,6 @@ RSSHub 是用**这台服务器自己的 IP** 去访问 B站的。B站的风控�
 | RSSHub 实例列表与竞争逻辑 | `plugins/bilibilibot/api/rsshub.py` |
 | 8 秒预算常量 `FETCH_BUDGET_SECONDS` | `plugins/bilibilibot/api/rsshub.py` |
 | 视频回退链（官方 → RSSHub → 动态流） | `plugins/bilibilibot/api/space.py` |
-| 环境变量读取点 | `plugins/bilibilibot/handlers.py` |
-| 环境变量模板 | `.env.example` |
+| 配置模型 | `plugins/bilibilibot/config.py`（`rsshub_base_urls`） |
+| 配置读取点 | `plugins/bilibilibot/handlers.py` |
+| 配置模板 | `entari.example.yml` |

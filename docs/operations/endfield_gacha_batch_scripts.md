@@ -20,7 +20,7 @@
 ## 前置准备
 
 1. Python 环境：仓库自带虚拟环境 `./.venv`。
-2. `export` 脚本需要在 `.env` 配置解密密钥（与 bot 绑定功能同一把）：
+2. `export` 脚本在仓库根目录运行，像 bot 一样读取 `entari.yml` 与 `.env`，解密密钥与 bot 绑定功能同一把（`.env` 的值，由 `plugins.endfield.credential_key` 引用）：
 
    ```ini
    ENDFIELD_CREDENTIAL_KEY=<Base64 编码的 32 字节密钥>

@@ -1,7 +1,5 @@
 # 明日方舟森空岛签到
 
-> 配置已迁到 `entari.yml`（密钥仍在 `.env`）。本页出现的旧环境变量名与新键的对应见 README「配置」一节的对照表。
-
 独立插件 `plugins/arknights/`，提供鹰角账号绑定与明日方舟（森空岛）每日签到。
 它不依赖 `plugins.endfield`：导入终末地包会执行其入口并注册命令，因此本插件只复用
 `otae_bot.*` 共享设施，并自带客户端、加密与存储。
@@ -52,15 +50,24 @@
 
 ## 配置
 
+密钥放 `.env`，由 `entari.yml` 的 `plugins.arknights.credential_key` 引用：
+
 ```dotenv
-# 必填；Base64 编码的 32 字节密钥
+# .env：必填；Base64 编码的 32 字节密钥
 ARKNIGHTS_CREDENTIAL_KEY=
 ```
 
+```yaml
+plugins:
+  plugins.arknights:
+    credential_key: "${{ env.ARKNIGHTS_CREDENTIAL_KEY :- }}"
+```
+
 - 生成：`python -c "import base64,secrets; print(base64.b64encode(secrets.token_bytes(32)).decode())"`
-- 只读取 `ARKNIGHTS_CREDENTIAL_KEY`，**不会**回退或复用 `ENDFIELD_CREDENTIAL_KEY`，
+- 只读取 `plugins.arknights.credential_key`，**不会**回退或复用终末地的 `plugins.endfield.credential_key`，
   两款游戏的密钥可以各自轮换、吊销。留空时 `/ak 绑定` 与 `/ak 签到` 会直接返回
-  “未配置环境变量 ARKNIGHTS_CREDENTIAL_KEY”的提示；插件不会自动生成或改写 `.env`。
+  「未配置凭据密钥 ARKNIGHTS_CREDENTIAL_KEY（plugins.arknights.credential_key）」开头的提示；
+  插件不会自动生成或改写 `.env`。
 - 密钥只用于 AES-256-GCM 加密账号 Token（`associated_data = b"arknights-account-token-v1"`），
   不会写入日志或聊天消息。
 

@@ -64,7 +64,7 @@ plugins:
 
 ## 引用的内容从哪里来（合并转发、卡片）
 
-`/q` 不再另行查询引用的消息，只读事件里带来的内容。经 `ONEBOT_CLIENTS` 接入时，边界适配器
+`/q` 不再另行查询引用的消息，只读事件里带来的内容。经 OneBot 边界（`entari.yml` 的 `plugins.server.adapters`）接入时，边界适配器
 （`otae_bot/boundary/onebot11.py`）把引用写成 `<quote id>`，里面是 `<author>` 和原消息内容；
 被引用的是合并转发时，内容是 `<message id="<resid>" forward="true">`，子元素是各条 `<message>`，
 每条以 `<author id name/>` 开头（嵌套转发最多 3 层、总共 200 条）。HYW 按原顺序展开每条的发送者、

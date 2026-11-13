@@ -1,7 +1,5 @@
 # 终末地抽卡分析图 v3 与消息投递
 
-> 配置已迁到 `entari.yml`（密钥仍在 `.env`）。本页出现的旧环境变量名与新键的对应见 README「配置」一节的对照表。
-
 `/ef 抽卡` 的分析图：宽 1600 逻辑 px；有重构记录时三栏，重构寻访（+ 其他寻访）作为较窄的侧栏
 （默认在右：特许寻访 | 武器申领 | 重构寻访），没有重构记录时折叠为两栏（特许寻访 + 其他寻访 | 武器申领）；
 上方总览为总数格 + 每栏一格，沿用家族 B 中性灰外壳。
@@ -13,7 +11,7 @@
 | 位置 | 作用 |
 | --- | --- |
 | `plugins/endfield/gacha/draw.py` | v3 全部布局知识：分栏与排序、保底格、记录行、测量页、分页（`paginate_gacha`）、页面 HTML、截图外壳 |
-| `plugins/endfield/rendering/cards.py` `draw_gacha_analysis_cards` | 入口与回滚开关：默认转发到 v3；`ENDFIELD_GACHA_LAYOUT=v1` 走旧版两栏（`_draw_gacha_analysis_cards_v1`） |
+| `plugins/endfield/rendering/cards.py` `draw_gacha_analysis_cards` | 入口与回滚开关：默认转发到 v3；`gacha_layout: v1` 走旧版两栏（`_draw_gacha_analysis_cards_v1`） |
 | `otae_bot/infrastructure/rendering/browser.py` `evaluate_web_page` | 在共享浏览器线程里加载页面并执行测量脚本，与截图同一套请求路由 |
 | `plugins/endfield/handlers.py` `_finish_gacha_pngs` | 抽卡投递：≤3 张普通消息，>3 张合并转发，逐级回退 |
 | `plugins/endfield/handlers.py` `_send_forward_pngs` | 合并转发；失败时逐张发普通图片消息，返回 `satori` / `images` |
@@ -68,7 +66,7 @@
 
 后端只给出 `kind_key`、`series_key`、`series_index`、`is_current`、`latest_ts` 等字段（不排序、不分栏），
 栏位完全由 `draw.py` 的 `GACHA_LAYOUTS` 决定（`build_gacha_columns` 按“有没有重构池”和
-`ENDFIELD_GACHA_RERUN_SIDE` 选一种）：
+`gacha_rerun_side` 选一种）：
 
 | 排法 | 栏（从左到右） |
 | --- | --- |
@@ -97,8 +95,8 @@
   多期系列的卡片副标题写「第 n 期」，历史期写「累计已继承至第 m 期」。
 - 其他寻访、常驻申领即使是该类最新一期也按历史池样式展示（垫抽数仍在池头右侧）。
 - `kind_key` 为空（旧夹具）时交给注册表 `resolve_pool_kind` 识别，前端不写名称子串判断。
-- 基础寻访：`GachaAnalysis.show_standard_pools`（环境变量 `ENDFIELD_GACHA_SHOW_STANDARD`，未设读
-  `GACHA_SHOW_STANDARD`，默认展示）为假时不出卡片，「其他寻访」组末尾留一行虚线说明
+- 基础寻访：`GachaAnalysis.show_standard_pools`（配置 `plugins.endfield.gacha_show_standard`，
+  默认展示）为假时不出卡片，「其他寻访」组末尾留一行虚线说明
   「基础寻访已按设置隐藏：N 抽 · M 个六星，仍计入总数与角色寻访」；分组标题的统计只算可见池；
   只剩基础寻访时分组标题与说明照样保留。总览数字不变。
 
@@ -160,12 +158,14 @@
 
 ## 配置与回滚
 
-| 环境变量 | 默认 | 作用 |
+配置在 `entari.yml` 的 `plugins.endfield` 段（`plugins/endfield/config.py`）。
+
+| 配置 | 默认 | 作用 |
 | --- | --- | --- |
-| `ENDFIELD_GACHA_LAYOUT` | `v3` | `v1` 回到旧版两栏（1280 宽、6144 上限、按行数预算分页） |
-| `ENDFIELD_GACHA_RERUN_SIDE` | `right` | 重构侧栏位置：`right` = 特许 \| 武器 \| 重构，`left` = 重构 \| 特许 \| 武器；无法识别时按 `right` 并记 warning。没有重构记录时两种设置都是两栏 |
-| `ENDFIELD_GACHA_FORWARD_ABOVE` | `3` | 超过几张改为合并转发；`0` 关闭合并转发（一律普通消息） |
-| `ENDFIELD_GACHA_SHOW_STANDARD`（或 `GACHA_SHOW_STANDARD`） | 展示 | `0/false/no/off` 隐藏基础寻访卡片（仍计入总数） |
+| `gacha_layout` | `v3` | `v1` 回到旧版两栏（1280 宽、6144 上限、按行数预算分页） |
+| `gacha_rerun_side` | `right` | 重构侧栏位置：`right` = 特许 \| 武器 \| 重构，`left` = 重构 \| 特许 \| 武器；无法识别时按 `right` 并记 warning。没有重构记录时两种设置都是两栏 |
+| `gacha_forward_above` | `3` | 超过几张改为合并转发；`0` 关闭合并转发（一律普通消息） |
+| `gacha_show_standard` | `true` | `false` 隐藏基础寻访卡片（仍计入总数） |
 
 ## 新增池类型
 

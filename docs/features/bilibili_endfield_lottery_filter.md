@@ -1,29 +1,26 @@
 # 动态抽奖的过滤规则
 
-> 配置已迁到 `entari.yml`（密钥仍在 `.env`）。本页出现的旧环境变量名与新键的对应见 README「配置」一节的对照表。
-
 B 站账号会把社交抽奖混进动态流里，这类内容不是游戏资讯。**默认对所有账号跳过抽奖动态**，
 需要时可以收窄到指定账号或整个关闭。过滤只作用于动态，不影响直播与视频订阅，
 也不影响手动发送链接的预览。
 
 ## 配置
 
-`BILI_LOTTERY_FILTER_UIDS` 决定生效范围：
+`entari.yml` 的 `plugins.bilibilibot.lottery_filter_uids` 决定生效范围：
 
-```bash
-# 默认值（变量未设置时同样是这个）：所有账号的动态都过滤
-BILI_LOTTERY_FILTER_UIDS=*
-
-# 收窄到指定账号
-BILI_LOTTERY_FILTER_UIDS=1265652806
-BILI_LOTTERY_FILTER_UIDS=1265652806,12345
-
-# 显式留空：关闭过滤，所有动态照常推送
-BILI_LOTTERY_FILTER_UIDS=
+```yaml
+plugins:
+  plugins.bilibilibot:
+    # 默认值（不写这一项时同样是这个）：所有账号的动态都过滤
+    lottery_filter_uids: "*"
+    # 收窄到指定账号（逗号分隔）
+    # lottery_filter_uids: "1265652806,12345"
+    # 显式留空：关闭过滤，所有动态照常推送
+    # lottery_filter_uids: ""
 ```
 
 按 UID 而不是昵称生效，账号改名不受影响。`*` 与 `all` 等价。
-只有显式留空才关闭过滤——变量未设置时按默认值走，即全部账号。
+只有显式留空才关闭过滤——不写这一项时按默认值走，即全部账号。
 
 ## 判定依据
 

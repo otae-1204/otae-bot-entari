@@ -27,7 +27,7 @@ from otae_bot.config.core import CoreSettings
 from otae_bot.config.root import PROJECT_ROOT
 from otae_bot.config.settings import core_settings
 
-#: Runtime cache location; override with ``OTAE_HELP_CACHE_PATH``.
+#: Runtime cache location; override with ``otae.help_cache_path`` in entari.yml.
 DEFAULT_CACHE_PATH = CoreSettings().help_cache_path
 
 #: Matches the offline pipeline in ``scripts/render/render_help_cards.py``.

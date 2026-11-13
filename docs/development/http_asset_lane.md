@@ -1,7 +1,5 @@
 # 素材通道：独立并发、短超时、按主机熔断与整卡截止时间
 
-> 配置已迁到 `entari.yml`（密钥仍在 `.env`）。本页出现的旧环境变量名与新键的对应见 README「配置」一节的对照表。
-
 ## 背景
 
 生产机 em（Windows，Python 3.13）直连 `bbs.hycdn.cn`（阿里 CDN）的 443 与 80 全部超时，
@@ -21,7 +19,7 @@
 | 按主机熔断 | 同一主机连续 3 次连接超时 / 连接失败 / 代理失败后打开，冷却 300s 内该主机的素材请求直接判缺失、不发网络请求；冷却期过后只放一个探测请求（半开），成功即关闭，失败则重新计时。404 等 HTTP 状态、读超时说明主机可达，不计数且清零连续失败。日志只在打开（warning）和恢复（info）时各记一次。 |
 | 整卡截止时间 | 每批素材有总预算（默认 25s）；`/ef` 账号卡、`/ef 回响`（影拓 / 回响）在整张卡范围共用一个预算，`_resolve_asset_groups`、缺章卡、抽卡图片缓存的首选 + 备用两批也共用一个预算。到点不再等待，已拿到的照常出图，未拿到的走各卡原有的占位 / 留空逻辑，结果不进渲染缓存（下次重新尝试）。每轮至少等 0.5s，即使截止时间已过，内存 / 磁盘缓存命中仍拿得到。干员卡立绘（`characterportrait`，约 16.8 MB）例外：与图标并行取、单独计时，预算取 `max(整卡预算, 60s)`（整卡不限时则同样不限，外层已有截止时间时只收紧），冷缓存时整卡等立绘下完再出图。 |
 | 代理（默认关闭） | 可为素材指定代理，并限定只有哪些主机走代理；或允许素材客户端 `trust_env` 读取 `HTTP(S)_PROXY` / `NO_PROXY`。默认不走代理、`trust_env=False`。 |
-| 先直连、失败再走代理 | 配置了代理时默认 `PROXY_MODE=fallback`：代理主机先直连，只有连接失败 / 连接超时才对这次请求改走代理，并记住该主机「直连不通」300s，期间直接走代理，过后只放一个请求探测直连。读超时、HTTP 状态说明已连上，不改走代理。熔断只看最终结果：直连失败但代理成功不计数。`always` 保持原来的「代理主机一律走代理」。 |
+| 先直连、失败再走代理 | 配置了代理时默认 `proxy_mode: fallback`：代理主机先直连，只有连接失败 / 连接超时才对这次请求改走代理，并记住该主机「直连不通」300s，期间直接走代理，过后只放一个请求探测直连。读超时、HTTP 状态说明已连上，不改走代理。熔断只看最终结果：直连失败但代理成功不计数。`always` 保持原来的「代理主机一律走代理」。 |
 | 主机改写（默认关闭） | 可配置 `源主机=目标主机` 映射，只改主机名、保留路径。**不内置任何映射**：实测 `bbs.hycdn.cn/asset/endfield_attendance/...png` 在 bbs 上 200，同一路径在 `web.hycdn.cn` 与 `ak.hycdn.cn` 都是 404。 |
 | 磁盘缓存不挡取图 | 新图交给渲染后再排队落盘（每个库一个后台写线程，批量事务）；排队中的行立即可读。服务器回 304 只更新校验时间与 ETag / Last-Modified，不删除、不重写正文。写入失败只记日志。 |
 | 旧缓存兜底 | 重新校验失败（连接失败、5xx、404、熔断中）时用已过期的磁盘副本，内存里只留 60s 后再试；整批截止时间到点时，没取到但磁盘上有旧副本的也直接用旧图。日志里记 `stale=N`。 |
@@ -60,35 +58,40 @@ be55f44 加了截止时间后变成缺图。
 
 ## 配置
 
-都在 `.env`（或进程环境变量）里，首次取图时读取；留空即默认值。
+在 `entari.yml` 的 `otae.http_asset` 段（模型 `otae_bot/config/core.py` 的 `HttpAssetSettings`），首次取图时读取；不写或留空即默认值。带账号密码的代理地址放 `.env`，用 `"${{ env.名字 :- }}"` 引用。
 
 | 配置 | 默认 | 作用 |
 | --- | ---: | --- |
-| `OTAE_HTTP_ASSET_CONNECT_TIMEOUT` | 4 | 素材连接超时（秒，0.5–60） |
-| `OTAE_HTTP_ASSET_READ_TIMEOUT` | 10 | 素材读超时（秒，1–120；调用方显式传入的超时优先） |
-| `OTAE_HTTP_ASSET_RETRIES` | 1 | 失败后重试次数（0–5；0 = 只试一次） |
-| `OTAE_HTTP_ASSET_CONCURRENCY` | 8 | 素材通道并发上限（独立于 API 的 8） |
-| `OTAE_HTTP_ASSET_BREAKER_THRESHOLD` | 3 | 连续几次连接失败后熔断（0 = 关闭熔断） |
-| `OTAE_HTTP_ASSET_BREAKER_COOLDOWN` | 300 | 熔断冷却秒数，过后放一个探测请求 |
-| `OTAE_HTTP_ASSET_RENDER_BUDGET` | 25 | 每张卡 / 每批素材准备的总预算（秒；0 = 不限时） |
-| `OTAE_HTTP_ASSET_PROXY` | 空 | 素材代理，如 `http://127.0.0.1:7897`（支持 http/https/socks5；省略 scheme 按 http；socks 需额外装 `socksio`） |
-| `OTAE_HTTP_ASSET_PROXY_HOSTS` | 空 | 只让这些主机走素材代理，逗号分隔，支持 `*.example.com`；留空且设置了代理时全部素材走代理 |
-| `OTAE_HTTP_ASSET_PROXY_MODE` | fallback | `fallback`：上面的主机先直连，连接失败 / 连接超时才对该请求改走代理；`always`：一律走代理。未配置代理时不起作用 |
-| `OTAE_HTTP_ASSET_DIRECT_COOLDOWN` | 300 | fallback 模式下某主机直连失败后，多少秒内直接走代理（1–86400），过后放一个请求探测直连 |
-| `OTAE_HTTP_ASSET_TRUST_ENV` | false | 素材客户端是否读取 `HTTP(S)_PROXY` / `NO_PROXY` / `SSL_CERT_*` |
-| `OTAE_HTTP_ASSET_HOST_REWRITE` | 空 | 主机改写：`源=目标,源2=目标2` 或 JSON 对象 |
-| `OTAE_HTTP_ASSET_HOST_MAX_AGE` | `hycdn.cn=604800` | 内容地址固定的图床，磁盘副本多少秒内不再校验，按主机后缀匹配（`hycdn.cn` 覆盖 `bbs.hycdn.cn` 等），逗号分隔多项；`off` = 全部按 600s。服务器的 `no-cache` / `no-store` / `private` 仍然生效 |
+| `connect_timeout` | 4 | 素材连接超时（秒，0.5–60） |
+| `read_timeout` | 10 | 素材读超时（秒，1–120；调用方显式传入的超时优先） |
+| `retries` | 1 | 失败后重试次数（0–5；0 = 只试一次） |
+| `concurrency` | 8 | 素材通道并发上限（独立于 API 的 8） |
+| `breaker_threshold` | 3 | 连续几次连接失败后熔断（0 = 关闭熔断） |
+| `breaker_cooldown` | 300 | 熔断冷却秒数，过后放一个探测请求 |
+| `render_budget` | 25 | 每张卡 / 每批素材准备的总预算（秒；0 = 不限时） |
+| `proxy` | 空 | 素材代理，如 `http://127.0.0.1:7897`（支持 http/https/socks5；省略 scheme 按 http；socks 需额外装 `socksio`） |
+| `proxy_hosts` | 空 | 只让这些主机走素材代理，逗号分隔，支持 `*.example.com`；留空且设置了代理时全部素材走代理 |
+| `proxy_mode` | fallback | `fallback`：上面的主机先直连，连接失败 / 连接超时才对该请求改走代理；`always`：一律走代理。未配置代理时不起作用 |
+| `direct_cooldown` | 300 | fallback 模式下某主机直连失败后，多少秒内直接走代理（1–86400），过后放一个请求探测直连 |
+| `trust_env` | false | 素材客户端是否读取 `HTTP(S)_PROXY` / `NO_PROXY` / `SSL_CERT_*` |
+| `host_rewrite` | 空 | 主机改写：`源=目标,源2=目标2` 或 JSON 对象 |
+| `host_max_age` | `hycdn.cn=604800` | 内容地址固定的图床，磁盘副本多少秒内不再校验，按主机后缀匹配（`hycdn.cn` 覆盖 `bbs.hycdn.cn` 等），逗号分隔多项；`off` = 全部按 600s。服务器的 `no-cache` / `no-store` / `private` 仍然生效 |
+| `host_concurrency` | `hycdn.cn=4,fz.wiki=2,warfarin.wiki=2` | 按主机后缀的并发上限；`off` = 只受总并发限制 |
+| `hard_deadline` | 180 | 后台续传超过多少秒仍未完成才取消 |
+| `queue_limit` | 2000 | 未完成下载超过多少个时丢弃新的预取 |
+| `prefetch` | true | 是否预取最近用过的素材 |
+| `prefetch_daily_mb` | 300 | 预取每日流量上限 MB（北京时间按天） |
 
 代理地址可能带口令，日志只记 scheme、主机和端口。
 
-`PROXY_MODE` 默认 `fallback` 的理由：配代理是为了「直连不通时还能取到图」，不是必须绕开直连。
+`proxy_mode` 默认 `fallback` 的理由：配代理是为了「直连不通时还能取到图」，不是必须绕开直连。
 BOT云运维 10-03 实测直连 `bbs.hycdn.cn` 中位 0.05s、走代理 2.2s；`always` 下 232 张图在 8 个并发槽里
 要约 232/8 × 2.2s ≈ 64s，冷缓存时必然被 25s 截止时间截断。`fallback` 在直连正常时和不配代理一样快；
 直连坏了也只多付一次连接超时（默认 4s），之后 300s 内直接走代理。必须绕开直连（例如出口审计）时设 `always`。
 
-磁盘缓存的位置与预算沿用原有变量：`OTAE_PUBLIC_IMAGE_CACHE_PATH`（默认
-`data/cache/public-images-v1.sqlite3`）、`OTAE_PUBLIC_IMAGE_CACHE_MIB`（默认 256），表格缓存同理
-（`OTAE_PUBLIC_TABLE_CACHE_*`）。
+磁盘缓存的位置与预算在 `otae.http_cache`：`public_image_path`（默认
+`data/cache/public-images-v1.sqlite3`）、`public_image_mib`（默认 256），表格缓存同理
+（`public_table_path`、`public_table_mib`）。
 
 ## 实测（otae-1，bbs.hycdn.cn 指向黑洞地址 10.255.255.1）
 
@@ -142,16 +145,18 @@ em（Windows、Python 3.13）上实测约 141ms，约慢 7.7 倍；改后取图�
 
 ## em 建议配置
 
-```env
-OTAE_HTTP_ASSET_PROXY=http://127.0.0.1:7897
-OTAE_HTTP_ASSET_PROXY_HOSTS=bbs.hycdn.cn
-# OTAE_HTTP_ASSET_PROXY_MODE 留空即 fallback：先直连（实测 0.05s），连不上才走 mihomo（2.2s）
-# OTAE_HTTP_ASSET_RENDER_BUDGET 留空（25s），去掉临时设的 45
+```yaml
+otae:
+  http_asset:
+    proxy: http://127.0.0.1:7897
+    proxy_hosts: bbs.hycdn.cn
+    # proxy_mode 不写即 fallback：先直连（实测 0.05s），连不上才走 mihomo（2.2s）
+    # render_budget 不写（25s），去掉临时设的 45
 ```
 
 其余保持默认。理由：
 
-- **去掉 `OTAE_HTTP_ASSET_RENDER_BUDGET=45`**：被截断前那 27s 基本都在排队等同步写盘（每张约 141ms），
+- **去掉 `render_budget: 45`**：被截断前那 27s 基本都在排队等同步写盘（每张约 141ms），
   网络 5s 内就全到了。现在取图不等磁盘，304 不重写，hycdn 图 7 天内直接读盘，
   到点没取到的还会先用旧副本；25s 足够，留 45 只会在图床真不可达时让用户多等 20s。
 - **代理用 fallback**：直连正常时和不配代理一样快；直连坏了第一次多等一个连接超时（4s），
