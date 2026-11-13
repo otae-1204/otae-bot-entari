@@ -1,7 +1,9 @@
 """Runtime account registry for Entari scheduled/background tasks.
 
-Every online account is kept by self_id. ``get_account()`` stays the default:
-the most recent login that is still online. Which groups each account is in
+Every online account is kept by (platform, self_id): the same user id on two
+platforms is two accounts. ``get_account()`` is the most recent login that is
+still online, on any platform; background senders pick by group or by the
+target's platform instead (``otae_bot.delivery``). Which groups each account is in
 comes from Satori ``guild.list``; it is fetched on login, refreshed by callers
 when older than ``GUILD_REFRESH_SECONDS`` and again after a failed send.
 """
@@ -21,22 +23,30 @@ GUILD_LIST_TIMEOUT_SECONDS = 15
 # A forced guild.list after a failed send, at most this often per account.
 GUILD_RETRY_REFRESH_SECONDS = 60
 
-_accounts: dict[str, Account] = {}
+AccountKey = tuple[str, str]
+
+_accounts: dict[AccountKey, Account] = {}
 _status: Any = None
 _updated_at: datetime | None = None
-_guilds: dict[str, frozenset[str]] = {}
-_guilds_at: dict[str, float] = {}
-_guild_locks: dict[str, asyncio.Lock] = {}
+_guilds: dict[AccountKey, frozenset[str]] = {}
+_guilds_at: dict[AccountKey, float] = {}
+_guild_locks: dict[AccountKey, asyncio.Lock] = {}
 _background: set[asyncio.Task] = set()
 
 
 def account_id(account: Any) -> str:
+    """The account's user id, for logs and Satori targets; not unique across platforms."""
     return str(getattr(account, "self_id", "") or getattr(account, "id", "") or "")
+
+
+def account_key(account: Any) -> AccountKey:
+    """What identifies an account here: its platform and its user id."""
+    return str(getattr(account, "platform", "") or ""), account_id(account)
 
 
 def set_account(account: Account, status: Any = None) -> None:
     global _status, _updated_at
-    key = account_id(account)
+    key = account_key(account)
     # Re-inserting moves it last: the latest login is the default account.
     _accounts.pop(key, None)
     _accounts[key] = account
@@ -44,14 +54,15 @@ def set_account(account: Account, status: Any = None) -> None:
     _updated_at = datetime.now(timezone.utc)
 
 
-def clear_account(account_id: str | None = None) -> None:
-    """Forget one account that went offline, or every account."""
+def clear_account(account: Any = None) -> None:
+    """Forget one account that went offline (by its platform and id), or every account."""
     global _status, _updated_at
+    key = None if account is None else account_key(account)
     for table in (_accounts, _guilds, _guilds_at, _guild_locks):
-        if account_id is None:
+        if key is None:
             table.clear()
         else:
-            table.pop(str(account_id), None)
+            table.pop(key, None)
     _status = None
     _updated_at = datetime.now(timezone.utc)
 
@@ -79,7 +90,7 @@ def is_online() -> bool:
 
 def known_guilds(account: Any) -> frozenset[str] | None:
     """The groups this account is in, or None before guild.list has answered."""
-    return _guilds.get(account_id(account))
+    return _guilds.get(account_key(account))
 
 
 def get_bots_for_guild(guild_id: str) -> list[Account]:
@@ -94,7 +105,7 @@ def get_bot_for_guild(guild_id: str) -> Account | None:
 
 def forget_guild(account: Any, guild_id: str) -> None:
     """The account turned out not to be in the group; skip it until the next listing."""
-    key = account_id(account)
+    key = account_key(account)
     if key in _guilds:
         _guilds[key] = _guilds[key] - {str(guild_id)}
 
@@ -113,7 +124,8 @@ def schedule_guild_refresh(account: Any) -> None:
 
 
 async def _refresh_guilds(account: Any, max_age: float) -> None:
-    key = account_id(account)
+    key = account_key(account)
+    name = f"{key[0]}:{key[1]}"
     requested = monotonic()
     lock = _guild_locks.setdefault(key, asyncio.Lock())
     async with lock:
@@ -124,14 +136,14 @@ async def _refresh_guilds(account: Any, max_age: float) -> None:
         try:
             guilds = await asyncio.wait_for(_list_guilds(account), GUILD_LIST_TIMEOUT_SECONDS)
         except Exception as exc:  # noqa: BLE001 - Keep the previous listing; retry after max_age.
-            logger.warning(f"[runtime] guild.list failed for account {key}: {type(exc).__name__}: {exc}")
+            logger.warning(f"[runtime] guild.list failed for account {name}: {type(exc).__name__}: {exc}")
             guilds = None
         if key not in _accounts:
             return  # Went offline meanwhile.
         _guilds_at[key] = monotonic()
         if guilds is not None:
             _guilds[key] = guilds
-            logger.info(f"[runtime] account {key} is in {len(guilds)} groups")
+            logger.info(f"[runtime] account {name} is in {len(guilds)} groups")
 
 
 async def _list_guilds(account: Any) -> frozenset[str]:

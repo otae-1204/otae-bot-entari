@@ -104,7 +104,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         bot = account("1", ["200"])
         await self.online(bot)
         bot.groups.append("100")  # Invited since the last listing.
-        runtime._guilds_at["1"] -= runtime.GUILD_RETRY_REFRESH_SECONDS + 1
+        runtime._guilds_at[("qq", "1")] -= runtime.GUILD_RETRY_REFRESH_SECONDS + 1
         result = await deliver(Target.group("100"), "x")
         self.assertEqual((result.status, result.account), (SENT, bot))
         self.assertEqual(len(bot.listings), 2)

@@ -13,8 +13,8 @@ from otae_bot.accounts import runtime
 def on_ready(func: Callable[..., Any]):
     async def _account_update(event: AccountUpdate):
         if event.status in {LoginStatus.OFFLINE, LoginStatus.DISCONNECT}:
-            account_id = str(getattr(event.account, "self_id", "") or getattr(event.account, "id", ""))
-            runtime.clear_account(account_id or None)
+            # An account without an id cannot be told apart: forget them all, as before.
+            runtime.clear_account(event.account if runtime.account_id(event.account) else None)
             return None
         if event.status not in {LoginStatus.ONLINE, LoginStatus.CONNECT, LoginStatus.RECONNECT}:
             return None

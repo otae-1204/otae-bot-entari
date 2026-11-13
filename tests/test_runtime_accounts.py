@@ -38,12 +38,12 @@ class RuntimeAccountTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ready.get_bots(), [second, first])
         runtime.set_account(first)  # Reconnected: default again.
         self.assertEqual(runtime.get_bots(), [first, second])
-        runtime.clear_account("1194397508")
+        runtime.clear_account(first)
         # Another account is still online, so there is still a default.
         self.assertIs(ready.get_bot(), second)
         self.assertTrue(runtime.is_online())
-        runtime.clear_account("1194397508")
-        runtime.clear_account("3898438488")
+        runtime.clear_account(first)
+        runtime.clear_account(second)
         self.assertIsNone(runtime.get_account())
         with self.assertRaises(RuntimeError):
             ready.get_bot()
@@ -60,7 +60,7 @@ class RuntimeAccountTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(ready.get_bot_for_guild("300"))
         runtime.forget_guild(first, "200")
         self.assertIs(ready.get_bot_for_guild("200"), second)
-        runtime.clear_account("3898438488")
+        runtime.clear_account(second)
         self.assertIsNone(ready.get_bot_for_guild("977295722"))
 
     async def test_fresh_listings_are_reused_and_concurrent_refreshes_list_once(self):
