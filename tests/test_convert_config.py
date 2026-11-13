@@ -37,7 +37,7 @@ ENDFIELD_KEY = base64.b64encode(b"e" * 32).decode()
 LEGACY = {
     "SATORI_CLIENTS": '[{"host":"10.0.0.2","port":"5500","path":"","token":"satori-secret-1"},'
                       '{"host":"10.0.0.3","port":5501,"token":""},'
-                      '{"host":"bot.example.com","port":443,"path":"/satori/v1","token":"satori-secret-3","secure":true}]',
+                      '{"host":"bot.example.com","port":8443,"path":"/satori/v1","token":"satori-secret-3","secure":true}]',
     "ONEBOT_CLIENTS": '[{"endpoint":"ws://127.0.0.1:3001","token":"onebot-secret-1"},{"endpoint":"ws://127.0.0.1:3002"}]',
     "SUPERUSERS": '["10001", "10002"]',
     "ENDFIELD_CREDENTIAL_KEY": ENDFIELD_KEY,
@@ -348,7 +348,7 @@ class ConvertTests(unittest.TestCase):
                 {"host": "10.0.0.2", "port": 5500, "path": "", "secure": False, "token": "satori-secret-1",
                  "timeout": None},
                 {"host": "10.0.0.3", "port": 5501, "path": "", "secure": False, "token": None, "timeout": None},
-                {"host": "bot.example.com", "port": 443, "path": "/satori/v1", "secure": False,
+                {"host": "bot.example.com", "port": 8443, "path": "/satori/v1", "secure": False,
                  "token": "satori-secret-3", "timeout": None},
             ],
         )
@@ -445,6 +445,39 @@ class ConvertTests(unittest.TestCase):
         plan = convert_config.build_plan({"ONEBOT_CLIENTS": [{"endpoint": "ws://h:1"}]}, None, None, self.root)
         self.assertEqual(plan.yml["basic"]["network"], [])
         self.assertIn("server", plan.yml["plugins"])
+
+    def test_port_443_is_written_as_secure(self):
+        plan = convert_config.build_plan(
+            {"SATORI_CLIENTS": [{"host": "ir.example.com", "port": 443, "path": "/satori"}]}, None, None, self.root)
+        self.assertEqual(plan.yml["basic"]["network"][0]["secure"], True)
+        self.assertTrue(any("443" in line and "secure: true" in line for line in plan.report))
+
+    def test_secure_field_is_reported_without_claiming_how_the_deployment_behaved(self):
+        plan = convert_config.build_plan(
+            {"SATORI_CLIENTS": [{"host": "h", "port": 5500, "secure": True}]}, None, None, self.root)
+        self.assertNotIn("secure", plan.yml["basic"]["network"][0])
+        line = next(line for line in plan.report if ".secure" in line)
+        self.assertIn("旧主线上跟踪的代码", line)
+        self.assertIn("secure: true", line)
+
+    def test_per_entry_onebot_fields_are_reported_by_name_and_kept(self):
+        env = {"SATORI_CLIENTS": [
+            {"host": "h", "port": 5500},
+            {"host": "h", "port": 5501, "onebot_url": "http://127.0.0.1:3001", "onebot_token": "ob-secret"},
+        ]}
+        plan = convert_config.build_plan(env, None, None, self.root)
+        self.assertEqual(plan.obsolete, {"SATORI_CLIENTS_2_ONEBOT_TOKEN": "ob-secret",
+                                         "SATORI_CLIENTS_2_ONEBOT_URL": "http://127.0.0.1:3001"})
+        report = "\n".join(plan.report)
+        self.assertIn("SATORI_CLIENTS[2].onebot_url", report)
+        self.assertIn("SATORI_CLIENTS[2].onebot_token", report)
+        self.assertNotIn("ob-secret", report)
+        self.assertNotIn("127.0.0.1:3001", report)
+        self.assertEqual(plan.yml["basic"]["network"][1],
+                         {"type": "ws", "host": "h", "port": 5501, "path": ""})
+        env_text = convert_config.render_env(plan, "\n")
+        section = env_text.index("# ── 不再读取的键")
+        self.assertIn("SATORI_CLIENTS_2_ONEBOT_TOKEN=ob-secret", env_text[section:])
 
     def test_refuses_while_the_bot_runs(self):
         from otae_bot.lifecycle import acquire_run_lock

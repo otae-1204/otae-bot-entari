@@ -269,6 +269,9 @@ for _name, (_kind, _parse) in _ASSET.items():
     RULES[f"OTAE_HTTP_ASSET_{_name}"] = Rule(("otae", "http_asset", _name.lower()), _kind, _parse)
 #: Keys handled by code of their own below.
 STRUCTURED = ("SATORI_CLIENTS", "ONEBOT_CLIENTS", "SUPERUSERS")
+#: Fields of one SATORI_CLIENTS entry that map onto basic.network; any other field (e.g. the legacy
+#: per-account ``onebot_url`` / ``onebot_token``) is reported and kept in the "no longer read" section.
+SATORI_ENTRY_KEYS = {"host", "port", "path", "token", "secure"}
 
 
 # ── conversion ───────────────────────────────────────────────────────────────────
@@ -341,9 +344,16 @@ def _connections(plan: Plan, env: dict[str, Any]) -> None:
             plan.secrets[name] = token
             entry["token"] = placeholder(name)
             plan.report.append(f"SATORI_CLIENTS[{index}].token -> .env {name}（密钥）")
-        if "secure" in client:
-            plan.report.append(f"SATORI_CLIENTS[{index}].secure -> 旧版不读取该字段（一直是 ws://），按旧行为不写入；"
-                               "需要 wss 时在 basic.network 里手动加 secure: true")
+        if entry["port"] == 443:
+            entry["secure"] = True
+            plan.report.append(f"SATORI_CLIENTS[{index}] -> 端口 443，写入 secure: true（wss）；不对请改回")
+        elif "secure" in client:
+            plan.report.append(f"SATORI_CLIENTS[{index}].secure -> 旧主线上跟踪的代码不读取该字段（一直是 ws://），"
+                               "按此不写入；如果你的部署改过代码、实际走 wss，在 basic.network 里加 secure: true")
+        for extra in sorted(set(client) - SATORI_ENTRY_KEYS):
+            name = f"SATORI_CLIENTS_{index}_{extra.upper()}"
+            plan.obsolete[name] = _text(client[extra])
+            plan.report.append(f"SATORI_CLIENTS[{index}].{extra} -> 新版不读取；原值保留在 .env 的「不再读取」段（{name}）")
         network.append(entry)
     plan.yml.setdefault("basic", {})["network"] = network
     plan.report.append(f"SATORI_CLIENTS -> entari.yml basic.network（{len(network)} 条）")
@@ -530,7 +540,7 @@ def render_env(plan: Plan, newline: str) -> str:
         ("# ── 密钥（entari.yml 用 \"${{ env.名字 :- }}\" 引用）──", plan.secrets),
         ("# ── 第三方代码 / Entari 直接从进程环境读取 ──", plan.process),
         ("# ── 未识别的键（原样保留，bot 不读取；确认无用后可删除）──", plan.unknown),
-        ("# ── 不再读取的键（旧版就不读取或所属插件已归档；原样保留，确认无用后可删除）──", plan.obsolete),
+        ("# ── 不再读取的键（旧版就不读取、新版不再读取或所属插件已归档；原样保留，确认无用后可删除）──", plan.obsolete),
     )
     for title, values in sections:
         if values:
