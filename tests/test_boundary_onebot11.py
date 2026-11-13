@@ -664,7 +664,7 @@ class WiringTests(unittest.TestCase):
         patches = {name: Mock() for name in names}
         with (
             patch.multiple(application, **patches),
-            patch.object(application, "Entari") as entari,
+            patch.object(application, "EventLoginEntari") as entari,
             patch.object(application, "discover_plugins", return_value=("plugins.demo",)),
             patch.object(application, "load_plugin") as load_plugin,
         ):

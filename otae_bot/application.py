@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from arclet.entari import Cleanup, Entari, Startup, listen, load_plugin
+from arclet.entari import Cleanup, Startup, listen, load_plugin
 from arclet.entari.event.plugin import PluginUnloaded
 from loguru import logger
 
+from otae_bot.accounts.event_login import EventLoginEntari
 from otae_bot.command_usage import close_command_usage, install_command_usage_recorders
 from otae_bot.config.settings import core_settings, loaded_config, server_declaration
 from otae_bot.hypergryph.attendance_registry import on_plugin_unloaded
@@ -24,11 +25,12 @@ from otae_bot.pipeline.quote_fallback import install_quote_fetch_fallback
 from otae_bot.plugin_registry import discover_plugins
 
 
-def create_app() -> Entari:
+def create_app() -> EventLoginEntari:
     # Connections, log level and prefix come from entari.yml (see bot.py, which loads it
     # before anything else); without a loaded configuration the app has no connection.
+    # EventLoginEntari: events from native Satori servers carry a partial login (see there).
     config = loaded_config()
-    app = Entari.from_config(config) if config is not None else Entari()
+    app = EventLoginEntari.from_config(config) if config is not None else EventLoginEntari()
     server = server_declaration()
     if server is not None:
         # Loaded here, before Entari would load `server` from the file with its own
