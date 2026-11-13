@@ -1,7 +1,7 @@
 # otae-bot 配置示例。复制为 entari.yml 再改（entari.yml 不进 Git）：
 #   Windows:  copy entari.example.yml entari.yml
 #   Linux:    cp entari.example.yml entari.yml
-# 旧部署（.env + configs/）请改用 scripts/convert_config.py 自动转换，见 README「配置」。
+# 旧部署（.env + configs/）请改用 scripts/convert_config.py 自动转换，见 docs/operations/configuration.md。
 #
 # 规则：
 # - 这里放全部结构化配置；.env 只放密钥（以及少数第三方代码直接读取的环境变量）。
