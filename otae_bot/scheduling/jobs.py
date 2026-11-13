@@ -2,7 +2,8 @@
 
 Each job runs in its own task so a slow tick never delays the scheduler; a tick
 is skipped while ``max_instances`` runs are still active. ``snapshot()`` feeds
-``/status``; ``close_scheduled_jobs()`` cancels everything at shutdown.
+``/status``; ``close_scheduled_jobs()`` cancels everything at shutdown, and
+``close_scheduled_jobs(*ids)`` only the named jobs (a plugin closing its own).
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ import time
 from dataclasses import dataclass
 from datetime import timedelta
 from time import perf_counter
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 
 from arclet.entari import scheduler as entari_scheduler
 from arclet.entari.plugin import current_plugin
@@ -147,12 +148,17 @@ class _Scheduler:
             for job in self._jobs.values()
         ]
 
-    async def close(self) -> None:
-        jobs = list(self._jobs.values())
-        self._jobs.clear()
-        tasks = [task for job in jobs for task in job.active_tasks]
-        tasks.extend(self._retired_tasks)
-        self._retired_tasks.clear()
+    async def close(self, job_ids: Iterable[str] | None = None) -> None:
+        """Stop every job, or only ``job_ids``; running ticks are cancelled and awaited."""
+        if job_ids is None:
+            jobs = list(self._jobs.values())
+            self._jobs.clear()
+            tasks = [task for job in jobs for task in job.active_tasks]
+            tasks.extend(self._retired_tasks)
+            self._retired_tasks.clear()
+        else:
+            jobs = [self._jobs.pop(job_id) for job_id in dict.fromkeys(job_ids) if job_id in self._jobs]
+            tasks = [task for job in jobs for task in job.active_tasks]
         for job in jobs:
             if job.subscriber is not None:
                 job.subscriber.dispose()
@@ -177,8 +183,9 @@ def _seconds(trigger: str, kwargs: dict[str, Any]) -> float:
     return 60.0
 
 
-async def close_scheduled_jobs() -> None:
-    await timer.close()
+async def close_scheduled_jobs(*job_ids: str) -> None:
+    """Stop every scheduled job, or only the named ones."""
+    await timer.close(job_ids or None)
 
 
 def _plugin_module(module: str) -> str:

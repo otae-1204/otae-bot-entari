@@ -212,6 +212,32 @@ class ManagedSchedulerTests(unittest.IsolatedAsyncioTestCase):
         await self.scheduler.close()
         self.assertTrue(cancelled.is_set())
 
+    async def test_close_with_ids_stops_only_those_jobs(self):
+        started, cancelled = asyncio.Event(), asyncio.Event()
+        calls = []
+
+        async def own():
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+
+        async def other():
+            calls.append("other")
+
+        own_tick = self.scheduler.add_job(own, "interval", seconds=1, id="bili_live_check")
+        other_tick = self.scheduler.add_job(other, "interval", seconds=1, id="minecraft_broadcast")
+        await own_tick()
+        await started.wait()
+        await self.scheduler.close(["bili_live_check", "not-registered"])
+        self.assertTrue(cancelled.is_set())
+        self.assertEqual([job["id"] for job in self.scheduler.snapshot()], ["minecraft_broadcast"])
+        self.assertFalse(self.subscribers[-1].disposed)
+        await other_tick()
+        await asyncio.sleep(0.01)
+        self.assertEqual(calls, ["other"])
+
 
 class BilibiliPollingTests(unittest.IsolatedAsyncioTestCase):
     async def test_store_close_is_idempotent(self):

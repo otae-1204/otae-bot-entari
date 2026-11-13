@@ -118,9 +118,14 @@ notifier = Notifier(store, render=_render, send=_send)
 poller = Poller(client, store, notifier)
 
 
+_JOB_IDS = ("bili_live_check", "bili_video_check", "bili_dynamic_check", "bili_wbi_refresh",
+            "bili_risk_cookie_refresh")
+
+
 @listen(Cleanup)
 async def _close_bilibili():
-    await close_scheduled_jobs()
+    # Only this plugin's jobs: the others (MC broadcast, ...) are not bilibili's to stop.
+    await close_scheduled_jobs(*_JOB_IDS)
     # Order matters: stop delivery first, then the transport, then the database.
     await notifier.stop()
     await client.aclose()
