@@ -1,42 +1,53 @@
+# Copy the code of this checkout into a target directory with robocopy.
+# Default is a dry run (robocopy /L: list only); pass -Apply to copy.
+# Never copies or touches the target's runtime state: data, .runtime, output, archive, .venv,
+# entari.yml and .env*. Uses /E (no purge), so files that exist only in the target are kept.
+# Untested on Windows (written without a PowerShell host); review the /L listing before -Apply.
 param(
-    [switch]$Prod,
-    [switch]$SkipCheck,
-    [switch]$NoRestart
+    [Parameter(Mandatory = $true)][string]$Target,
+    [switch]$Apply,
+    [switch]$SkipCheck
 )
 
 $ErrorActionPreference = "Stop"
-$ProjectDir = Resolve-Path (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "..")
-$TargetDir = if ($Prod) { "D:\Bot\BotEntari" } else { $ProjectDir }
+$ProjectDir = (Resolve-Path (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "..")).Path
+$TargetDir = [System.IO.Path]::GetFullPath($Target)
 
-Write-Host "otae Bot Entari deploy -> $TargetDir" -ForegroundColor Cyan
+if ($TargetDir.TrimEnd('\') -ieq $ProjectDir.TrimEnd('\')) {
+    Write-Error "Target is this checkout itself: $TargetDir"
+}
 
-if (-not (Test-Path $TargetDir)) {
+$Mode = if ($Apply) { "APPLY" } else { "DRY RUN (robocopy /L, nothing is copied; add -Apply to copy)" }
+Write-Host "otae-bot deploy: $ProjectDir -> $TargetDir [$Mode]" -ForegroundColor Cyan
+
+if (-not $SkipCheck) {
+    $Python = Join-Path $ProjectDir ".venv\Scripts\python.exe"
+    if (-not (Test-Path $Python)) { $Python = (Get-Command python -ErrorAction Stop).Source }
+    & $Python -m compileall -q (Join-Path $ProjectDir "bot.py") (Join-Path $ProjectDir "otae_bot") (Join-Path $ProjectDir "plugins") (Join-Path $ProjectDir "scripts")
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
+
+# Root-level runtime directories are excluded by full path on both sides, so robocopy neither
+# copies into nor deletes from them; __pycache__ etc. are excluded by name anywhere.
+$ExcludeDirs = @()
+foreach ($name in @("data", ".runtime", "output", "archive", ".venv", ".git")) {
+    $ExcludeDirs += (Join-Path $ProjectDir $name)
+    $ExcludeDirs += (Join-Path $TargetDir $name)
+}
+$ExcludeDirs += @("__pycache__", ".idea", ".vscode", ".claude", ".codex_preview")
+$ExcludeFiles = @("*.pyc", "entari.yml", ".env", ".env.*")
+
+$Options = @("/E", "/R:1", "/W:1", "/XD") + $ExcludeDirs + @("/XF") + $ExcludeFiles
+if (-not $Apply) {
+    $Options += "/L"
+} elseif (-not (Test-Path $TargetDir)) {
     New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null
 }
 
-$Python = if (Test-Path (Join-Path $ProjectDir ".venv\Scripts\python.exe")) {
-    Join-Path $ProjectDir ".venv\Scripts\python.exe"
-} else {
-    (Get-Command python -ErrorAction Stop).Source
-}
+robocopy $ProjectDir $TargetDir @Options | Out-Host
+if ($LASTEXITCODE -gt 7) { exit $LASTEXITCODE }
 
-& $Python -m pip install -r (Join-Path $ProjectDir "requirements.txt")
-
-if (-not $SkipCheck) {
-    & $Python -m compileall -q $ProjectDir
+if ($Apply) {
+    Write-Host "Copied. Next, in $TargetDir : set up .venv (scripts\setup.ps1), check entari.yml / .env, then start." -ForegroundColor Green
 }
-
-if ($Prod) {
-    robocopy $ProjectDir $TargetDir /E /XD .git .venv __pycache__ .idea .vscode .claude .codex_preview /XF *.pyc .env .env.* entari.yml /R:1 /W:1 | Out-Host
-    if ($LASTEXITCODE -gt 7) {
-        exit $LASTEXITCODE
-    }
-}
-
-if (-not $NoRestart) {
-    if ($Prod) {
-        Write-Host "Start on server: cd D:\Bot\BotEntari; .\scripts\start.bat" -ForegroundColor Green
-    } else {
-        & (Join-Path $ProjectDir ".venv\Scripts\python.exe") (Join-Path $ProjectDir "bot.py")
-    }
-}
+exit 0
