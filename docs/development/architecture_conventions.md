@@ -58,7 +58,7 @@
 ## 5. 框架使用约定
 
 1. **只 import 公开名字。** 不 import 下划线开头的名字和模块，不访问对象的下划线属性。〔守卫〕
-2. **确实没有公开接口时**，把那一处私有用法收进 `otae_bot/pipeline/framework_hooks.py`，注释里写明缺的是哪个上游接口。其他地方一律通过它间接使用。当前只有一处：Letoderea 的全局传播器。
+2. **确实没有公开接口时**，把那一处私有用法收进 `otae_bot/pipeline/framework_hooks.py`，注释里写明缺的是哪个上游接口。其他地方一律通过它间接使用。当前收进去的有两处：Letoderea 的全局传播器，以及 `arclet.letoderea.subscriber.current_subscriber`（守卫基线里登记的只有前者）。
 3. **不替换框架的函数和属性**（不做 monkeypatch）。要拦截出站调用，用 `APIRequest` 等公开事件。
 4. **停止信号要放行。** 凡是写 `except Exception` 的地方，前面必须先有 `except ExitState: raise`，否则 `finish()` 会被当成错误吞掉。`asyncio.CancelledError` 同理。
 5. **全局机制只装一次。** 群功能开关、指令统计这类对所有插件生效的东西，在应用启动时统一挂载，不依赖插件加载事件重复安装。
@@ -67,7 +67,7 @@
 
 1. **固定三层：**
    - `handlers.py`：只做解析参数、调用 service、回复。要薄。
-   - `service.py`：业务逻辑。新代码必须不 import Entari、不接触消息元素，可以脱离 bot 单独测试；已有代码改到时再迁。现状：20 个插件中只有 4 个（bilibilibot、endfield、radar、tibo_radar）拆出了 `service.py`（共 15 个文件），其中 `bilibilibot/service.py` 仍直接用到 Entari 的图片元素，其余插件的业务逻辑多半还在 `handlers.py` 里。
+   - `service.py`：业务逻辑。新代码必须不 import Entari、不接触消息元素，可以脱离 bot 单独测试；已有代码改到时再迁。现状：20 个插件中只有 4 个（bilibilibot、endfield、radar、tibo_radar）拆出了 `service.py`（共 15 个文件），其余插件的业务逻辑多半还在 `handlers.py` 里。
    - `store.py` / `draw.py`：存储和渲染。
 2. **回复用会话，推送用投递服务。** 指令处理函数里用 `session.send`；定时任务和后台任务里的主动消息一律走 `otae_bot.delivery.deliver`，不自己选账号、不直接调协议发送接口。
 3. **群功能开关和指令统计是自动的。** 插件不需要、也不应该自己判断「本群是否开启」。
@@ -100,12 +100,12 @@
 
 ## 9. 测试
 
-1. **在协议层面测，不伪造框架内部对象。** 新写的测试必须用真实的 Satori 事件和假的协议调用驱动，不要用 `SimpleNamespace` 冒充事件和会话；已有测试改到时再迁。伪造内部对象的测试会在升级框架时成片失效。现状：112 个测试文件中 57 个用到 `SimpleNamespace`（共 409 处），其中至少 40 处（18 个文件）直接拿它冒充事件或会话。
+1. **在协议层面测，不伪造框架内部对象。** 新写的测试必须用真实的 Satori 事件和假的协议调用驱动，不要用 `SimpleNamespace` 冒充事件和会话；已有测试改到时再迁。伪造内部对象的测试会在升级框架时成片失效。现状（2026-11-13）：`tests/` 下 120 个测试文件中 54 个用到 `SimpleNamespace`（共 469 处）。
 2. **守卫基线只能缩小。** `tests/fixtures/boundary_guard_baseline.json` 里的条目只许减少；新增违规会让测试失败，不允许靠更新基线来放行新违规。
 3. **每次提交前跑全量测试。** 提交说明里写通过数，以及仍然失败的是哪些已知用例。
-4. **改动收发消息路径必须实测。** 用测试账号在测试群里跑一遍，并且开着双向限制：只接收测试群的消息，只允许向测试群发送。单元测试通过不等于链路通。
+4. **改动收发消息路径必须实测。** 用测试账号在测试群里跑一遍，并且开着双向限制：只接收测试群的消息，只允许向测试群发送（做法见 [实测](../operations/live_testing.md)）。单元测试通过不等于链路通。
 5. **实测发现的问题要补成单元测试**，再修。
-6. **已知不稳定的用例要登记**，不能默默重跑到通过为止。目前有六处：`test_hyw_retry`（与执行顺序有关，单独运行通过）、`test_bilibili_poller` 里的一个用例，`test_browser_render_queue` 和 `test_http_asset_broker` 里各一个计时用例（高负载时偶发），`test_endfield_card_detail_cache.py` 里的 `test_interval_and_lock_waits_are_counted_separately`（计时），以及 `test_endfield_daily.py` 里的 `test_accounts_load_in_parallel_in_binding_order_and_fail_independently`（计时，要求 0.6 秒内完成，全量负载下偶发）。
+6. **已知失败与不稳定的用例要登记**，不能默默重跑到通过为止。唯一清单在 [测试](testing.md#已知失败与不稳定用例)。
 
 ## 10. 提交与分支
 
@@ -122,7 +122,7 @@
 2. **升级步骤：**
    1. 在独立环境里装新版本，跑全量测试，对比升级前后的失败列表。
    2. 逐个核对 `boundary/` 里的补丁：上游修好的删掉，行为变了的重新实测。
-   3. 核对 `framework_hooks.py` 里那一处私有用法是否还成立，上游有了公开接口就换掉。
+   3. 核对 `framework_hooks.py` 里的私有用法是否还成立，上游有了公开接口就换掉。
    4. 用测试账号实测收发。
 3. **不直接在线上环境里升级依赖。**
 
