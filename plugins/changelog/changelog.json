@@ -1,15 +1,203 @@
 {
   "schema": 2,
-  "head": "3ea7f94",
+  "head": "2f45bba",
   "generated_from": {
     "first_commit": "8e1b455",
     "first_date": "2026-06-17",
-    "last_date": "2026-11-10",
-    "commit_count": 390,
+    "last_date": "2026-11-13",
+    "commit_count": 509,
     "merge_commit_count": 36,
-    "version_count": 55
+    "version_count": 56
   },
   "releases": [
+    {
+      "version": "v2.0.0",
+      "date": "2026-11-13",
+      "from": "2026-11-12",
+      "to": "2026-11-13",
+      "title": "架构重构",
+      "summary": "整体架构重构，支持同时接入 QQ 和 Ir。",
+      "tags": [
+        "框架"
+      ],
+      "highlights": [
+        {
+          "kind": "refactor",
+          "date": "2026-11-12",
+          "text": "整体架构重构，内部统一为 Satori。",
+          "commits": [
+            "a0b646e",
+            "24f87a9",
+            "05a2626",
+            "9b167da",
+            "b3b7490",
+            "0560917",
+            "efcc612",
+            "ff37d04",
+            "694662c",
+            "a58235a",
+            "d68abc9",
+            "4c1d8e2",
+            "fb9cef4",
+            "8c466a4",
+            "90e9a6a",
+            "75ec5d8",
+            "afe93bb",
+            "d71d500",
+            "6e9dfe8",
+            "9f1cfd8",
+            "33fb797",
+            "bc47e29",
+            "e14ff69",
+            "244ee12",
+            "3295d03",
+            "1f81d9d",
+            "dc9a98b",
+            "43db435",
+            "14dfac0",
+            "905c07b",
+            "4a21918",
+            "d681bb5",
+            "0064068",
+            "a2b4d0c",
+            "7cc64ce",
+            "429e1f4",
+            "4299050",
+            "e760bd5",
+            "0f8623a",
+            "309e704",
+            "a18b5ad",
+            "154a767",
+            "885ae12",
+            "8193cc0",
+            "c677540",
+            "87a2078",
+            "64472eb",
+            "eb6cb69",
+            "1104851",
+            "4961e06",
+            "5ecca61",
+            "0723e72",
+            "43a75f9",
+            "b00a41e",
+            "e8f31ca",
+            "08619ea",
+            "7be7bf5",
+            "bfac605",
+            "73d4b9f",
+            "a0d1e9e",
+            "3fa2e78",
+            "f3dc722",
+            "7c5cb3b",
+            "12a3fd4",
+            "b102b01",
+            "c75056f",
+            "d779588",
+            "b4c7fb0",
+            "126e45c",
+            "8e86f41",
+            "a236def",
+            "32a4fc8",
+            "353d259",
+            "5ca4e80",
+            "3466dc0",
+            "61ded48",
+            "8f26665"
+          ]
+        },
+        {
+          "kind": "feat",
+          "date": "2026-11-12",
+          "text": "支持经 OneBot 11 接入；配置改用 entari.yml。",
+          "commits": [
+            "012c718",
+            "e47b391",
+            "e78f755",
+            "9798355",
+            "a1317ba",
+            "f05fee8",
+            "d58a2c0",
+            "26e51bb",
+            "e54c5e3",
+            "ccc481d",
+            "2dbb7e7",
+            "f81b90f",
+            "b178d4d",
+            "efd4e34",
+            "90dd4ce",
+            "d810a81",
+            "b4fad3b",
+            "4f0d095",
+            "9c47cae"
+          ]
+        },
+        {
+          "kind": "feat",
+          "date": "2026-11-12",
+          "text": "图片改为上传发送。",
+          "commits": [
+            "37e9182",
+            "ed3e9e0",
+            "53c941c",
+            "c5f1f0d"
+          ]
+        },
+        {
+          "kind": "fix",
+          "date": "2026-11-13",
+          "text": "修复接入 Ir 后播报发不出去。",
+          "commits": [
+            "45ea139",
+            "e0e6dd4",
+            "9a9d70a",
+            "d4db1ef",
+            "ce64b55",
+            "030bb3e",
+            "88c3a98"
+          ]
+        },
+        {
+          "kind": "fix",
+          "date": "2026-11-13",
+          "text": "修复接入 Ir 后收不到消息。",
+          "commits": [
+            "5c65aac",
+            "b8fc038",
+            "1f4ba6c",
+            "b22848a"
+          ]
+        },
+        {
+          "kind": "fix",
+          "date": "2026-11-12",
+          "text": "修复 /wiki、/mcsm cmd 多发提示。",
+          "commits": [
+            "bb8b689",
+            "470c8f2"
+          ]
+        },
+        {
+          "kind": "chore",
+          "date": "2026-11-12",
+          "text": "升级 Entari 0.19.4；Grok Bot 下线。",
+          "commits": [
+            "27abf87",
+            "92f5e34",
+            "9b4a870",
+            "84afd5d",
+            "68ca9e3"
+          ]
+        },
+        {
+          "kind": "style",
+          "date": "2026-11-13",
+          "text": "更新日志不再列出提交哈希。",
+          "commits": [
+            "2f45bba"
+          ]
+        }
+      ]
+    },
     {
       "version": "v1.37.7",
       "date": "2026-11-10",
