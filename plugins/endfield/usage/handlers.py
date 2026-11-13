@@ -7,7 +7,6 @@ import asyncio
 from arclet.entari import At, Event
 from loguru import logger
 
-from otae_bot.accounts.ready import get_bot
 from otae_bot.messaging.inbound import event_chain, event_user_id, get_group_id, is_group
 
 from ..account.challenge.i18n import get_challenge_locale
@@ -62,11 +61,8 @@ async def _handle_usage_stats(
         return
     subject_label = "个人统计" if mentions else ""
     if scope == "group" and active_bot is None:
-        try:
-            active_bot = get_bot()
-        except RuntimeError:
-            await session.send("群成员列表获取失败，请稍后再试。")
-            return
+        # The account that got the command is in this group; not whichever logged in last.
+        active_bot = session.account
 
     if command.challenge_view == "usage_refresh":
         if scope == "global":

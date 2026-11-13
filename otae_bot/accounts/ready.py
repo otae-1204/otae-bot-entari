@@ -32,7 +32,16 @@ def on_ready(func: Callable[..., Any]):
 
 
 def get_bot() -> Account:
-    """The default account: the most recent login that is still online."""
+    """The most recent login that is still online, on any platform.
+
+    With several platforms online (QQ through LLBot, the Ir panel) this is not
+    a sender for any particular chat: replies use the session's account,
+    proactive messages ``otae_bot.delivery.deliver`` (by group, or by the
+    target's platform), lookups for a command's group ``session.account``.
+    Only "some online account" callers remain: Tibo's cycle account (a
+    preference ``deliver`` checks against the group) and bilibili's group
+    ordering (members of the group first).
+    """
     account = runtime.get_account()
     if account is None:
         raise RuntimeError("No Entari account is ready")

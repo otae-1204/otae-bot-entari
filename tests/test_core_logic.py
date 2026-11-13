@@ -3048,7 +3048,7 @@ remotePort = {{ $v.Second }}
         self.assertIn("guild_name = str(getattr(guild, \"name\", \"\") or \"\").strip()", source)
         self.assertIn("full_guild = await guild_get(guild_id=str(group_id))", source)
         self.assertIn("return str(group_id)", source)
-        self.assertIn("group_name = await _get_group_name(event, group_id)", source)
+        self.assertIn("group_name = await _get_group_name(event, group_id, session.account)", source)
         self.assertIn("_draw_server_list_from_responses", source)
         self.assertIn("run_image_render(", source)
 

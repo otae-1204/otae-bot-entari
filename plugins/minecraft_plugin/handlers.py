@@ -10,7 +10,9 @@ from arclet.entari.command import Match
 from arclet.alconna import Alconna, Args, MultiVar
 from nepattern import AnyString
 
-from otae_bot.accounts.ready import get_bot, on_ready
+from arclet.letoderea import ExitState
+
+from otae_bot.accounts.ready import on_ready
 from otae_bot.messaging.inbound import event_user_id, get_rest
 from otae_bot.infrastructure.rendering.executor import run_image_render
 from otae_bot.messaging.media import png
@@ -45,20 +47,22 @@ def _get_group_id(event: Event) -> str:
     return str(guild.id) if (guild and guild.id) else str(event_user_id(event))
 
 
-async def _get_group_name(event: Event, group_id: str) -> str:
+async def _get_group_name(event: Event, group_id: str, bot) -> str:
+    """Group name from the event, else asked through ``bot``, the account that got the command."""
     guild = getattr(event, "guild", None)
     guild_name = str(getattr(guild, "name", "") or "").strip() if guild else ""
     if guild_name:
         return guild_name
 
     try:
-        bot = get_bot()
         guild_get = getattr(bot, "guild_get", None)
         if callable(guild_get):
             full_guild = await guild_get(guild_id=str(group_id))
             full_name = str(getattr(full_guild, "name", "") or "").strip()
             if full_name:
                 return full_name
+    except ExitState:
+        raise
     except Exception:
         pass
 
@@ -154,7 +158,7 @@ async def handle_ping_command(session: Session, rest: Match[tuple[str, ...]]):
             return
 
         # 多个服务器全部传入，draw_server_info 会处理离线状态
-        group_name = await _get_group_name(event, group_id)
+        group_name = await _get_group_name(event, group_id, session.account)
         output = await run_image_render(
             _draw_server_list_from_responses,
             responses,
@@ -512,13 +516,15 @@ async def handle_online_command(session: Session, rest: Match[tuple[str, ...]]):
         favicon = None
         if guild:
             try:
-                bot = get_bot()
+                bot = session.account  # The account that got the command is in this group.
                 full_guild = await bot.guild_get(guild_id=str(guild.id))
                 server_name = full_guild.name or server_name
                 avatar_url = full_guild.avatar
                 if avatar_url:
                     data = await bot.download(avatar_url)
                     favicon = base64.b64encode(data).decode()
+            except ExitState:
+                raise
             except Exception:
                 server_name = guild.name or server_name
         if len(server_name) > 20:

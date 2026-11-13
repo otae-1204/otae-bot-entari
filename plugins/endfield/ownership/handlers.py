@@ -5,7 +5,6 @@ from __future__ import annotations
 from arclet.entari import Event, MessageChain
 from loguru import logger
 
-from otae_bot.accounts.ready import get_bot
 from otae_bot.messaging.inbound import event_user_id, get_group_id, is_group
 
 from ..account.crypto import CredentialCipher, CredentialKeyError
@@ -41,11 +40,8 @@ async def _handle_ownership_stats(
     user_id = str(event_user_id(event))
     active_bot = bot
     if scope == "group" and active_bot is None:
-        try:
-            active_bot = get_bot()
-        except RuntimeError:
-            await session.send("群成员列表获取失败，请稍后再试。")
-            return
+        # The account that got the command is in this group; not whichever logged in last.
+        active_bot = session.account
 
     if command.action == "ownership_refresh":
         if scope == "global":
