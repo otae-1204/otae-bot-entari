@@ -316,3 +316,81 @@ def test_a_delivery_switched_off_for_the_group_is_not_retried(world, monkeypatch
         assert GROUP not in broadcast._retry_at
 
     run(world, scenario)
+
+
+@pytest.fixture
+def log_lines():
+    lines = []
+    sink = logger.add(lambda message: lines.append((message.record["level"].name, message.record["message"])),
+                      level="DEBUG", format="{message}")
+    yield lines
+    logger.remove(sink)
+
+
+def test_a_hung_server_times_out_without_holding_up_the_others(world, monkeypatch):
+    async def scenario():
+        await online(world, qq("3898438488", [GROUP]))
+        hung = "hung.example:25565"
+        world.manager.servers[GROUP][hung] = {"name": "挂死服"}
+        getattr(broadcast, "__BroadcastInfo")[GROUP][hung] = {
+            "name": "挂死服", "address": hung, "players": None, "players_hidden": False, "online_players": 0,
+        }
+        never = asyncio.Event()
+        answered = broadcast.ping
+
+        async def ping(address, server_type="java"):
+            if address == hung:
+                world.pinged.append(address)
+                await never.wait()  # Like a mcstatus thread stuck on a server that never answers.
+            return await answered(address, server_type)
+
+        monkeypatch.setattr(broadcast, "ping", ping)
+        monkeypatch.setattr(broadcast, "PING_TIMEOUT_SECONDS", 0.05)
+        world.players[MC] = ["Alice", "Bob"]
+        await asyncio.wait_for(broadcast.broadcast(), 5)
+        assert [sender for sender, _ in sent(world)] == ["3898438488"]
+        assert getattr(broadcast, "__BroadcastInfo")[GROUP][hung]["players"] is None  # The unreachable path.
+
+        # The stuck ping is reused, not started again, until it finishes.
+        world.now += broadcast.MC_BROADCAST_INTERVAL
+        await asyncio.wait_for(broadcast.broadcast(), 5)
+        assert world.pinged.count(hung) == 1
+        never.set()
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        assert hung not in broadcast._inflight_pings
+
+    run(world, scenario)
+
+
+def test_a_stalled_tick_is_abandoned_so_later_ticks_run(world, monkeypatch, log_lines):
+    async def scenario():
+        await online(world, qq("3898438488", [GROUP]))
+        stuck = asyncio.Event()
+
+        async def stalled():
+            await stuck.wait()
+
+        monkeypatch.setattr(world.manager, "get_all_broadcast_servers", stalled)
+        monkeypatch.setattr(broadcast, "BROADCAST_TICK_TIMEOUT_SECONDS", 0.05)
+        await asyncio.wait_for(broadcast.broadcast(), 5)  # Returns: the scheduler sees the job finish.
+        assert any(level == "WARNING" and "已中止" in text for level, text in log_lines)
+
+    run(world, scenario)
+
+
+def test_each_tick_logs_one_line_at_debug_when_idle_and_info_when_something_happened(world, log_lines):
+    async def scenario():
+        await online(world, qq("3898438488", [GROUP, OTHER]))
+        await broadcast.broadcast()
+        ticks = [(level, text) for level, text in log_lines if "检查完成" in text]
+        assert len(ticks) == 1 and ticks[0][0] == "DEBUG" and "到期群 2" in ticks[0][1]
+        log_lines.clear()
+        world.now += broadcast.MC_BROADCAST_INTERVAL
+        world.players[MC] = ["Alice", "Bob"]
+        await broadcast.broadcast()
+        ticks = [(level, text) for level, text in log_lines if "检查完成" in text]
+        assert len(ticks) == 1 and ticks[0][0] == "INFO" and "变化 1 条" in ticks[0][1]
+        assert "Bob" not in ticks[0][1]
+
+    run(world, scenario)

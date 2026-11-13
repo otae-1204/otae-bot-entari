@@ -47,6 +47,13 @@ _last_broadcast_at: dict[str, int] = {}
 _send_failures: dict[str, int] = {}
 _retry_at: dict[str, int] = {}
 RETRY_BACKOFF_MAX_SECONDS = 1800
+# 单次 ping 的总时限（mcstatus 自己只限每次连接/读写 3 秒，不限总时长），
+# 单次发送的时限，以及一轮检查的总时限：一台挂死的服务器拖不住后面的检查。
+PING_TIMEOUT_SECONDS = 10
+SEND_TIMEOUT_SECONDS = 30
+BROADCAST_TICK_TIMEOUT_SECONDS = 180
+# 超时后仍在线程里跑的 ping：结束前同一地址复用它，不再另起线程。
+_inflight_pings: dict[str, asyncio.Future] = {}
 
 
 # ── 监听 bot 重新入群 → 清除踢出标记 ──
@@ -123,11 +130,37 @@ def _normalize_servers(data) -> dict:
     return {}
 
 
-async def _ping_with_timeout(addr: str, timeout: float = 5) -> dict:
-    """带超时的 ping，避免离线服务器卡死初始化."""
+def _ping_finished(addr: str, task: asyncio.Future) -> None:
+    if _inflight_pings.get(addr) is task:
+        del _inflight_pings[addr]
+    if not task.cancelled():
+        task.exception()  # ping() 自己兜住异常；这里只为不留“未取回的异常”。
+
+
+async def _ping_with_timeout(addr: str, timeout: float | None = None) -> dict:
+    """带总时限的 ping；超时按连不上处理（与 ping 失败同一路径）.
+
+    ping 在线程里跑，取消不了线程。超时后不再等它，但在它结束前同一地址的
+    后续 ping 都等这一个，避免挂死的服务器每轮多占一个线程、把线程池占满。
+    """
+    timeout = PING_TIMEOUT_SECONDS if timeout is None else timeout
+    task = _inflight_pings.get(addr)
+    if task is None:
+        task = asyncio.ensure_future(ping(addr, "java"))
+        _inflight_pings[addr] = task
+        task.add_done_callback(lambda done, key=addr: _ping_finished(key, done))
+    finished, _ = await asyncio.wait({task}, timeout=timeout)
+    if not finished:
+        logger.debug(f"[MC_Server] ping {addr} 超过 {timeout} 秒未返回，按连不上处理")
+        return {"status": "error", "data": {}}
+    if task.cancelled():  # Only at shutdown; this caller's own cancellation still propagates.
+        return {"status": "error", "data": {}}
     try:
-        return await asyncio.wait_for(ping(addr, "java"), timeout=timeout)
-    except (asyncio.TimeoutError, Exception):
+        return task.result()
+    except ExitState:
+        raise
+    except Exception as exc:
+        logger.debug(f"[MC_Server] ping {addr} 失败：{type(exc).__name__}")
         return {"status": "error", "data": {}}
 
 
@@ -262,8 +295,8 @@ async def _sync_server_list():
                         __BroadcastInfo[gid][addr] = _build_broadcast_cache_entry(addr, name, result, now)
     except (ExitState, asyncio.CancelledError):
         raise
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning(f"[MC_Server] 同步播报服务器列表失败：{type(exc).__name__}")
 
 
 def _is_kicked_error(exc: BaseException) -> bool:
@@ -289,7 +322,7 @@ async def _send_group(group_id: str, text: str) -> tuple[str, BaseException | No
     target = Target.group(gid)
     kicked = 0
     for _ in range(len(runtime.get_bots()) + 1):
-        result = await deliver(target, _text(text))
+        result = await asyncio.wait_for(deliver(target, _text(text)), SEND_TIMEOUT_SECONDS)
         if result.status == DELIVERY_NO_ACCOUNT:
             if kicked:
                 break
@@ -347,7 +380,7 @@ async def _check_server(group_id: str, addr: str, server_info: dict, now: int) -
         return None
     server_name = server_info.get("name", addr)
 
-    server_status = await ping(server_address, server_type="java")
+    server_status = await _ping_with_timeout(server_address)
     current_players = None
     current_players_hidden = False
     current_online_players = 0
@@ -373,7 +406,7 @@ async def _check_server(group_id: str, addr: str, server_info: dict, now: int) -
     if previous_players is not None and current_players is None:
         for _ in range(3):
             await asyncio.sleep(1)
-            confirm = await safe_ping(server_address)
+            confirm = await _ping_with_timeout(server_address)
             if confirm.get("status") == "success":
                 data = confirm.get("data", {})
                 if data.get("players_hidden"):
@@ -417,9 +450,50 @@ async def _commit_checks(group_id: str, checks: list[_ServerCheck]) -> None:
         _record_playtimes(group_id, check.addr, check.playtimes)
 
 
+@dataclass
+class _TickStats:
+    groups: int = 0
+    servers: int = 0
+    changes: int = 0
+    sent: int = 0
+    deferred: int = 0
+    errors: int = 0
+
+    def summary(self) -> str:
+        return (
+            f"到期群 {self.groups}，服务器 {self.servers}，变化 {self.changes} 条，"
+            f"已发 {self.sent} 群，暂缓 {self.deferred} 群，异常 {self.errors} 条"
+        )
+
+
 @timer.scheduled_job("interval", seconds=BROADCAST_TICK_SECONDS, misfire_grace_time=30, max_instances=1)
 async def broadcast():
     """定时轮询所有服务器，检测玩家变化并播报（同时同步 DB 配置）.
+
+    每轮最多 BROADCAST_TICK_TIMEOUT_SECONDS 秒：超时就中止本轮，调度器的
+    “上一轮还在跑就跳过”不会被一轮挂死的检查永久卡住。每轮记一行日志：
+    什么都没发生时为 DEBUG，有变化、发送、暂缓或异常时为 INFO。
+    """
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    stats = _TickStats()
+    try:
+        await asyncio.wait_for(_broadcast_tick(stats), BROADCAST_TICK_TIMEOUT_SECONDS)
+    except asyncio.TimeoutError:
+        logger.warning(
+            f"[MC_Server] 本轮检查超过 {BROADCAST_TICK_TIMEOUT_SECONDS} 秒未完成，已中止"
+            f"（{stats.summary()}）；未发出的变化下次重试"
+        )
+        return
+    line = f"[MC_Server] 检查完成：{stats.summary()}，用时 {loop.time() - started:.1f} 秒"
+    if stats.changes or stats.deferred or stats.errors:
+        logger.info(line)
+    else:
+        logger.debug(line)
+
+
+async def _broadcast_tick(stats: _TickStats) -> None:
+    """一轮检查.
 
     有变化的服务器，状态在播报发出（或按群开关、被移出群有意不发）之后才写回
     缓存；发送失败或没有在群账号时不写，下次到期重新比对，未发出的变化一并
@@ -448,47 +522,33 @@ async def broadcast():
         if not _is_group_broadcast_due(str(group_id), now):
             continue
         _mark_group_broadcasted(str(group_id), now)
+        stats.groups += 1
+        stats.servers += len(group_servers)
+        # 同一群的服务器并发检查，每台受 PING_TIMEOUT_SECONDS 限制。
+        results = await asyncio.gather(
+            *(_check_server(group_id, addr, info, now) for addr, info in group_servers.items()),
+            return_exceptions=True,
+        )
         checks: list[_ServerCheck] = []
-        for addr, server_info in group_servers.items():
-            try:
-                check = await _check_server(group_id, addr, server_info, now)
-            except (ExitState, asyncio.CancelledError):
-                raise
-            except Exception:
-                errors.append(f"群 {group_id} 服务器 {addr}: {traceback.format_exc()}")
-                continue
-            if check is not None:
-                checks.append(check)
+        for addr, result in zip(group_servers, results):
+            if isinstance(result, (ExitState, asyncio.CancelledError)):
+                raise result
+            if isinstance(result, BaseException):
+                errors.append(f"群 {group_id} 服务器 {addr}: {''.join(traceback.format_exception(result))}")
+                logger.warning(f"[MC_Server] 群 {group_id} 服务器 {addr} 检查出错：{type(result).__name__}")
+            elif result is not None:
+                checks.append(result)
 
         # 没有要播报的变化：直接写回（人数、隐藏状态等）。
         await _commit_checks(group_id, [check for check in checks if not check.messages])
         changed = [check for check in checks if check.messages]
         if not changed:
             continue
-        group_messages = [line for check in changed for line in check.messages]
-        try:
-            outcome, failure = await _send_group(str(group_id), "\n".join(group_messages))
-        except (ExitState, asyncio.CancelledError):
-            raise
-        except Exception as exc:
-            logger.warning(f"[MC_Server] 群 {group_id} 播报发送失败：{type(exc).__name__}")
-            outcome, failure = FAILED, exc
-        if outcome in (SENT, KICKED):
-            # 被移出群：与原来一样丢弃这次变化，该群暂停到重新入群。
-            await _commit_checks(group_id, changed)
-            _group_delivered(str(group_id))
-            continue
-        wait = _defer_group(str(group_id), now)
-        logger.warning(
-            f"[MC_Server] 群 {group_id} 的 {len(group_messages)} 条变化未发出，"
-            f"{wait} 秒后重试（连续失败 {_send_failures[str(group_id)]} 次）"
-        )
-        if outcome == FAILED:
-            detail = "".join(traceback.format_exception(failure)) if failure is not None else ""
-            errors.append(f"群 {group_id} 发送消息失败: {detail}")
-        else:
-            errors.append(f"群 {group_id} 发送消息失败: 没有在线账号在该群内")
+        stats.changes += sum(len(check.messages) for check in changed)
+        # 发送与写回不受本轮总时限打断：发出去了就一定写回，避免下次重复播报。
+        await asyncio.shield(_deliver_group(str(group_id), group_id, changed, now, stats, errors))
 
+    stats.errors = len(errors)
     if errors:
         bot = _digest_account(snapshot)
         if bot is None:
@@ -510,9 +570,10 @@ async def broadcast():
                     suppressed += len(group_errors)
             if lines:
                 suffix = f"\n已折叠 {suppressed} 条重复异常" if suppressed else ""
-                result = await deliver(target, _text(
+                digest = _text(
                     f"广播异常摘要（共 {len(lines)} 条）：\n" + "\n---\n".join(lines[-5:]) + suffix
-                ), account=bot)
+                )
+                result = await asyncio.wait_for(deliver(target, digest, account=bot), SEND_TIMEOUT_SECONDS)
                 result.raise_for_failure()
         except (ExitState, asyncio.CancelledError):
             raise
@@ -520,6 +581,36 @@ async def broadcast():
             logger.warning(
                 f"[MC_Server] 广播异常摘要发送失败：账号 {runtime.account_id(bot)}，{type(exc).__name__}"
             )
+
+
+async def _deliver_group(gid: str, group_id, changed: list[_ServerCheck], now: int,
+                         stats: _TickStats, errors: list[str]) -> None:
+    group_messages = [line for check in changed for line in check.messages]
+    try:
+        outcome, failure = await _send_group(gid, "\n".join(group_messages))
+    except (ExitState, asyncio.CancelledError):
+        raise
+    except Exception as exc:
+        logger.warning(f"[MC_Server] 群 {gid} 播报发送失败：{type(exc).__name__}")
+        outcome, failure = FAILED, exc
+    if outcome in (SENT, KICKED):
+        # 被移出群：与原来一样丢弃这次变化，该群暂停到重新入群。
+        await _commit_checks(group_id, changed)
+        _group_delivered(gid)
+        if outcome == SENT:
+            stats.sent += 1
+        return
+    stats.deferred += 1
+    wait = _defer_group(gid, now)
+    logger.warning(
+        f"[MC_Server] 群 {gid} 的 {len(group_messages)} 条变化未发出，"
+        f"{wait} 秒后重试（连续失败 {_send_failures[gid]} 次）"
+    )
+    if outcome == FAILED:
+        detail = "".join(traceback.format_exception(failure)) if failure is not None else ""
+        errors.append(f"群 {gid} 发送消息失败: {detail}")
+    else:
+        errors.append(f"群 {gid} 发送消息失败: 没有在线账号在该群内")
 
 
 def get_player_online_times(group_id: str, server_address: str) -> dict[str, str]:
