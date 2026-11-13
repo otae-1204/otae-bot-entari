@@ -147,7 +147,7 @@
 - 选图：`art_frame.candidates(高度, 图库, 主题)`，立绘窗门槛与 help 相同；高度未知时给整个图库。
   高度要渲染后才知道的卡片（如更新日志），先随机挑一张出图，量出高度后不合格再重挑重出，
   见 `plugins/changelog/rendering.py`。
-- 渲染：一般直接用 `art_card.render_card(ArtCard(标题, 副标题, 面板 HTML, css))`，它负责离线文档、CSP、随机插画和按高度重挑，见 `docs/status_and_usage_stats.md`。
+- 渲染：一般直接用 `art_card.render_card(ArtCard(标题, 副标题, 面板 HTML, css))`，它负责离线文档、CSP、随机插画和按高度重挑，见 `docs/features/status_and_usage_stats.md`。
 - 外框：`font_face_css(主题)` + `frame_css(主题, 插画, min_card_height=…)` 放进 `<style>`，
   页面用 `frame_body(标题, subtitle_html(副标题), 插画, 面板内容, 主题)` 生成；截图选择器为 `.page`。
   卡片只写面板内容和它的样式，类名加自己的前缀，避免和外框的 `.page`、`.card`、`.panel` 等冲突。

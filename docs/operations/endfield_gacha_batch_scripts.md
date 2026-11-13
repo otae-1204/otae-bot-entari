@@ -111,5 +111,5 @@ chcp 65001 > $null; .\.venv\Scripts\python.exe scripts\endfield\aggregate_endfie
 
 ## 注意事项
 
-- `output/` 目录当前**未**被 `.gitignore` 忽略。导出的寻访明细含玩家数据，聚合 JSON 虽为匿名，若不想入库，请先向 `.gitignore` 追加 `output/`。
+- `output/` 已在 `.gitignore` 中，导出结果不会入库；寻访明细含玩家数据，不要外传。
 - 两个脚本都通过合成包按需加载 `plugins/endfield` 下的模块，不会触发 bot 主入口；正常运行不影响线上 bot 进程与数据库（`aggregate` 只读，`export` 不写库）。

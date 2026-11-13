@@ -186,7 +186,7 @@ git log ──► scripts/generate_changelog.py ──► plugins/changelog/chan
 ## 卡片风格
 
 与 help 卡片同一套外框：蓝色横幅、插画虚化底、磨砂面板、右侧插画立牌，横幅右侧的白色胶囊留空。
-外框、主题、图库与选图规则直接调用 `otae_bot/infrastructure/rendering/art_frame.py`，与 help 共用一份（见 `docs/help_cards.md`「同模板的其他卡片」），`assets/card.css` 只写面板内容。
+外框、主题、图库与选图规则直接调用 `otae_bot/infrastructure/rendering/art_frame.py`，与 help 共用一份（见 `docs/development/help_cards.md`「同模板的其他卡片」），`assets/card.css` 只写面板内容。
 主色、页宽（1325 px）、立牌宽度、字体与模糊半径都从 `art_frame.HelpTheme` 读取，
 help 改配色时更新日志跟着变；只有最小卡片高度单独定为 460 px，内容短的页面不会空出一大块。
 按 1x 渲染，与 help 一致。面板内容的类名统一加 `cl-` 前缀，避免与外框的 `.page`、`.card`、`.panel` 等冲突。

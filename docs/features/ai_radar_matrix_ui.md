@@ -93,17 +93,17 @@
 .venv/bin/python scripts/preview/preview_ai_radar_matrix.py
 ```
 
-输出在 `output/ai-radar/`，保留用户的 `demo.png`：
+输出在 `output/ai-radar/`（本地生成，不入库），保留用户的 `demo.png`：
 
-- [完整长图 PNG](../output/ai-radar/matrix.png) / [完整 HTML](../output/ai-radar/matrix.html)
-- [顶部局部预览](../output/ai-radar/matrix-detail.png)：同一长图的顶部截图，方便查看文字和分区。
-- [六档模型细节](../output/ai-radar/matrix-model-detail.png)：查看卡头、分数层级、证据及底部投入数据。
-- [分数渐变细节](../output/ai-radar/matrix-score-detail.png)：同一卡片内的低、中、高分与模型整体 IQ 使用统一色卡。
-- [单模型厂商细节](../output/ai-radar/matrix-single-model.png)：确认只有一个模型时仍保持正常卡宽和纵向结构。
-- [小样本预警细节](../output/ai-radar/matrix-insufficient.png)：真实快照中的小样本档位与历史缺失状态。
-- [零样本细节](../output/ai-radar/matrix-no-samples.png)：区分没有有效样本的空档位和仍有实测分数的小样本档位。
-- [国外区域预览](../output/ai-radar/matrix-international.png) / [国内区域预览](../output/ai-radar/matrix-domestic.png)：同一张长图的区域截图。
-- [手机布局长图](../output/ai-radar/matrix-mobile.png)
+- 完整长图 PNG（`matrix.png`） / 完整 HTML（`matrix.html`）
+- 顶部局部预览（`matrix-detail.png`）：同一长图的顶部截图，方便查看文字和分区。
+- 六档模型细节（`matrix-model-detail.png`）：查看卡头、分数层级、证据及底部投入数据。
+- 分数渐变细节（`matrix-score-detail.png`）：同一卡片内的低、中、高分与模型整体 IQ 使用统一色卡。
+- 单模型厂商细节（`matrix-single-model.png`）：确认只有一个模型时仍保持正常卡宽和纵向结构。
+- 小样本预警细节（`matrix-insufficient.png`）：真实快照中的小样本档位与历史缺失状态。
+- 零样本细节（`matrix-no-samples.png`）：区分没有有效样本的空档位和仍有实测分数的小样本档位。
+- 国外区域预览（`matrix-international.png`） / 国内区域预览（`matrix-domestic.png`）：同一张长图的区域截图。
+- 手机布局长图（`matrix-mobile.png`）
 - `matrix-source-deep-swe.json`：可复用的原始公开数据快照。
 - `matrix-validation.json`：1960 / 1024 / 768 / 390 px 布局、分组、卡宽一致性、字体、图标解码、坐标标签尺寸与边界、实际 IQ 取色与文字对比度、预警数量、溢出和外部请求检查。
 

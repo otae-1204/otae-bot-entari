@@ -11,10 +11,10 @@
 | `/ef 档案 刷新` | `archive_refresh` | 重抓 AKEData 全量 + 上一游戏版本基线并落盘，随后返回统计卡 |
 | `/ef 档案 收集 [账号]`（别名 进度/progress） | `archive_progress` | 个人「已获得 docNum / 全库总数」进度卡（需绑定森空岛账号） |
 
-设计完全对齐蚀刻章模块（`docs/endfield_medal_guide.md`）：AKEData 全量快照 × 上一版本
+设计完全对齐蚀刻章模块（`docs/features/endfield_medal_guide.md`）：AKEData 全量快照 × 上一版本
 基线做版本新增；自动刷新 + JSON 双槽快照缓存，并保留手动刷新。**关键差异**：森空岛对档案只提供
 `card/detail → data.detail.base.docNum` 一个总数（无逐条明细，见
-`docs/skland_endfield_ui_data_inventory.md` §11），因此**没有**「缺什么」明细查询，
+`docs/reference/skland_endfield_ui_data_inventory.md` §11），因此**没有**「缺什么」明细查询，
 个人侧只有「已获得/总数/缺 N 条」。
 
 ## 按需刷新（档案与蚀刻章共用）

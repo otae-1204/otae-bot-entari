@@ -23,7 +23,7 @@ F1/F2 详情每条显示 **描述**（深色）+ **获取条件**（浅色），
   - **值是真 id，不是图片**：hex = `md5(achv_id)`，故能直接关联 AKEData 奖章记录（实测 10/10 命中），做「展示奖章统计」不需要任何图像识别；用 `build_medal_id_index` / `resolve_medal_wall` 还原。
   - **槽位序号即蜂窝坐标**：奇数为上排、偶数为下排，同列两格是相邻的一对（1/2、3/4 …），不是「前 5 后 5」。
 
-> 取数细节见 `docs/akedata_data_access_guide.md`；森空岛字段见 `docs/skland_endfield_personal_api.md`。
+> 取数细节见 `docs/reference/akedata_data_access_guide.md`；森空岛字段见 `docs/reference/skland_endfield_personal_api.md`。
 
 公开快照与档案共用按需刷新：查询统计或缺章时触发，全机器人共享 **24 小时** manifest
 检查冷却，启动和空闲时不轮询。完整构建、热更号或发布元数据变化才拉表，不再每 6 小时
@@ -57,7 +57,7 @@ F1/F2 详情每条显示 **描述**（深色）+ **获取条件**（浅色），
 - 实际档位 `real_level = skland.level + initLevel - 1`。
 - 全游戏仅「谷地调查者奖章」（`initLevel=2`，2→3 升级）受影响；其余可升级章 `initLevel=1` 无偏移。
 - 等级横条按账号**已拥有**的 `real_level`（颜色）统计，未升满判定 `can_be_upgraded and real_level < max_level`。
-- 完整数据对比见 `docs/bugfix_medal_investigator_max_tier.md`（权威）。
+- 完整数据对比见 `docs/history/bugfix_medal_investigator_max_tier.md`（权威）。
 
 ### 4.2 图标档位规则
 - 图标 URL：`{AKEDATA_ICON_BASE}/{achvId}_lv{NN}.png`（每档一张；单档章只有 `_lv01`）。
@@ -76,7 +76,7 @@ F1/F2 详情每条显示 **描述**（深色）+ **获取条件**（浅色），
 `tier_desc` / `tier_cond` 这类 `dict[int,str]` 经 `medal_snapshot.json` 存盘后 key 会变成字符串。查询统一走 `_tier_text(d, lv)`（兼容 int/str key），否则会查空。
 
 ### 4.5 关联键
-`md5(achv_id) == 森空岛 achievementData.id`（实测 115/115 命中），比按名字关联可靠（不受命名滞后影响）。详见 `docs/skland_medal_id_mapping.md`。
+`md5(achv_id) == 森空岛 achievementData.id`（实测 115/115 命中），比按名字关联可靠（不受命名滞后影响）。详见 `docs/reference/skland_medal_id_mapping.md`。
 
 ### 4.6 共享引用陷阱
 同一枚章可能同时进 F2 的 `not_maxed` 和 `not_plated`，故选档时用 `dataclasses.replace(...)` 复制副本，避免后写覆盖。
