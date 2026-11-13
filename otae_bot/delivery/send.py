@@ -57,11 +57,17 @@ def is_not_in_group(exc: BaseException) -> bool:
     return bool(_NOT_IN_GROUP.search(f"{type(exc).__name__}: {exc}"))
 
 
+def _platform(bot: Any) -> str:
+    return str(getattr(bot, "platform", "") or "")
+
+
+def _same_platform(bot: Any, target: Target) -> bool:
+    return not target.platform or _platform(bot) == target.platform
+
+
 def _online(target: Target) -> Account | None:
     for bot in runtime.get_bots():
-        if runtime.account_id(bot) == target.self_id and (
-            not target.platform or str(getattr(bot, "platform", "") or "") == target.platform
-        ):
+        if runtime.account_id(bot) == target.self_id and _same_platform(bot, target):
             return bot
     return None
 
@@ -70,13 +76,31 @@ def _group_account(target: Target) -> Account | None:
     preferred = _online(target) if target.self_id else None
     if preferred is not None and target.guild_id in (runtime.known_guilds(preferred) or ()):
         return preferred
+    # Only accounts whose guild.list names the group. The platform is not
+    # filtered: a stored target may name a platform an account has since moved off.
     return runtime.get_bot_for_guild(target.guild_id)
 
 
+def private_candidates(target: Target) -> list[Account]:
+    """Accounts that may send to a private ``target``, in the order ``deliver`` tries them.
+
+    The named account when it is online; otherwise the most recent login on the
+    target's platform, never one on another platform. With the platform unknown
+    every online account qualifies, the most recent login first, and ``deliver``
+    tries the next one when a send fails (the user may exist on one platform only).
+    """
+    if target.self_id and (named := _online(target)) is not None:
+        return [named]
+    bots = runtime.get_bots()
+    if target.platform:
+        return [bot for bot in bots if _platform(bot) == target.platform][:1]
+    return bots
+
+
 async def resolve_account(target: Target) -> Account | None:
-    """The account ``deliver`` would use for ``target`` when none is given."""
+    """The account ``deliver`` would use (first) for ``target`` when none is given."""
     if target.is_private:
-        return (_online(target) if target.self_id else None) or runtime.get_account()
+        return next(iter(private_candidates(target)), None)
     await runtime.refresh_guilds(max_age=runtime.GUILD_REFRESH_SECONDS)
     bot = _group_account(target)
     if bot is None:
@@ -99,14 +123,33 @@ async def deliver(
     that). ``plugin`` defaults to the plugin of the running subscriber, whose
     per-group switch decides whether a group delivery is suppressed.
     """
-    bot = account if account is not None else await resolve_account(target)
-    if bot is None:
+    if account is not None:
+        candidates = [account]
+    elif target.is_private:
+        candidates = private_candidates(target)
+    else:
+        candidates = [bot] if (bot := await resolve_account(target)) is not None else []
+    if not candidates:
         where = f"user {target.user_id}" if target.is_private else f"group {target.guild_id}"
         logger.warning(f"[delivery] no online account can send to {where}")
         return DeliveryResult(NO_ACCOUNT)
+    chain = message if isinstance(message, MessageChain) else MessageChain(message)
+    result = DeliveryResult(NO_ACCOUNT)
+    for bot in candidates:
+        result = await _send(bot, target, chain, plugin)
+        if result.status != FAILED:
+            break
+        if bot is not candidates[-1]:
+            logger.debug(
+                f"[delivery] {_platform(bot)}:{runtime.account_id(bot)} could not send to user "
+                f"{target.user_id} ({type(result.exception).__name__}); trying the next account"
+            )
+    return result
+
+
+async def _send(bot: Account, target: Target, chain: MessageChain, plugin: str | None) -> DeliveryResult:
     if not target.is_private and not allow_group_delivery(bot, target.guild_id, plugin):
         return DeliveryResult(SUPPRESSED, bot)
-    chain = message if isinstance(message, MessageChain) else MessageChain(message)
     try:
         if target.is_private:
             messages = await bot.protocol.send_private_message(target.user_id, chain)
