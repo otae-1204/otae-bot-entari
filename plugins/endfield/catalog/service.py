@@ -731,7 +731,7 @@ class EndfieldService:
 
         manifest → latest 版本 → AchievementTable + AchievementTypeTable + I18nTextTable_CN，
         聚合成快照。AKEData 的 ``achv_*`` id 与森空岛 hex 经 md5 关联，故 ``medal_id`` 直接用
-        achv_id。详见 ``docs/skland_medal_id_mapping.md``。
+        achv_id。详见 ``docs/reference/skland_medal_id_mapping.md``。
         """
         from ..providers.akedata import fetch_akedata_medal_tables
 
@@ -851,7 +851,7 @@ class EndfieldService:
         # 等级分布按账号已拥有奖章的「当前档位（颜色）」统计。
         # 森空岛 level 对 initLevel>1 的章有偏移（如「谷地调查者奖章」initLevel=2：银记 1、金记 2），
         # 实际档位 = skland level + initLevel - 1；否则会把 2→3 升级章误判。
-        # 详见 docs/bugfix_medal_investigator_max_tier.md。AKEData max_level 本身正确。
+        # 详见 docs/history/bugfix_medal_investigator_max_tier.md。AKEData max_level 本身正确。
         owned_level_counts: dict[int, int] = {}
         for medal in snapshot.medals:
             achv_id = medal.medal_id or ""
@@ -1038,7 +1038,7 @@ class EndfieldService:
         server_name: str,
     ) -> ArchiveProgressView:
         """个人档案收集进度：森空岛 card/detail 只给 ``data.detail.base.docNum`` 总数，
-        无逐条明细（见 docs/skland_endfield_ui_data_inventory.md §11），故仅做
+        无逐条明细（见 docs/reference/skland_endfield_ui_data_inventory.md §11），故仅做
         已获得/总数展示。docNum 超过快照总数时标记 ``over_total`` 供卡片提示口径异常。
         """
         base = (((raw_detail.get("data") or {}).get("detail") or {}).get("base") or {})

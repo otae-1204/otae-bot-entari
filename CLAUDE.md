@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 基于 Entari / Satori 的 QQ 机器人：`otae_bot/` 是应用骨架与共享代码，`plugins/` 下 20 个功能插件。
-外部经 Satori（`entari.yml` 的 `basic.network`）或由边界层内嵌的 OneBot 11 服务端（`plugins.server`）接入。完整约定见 `docs/architecture_conventions.md`。
+外部经 Satori（`entari.yml` 的 `basic.network`）或由边界层内嵌的 OneBot 11 服务端（`plugins.server`）接入。完整约定见 `docs/development/architecture_conventions.md`。
 
 ## 不可违反的规则
 

@@ -31,7 +31,7 @@ class BoundaryGuardTests(unittest.TestCase):
         violations = guard.scan()
         new, gone = guard.compare(violations, guard.load_baseline())
         self.assertFalse(new, "new violations (protocol code belongs in otae_bot/boundary/; imports follow "
-                         "docs/architecture_conventions.md §2):\n"
+                         "docs/development/architecture_conventions.md §2):\n"
                          + "\n".join(f"  {v.rule} {v.file}:{v.line}  {v.snippet}" for v in new))
         self.assertFalse(gone, f"violations fixed but still in the baseline; run `{REGENERATE}`:\n"
                          + "\n".join(f"  {r} {f}  {s}" for (r, f, s) in sorted(gone)))

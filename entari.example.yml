@@ -47,7 +47,7 @@ otae:
     api_key: "${{ env.LLM_API_KEY :- }}"   # API Key（密钥），填 "${{ env.LLM_API_KEY :- }}"
     base_url: ""   # OpenAI 兼容接口基址；留空 = https://api.deepseek.com
     model: ""   # 模型名；留空 = deepseek-v4-flash
-  # 素材通道（图片/图标/头像），见 docs/http_asset_lane.md；留空的项用内置默认值
+  # 素材通道（图片/图标/头像），见 docs/development/http_asset_lane.md；留空的项用内置默认值
   http_asset:
     # connect_timeout:   # 连接超时秒数（默认 4）
     # read_timeout:   # 读超时秒数（默认 10）
@@ -119,7 +119,7 @@ plugins:
     gacha_forward_above: 3   # 抽卡分析图超过几张改为合并转发（0 = 关闭合并转发）
     gacha_show_standard: true   # 是否展示基础寻访卡片（隐藏时仍计入总数）
     gacha_rerun_side: "right"   # 重构侧栏放在哪一边：right 或 left
-  # HYW 搜索问答（/q、/hyw、/何意味），见 docs/hyw_plugin.md
+  # HYW 搜索问答（/q、/hyw、/何意味），见 docs/features/hyw_plugin.md
   plugins.hyw:
     config_source: "hyw"   # 凭据来源：hyw = 本段；llm = 整组用 otae.llm；steam = 整组用 plugins.steamInfo 的 llm_*
     api_key: "${{ env.HYW_API_KEY :- }}"   # API Key（密钥）

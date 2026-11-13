@@ -73,7 +73,7 @@ _TABLE_COMMANDS = {"档位", "combos"}
 #: （榜/模型/对比/推荐/预警/性价比/趋势）+ 频道 + 档位 + 帮助。
 #: 被摘掉的 5 个（题 / 好题 / 贡献者 / 流水 / 实时）**只摘命令面**——
 #: ``service.py`` / ``provider.py`` / ``formatters.py`` 里的对应能力原样保留，
-#: 前端 AI 仍可经 ``RadarService`` 取到这些数据（见 docs/ai_radar_frontend_api.md §19）。
+#: 前端 AI 仍可经 ``RadarService`` 取到这些数据（见 docs/reference/ai_radar_frontend_api.md §19）。
 _SUBCOMMANDS: dict[str, str] = {
     "总览": "overview",
     "overview": "overview",

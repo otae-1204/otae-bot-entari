@@ -81,7 +81,7 @@ _ATTENDANCE_AKEDATA_ICON_IDS = {
 # Verified original Skland icons against ItemTable + I18nTextTable_CN, version
 # 1.5.3@10024360-6 (2026-09-21). Match image fingerprints, never numbered reward
 # aliases: a future calendar can reuse an alias for a different item.
-# See docs/endfield_attendance_card.md for sources and the public fixture.
+# See docs/features/endfield_attendance_card.md for sources and the public fixture.
 _ATTENDANCE_SKLAND_ICON_ITEMS = {
     "921a397e2765462c009b939e0cd92606": "item_expcard_stage1_mid",
     "ed34d5a121dbc81da6f6991792ff97f6": "item_expcard_stage2_low",
@@ -753,7 +753,7 @@ class EndfieldOfficialClient:
 
         GET /api/v1/game/endfield/card/detail?roleId=<id>&serverId=<id>，签名 GET（query 入签名）。
         奖章进度在 ``data.detail.achieve.achieveMedals[]``，每枚含 ``achievementData.id`` /
-        ``level`` / ``isPlated``。依据 docs/skland_endfield_personal_api.md（2026-07-15 实测）。
+        ``level`` / ``isPlated``。依据 docs/reference/skland_endfield_personal_api.md（2026-07-15 实测）。
         """
         return await self._personal_card_payload(
             account_token, role,

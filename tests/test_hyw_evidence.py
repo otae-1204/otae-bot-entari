@@ -10,8 +10,8 @@ ones that invoke a test file as a plain script with a bare system interpreter:
   itself when no service-account credential is available.
 
 Checks:
-1. docs/hyw_plugin.md documents every plugins.hyw setting;
-2. docs/hyw_plugin.md documents the service-account mode and its fixed rules;
+1. docs/features/hyw_plugin.md documents every plugins.hyw setting;
+2. docs/features/hyw_plugin.md documents the service-account mode and its fixed rules;
 3. a live text + image round trip through the real command handler.
 """
 
@@ -78,13 +78,13 @@ class SuiteEvidenceTests(unittest.TestCase):
     def test_docs_document_every_hyw_setting(self):
         from plugins.hyw.config import HywSettings
 
-        docs = (REPO_ROOT / "docs" / "hyw_plugin.md").read_text(encoding="utf-8")
+        docs = (REPO_ROOT / "docs" / "features" / "hyw_plugin.md").read_text(encoding="utf-8")
         documented = set(re.findall(r"^    ([a-z_]+):", docs, flags=re.MULTILINE))
         declared = {item.name for item in dataclasses.fields(HywSettings)}
-        self.assertEqual(sorted(declared - documented), [], "not documented in docs/hyw_plugin.md")
+        self.assertEqual(sorted(declared - documented), [], "not documented in docs/features/hyw_plugin.md")
 
     def test_docs_document_service_account_mode(self):
-        docs = (REPO_ROOT / "docs" / "hyw_plugin.md").read_text(encoding="utf-8")
+        docs = (REPO_ROOT / "docs" / "features" / "hyw_plugin.md").read_text(encoding="utf-8")
         self.assertIn("## 使用 Google 服务账号凭据（Vertex AI）", docs)
         for token in ("credentials_file", "vertex_location", "vertex_base_url", "被忽略"):
             self.assertIn(token, docs)

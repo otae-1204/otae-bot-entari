@@ -13,7 +13,7 @@ DEEPSEEK_MODEL = "deepseek-v4-flash"
 
 
 class HywSettings(Settings):
-    """HYW 搜索问答（/q、/hyw、/何意味），见 docs/hyw_plugin.md"""
+    """HYW 搜索问答（/q、/hyw、/何意味），见 docs/features/hyw_plugin.md"""
 
     config_source: str = setting(
         default="hyw", description="凭据来源：hyw = 本段；llm = 整组用 otae.llm；steam = 整组用 plugins.steamInfo 的 llm_*"

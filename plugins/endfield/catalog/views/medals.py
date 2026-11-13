@@ -89,7 +89,7 @@ def _parse_player_medal_progress(
     **关联键（2026-07-28 实测 115/115 命中）**：森空岛 ``achievementData.id`` 是
     ``md5(游戏 achv_id)``（32 位 hex），与 FZ 的 ``achv_*`` 经 md5 一一对应，故**主键用 hex id**；
     name 索引仅作兜底，用于极少数 FZ 缺 ``achv_id`` 的条目（命名滞后会使 name 关联误判，
-    详见 ``docs/skland_medal_id_mapping.md``）。
+    详见 ``docs/reference/skland_medal_id_mapping.md``）。
     """
     achieve = (((raw.get("data") or {}).get("detail") or {}).get("achieve") or {})
     by_hex: dict[str, MedalProgressView] = {}
@@ -207,7 +207,7 @@ def parse_player_medal_wall(
         meta = item.get("achievementData") or {}
         init_level = _to_int(meta.get("initLevel")) or 0
         # 与缺章判定同一口径：森空岛 level 对 initLevel>1 的章有偏移（详见
-        # docs/bugfix_medal_investigator_max_tier.md），图标必须按实际档位选。
+        # docs/history/bugfix_medal_investigator_max_tier.md），图标必须按实际档位选。
         offset = init_level - 1 if init_level > 0 else 0
         level = _to_int(item.get("level")) + offset
         plated = _clean_plated_flag(item.get("isPlated"))
@@ -253,7 +253,7 @@ def build_medal_id_index(medals: Iterable[MedalItemView]) -> dict[str, MedalItem
     """``md5(achv_id) -> 奖章`` 索引，用于把森空岛 hex id 还原成 AKEData 奖章记录。
 
     奖章墙（``display``）与进度（``achieveMedals``）都只给 hex id，且 hex 就是
-    ``md5(achv_id)``（实测 115/115，见 ``docs/skland_medal_id_mapping.md``）。要做「用户
+    ``md5(achv_id)``（实测 115/115，见 ``docs/reference/skland_medal_id_mapping.md``）。要做「用户
     展示了哪些奖章」这类统计时，先用本函数建一次索引再查，避免各处重复算 md5。
     """
     index: dict[str, MedalItemView] = {}

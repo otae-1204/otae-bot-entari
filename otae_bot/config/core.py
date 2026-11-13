@@ -19,7 +19,7 @@ class LlmSettings(Settings):
 
 
 class HttpAssetSettings(Settings):
-    """素材通道（图片/图标/头像），见 docs/http_asset_lane.md；留空的项用内置默认值"""
+    """素材通道（图片/图标/头像），见 docs/development/http_asset_lane.md；留空的项用内置默认值"""
 
     connect_timeout: float | None = field(default=None, description="连接超时秒数（默认 4）")
     read_timeout: float | None = field(default=None, description="读超时秒数（默认 10）")

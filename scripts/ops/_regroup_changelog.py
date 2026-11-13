@@ -4,7 +4,7 @@
 
 **只在 schema 1 上跑一次。** 当前数据已是 schema 2，本脚本会直接拒绝运行：
 对已重组的数据重跑会把每条更新的 ``date`` 改成版本窗口的结束日，破坏数据。
-新增版本请直接编辑 ``plugins/changelog/changelog.json``（见 docs/changelog_plugin.md）。
+新增版本请直接编辑 ``plugins/changelog/changelog.json``（见 docs/features/changelog_plugin.md）。
 """
 
 import json

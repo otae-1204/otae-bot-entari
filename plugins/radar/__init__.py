@@ -15,7 +15,7 @@
 - ``rendering.py`` / ``assets/card.css``：离线 HTML/CSS → PNG；
 - ``handlers.py``：命令解析 → service → presentation → 图片 / 分段文本回复。
 
-前端实现请参考 ``docs/ai_radar_frontend_api.md``（数据接口文档）。
+前端实现请参考 ``docs/reference/ai_radar_frontend_api.md``（数据接口文档）。
 """
 
 from .handlers import *  # noqa: F401,F403

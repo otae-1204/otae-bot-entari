@@ -8,7 +8,7 @@
 分页流程：先在浏览器里一次量出每个块的高度（池头、续页池头、每一行记录、栏头、分组标题），
 再按栏装箱——池卡片只在两行记录之间拆分，续段标「（续）」；先求最少页数，再二分求统一栏高，
 让各页高度均衡。布局知识（kind → 栏/组、保底格文案、排序、分页）全部在本模块，
-后端字段约定与新增池类型的步骤见 docs/endfield_gacha_card_v3.md。
+后端字段约定与新增池类型的步骤见 docs/features/endfield_gacha_card_v3.md。
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ from .service import calculate_group_expectation, format_timestamp
 GACHA_CARD_WIDTH = 1600               # 抽卡专用宽度（CSS px，2× 截图 = 3200 px）；其它卡片不受影响
 GACHA_PAGE_MAX_HEIGHT = 4096          # 抽卡专用单页上限（CSS px）；其它卡片仍用 cards.CARD_MAX_HEIGHT
 GACHA_RERUN_SIDES = ("right", "left")
-GACHA_RERUN_SIDE_DEFAULT = "right"    # 主栏位置不随“有没有重构记录”变化（见 docs/endfield_gacha_card_v3.md）
+GACHA_RERUN_SIDE_DEFAULT = "right"    # 主栏位置不随“有没有重构记录”变化（见 docs/features/endfield_gacha_card_v3.md）
 SIDE_COLUMN_SHARE = 0.86              # 重构侧栏相对主栏（特许 / 武器）的宽度比例
 GACHA_PAGE_SAFETY = 16                # 预测误差余量
 GACHA_RETRY_SAFETY = 4 * GACHA_PAGE_SAFETY   # 截图意外超高时，用 4 倍余量重新装箱再试一次
@@ -108,7 +108,7 @@ GACHA_LAYOUTS = {
     # 没有重构池：两栏、不留空列；「其他寻访」同为角色池，接在特许寻访下方（与 v1 的角色 | 武器两栏一致）
     "two": (replace(SPECIAL_COLUMN, sections=(SPECIAL_SECTION, OTHER_SECTION)), WEAPON_COLUMN),
 }
-# 注册表新增池类型时必须在这里指定栏位，否则导入即失败（见 docs/endfield_gacha_card_v3.md）。
+# 注册表新增池类型时必须在这里指定栏位，否则导入即失败（见 docs/features/endfield_gacha_card_v3.md）。
 assert all(
     {kind for column in columns for section in column.sections for kind in section.kinds}
     == set(KINDS_BY_KEY) - ({"rerun"} if name == "two" else set())

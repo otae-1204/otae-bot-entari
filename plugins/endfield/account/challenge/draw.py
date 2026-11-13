@@ -102,7 +102,7 @@ CHALLENGE_CARD_MAX_HEIGHT = 6000
 _INFO_SPAN = re.compile(f"[{_INFO_OPEN}{_INFO_CLOSE}]")
 CHALLENGE_VARIANTS = ("a", "b", "c")
 DEFAULT_VARIANT = "b"
-# 空态「下一步」的提示。原因取自 docs/skland_endfield_public_query.md 的实测结论：
+# 空态「下一步」的提示。原因取自 docs/reference/skland_endfield_public_query.md 的实测结论：
 # code 0 且账号定位正常时，缺的是通关记录或展示开关，两者都可能。
 NEXT_STEP_HINT = "如果你确实打过，请在森空岛开启个人数据展示后回来重新查询。"
 # 挑战卡主色对齐插件家底色板：影拓=琥珀金（同族于签名黄 #ffd000），回响=钢青蓝（配装页数据蓝的降饱和版）。
@@ -1570,7 +1570,7 @@ def _monument_history_block(group: MonumentGroup, assets) -> str:
 def _empty_html(identity, kind, query, variant):
     """空态是一张查询回执：左联存查询上下文，右联给结论、两种真实原因与下一步。
 
-    原因取自实测结论（docs/skland_endfield_public_query.md）：接口返回成功、账号
+    原因取自实测结论（docs/reference/skland_endfield_public_query.md）：接口返回成功、账号
     定位正常时，缺的是「通关记录」或「展示开关」，两者都可能，所以并列而不武断。
     """
     kind_text = str(kind)

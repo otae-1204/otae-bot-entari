@@ -5,7 +5,7 @@ framework private APIs and platform-name branching belong to the boundary
 (rules R1-R8). Media leave the bot only as uploads or inline data, built from
 bytes; local paths in media elements and direct ``upload.create`` calls are
 only allowed in the outbound pipeline and the boundary (rule R9). Imports must follow the layering in
-``docs/architecture_conventions.md`` (rules L1-L4), and nothing may still use
+``docs/development/architecture_conventions.md`` (rules L1-L4), and nothing may still use
 the NoneBot-style compatibility layer ``otae_bot/compat`` (rule C1). The checks
 are AST heuristics run over ``otae_bot/`` and ``plugins/``.
 

@@ -14,7 +14,7 @@ AKEData 是基于游戏客户端 TableCfg 的数据站，CDN（data.akedata.wiki
   ``categoryPriority``、``achievementGroupData[]``(groupId + groupName text-id)。
 - 图标：``<dataBase>/public/images/.../sprites/medaliconbig/<achvId>_lv<NN>.png``。
 
-achv_id 与森空岛 ``achievementData.id`` 经 md5 一一对应（见 ``docs/skland_medal_id_mapping.md``）。
+achv_id 与森空岛 ``achievementData.id`` 经 md5 一一对应（见 ``docs/reference/skland_medal_id_mapping.md``）。
 """
 from __future__ import annotations
 
