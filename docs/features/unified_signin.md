@@ -76,4 +76,4 @@
 
 六账号效果（`/ef 签到`，样例数据，奖励数量只用于展示布局）：
 
-![终末地 3 个角色与明日方舟 3 个角色的合成签到卡](images/signin-six-accounts.png)
+![终末地 3 个角色与明日方舟 3 个角色的合成签到卡](../images/signin-six-accounts.png)

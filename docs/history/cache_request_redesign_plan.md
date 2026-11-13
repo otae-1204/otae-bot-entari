@@ -195,7 +195,7 @@ AssetBroker、Playwright 与前三期的缓存语义都没动。与方案 / brie
 
 主人原话：「目前的缓存体系需要大改，请求体系也要改」「目前主要问题是各种查询的响应过慢」。
 本文不再打局部补丁（素材通道、整卡预算、磁盘异步写、hycdn 长缓存、namespace 别名、立绘单独计时
-都已经做过，见 [http_asset_lane.md](http_asset_lane.md)），而是把「一次查询从收到命令到发出图片」
+都已经做过，见 [http_asset_lane.md](../development/http_asset_lane.md)），而是把「一次查询从收到命令到发出图片」
 的时间拆开，指出每段慢在哪、为什么现有缓存没把它省掉，再给出分层与分期的改法。
 
 ## 1. 问题诊断：各种查询为什么慢
@@ -232,12 +232,12 @@ AssetBroker、Playwright 与前三期的缓存语义都没动。与方案 / brie
    计入内存池的体积 ≈ 53 MiB（原文 22.5 MB + 解析树 31.6 MiB）；真实 18 MB 原文按比例约 45 MiB。
    em 是 Windows + Python 3.13，按磁盘写入那次 7.7 倍的经验系数估，这一步在 em 上可能 1–2 s。
 2. **素材冷。** 账号卡 232 张图在 8 个并发槽里，每张一次 TLS 连接复用后约 50–200 ms，网络下限约
-   232 / 8 × RTT；立绘 `characterportrait` 是 16.8 MB 未压缩 PNG（[AKE 立绘事实](endfield_cold_start_notice.md)
+   232 / 8 × RTT；立绘 `characterportrait` 是 16.8 MB 未压缩 PNG（[AKE 立绘事实](../features/endfield_cold_start_notice.md)
    与 v1.27.6 记录），冷下载独占一个槽几十秒。
 3. **浏览器冷。** `rendering/browser.py` 用一个 `ThreadPoolExecutor(max_workers=1)` 跑同步 Playwright，
    进程内第一次截图要启动 Chromium；之后每次截图都 `browser.new_context()` + `new_page()` + `page.route("**/*")`
    + `goto` + `wait_for_images` + `settle_ms`，再 `context.close()`。冷启动提示文案只覆盖前两类冷，
-   不覆盖浏览器（[冷启动提醒](endfield_cold_start_notice.md) 明确不做）。
+   不覆盖浏览器（[冷启动提醒](../features/endfield_cold_start_notice.md) 明确不做）。
 
 #### B. 热缓存仍慢：缓存层没有覆盖热路径的大头
 

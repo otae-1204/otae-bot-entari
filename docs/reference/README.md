@@ -11,7 +11,7 @@ Git 检出时可能转换换行符，跨平台校验时需留意这一差异。
 固定为 **0.19.4**。涉及 API 或插件组织方式时，需核对当前安装版本，
 不能直接把示例当成升级要求。
 
-本项目的开发入口见 [代码结构](../code_structure.md)：命令、监听与会话直接用 Entari
+本项目的开发入口见 [代码结构](../development/code_structure.md)：命令、监听与会话直接用 Entari
 公开接口，多账号、对话与定时任务复用 `otae_bot/accounts/`、`otae_bot/messaging/`、
 `otae_bot/scheduling/`，HTTP、存储与渲染复用 `otae_bot/infrastructure/`。
 项目内功能仍放在 `plugins/<功能>/`，不因参考文档的发行插件示例而搬迁目录、

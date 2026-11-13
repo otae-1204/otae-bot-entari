@@ -4,7 +4,7 @@
 
 状态：设计稿 v2（示意数据渲染，未接入真实聚合）　·　创建 2026-10-23
 口径来源：[`endfield_usage_stats_design.md`](endfield_usage_stats_design.md)
-示意图：[单关卡卡](images/endfield-usage-stats/usage-single-card.png) · [样本不足卡](images/endfield-usage-stats/usage-insufficient-card.png) · [当期概览卡](images/endfield-usage-stats/usage-overview-card.png)
+示意图：[单关卡卡](../images/endfield-usage-stats/usage-single-card.png) · [样本不足卡](../images/endfield-usage-stats/usage-insufficient-card.png) · [当期概览卡](../images/endfield-usage-stats/usage-overview-card.png)
 手机尺寸预览（375px 宽，判断可读性用）：`docs/images/endfield-usage-stats/preview-375/`
 
 ## 1. 为什么重做
@@ -69,7 +69,7 @@ QQ 里图片按宽度铺满，1080px 画布在 375px 屏上缩放 0.347：
 
 ### 4.1 单关卡卡
 
-![单关卡卡](images/endfield-usage-stats/usage-single-card.png)
+![单关卡卡](../images/endfield-usage-stats/usage-single-card.png)
 
 | 区块 | 高度 | 内容 |
 | --- | --- | --- |
@@ -86,7 +86,7 @@ QQ 里图片按宽度铺满，1080px 画布在 375px 屏上缩放 0.347：
 
 ### 4.2 样本不足卡
 
-![样本不足卡](images/endfield-usage-stats/usage-insufficient-card.png)
+![样本不足卡](../images/endfield-usage-stats/usage-insufficient-card.png)
 
 同头部、时效、样本区，把排行整段换成：
 
@@ -97,7 +97,7 @@ QQ 里图片按宽度铺满，1080px 画布在 375px 屏上缩放 0.347：
 
 ### 4.3 当期概览卡
 
-![当期概览卡](images/endfield-usage-stats/usage-overview-card.png)
+![当期概览卡](../images/endfield-usage-stats/usage-overview-card.png)
 
 - 头部小标换 `ENDFIELD / SEASON OVERVIEW`，标题 `影拓丰碑 · 使用率总览`，副标题带期次与难度。
 - 样本区第 1、4 格换口径：`有记录角色`、`可统计关卡 3 / 4`。

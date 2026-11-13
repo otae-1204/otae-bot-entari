@@ -3,7 +3,7 @@
 # AI 智商雷达插件 · 插件侧接口契约
 
 > 这是**插件自身**的接口文档（Python 层契约），不是上游 API。
-> 上游 API 见 [`ai_radar_interface.md`](ai_radar_interface.md)；字段释义见 [`ai_radar_data_dictionary.md`](ai_radar_data_dictionary.md)；框架见 [`ai_radar_plugin_framework.md`](ai_radar_plugin_framework.md)。
+> 上游 API 见 [`ai_radar_interface.md`](../reference/ai_radar_interface.md)；字段释义见 [`ai_radar_data_dictionary.md`](../reference/ai_radar_data_dictionary.md)；框架见 [`ai_radar_plugin_framework.md`](ai_radar_plugin_framework.md)。
 > **本阶段只定义契约，不含实现**。所有签名中的类型名对应 `plugins/radar/models.py` 的只读数据模型。
 
 ---

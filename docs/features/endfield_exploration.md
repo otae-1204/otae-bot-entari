@@ -22,9 +22,9 @@
 
 下图使用截图中可见的 13 个地区作为本地样例，已标注“非实时查询”，不代表任何账号的当前进度。
 
-![地区探索收集进度](images/endfield-exploration/exploration.png)
+![地区探索收集进度](../images/endfield-exploration/exploration.png)
 
-未完成、未知总量和异常数量的展示见[边界数据预览](images/endfield-exploration/partial.png)。
+未完成、未知总量和异常数量的展示见[边界数据预览](../images/endfield-exploration/partial.png)。
 
 ## 数据与字段
 
@@ -55,7 +55,7 @@ data.detail.domain[]
 | 5 | `equipTrchestCount` | 装备模板箱 |
 | 6 | `trstarCount` | 塔晶 |
 
-既有响应结构见 [森空岛 UI 数据清单](skland_endfield_ui_data_inventory.md#49-地区建设与探索-domain)。其中早期文档只记录了前五类字段。第六类 `trstarCount` 的结构另与公开适配器的 [EndfieldDetail 类型定义](https://github.com/wahaha216/koishi-plugin-skland/blob/b25b595abd3d7dd74b1d7e8f22fb89b78e33c81a/src/types/endfieldDetail.ts)交叉核对；该链接是第三方适配器源码，并非森空岛官方接口文档。列名及顺序按本次用户提供的森空岛截图和说明确定，没有复制该适配器的实现。
+既有响应结构见 [森空岛 UI 数据清单](../reference/skland_endfield_ui_data_inventory.md#49-地区建设与探索-domain)。其中早期文档只记录了前五类字段。第六类 `trstarCount` 的结构另与公开适配器的 [EndfieldDetail 类型定义](https://github.com/wahaha216/koishi-plugin-skland/blob/b25b595abd3d7dd74b1d7e8f22fb89b78e33c81a/src/types/endfieldDetail.ts)交叉核对；该链接是第三方适配器源码，并非森空岛官方接口文档。列名及顺序按本次用户提供的森空岛截图和说明确定，没有复制该适配器的实现。
 
 数据边界：
 
@@ -107,7 +107,7 @@ data.detail.domain[]
 
 每个小地区名称前优先展示森空岛同款立体图标。资源来自官方新版[地区探索组件](https://assets.skland.com/_static_assets/game-tools/RegionExploreTable-D36RE3Dz.js)：多数 PNG 以内嵌 Base64 保存，雪松林和遂明使用独立图片地址。组件共映射 17 个区域，首墩与首墩内部共用一张图。六类列头图标也从同一组件提取，并按其表头与统计字段逐列核对。
 
-原始图片已存入 `assets/image/endfield/exploration/`。`manifest.json` 记录来源、地区映射和 SHA-256；地区名称及所属关系由[森空岛公开地图树](https://zonai.skland.com/web/v1/game/endfield/map/tree)补充。已收录区域无需联网下载素材，渲染时直接内嵌本地 PNG。具体来源和维护方式见[素材说明](../assets/image/endfield/exploration/README.md)。
+原始图片已存入 `assets/image/endfield/exploration/`。`manifest.json` 记录来源、地区映射和 SHA-256；地区名称及所属关系由[森空岛公开地图树](https://zonai.skland.com/web/v1/game/endfield/map/tree)补充。已收录区域无需联网下载素材，渲染时直接内嵌本地 PNG。具体来源和维护方式见[素材说明](../../assets/image/endfield/exploration/README.md)。
 
 匹配先确认大地区，再查找其下的小地区。大地区依次按精确 ID、`domain_1` → `map01` / `domain_2` → `map02` 别名、完整名称查找；小地区优先使用精确 ID，找不到 ID 时按完整名称匹配；重名或跨地区的候选不猜测。本地立体图标另外允许只凭 `levelId` 命中：素材清单中只出现一次的 `levelId` 即使大地区对不上也能取图，结果仍按接口返回的大地区 ID 和 `levelId` 归位。素材请求只访问公开地图树、索引及图片地址，不携带账号凭据、UID 或收集统计。
 

@@ -56,7 +56,7 @@
 
 模型卡两列排布，每张 724 px；厂商只有一个模型时卡宽不变，末行不足两张也不拉伸。每页最多 `MATRIX_PAGE_MAX_MODELS`（12）个模型，在页数不变的前提下均分，避免只剩一两个模型的末页（例如 14 个国外模型分成 7 + 7，而不是 12 + 2）。所有断点均检查卡宽一致。图片与文本降级输出使用同一套分组规则，原始数据不做合并或改写。
 
-图标使用[众测雷达](https://deng.codexradar.com/)公开页面的原始资源：Astra 星系、Sol 太阳、Terra 地球、Luna 月亮、GPT-5.5 星系系统，以及 DeepSeek、Grok、Kimi、GLM、Gemini、HY4、Claude 对应图标。同家族不同版本共享图标，通过完整 ID 区分。图标随插件本地保存、内嵌输出，未知模型使用雷达图形。来源清单见 [assets/models/README.md](../plugins/radar/assets/models/README.md)。
+图标使用[众测雷达](https://deng.codexradar.com/)公开页面的原始资源：Astra 星系、Sol 太阳、Terra 地球、Luna 月亮、GPT-5.5 星系系统，以及 DeepSeek、Grok、Kimi、GLM、Gemini、HY4、Claude 对应图标。同家族不同版本共享图标，通过完整 ID 区分。图标随插件本地保存、内嵌输出，未知模型使用雷达图形。来源清单见 [assets/models/README.md](../../plugins/radar/assets/models/README.md)。
 
 ## 数据选择的用意
 

@@ -1,7 +1,7 @@
 # AI 智商雷达插件 · 上游接口文档
 
 > 数据源：**众测雷达 / DRadar** — 站点 `https://deng.codexradar.com/`，API `https://api.codexradar.com`
-> 本文是**上游 API 的实测接口文档**（供插件实现时对照），不是插件自身的接口；插件侧契约见 [`ai_radar_plugin_api.md`](ai_radar_plugin_api.md)。
+> 本文是**上游 API 的实测接口文档**（供插件实现时对照），不是插件自身的接口；插件侧契约见 [`ai_radar_plugin_api.md`](../history/ai_radar_plugin_api.md)。
 > 实测时间：2026-09-13（UTC+8 上午）。上游数据是**持续更新的快照**，字段会演进，实现时必须以 `/openapi.json` 与实测为准。
 
 ---
@@ -88,7 +88,7 @@ B 面实测端点：
 
 `OPTIONS` 预检 200：`allow-methods: GET, POST`，`allow-headers: Accept, Accept-Language, Authorization, Content-Language, Content-Type, X-DRadar-Capabilities`，`max-age: 600`。**无 `Access-Control-Allow-Credentials`** → 浏览器端不能带 cookie，只能用 Bearer。
 
-> 插件（服务端 Python）不受 CORS 约束；此节记录只为说明「上游把浏览器消费方限定在自家域」，第三方长期消费的许可状态见 [开放问题](ai_radar_open_items.md)。
+> 插件（服务端 Python）不受 CORS 约束；此节记录只为说明「上游把浏览器消费方限定在自家域」，第三方长期消费的许可状态见 [开放问题](../history/ai_radar_open_items.md)。
 
 ### 1.4 缓存
 

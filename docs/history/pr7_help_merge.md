@@ -4,7 +4,7 @@
 
 [PR #7](https://github.com/otae-1204/otae-bot-entari/pull/7)（`fix(endfield): 优化帮助与签到卡片并补全签到奖励名称`）
 包含两件互不相关的改动。本文档说明怎样合并它：签到部分原样接收，帮助部分由
-[帮助图片生成框架](help_cards.md) 替代。合并后 GitHub 会把 PR #7 标记为已合并，作者署名保留。
+[帮助图片生成框架](../development/help_cards.md) 替代。合并后 GitHub 会把 PR #7 标记为已合并，作者署名保留。
 
 ## PR #7 的内容
 

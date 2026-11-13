@@ -84,4 +84,4 @@
 保存在 `data/endfield/random-wiki/previews/run-2026-10-07/reply-01.png`。
 下图为该次运行的原始输出，复用 bot 现有资料卡样式：
 
-![随机物品：扩容反应池](images/endfield-random-wiki/random-item.png)
+![随机物品：扩容反应池](../images/endfield-random-wiki/random-item.png)

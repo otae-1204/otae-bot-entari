@@ -2,7 +2,7 @@
 
 渲染入口为 `plugins/bilibilibot/draw.py`，订阅推送与群消息链接预览共用同一套布局。
 
-![樱花粉视频与直播卡片](images/bilibili-cards-sakura.png)
+![樱花粉视频与直播卡片](../images/bilibili-cards-sakura.png)
 
 上图由预览脚本生成，视频卡与直播卡封面取自仓库内的 `docs/images/bilibili-cards-video-cover.jpg` 和 `docs/images/bilibili-cards-live-cover.jpg`，主播昵称与标题为示例资料；直播状态与“2 小时 18 分钟”时长均为演示数据，不代表真实直播场次。
 

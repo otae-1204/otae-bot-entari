@@ -119,10 +119,10 @@ Windows / Python 3.13 相关回归为 **249 passed、3 skipped、47 subtests pas
 
 `--file` 接受官网详情 JSON，可重复指定；`--at` 应选择至少两项活动同时开启的时刻。脚本输出 PNG 和 `business-preview.json` 至 `data/endfield/announcements/previews/pr-2026-10-01/`，不改动正式订阅或发送记录。
 
-![同期开启三项活动](images/endfield-announcements/opening-activities.png)
+![同期开启三项活动](../images/endfield-announcements/opening-activities.png)
 
-![逐项去重后保留两项活动](images/endfield-announcements/opening-after-dedup.png)
+![逐项去重后保留两项活动](../images/endfield-announcements/opening-after-dedup.png)
 
 另用 2026-09-16 12:00 的历史时刻回放“集成援助·泡泡出击”，核对有明确截止时间的倒计时为 **14 天 4 小时**。未公布截止时刻的活动继续显示“截止时间待定”。
 
-![已知截止时间的倒计时](images/endfield-announcements/countdown.png)
+![已知截止时间的倒计时](../images/endfield-announcements/countdown.png)

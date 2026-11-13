@@ -4,7 +4,7 @@
 
 > 状态：**设计稿（未实现）**。本文只定义框架与边界，不含任何代码实现。
 > 数据源：[众测雷达 / DRadar](https://deng.codexradar.com/)，后端 `https://api.codexradar.com`。
-> 配套接口文档见 [`ai_radar_interface.md`](ai_radar_interface.md)、[`ai_radar_data_dictionary.md`](ai_radar_data_dictionary.md)、[`ai_radar_plugin_api.md`](ai_radar_plugin_api.md)、[`ai_radar_open_items.md`](ai_radar_open_items.md)。
+> 配套接口文档见 [`ai_radar_interface.md`](../reference/ai_radar_interface.md)、[`ai_radar_data_dictionary.md`](../reference/ai_radar_data_dictionary.md)、[`ai_radar_plugin_api.md`](ai_radar_plugin_api.md)、[`ai_radar_open_items.md`](ai_radar_open_items.md)。
 
 ---
 
@@ -91,7 +91,7 @@ plugins/radar/
 
 ### 3.1 只走 A 面：为什么不用网站侧 `codexradar.com/api/*`
 
-上游有**两套 host 的公开 JSON 面**（详见 [`ai_radar_interface.md`](ai_radar_interface.md) §1.2）：A 面 `api.codexradar.com/api/v1/*`（有 OpenAPI、58 路径）与 B 面 `codexradar.com/api/*`（无 OpenAPI）。本插件**主路径只走 A 面**，理由：
+上游有**两套 host 的公开 JSON 面**（详见 [`ai_radar_interface.md`](../reference/ai_radar_interface.md) §1.2）：A 面 `api.codexradar.com/api/v1/*`（有 OpenAPI、58 路径）与 B 面 `codexradar.com/api/*`（无 OpenAPI）。本插件**主路径只走 A 面**，理由：
 
 1. **A 面有契约**（`/openapi.json`），B 面是站点前端自用面、无任何契约承诺，字段可随前端改版静默变更。
 2. **A 面覆盖本插件全部查询需求**：B 面实测的 `radar-insights` / `intelligence-efficiency-metrics` 与 A 面**同源同键**（仅缓存时差），不构成新增能力。

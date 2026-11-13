@@ -3,7 +3,7 @@
 # 终末地关卡成员使用率（群内）设计与口径
 
 > 状态：设计已定稿，未实现　·　创建 2026-10-23
-> 关联：[关卡资料查询](endfield_stage_query_plan.md) · [持有率展示层](endfield_ownership_stats_renderer.md) · [持有率运维](endfield_ownership_stats_operations.md) · [森空岛个人接口](skland_endfield_personal_api.md)
+> 关联：[关卡资料查询](endfield_stage_query_plan.md) · [持有率展示层](../features/endfield_ownership_stats_renderer.md) · [持有率运维](../operations/endfield_ownership_stats_operations.md) · [森空岛个人接口](../reference/skland_endfield_personal_api.md)
 
 ## 1. 目标
 
