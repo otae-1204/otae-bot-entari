@@ -1,3 +1,5 @@
+> 历史记录：内容、路径与写法以当时为准；现状见 [终末地](../features/endfield.md)。
+
 # AKE 切换后：富文本与账号页修复
 
 2026-09-05，基线 `84d439c`，继续使用 `refactor/project-architecture`。

@@ -1,3 +1,5 @@
+> 历史记录：内容、路径与写法以当时为准；现状见 [HYW 搜索问答](../features/hyw_plugin.md)。
+
 # HYW 接入 Hyw-Frontier —— 实现说明
 
 > 2026-10-01：适配层已接入 `plugins/hyw/`。回滚用 `git checkout d80759d -- plugins/hyw tests/test_hyw.py tests/test_hyw_evidence.py docs/hyw_plugin.md`。

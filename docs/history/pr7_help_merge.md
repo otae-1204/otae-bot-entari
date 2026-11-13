@@ -1,3 +1,5 @@
+> 历史记录：内容、路径与写法以当时为准；现状见 [帮助图片生成框架](../development/help_cards.md)。
+
 # 合并 PR #7：接收签到卡片，帮助卡片改用新框架
 
 [PR #7](https://github.com/otae-1204/otae-bot-entari/pull/7)（`fix(endfield): 优化帮助与签到卡片并补全签到奖励名称`）

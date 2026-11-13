@@ -1,3 +1,5 @@
+> 历史记录：内容、路径与写法以当时为准；现状见 [终末地](../features/endfield.md)。状态更正：文中「未开工」已过时，图鉴已实现于 `plugins/endfield/encyclopedia/`；原文件名 `endfield_encyclopedia_implementation_grok.md`。
+
 # 终末地图鉴查询实现计划（修订）
 
 状态：**实现计划，未开工**。设计口径仍以 [终末地图鉴查询方案 v2](endfield_encyclopedia_query_plan.md) 为准。本文替换上一版实现计划。

@@ -1,3 +1,5 @@
+> 历史记录：内容、路径与写法以当时为准；现状见 [HYW 搜索问答](../features/hyw_plugin.md)。
+
 # HYW 插件兼容 Google 服务账号凭据 —— 修改方案（v2，已实施）
 
 > **实施状态（2026-09-11）**：本方案已按用户批准落地。新增 `plugins/hyw/google_auth.py`；

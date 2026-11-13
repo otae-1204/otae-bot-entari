@@ -1,3 +1,5 @@
+> 历史记录：内容、路径与写法以当时为准；现状见 [终末地](../features/endfield.md)。状态更正：文中「未实现」已过时，图鉴已实现于 `plugins/endfield/encyclopedia/`；原文件名 `endfield_encyclopedia_design_v3_deepseek.md`。
+
 # 终末地图鉴实现设计 v3
 
 状态：**设计，未实现**。参照三份材料：`docs/endfield_encyclopedia_query_plan.md`（v2 方案，定口径）、`docs/endfield_encyclopedia_implementation.md`（Grok 实现计划，定接缝）、Fable 审查（M1–M10 / S1–S11 / N1–N12），以及本仓库当前代码。v2 与实现计划里已经写对的部分本文不重述，只写我这一版怎么做、以及材料里说错的地方。

@@ -1,3 +1,5 @@
+> 历史记录：内容、路径与写法以当时为准；现状见 [运行状态与指令统计](../features/status_and_usage_stats.md)。状态更正：未按本方案实现 `plugins/insight/`，已被 `plugins/usage_stats/` 与 `otae_bot/command_usage/` 取代。
+
 # `/统计` 命令使用统计插件方案（plugins/insight）
 
 状态：**方案定稿，未实现**。本文档只描述设计，仓库中尚不存在 `plugins/insight/`。
