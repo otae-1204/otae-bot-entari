@@ -35,7 +35,7 @@
 
 Hyw-Frontier 要求 Python ≥ 3.11。本仓库 `pyproject.toml` 现为 `>=3.10,<3.14`。接入前把下限改为 `>=3.11,<3.14`，并确认运行机器人的解释器已是 3.11 或 3.12。
 
-不要安装上游的 `entari_plugin_hyw_frontier` wheel。那个包按 Entari 0.18.6 编写，本仓库是 0.19.4。命令、会话、群功能开关和发图都留在 `plugins/hyw/`，只调用核心库的 `answer()`。
+不要安装上游的 `entari_plugin_hyw_frontier` wheel。那个包按 Entari 0.18.6 编写，本仓库是 0.17.4。命令、会话、群功能开关和发图都留在 `plugins/hyw/`，只调用核心库的 `answer()`。
 
 `md2png` 与 `hyw_frontier` 在上游仓库里是路径依赖，不假定 PyPI 上有同版本。两者都不发布到 PyPI，所以 `0a1fede` 的 `md2png/` 与 `hyw_frontier/` 已按锁定提交收进 `vendor/hyw-frontier/`，由 `requirements.txt` 以 `-e` 安装；换机器只需 `git clone` 加 `pip install -r requirements.txt`。调试网页 `hyw_frontier/server.py`、`static/` 与 `dev_reload.py` 没有收进来。本地补丁逐条记在 `plugins/hyw/NOTICE.md`，同步上游时必须保留。
 

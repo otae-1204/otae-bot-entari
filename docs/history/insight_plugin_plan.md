@@ -62,7 +62,7 @@
 
 ### 1.4 群开关盲区（本方案的核心约束）
 
-`GroupFeatureGate`（`otae_bot/pipeline/feature_gate.py`）以 **priority `-100`** 挂在各插件 scope 的订阅者上，**跑在 Alconna 解析之前**：插件被禁用即 `STOP`。
+`GroupFeatureGate`（`otae_bot/adapters/feature_gate.py`）以 **priority `-100`** 挂在各插件 scope 的订阅者上，**跑在 Alconna 解析之前**：插件被禁用即 `STOP`。
 
 实测：
 
@@ -226,7 +226,7 @@ CREATE TABLE IF NOT EXISTS user_profile (
 | `/统计 群 [n]` | 群活跃榜 Top N |
 | `/统计 导出 [天]` | 导出 CSV 至 `data/insight/exports/`，返回路径 |
 
-- 权限：**v1 仅 SuperUser**（`otae_bot.groups.superusers.is_superuser`）。
+- 权限：**v1 仅 SuperUser**（`otae_bot.permissions.is_superuser`）。
 - 渲染：v1 纯文本表格（`formatters.py`）。图片卡片可后续复用 `otae_bot.infrastructure.rendering`，**不列入 v1**。
 - 时区：`Asia/Shanghai`（`zoneinfo`），`day` 取本地日期。
 - 所有输出结尾附 §3 的盲区脚注。
@@ -245,7 +245,7 @@ CREATE TABLE IF NOT EXISTS user_profile (
 
 豁免 `insight` 是**必需**的，不是可选优化：否则任一群执行 `/功能 关闭 统计` 后，该群采集器被 gate `STOP`，数据**静默丢失**且无任何报错——对统计插件是最坏的失败模式。
 
-`otae_bot/groups/features.py`：
+`otae_bot/group_features.py`：
 
 ```python
 PROTECTED_PLUGINS = {"group_manager", "request_handler", "insight"}
@@ -253,8 +253,8 @@ PROTECTED_PLUGINS = {"group_manager", "request_handler", "insight"}
 
 两处生效点（均已确认）：
 
-- `otae_bot/pipeline/feature_gate.py:41` —— `install_group_feature_gates()` 跳过豁免插件，**不挂 gate**；
-- `otae_bot/groups/features.py:122` —— `set_enabled()` 抛 `ValueError`，`/功能 关闭 统计` 被明确拒绝。
+- `otae_bot/adapters/feature_gate.py:41` —— `install_group_feature_gates()` 跳过豁免插件，**不挂 gate**；
+- `otae_bot/group_features.py:122` —— `set_enabled()` 抛 `ValueError`，`/功能 关闭 统计` 被明确拒绝。
 
 ### 9.1 文案需同步改写
 
@@ -329,7 +329,7 @@ PROTECTED_PLUGINS = {"group_manager", "request_handler", "insight"}
 
 ## 12. 实施顺序（待批准后执行）
 
-1. `otae_bot/groups/features.py` 加 `insight` 到 `PROTECTED_PLUGINS`；改 `group_manager` 两处文案。
+1. `otae_bot/group_features.py` 加 `insight` 到 `PROTECTED_PLUGINS`；改 `group_manager` 两处文案。
 2. `plugins/insight/` 骨架：`__init__.py` / `config.py` / `models.py`。
 3. `registry.py`（归属索引）+ `store.py`（schema、写入、清理）。
 4. `collector.py`（双事件订阅、缓冲、flush、异常隔离）。

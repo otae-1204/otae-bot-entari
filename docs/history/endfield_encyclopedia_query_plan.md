@@ -23,7 +23,7 @@ v1 把 §4.1 探针要回答的问题当成已知结论写进了 §6。v2 先做
 | 9 | §3.2 §5 | 「回复该类资料只提供 AkeData」 | 明确在 handler 里显式判断并列入接入点 | 今天不支持的来源取不到 resolver 直接返回空（`handlers.py:2161`），用户只看到「没有找到」 |
 | 10 | §7 | 别名 kind 扩展为五种 | 写明 `SUPPORTED_KINDS`、`alias_data.json` 结构与 `/ef 别名 添加` 的范围词 | `catalog/aliases.py:9` 只有三种 |
 | 11 | §7 | 索引按「AkeData `latest` 版本号」失效 | 按 `AkeSnapshot.revision`（`version\|sharedRevision`）失效 | `providers/repository.py:43`；成品缓存已用它 |
-| 12 | §4.1 §11 | 探针另写脚本；夹具从零做 | 扩 `scripts/endfield/inspect_endfield_akedata.py` 的 `--tables`；复用 `tests/fixtures/endfield_akedata_1_5_3.json` | 该脚本已拉 ItemTable / Hyperlink / RichText / SkillPatch；夹具已含这四张表子集 |
+| 12 | §4.1 §11 | 探针另写脚本；夹具从零做 | 扩 `scripts/inspect_endfield_akedata.py` 的 `--tables`；复用 `tests/fixtures/endfield_akedata_1_5_3.json` | 该脚本已拉 ItemTable / Hyperlink / RichText / SkillPatch；夹具已含这四张表子集 |
 | 13 | §3.1 §5 | 档案分流只提「档案」「档案库」；取表放在 `service.py` | 覆盖 `ARCHIVE_ALIASES` 全部五个词；照关卡模块拆出 `akedata.py` | `catalog/commands.py:59`；`stages/akedata.py` 的分工 |
 
 ---
@@ -200,7 +200,7 @@ v2 探针已回答 v1 §4.1 的第 1、2、3、4 问，第 5 问（`PrtsAllItem`
 5. `iconPath` `TermIcon/x` → `sprites/termicon/x.png` 的映射，抽三条实际请求确认。
 6. `BuffData.applyTags` 是否含 `ba.*` id（只记录，不进本方案任何一期）。
 
-探针不另写脚本：扩 `scripts/endfield/inspect_endfield_akedata.py` 的 `--tables` 默认值，加 `ItemTypeTable`、`ItemShowingTypeTable`、`UseItemTable`、`EquipItemTable`、`EnemyTable`、`EnemyTemplateDisplayInfoTable`、`EnemyAttributeTemplateTable`、`EnemyAbilityDescTable`。结果写进本文附录。探针期间不对用户开放命令。
+探针不另写脚本：扩 `scripts/inspect_endfield_akedata.py` 的 `--tables` 默认值，加 `ItemTypeTable`、`ItemShowingTypeTable`、`UseItemTable`、`EquipItemTable`、`EnemyTable`、`EnemyTemplateDisplayInfoTable`、`EnemyAttributeTemplateTable`、`EnemyAbilityDescTable`。结果写进本文附录。探针期间不对用户开放命令。
 
 ---
 
@@ -392,7 +392,7 @@ kind, entity_id, display_name, extra_names[], search_text
 
 每一期都可以单独上线，后一期不推翻前一期的命令。
 
-**第 0 期，探针。** 扩 `scripts/endfield/inspect_endfield_akedata.py`，回答 §4.5 的六个问题，把对照表补进本文附录。没有附录之前不写视图。
+**第 0 期，探针。** 扩 `scripts/inspect_endfield_akedata.py`，回答 §4.5 的六个问题，把对照表补进本文附录。没有附录之前不写视图。
 
 **第 1 期，物品和道具。** 索引、`classify.py` 白名单与让路、物品目录、物品卡、道具卡、`--source` 显式拒绝、别名系统扩展。全局搜索纳入这两种。
 
@@ -444,7 +444,7 @@ kind, entity_id, display_name, extra_names[], search_text
 命令（零请求，只读已落盘的 JSON）：
 
 ```text
-.venv/Scripts/python.exe scripts/endfield/inspect_endfield_akedata.py --report encyclopedia
+.venv/Scripts/python.exe scripts/inspect_endfield_akedata.py --report encyclopedia
 ```
 
 数据源：AkeData `latest = 1.5.3@10024360-6`，`tableCfgPath = public/1.5.3/10024360-6/TableCfg`。

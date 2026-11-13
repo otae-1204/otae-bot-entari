@@ -726,7 +726,7 @@ B站订阅结果
 
 #### 实现
 
-- `otae_bot/accounts/runtime.py` 按 `self_id` 保存全部在线账号，下线时移除。`get_bot()` 仍返回
+- `otae_bot/adapters/runtime.py` 按 `self_id` 保存全部在线账号，下线时移除。`get_bot()` 仍返回
   默认账号（仍在线的最后一次登录），该账号下线时退回另一个在线账号；新增 `get_bots()`、
   `get_bot_for_guild(group_id)`。
 - 每个账号所在的群来自 Satori `guild.list`：账号上线时在后台获取一次；推送前若某账号的群列表
@@ -856,7 +856,7 @@ B站订阅结果
 ### 阶段 7：拆分 `client.py`（约 1 天）
 
 - 按第 5.1 节拆成 `api/*`；`client.py` 只保留兼容性的重新导出，确认没有引用后删除。
-- 同步更新 `scripts/preview/preview_bilibili_cards.py`，以及测试里的 `_load_bili_new_module("client")` 调用。
+- 同步更新 `scripts/preview_bilibili_cards.py`，以及测试里的 `_load_bili_new_module("client")` 调用。
 - **验收**：`rg "bilibilibot.client|bili_client" tests scripts plugins` 的结果只剩有意保留的引用。
 
 ---

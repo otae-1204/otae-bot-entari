@@ -11,13 +11,13 @@ PR 基于 `53a80e9`，只有两个提交，边界清楚：
 | 提交 | 内容 | 处理 |
 | --- | --- | --- |
 | `8f277ba` 重排帮助卡片分类并修复文本超框 | `scripts/render_endfield_help.py`、`scripts/help_pages.json`（仅 `endfield` 页）、`assets/image/help/endfield.png`、`docs/endfield_help_card.md`、`tests/test_endfield.py` 的帮助图测试 | 不接收，由新框架替代 |
-| `8352b93` 统一签到卡片配色并补全奖励名称 | `plugins/endfield/account/client.py`、`plugins/endfield/rendering/cards.py`、`scripts/render/render_endfield_attendance_preview.py`、`tests/fixtures/endfield_attendance_rewards.json`、`tests/test_endfield_account.py`、`docs/endfield_attendance_card.md` | 原样接收 |
+| `8352b93` 统一签到卡片配色并补全奖励名称 | `plugins/endfield/account/client.py`、`plugins/endfield/rendering/cards.py`、`scripts/render_endfield_attendance_preview.py`、`tests/fixtures/endfield_attendance_rewards.json`、`tests/test_endfield_account.py`、`docs/endfield_attendance_card.md` | 原样接收 |
 
 ## PR #7 帮助功能与替代方案对照
 
 | PR #7 的做法 | 新框架中的对应 |
 | --- | --- |
-| `render_endfield_help.py` 只渲染终末地一页，采用独立的深灰加黄绿配色、1200px 宽 | `scripts/render/render_help_cards.py` 渲染所有帮助页，沿用原有蓝色标题条和磨砂面板，新增插画立绘窗，宽 1325px |
+| `render_endfield_help.py` 只渲染终末地一页，采用独立的深灰加黄绿配色、1200px 宽 | `scripts/render_help_cards.py` 渲染所有帮助页，沿用原有蓝色标题条和磨砂面板，新增插画立绘窗，宽 1325px |
 | spec 使用 `groups` + `sections`，条目为 `command` / `description` / `badge`，分区带 `access` 和 `notes`，页面带 `subtitle`、`legend` | 保留结构化条目和 `badge`、`access`、`notes`、`subtitle`；`groups` 改为 `columns`（左栏为账号相关，右栏为资料与工具）；`legend` 并入 `footnote`。解析器也接受 `command` / `description` 键名 |
 | 浏览器内检查文字超框、分区重叠、页脚位置、字体加载、外部请求；`--stress` 测长内容 | 保留同类检查（`LAYOUT_CHECK` / `layout_problems`），另加标题与装饰碰撞、插画加载、高度上限检查；`--stress` 对每一页都测 |
 | `--write-asset`：校验全部通过才覆盖正式图片；输出 `output/endfield-help/` | `--write`，规则相同；输出到 `data/help/previews/`（HTML、PNG、`validation.json`） |
@@ -39,8 +39,8 @@ PR #7 整理的终末地帮助内容（按账号 / 资料分区、权限标签�
 ## 前置条件
 
 1. 帮助框架及相关改动已提交到本地 `main`：
-   - `otae_bot/infrastructure/rendering/help_images.py`、`otae_bot/infrastructure/rendering/help_cards.py`
-   - `scripts/render/render_help_cards.py`、`scripts/help_pages.json`
+   - `otae_bot/help_images.py`、`otae_bot/infrastructure/rendering/help_cards.py`
+   - `scripts/render_help_cards.py`、`scripts/help_pages.json`
    - `assets/image/help/`（全部主图、`variants/`、`art/`）
    - `plugins/help_plugin/handlers.py`、`plugins/endfield/handlers.py`（`_finish_endfield_help` 改为随机挑图）
    - `tests/test_help_cards.py`、`tests/test_endfield.py`
@@ -84,7 +84,7 @@ git diff --cached --stat HEAD
  docs/endfield_attendance_card.md                |  90 +++++++++
  plugins/endfield/account/client.py              |  99 +++++----
  plugins/endfield/rendering/cards.py             |  36 +++-
- scripts/render/render_endfield_attendance_preview.py   | 168 ++++++++++++++++
+ scripts/render_endfield_attendance_preview.py   | 168 ++++++++++++++++
  tests/fixtures/endfield_attendance_rewards.json | 255 ++++++++++++++++++++++++
  tests/test_endfield_account.py                  |  97 ++++++++-
  6 files changed, 700 insertions(+), 45 deletions(-)
@@ -97,9 +97,9 @@ git diff --cached --stat HEAD
 ## 验证
 
 ```powershell
-.venv/Scripts/python.exe scripts/render/render_help_cards.py --check
+.venv/Scripts/python.exe scripts/render_help_cards.py --check
 .venv/Scripts/python.exe -m pytest tests/test_help_cards.py tests/test_help_plugin.py tests/test_endfield.py tests/test_endfield_account.py tests/test_endfield_challenge.py -q
-.venv/Scripts/python.exe scripts/render/render_endfield_attendance_preview.py --stress
+.venv/Scripts/python.exe scripts/render_endfield_attendance_preview.py --stress
 ```
 
 - `--check` 应输出 `all N help images are up to date`。
@@ -120,7 +120,7 @@ git branch -d merge/pr-7 pr-7
 ## 给 PR 作者的说明（可直接贴到 PR #7）
 
 > 感谢整理！签到卡片和奖励名称的改动已原样合并。帮助卡片这边，我们把帮助图统一改成了一个可配置的框架
-> （`scripts/render/render_help_cards.py` + `scripts/help_pages.json` + `assets/image/help/art/gallery.json`），
+> （`scripts/render_help_cards.py` + `scripts/help_pages.json` + `assets/image/help/art/gallery.json`），
 > 所有帮助页共用原有的蓝色主题并加入插画立绘窗，所以没有采用这个 PR 里的新配色和
 > `render_endfield_help.py`。你整理的分区、权限标签和备注已经移植到新 spec 的 `endfield` 页，
 > 说明文字做了缩短；浏览器排版校验和 `--stress` 思路也保留了下来。维护说明见 `docs/help_cards.md`。

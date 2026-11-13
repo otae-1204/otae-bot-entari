@@ -192,15 +192,15 @@ git pull --ff-only origin main
 git worktree add --detach ../otae-endfield-cache-before 9d0b1bba8bc341e63b9d20038c4b6ea0fd6ada2d
 
 python -m pytest -q
-python scripts/endfield/check_endfield_public_cache.py --output output/public-cache-check.json
+python scripts/check_endfield_public_cache.py --output output/public-cache-check.json
 
-python scripts/endfield/benchmark_endfield_queries.py --repo ../otae-endfield-cache-before --mode record --cases equipment_search,weapon_relations,loadout,operator_card,weapon_card,equipment_card,operator_catalog,weapon_catalog,equipment_catalog,stage_catalog,stage_card,calendar,medals_data,mixed --output output/cache-before-live.json
-python scripts/endfield/benchmark_endfield_queries.py --mode live --cases equipment_search,weapon_relations,loadout,operator_card,weapon_card,equipment_card,operator_catalog,weapon_catalog,equipment_catalog,stage_catalog,stage_card,calendar,medals_data,mixed --output output/cache-after-live.json
+python scripts/benchmark_endfield_queries.py --repo ../otae-endfield-cache-before --mode record --cases equipment_search,weapon_relations,loadout,operator_card,weapon_card,equipment_card,operator_catalog,weapon_catalog,equipment_catalog,stage_catalog,stage_card,calendar,medals_data,mixed --output output/cache-before-live.json
+python scripts/benchmark_endfield_queries.py --mode live --cases equipment_search,weapon_relations,loadout,operator_card,weapon_card,equipment_card,operator_catalog,weapon_catalog,equipment_catalog,stage_catalog,stage_card,calendar,medals_data,mixed --output output/cache-after-live.json
 
-python scripts/endfield/benchmark_endfield_queries.py --repo ../otae-endfield-cache-before --mode replay --cases mixed --output output/cache-before-replay.json
-python scripts/endfield/benchmark_endfield_queries.py --mode replay --cases mixed --output output/cache-after-replay.json
+python scripts/benchmark_endfield_queries.py --repo ../otae-endfield-cache-before --mode replay --cases mixed --output output/cache-before-replay.json
+python scripts/benchmark_endfield_queries.py --mode replay --cases mixed --output output/cache-after-replay.json
 
-python scripts/endfield/benchmark_endfield_account_cache.py --baseline ../otae-endfield-cache-before --runs 3 --history --output output/account-cache-report.json
+python scripts/benchmark_endfield_account_cache.py --baseline ../otae-endfield-cache-before --runs 3 --history --output output/account-cache-report.json
 ```
 
 这些命令应顺序运行，不要与 pytest 或另一份基准同时测 CPU。账号脚本在终端无回显输入凭据，不把凭据放命令参数、环境变量或文件；使用临时工作目录、内存账号库及替换后的发送出口，不访问生产数据库或发送消息。`--history` 会查询官方可用完整记录，不改变账号状态。不同机器的绝对时延应以本机复测为准。
