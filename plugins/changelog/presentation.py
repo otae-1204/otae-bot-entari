@@ -85,10 +85,11 @@ def _items(release: Release) -> str:
         rows = []
         for item in items:
             number += 1
+            # Hashes stay in changelog.json for the checker; readers only need date and size.
             stamp = f"{item.date} · " if item.date else ""
             rows.append(
                 f'<div class="cl-item"><span class="cl-n">{number:02}</span><p>{text(item.text)}'
-                f'<small>{text(stamp + " ".join(item.commits))}</small></p></div>'
+                f'<small>{text(f"{stamp}{len(item.commits)} 个提交")}</small></p></div>'
             )
         groups.append(
             f'<section class="cl-group kind-{text(kind)}"><h2 class="cl-heading"><i></i>{text(KIND_LABELS[kind])}'

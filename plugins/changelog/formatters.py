@@ -31,7 +31,7 @@ def format_release(release: Release, *, number: int, total: int) -> list[str]:
     for item in release.highlights:
         stamp = f"（{item.date}）" if multi_day and item.date else ""
         lines.append(f"[{item.label}] {item.text}{stamp}")
-    lines += ["", f"提交：{' '.join(release.commits)}", FOOTNOTE]
+    lines += ["", FOOTNOTE]
     return lines
 
 

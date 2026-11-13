@@ -326,14 +326,15 @@ class TextFormatterTests(unittest.TestCase):
     def setUpClass(cls):
         cls.changelog = _changelog()
 
-    def test_latest_text_contains_version_title_and_commits(self):
+    def test_latest_text_contains_version_title_and_commit_count_but_no_hashes(self):
         text = "\n".join(formatters.format_latest(self.changelog))
         latest = self.changelog.latest
         self.assertIn(latest.version, text)
         self.assertIn(latest.date_range, text)
         self.assertIn(latest.title, text)
+        self.assertIn(f"{latest.commit_count} 个提交", text)
         for short in latest.commits:
-            self.assertIn(short, text)
+            self.assertNotIn(short, text)
 
     def test_release_text_labels_every_highlight_and_keeps_dates(self):
         release = self.changelog.releases[1]
