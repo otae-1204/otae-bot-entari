@@ -538,11 +538,11 @@ async def check_minecraft_rejoin_clears_the_kick_mark():
         return GuildMemberAddedEvent(account, origin)
 
     broadcast._kicked_groups.add('100')
-    with patch.object(broadcast, 'get_bot', return_value=account):
-        await publish(joined('someone'))
-        assert '100' in broadcast._kicked_groups
-        await publish(joined('test-bot'))
-        assert '100' not in broadcast._kicked_groups
+    # The account that received the event joined; whichever logged in last does not matter.
+    await publish(joined('someone'))
+    assert '100' in broadcast._kicked_groups
+    await publish(joined('test-bot'))
+    assert '100' not in broadcast._kicked_groups
 
 asyncio.get_event_loop().run_until_complete(check_minecraft_rejoin_clears_the_kick_mark())
 

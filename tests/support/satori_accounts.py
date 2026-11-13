@@ -3,8 +3,8 @@
 ``make_account(self_id, platform=..., guilds=...)`` must be called inside a
 running event loop (aiohttp). The protocol is the real ``EntariProtocol``:
 ``guild.list`` answers one page with ``guilds`` (``None``: the call fails, as
-on an endpoint without it), ``message.create`` records the send in ``sent``
-as ``(channel_id, content)`` or raises ``reject`` when set, and
+on an endpoint without it), ``message.create`` raises ``reject`` when set, else
+records the accepted send in ``sent`` as ``(channel_id, content)``, and
 ``user.channel.create`` opens ``private:<user id>``.
 """
 
@@ -22,6 +22,7 @@ class RecordingProtocol(EntariProtocol):
         self.guilds: list[str] | None = []
         self.reject: BaseException | None = None
         self.answer_empty = False
+        self.delivered: list[tuple[str, str]] = []
 
     async def call_api(self, action, params=None, multipart=False, method="POST"):
         name = str(getattr(action, "value", action))
@@ -38,14 +39,15 @@ class RecordingProtocol(EntariProtocol):
                 raise self.reject
             if self.answer_empty:
                 return []
+            self.delivered.append((params["channel_id"], params["content"]))
             return [{"id": f"sent-{len(self.calls)}", "content": params["content"]}]
         raise AssertionError(f"unexpected API call {name}")
 
     # Properties, not methods: EntariProtocol wraps every method as an API call.
     @property
     def sent(self) -> list[tuple[str, str]]:
-        return [(params["channel_id"], params["content"])
-                for action, params in self.calls if action == Api.MESSAGE_CREATE.value]
+        """Messages the endpoint accepted, as (channel_id, content)."""
+        return list(self.delivered)
 
     @property
     def listings(self) -> int:

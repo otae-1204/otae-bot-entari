@@ -3,18 +3,21 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import time
 import traceback
 
-from arclet.entari import Account as Bot, MessageChain, Session, Text, listen
+from arclet.entari import MessageChain, Session, Text, listen
 from arclet.entari.event.base import GuildMemberAddedEvent
+from arclet.letoderea import ExitState
+from loguru import logger
 
-from otae_bot.accounts.ready import get_bot
-from otae_bot.scheduling.jobs import timer
-
+from otae_bot.accounts import runtime
 from otae_bot.config.settings import Config
+from otae_bot.delivery import FAILED as DELIVERY_FAILED
+from otae_bot.delivery import NO_ACCOUNT as DELIVERY_NO_ACCOUNT
+from otae_bot.delivery import SENT as DELIVERY_SENT
 from otae_bot.delivery import Target, deliver
+from otae_bot.scheduling.jobs import timer
 from .config import minecraft_settings
 from .data_source import PlayerGameTimeManager
 from .ping import ping
@@ -24,8 +27,6 @@ from .broadcast_utils import (
     group_errors_by_group,
     should_send_error_digest,
 )
-
-logger = logging.getLogger(__name__)
 
 MC_BROADCAST_INTERVAL = minecraft_settings().broadcast_interval
 
@@ -45,14 +46,15 @@ _last_broadcast_at: dict[str, int] = {}
 
 # ── 监听 bot 重新入群 → 清除踢出标记 ──
 
-def _is_bot_added(event) -> bool:
-    bot_self_id = get_bot().self_id if get_bot() else ""
-    return str(event.user.id) == str(bot_self_id)
+def _is_bot_added(account, event) -> bool:
+    # 收到事件的账号自己入群才算，不与“最近登录”的账号比对。
+    user_id = str(getattr(getattr(event, "user", None), "id", "") or "")
+    return bool(user_id) and user_id == runtime.account_id(account)
 
 
 async def _clear_kick_mark(session: Session):
     event = session.event
-    if not _is_bot_added(event):
+    if not _is_bot_added(session.account, event):
         return
     guild_id = str(event.guild.id) if event.guild else ""
     if guild_id:
@@ -63,10 +65,16 @@ async def _clear_kick_mark(session: Session):
 listen(GuildMemberAddedEvent)(_clear_kick_mark)
 
 
+def _text(text: str) -> MessageChain:
+    return MessageChain([Text(text)])
+
+
 async def safe_ping(server_address: str, server_type: str = "java") -> dict:
     """安全的 ping 包装，统一返回格式."""
     try:
         return await ping(server_address, server_type)
+    except (ExitState, asyncio.CancelledError):
+        raise
     except Exception as exc:
         return {"status": "error", "data": {}, "error": str(exc)}
 
@@ -186,7 +194,7 @@ async def init_broadcast(bm):
             group[addr]["address"] = addr
             continue
         group[addr] = _build_broadcast_cache_entry(addr, name, result, int(time.time()))
-    logger.info("Broadcast server cache initialized: %s servers", len(entries))
+    logger.info(f"Broadcast server cache initialized: {len(entries)} servers")
 
 
 async def _sync_server_list():
@@ -221,8 +229,70 @@ async def _sync_server_list():
                 for (gid, addr, name), result in zip(new_entries, results):
                     if gid in __BroadcastInfo and addr not in __BroadcastInfo[gid]:
                         __BroadcastInfo[gid][addr] = _build_broadcast_cache_entry(addr, name, result, now)
+    except (ExitState, asyncio.CancelledError):
+        raise
     except Exception:
         pass
+
+
+def _is_kicked_error(exc: BaseException) -> bool:
+    """LLBot 报告账号已被移出群 / 群解散（含 content bytes 中的中文错误）."""
+    err_msg = str(exc)
+    if "已被移出该群" in err_msg or "已被移除" in err_msg or "群已解散" in err_msg:
+        return True
+    return "500" in err_msg and ("移出" in err_msg or "移除" in err_msg or "解散" in err_msg)
+
+
+SENT, KICKED, NO_ACCOUNT, FAILED = "sent", "kicked", "no_account", "failed"
+
+
+async def _send_group(group_id: str, text: str) -> tuple[str, BaseException | None]:
+    """经投递服务发出一条播报；返回 (结果, 失败时的异常).
+
+    不指定账号：deliver 只用 guild.list 里列出该群的在线账号（必要时刷新群
+    列表），绝不交给“最近登录”的账号（它可能是别的平台，如 Ir）。某账号报告
+    已被移出群时从它的群列表里去掉该群，换下一个在群账号；全部被移出才暂停该群。
+    群功能被关闭时 deliver 不发，也算处理完毕。
+    """
+    gid = str(group_id)
+    target = Target.group(gid)
+    kicked = 0
+    for _ in range(len(runtime.get_bots()) + 1):
+        result = await deliver(target, _text(text))
+        if result.status == DELIVERY_NO_ACCOUNT:
+            if kicked:
+                break
+            online = ", ".join(runtime.account_id(bot) or "?" for bot in runtime.get_bots()) or "none"
+            logger.warning(f"[MC_Server] 群 {gid} 没有在线账号在群内，本次播报未发出；在线账号：{online}")
+            return NO_ACCOUNT, None
+        sender_id = runtime.account_id(result.account)
+        if result.status == DELIVERY_FAILED:
+            exc = result.exception
+            if exc is not None and _is_kicked_error(exc):
+                runtime.forget_guild(result.account, gid)
+                logger.warning(f"[MC_Server] 账号 {sender_id} 已不在群 {gid}（{type(exc).__name__}）")
+                kicked += 1
+                continue
+            logger.warning(f"[MC_Server] 群 {gid} 播报发送失败：账号 {sender_id}，{type(exc).__name__}")
+            return FAILED, exc
+        if result.status == DELIVERY_SENT:
+            logger.info(f"[MC_Server] 群 {gid} 播报已发送（{text.count(chr(10)) + 1} 行，账号 {sender_id}）")
+        return SENT, None
+    logger.warning(f"[MC_Server] 所有在线账号都已被移出群 {gid}，暂停该群广播")
+    _kicked_groups.add(gid)
+    return KICKED, None
+
+
+def _digest_account(group_ids) -> object | None:
+    """超级用户异常摘要的发送账号：按群号排序，第一个有在群账号的配置群所用的账号.
+
+    这样摘要总由能发 QQ 群播报的账号私聊发出，不会落到别的平台的账号上。
+    """
+    for gid in sorted(str(item) for item in group_ids):
+        bots = runtime.get_bots_for_guild(gid)
+        if bots:
+            return bots[0]
+    return None
 
 
 @timer.scheduled_job("interval", seconds=BROADCAST_TICK_SECONDS, misfire_grace_time=30, max_instances=1)
@@ -230,7 +300,6 @@ async def broadcast():
     """定时轮询所有服务器，检测玩家变化并播报（同时同步 DB 配置）."""
     await _sync_server_list()
 
-    bot: Bot = get_bot()
     errors: list[str] = []
     now = int(time.time())
 
@@ -329,29 +398,33 @@ async def broadcast():
                         __BroadcastInfo[group_id][addr]["players_hidden"] = False
                         __BroadcastInfo[group_id][addr]["online_players"] = 0
 
+            except (ExitState, asyncio.CancelledError):
+                raise
             except Exception:
                 errors.append(f"群 {group_id} 服务器 {addr}: {traceback.format_exc()}")
 
         if group_messages:
             try:
-                # The default account sends, as before; a send error keeps its traceback.
-                result = await deliver(Target.group(str(group_id)), MessageChain([Text("\n".join(group_messages))]), account=bot)
-                result.raise_for_failure()
+                outcome, failure = await _send_group(str(group_id), "\n".join(group_messages))
+            except (ExitState, asyncio.CancelledError):
+                raise
             except Exception as exc:
-                err_msg = str(exc)
-                # 检测 bot 被移出群 / 群解散（含 content bytes 中的中文错误）
-                if "已被移出该群" in err_msg or "已被移除" in err_msg or "群已解散" in err_msg:
-                    logger.warning(f"Bot 已被移出群 {group_id}，暂停该群广播")
-                    _kicked_groups.add(str(group_id))
-                elif "500" in err_msg and ("移出" in err_msg or "移除" in err_msg or "解散" in err_msg):
-                    logger.warning(f"Bot 已被移出群 {group_id}，暂停该群广播")
-                    _kicked_groups.add(str(group_id))
-                else:
-                    errors.append(f"群 {group_id} 发送消息失败: {traceback.format_exc()}")
+                logger.warning(f"[MC_Server] 群 {group_id} 播报发送失败：{type(exc).__name__}")
+                outcome, failure = FAILED, exc
+            if outcome == FAILED:
+                detail = "".join(traceback.format_exception(failure)) if failure is not None else ""
+                errors.append(f"群 {group_id} 发送消息失败: {detail}")
+            elif outcome == NO_ACCOUNT:
+                errors.append(f"群 {group_id} 发送消息失败: 没有在线账号在该群内")
 
     if errors:
+        bot = _digest_account(snapshot)
+        if bot is None:
+            logger.warning(f"[MC_Server] 广播异常摘要未发送：没有可用的 QQ 账号（{len(errors)} 条异常）")
+            return
         try:
-            target = Target.private(superuser)
+            # 私聊发给超级用户：用这个账号，平台与它相同，不会落到别的平台。
+            target = Target.private(superuser, self_id=runtime.account_id(bot), platform=getattr(bot, "platform", ""))
             grouped = group_errors_by_group(errors)
             now_ts = int(time.time())
             lines: list[str] = []
@@ -365,11 +438,16 @@ async def broadcast():
                     suppressed += len(group_errors)
             if lines:
                 suffix = f"\n已折叠 {suppressed} 条重复异常" if suppressed else ""
-                await deliver(target, MessageChain([Text(
+                result = await deliver(target, _text(
                     f"广播异常摘要（共 {len(lines)} 条）：\n" + "\n---\n".join(lines[-5:]) + suffix
-                )]), account=bot)
-        except Exception:
-            pass
+                ), account=bot)
+                result.raise_for_failure()
+        except (ExitState, asyncio.CancelledError):
+            raise
+        except Exception as exc:
+            logger.warning(
+                f"[MC_Server] 广播异常摘要发送失败：账号 {runtime.account_id(bot)}，{type(exc).__name__}"
+            )
 
 
 def get_player_online_times(group_id: str, server_address: str) -> dict[str, str]:

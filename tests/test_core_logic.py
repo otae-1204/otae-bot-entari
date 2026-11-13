@@ -40,87 +40,29 @@ def _load_mcsm_draw_module():
 
 
 def _load_minecraft_broadcast_module(name: str):
-    previous_ready = sys.modules.get("otae_bot.accounts.ready")
-    previous_jobs = sys.modules.get("otae_bot.scheduling.jobs")
-    previous_arclet_entari = sys.modules.get("arclet.entari")
-    previous_arclet = sys.modules.get("arclet")
+    """Load broadcast.py on the real Entari/Satori modules; only the plugin package and ping are stubs."""
     previous_pkg = sys.modules.get("plugins.minecraft_plugin")
     previous_ping = sys.modules.get("plugins.minecraft_plugin.ping")
-    previous_event_base = sys.modules.get("arclet.entari.event.base")
-    previous_delivery = sys.modules.get("otae_bot.delivery")
-
-    delivery = types.ModuleType("otae_bot.delivery")
-    delivery.Target = types.SimpleNamespace(group=lambda *a, **kw: (a, kw), private=lambda *a, **kw: (a, kw))
-    async def fake_deliver(*args, **kwargs):
-        return None
-    delivery.deliver = fake_deliver
-    sys.modules["otae_bot.delivery"] = delivery
-
-    ready = types.ModuleType("otae_bot.accounts.ready")
-    ready.get_bot = lambda: None
-    jobs = types.ModuleType("otae_bot.scheduling.jobs")
-    jobs.timer = types.SimpleNamespace(
-        scheduled_job=lambda *args, **kwargs: (lambda func: func)
-    )
-
-    arclet = previous_arclet or types.ModuleType("arclet")
-    arclet_entari = types.ModuleType("arclet.entari")
-    arclet_entari.Account = object
-    arclet_entari.Session = object
-    arclet_entari.MessageChain = list
-    arclet_entari.Text = str
-    arclet_entari.listen = lambda *args, **kwargs: (lambda func: func)
-    event_base = types.ModuleType("arclet.entari.event.base")
-    event_base.GuildMemberAddedEvent = object
-    sys.modules["arclet.entari.event.base"] = event_base
-
-    sys.modules["otae_bot.accounts.ready"] = ready
-    sys.modules["otae_bot.scheduling.jobs"] = jobs
-    sys.modules["arclet"] = arclet
-    sys.modules["arclet.entari"] = arclet_entari
     pkg = previous_pkg or types.ModuleType("plugins.minecraft_plugin")
-    pkg.__path__ = [str(ROOT / "plugins/minecraft_plugin")]
-    sys.modules["plugins.minecraft_plugin"] = pkg
+    if previous_pkg is None:
+        pkg.__path__ = [str(ROOT / "plugins/minecraft_plugin")]
+        sys.modules["plugins.minecraft_plugin"] = pkg
     ping_module = types.ModuleType("plugins.minecraft_plugin.ping")
+
     async def fake_ping(*args, **kwargs):
         return {"status": "error", "data": {}}
+
     ping_module.ping = fake_ping
     sys.modules["plugins.minecraft_plugin.ping"] = ping_module
     try:
         return _load_module(f"plugins.minecraft_plugin.{name}", "plugins/minecraft_plugin/broadcast.py")
     finally:
-        for module_name, previous in (
-            ("otae_bot.accounts.ready", previous_ready),
-            ("otae_bot.scheduling.jobs", previous_jobs),
-        ):
-            if previous is None:
-                sys.modules.pop(module_name, None)
-            else:
-                sys.modules[module_name] = previous
-        if previous_arclet_entari is None:
-            sys.modules.pop("arclet.entari", None)
-        else:
-            sys.modules["arclet.entari"] = previous_arclet_entari
-        if previous_arclet is None:
-            sys.modules.pop("arclet", None)
-        else:
-            sys.modules["arclet"] = previous_arclet
         if previous_pkg is None:
             sys.modules.pop("plugins.minecraft_plugin", None)
-        else:
-            sys.modules["plugins.minecraft_plugin"] = previous_pkg
         if previous_ping is None:
             sys.modules.pop("plugins.minecraft_plugin.ping", None)
         else:
             sys.modules["plugins.minecraft_plugin.ping"] = previous_ping
-        if previous_event_base is None:
-            sys.modules.pop("arclet.entari.event.base", None)
-        else:
-            sys.modules["arclet.entari.event.base"] = previous_event_base
-        if previous_delivery is None:
-            sys.modules.pop("otae_bot.delivery", None)
-        else:
-            sys.modules["otae_bot.delivery"] = previous_delivery
 
 
 def _load_steam_data_source():

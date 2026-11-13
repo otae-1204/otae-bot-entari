@@ -1,14 +1,19 @@
-"""Player-change broadcasts: default account, kicked-group pause, error digest to the superuser."""
+"""Player-change broadcasts: an account in the group sends, kicked-group pause, error digest to the superuser.
+
+Real Satori accounts with the real EntariProtocol; only HTTP and the server ping are faked.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import importlib
 import sys
-from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+
+from otae_bot.accounts import runtime
+from tests.support.satori_accounts import make_account, pin_event_loop
 
 importlib.import_module("plugins.minecraft_plugin.broadcast")
 broadcast = sys.modules["plugins.minecraft_plugin.broadcast"]
@@ -16,43 +21,53 @@ broadcast = sys.modules["plugins.minecraft_plugin.broadcast"]
 
 @pytest.fixture
 def mc(monkeypatch):
-    bot = SimpleNamespace(self_id="9", platform="qq", protocol=SimpleNamespace(
-        send_message=AsyncMock(return_value=[SimpleNamespace(id="m")]),
-        send_private_message=AsyncMock(return_value=[SimpleNamespace(id="p")]),
-    ))
+    runtime.clear_account()
     monkeypatch.setattr(broadcast, "_bm", None)
-    monkeypatch.setattr(broadcast, "get_bot", lambda: bot)
     monkeypatch.setattr(broadcast, "__BroadcastInfo", {"100": {"a": {"address": "a", "name": "srv", "players": {}}}})
     monkeypatch.setattr(broadcast, "_kicked_groups", set())
     monkeypatch.setattr(broadcast, "_last_error_digest_at", {})
     monkeypatch.setattr(broadcast, "_is_group_broadcast_due", lambda *_: True)
     monkeypatch.setattr(broadcast, "_mark_group_broadcasted", lambda *_: None)
     monkeypatch.setattr(broadcast, "ping", AsyncMock(return_value={"status": "success", "data": {"players": ["Steve"]}}))
-    monkeypatch.setattr(broadcast, "_check_player_changes_simple", lambda *_: ["Steve 上线了"])
-    return bot
+    yield
+    runtime.clear_account()
 
 
-def test_changes_go_to_the_group_through_the_default_account(mc):
-    asyncio.run(broadcast.broadcast())
-    channel, message = mc.protocol.send_message.await_args.args
-    assert (channel, str(message)) == ("100", "Steve 上线了")
-    mc.protocol.send_private_message.assert_not_awaited()
+def run(reject=None, times=1):
+    """One account in group 100; run `times` broadcasts; return what it sent."""
+    async def scenario():
+        with pin_event_loop():
+            bot = make_account("9", platform="llonebot", guilds=["100"])
+            bot.protocol.reject = reject
+            runtime.set_account(bot)
+            await runtime.refresh_guilds()
+            for _ in range(times):
+                await broadcast.broadcast()
+            private = [(params["channel_id"], params["content"]) for action, params in bot.protocol.calls
+                       if action == "message.create" and params["channel_id"].startswith("private:")]
+            groups = [action for action, params in bot.protocol.calls
+                      if action == "message.create" and params["channel_id"] == "100"]
+            return bot.protocol.sent, private, groups
+
+    return asyncio.run(scenario())
+
+
+def test_changes_go_to_the_group_through_an_account_in_it(mc):
+    sent, private, _ = run()
+    assert sent == [("100", "[MC_Server] srv：Steve 加入了服务器。")]
+    assert private == []
 
 
 def test_a_kicked_group_is_paused_without_an_error_digest(mc):
-    mc.protocol.send_message.side_effect = RuntimeError("发送失败：已被移出该群")
-    asyncio.run(broadcast.broadcast())
+    _, private, groups = run(RuntimeError("发送失败：已被移出该群"), times=2)
     assert broadcast._kicked_groups == {"100"}
-    mc.protocol.send_private_message.assert_not_awaited()
-    mc.protocol.send_message.reset_mock()
-    asyncio.run(broadcast.broadcast())
-    mc.protocol.send_message.assert_not_awaited()
+    assert private == []
+    assert len(groups) == 1  # Paused: the second run does not try again.
 
 
 def test_other_send_errors_reach_the_superuser_with_the_traceback(mc):
-    mc.protocol.send_message.side_effect = RuntimeError("timeout")
-    asyncio.run(broadcast.broadcast())
+    _, private, _ = run(RuntimeError("timeout"))
     assert not broadcast._kicked_groups
-    user, message = mc.protocol.send_private_message.await_args.args
-    assert user == broadcast.superuser
-    assert "群 100 发送消息失败" in str(message) and "RuntimeError: timeout" in str(message)
+    [(channel, message)] = private
+    assert channel == "private:" + broadcast.superuser
+    assert "群 100 发送消息失败" in message and "RuntimeError: timeout" in message
