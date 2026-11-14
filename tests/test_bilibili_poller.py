@@ -601,6 +601,55 @@ async def test_dynamic_tick_writes_seen_marks_and_events(bili, tmp_path):
     finally:
         await store.close()
 
+@asyncio_test
+async def test_dynamic_first_poll_uses_newest_published_item(bili, tmp_path):
+    store = await open_store(bili, tmp_path)
+    try:
+        items = [
+            {
+                "id_str": "pinned-old",
+                "modules": {
+                    "module_author": {"pub_ts": 1000},
+                    "module_dynamic": {"desc": {"text": "旧置顶"}},
+                },
+            },
+            {
+                "id_str": "newest",
+                "modules": {
+                    "module_author": {"pub_ts": 3000},
+                    "module_dynamic": {"desc": {"text": "最新"}},
+                },
+            },
+        ]
+        latest = await bili.api.space.latest_dynamic(FakeApi(items={"1": items}), "1")
+        assert latest.item_id == "newest"
+        await store.upsert_target(
+            bili.models.TargetInfo(
+                "dynamic", "1", latest_id=latest.item_id, latest_ts=latest.published_at
+            )
+        )
+        await store.add_subscription("dynamic", "1", "group", "900")
+        poller = bili.poller.Poller(
+            FakeApi(items={"1": items}), store, intervals={"dynamic": 0}
+        )
+        await poller.tick_dynamic()
+        assert await store.outbox_count() == 0
+
+        items.append(
+            {
+                "id_str": "after-subscribe",
+                "modules": {
+                    "module_author": {"pub_ts": 4000},
+                    "module_dynamic": {"desc": {"text": "订阅后的新动态"}},
+                },
+            }
+        )
+        await poller.tick_dynamic()
+        assert await store.outbox_count() == 1
+    finally:
+        await store.close()
+
+
 # --- official account lottery filter ----------------------------------------
 
 
