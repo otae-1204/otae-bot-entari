@@ -1,15 +1,49 @@
 {
   "schema": 2,
-  "head": "ef30255",
+  "head": "9bf6374",
   "generated_from": {
     "first_commit": "8e1b455",
     "first_date": "2026-06-17",
     "last_date": "2026-11-14",
-    "commit_count": 531,
+    "commit_count": 537,
     "merge_commit_count": 36,
-    "version_count": 58
+    "version_count": 59
   },
   "releases": [
+    {
+      "version": "v2.0.3",
+      "date": "2026-11-14",
+      "from": "2026-11-14",
+      "to": "2026-11-14",
+      "title": "响应卡顿优化",
+      "summary": "减少后台任务与出图时整个机器人卡住的情况。",
+      "tags": [
+        "性能",
+        "终末地"
+      ],
+      "highlights": [
+        {
+          "kind": "fix",
+          "date": "2026-11-14",
+          "text": "发图超时时提示稍后送达，不再误报账号服务异常。",
+          "commits": [
+            "0e3de10"
+          ]
+        },
+        {
+          "kind": "perf",
+          "date": "2026-11-14",
+          "text": "出图、定时刷新、抽卡分析、日历与 Steam 存盘不再卡住其他指令。",
+          "commits": [
+            "691ec5a",
+            "3b12810",
+            "0988bdf",
+            "f152d8b",
+            "9bf6374"
+          ]
+        }
+      ]
+    },
     {
       "version": "v2.0.2",
       "date": "2026-11-14",
