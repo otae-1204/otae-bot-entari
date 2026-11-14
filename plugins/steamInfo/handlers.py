@@ -762,7 +762,7 @@ async def init_steam_info():
         )
 
         steam_info_data.update(parent_id, steam_info["response"])
-        steam_info_data.save()
+        await steam_info_data.save_async()
 
 
 def _log_init_steam_info_result(task: asyncio.Task):
@@ -808,7 +808,7 @@ async def update_steam_info():
             continue
 
         steam_info_data.update(parent_id, steam_info["response"])
-        steam_info_data.save()
+        await steam_info_data.save_async()
 
 
 @command.on(help)
@@ -955,7 +955,7 @@ async def unbind_handle(session: Session):
             parent_id, bind_data.get_all(parent_id)
         )
         if steam_info_changed:
-            steam_info_data.save()
+            await steam_info_data.save_async()
         logger.info(
             f"[steamInfo] unbound Steam user parent={parent_id} "
             f"user={user_id} removed={len(removed_records)}"

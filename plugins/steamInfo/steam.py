@@ -181,7 +181,7 @@ async def get_steam_app_list(
     if has_api_key:
         apps = await fetch_steam_store_app_list(steam_api_key, proxy)
         if apps:
-            _write_steam_app_list_cache(cache_file, apps)
+            await asyncio.to_thread(_write_steam_app_list_cache, cache_file, apps)
             return apps
 
     if (
@@ -203,7 +203,7 @@ async def get_steam_app_list(
                             raise ValueError(f"status {resp.status}")
                         data = await resp.json()
                         apps = data.get("applist", {}).get("apps", [])
-                        _write_steam_app_list_cache(cache_file, apps)
+                        await asyncio.to_thread(_write_steam_app_list_cache, cache_file, apps)
                         return apps
             except Exception as exc:
                 logger.warning(f"Failed to fetch Steam app list from {url}: {exc}")
@@ -320,9 +320,14 @@ def is_steam_app_list_cache_stale(cache_path: Path) -> bool:
     )
 
 
-async def _read_cached_app_list(cache_file: Path) -> List[dict]:
+def _read_cached_app_list_sync(cache_file: Path) -> List[dict]:
     data = json.loads(cache_file.read_text(encoding="utf-8"))
     return data.get("applist", {}).get("apps", [])
+
+
+async def _read_cached_app_list(cache_file: Path) -> List[dict]:
+    # The full Steam app list is ~9 MB of JSON; read and parse it off the loop.
+    return await asyncio.to_thread(_read_cached_app_list_sync, cache_file)
 
 
 def _steam_app_alias_file(alias_path: Optional[Path] = None) -> Path:

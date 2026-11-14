@@ -1,8 +1,10 @@
+import asyncio
 import json
 import logging
 import os
 import shutil
 import tempfile
+import threading
 import time
 from PIL import Image
 from pathlib import Path
@@ -18,6 +20,10 @@ logger = logging.getLogger(__name__)
 def _atomic_write_json(path: Path, content: Any) -> None:
     """Write JSON without exposing a partially written destination file."""
 
+    _atomic_write_text(path, json.dumps(content, indent=4))
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temp_name = tempfile.mkstemp(
         dir=path.parent,
@@ -27,7 +33,7 @@ def _atomic_write_json(path: Path, content: Any) -> None:
     temp_path = Path(temp_name)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as file:
-            json.dump(content, file, indent=4)
+            file.write(text)
             file.flush()
             os.fsync(file.fileno())
         os.replace(temp_path, path)
@@ -241,11 +247,30 @@ class SteamInfoData:
     def __init__(self, save_path: Path) -> None:
         self.content: Dict[str, PlayerSummariesResponse] = {}
         self._save_path = save_path
+        # Async saves write a snapshot from a worker thread; the version keeps an
+        # older snapshot that finishes late from overwriting a newer one.
+        self._write_lock = threading.Lock()
+        self._version = 0
+        self._written_version = 0
 
         self.content = _load_json_or_default(save_path, {})
 
+    def _write_snapshot(self, version: int, text: str) -> None:
+        with self._write_lock:
+            if version <= self._written_version:
+                return
+            _atomic_write_text(self._save_path, text)
+            self._written_version = version
+
     def save(self) -> None:
-        _atomic_write_json(self._save_path, self.content)
+        self._version += 1
+        self._write_snapshot(self._version, json.dumps(self.content, indent=4))
+
+    async def save_async(self) -> None:
+        """Serialize on the loop (a consistent snapshot), fsync the file off it."""
+        self._version += 1
+        version, text = self._version, json.dumps(self.content, indent=4)
+        await asyncio.to_thread(self._write_snapshot, version, text)
 
     def update(self, parent_id: str, content: PlayerSummariesResponse) -> None:
         old_content = self.content.get(parent_id, {"players": []})
