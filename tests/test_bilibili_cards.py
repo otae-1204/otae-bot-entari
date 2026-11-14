@@ -100,6 +100,59 @@ def test_decode_honors_orientation_and_transparency(renderer):
     assert renderer._decode_image(_png(transparent)).getpixel((0, 0)) == (255, 255, 255)
 
 
+def test_text_only_dynamic_skips_cover_placeholder(renderer):
+    text_only = Image.open(
+        BytesIO(
+            renderer._render_bili_card(
+                _card(renderer, "dynamic", title="标题", description="纯文字正文"),
+                None,
+                None,
+            )
+        )
+    )
+    failed_cover = Image.open(
+        BytesIO(
+            renderer._render_bili_card(
+                _card(
+                    renderer,
+                    "dynamic",
+                    title="标题",
+                    description="纯文字正文",
+                    cover_url="https://example.com/missing.jpg",
+                ),
+                None,
+                None,
+            )
+        )
+    )
+    empty_body = Image.open(
+        BytesIO(
+            renderer._render_bili_card(
+                _card(renderer, "dynamic", title="标题", description=""),
+                None,
+                None,
+            )
+        )
+    )
+    failed_cover_empty_body = Image.open(
+        BytesIO(
+            renderer._render_bili_card(
+                _card(
+                    renderer,
+                    "dynamic",
+                    title="标题",
+                    description="",
+                    cover_url="https://example.com/missing.jpg",
+                ),
+                None,
+                None,
+            )
+        )
+    )
+    assert text_only.height < failed_cover.height
+    assert empty_body.height == failed_cover_empty_body.height
+
+
 @pytest.mark.parametrize(
     "kind,label",
     [
