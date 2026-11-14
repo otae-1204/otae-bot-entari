@@ -401,9 +401,9 @@ class OwnershipStatsService:
     async def refresh_catalog(self, *, force: bool = False) -> bool:
         async with self._catalog_lock:
             check_started = time.monotonic()
-            current = self.store.list_operator_catalog()
+            current = await asyncio.to_thread(self.store.list_operator_catalog)
             current_version = next((item.version for item in current if item.source == "akedata"), "")
-            current_revision = self.store.get_meta("operator_catalog_revision")
+            current_revision = await asyncio.to_thread(self.store.get_meta, "operator_catalog_revision")
             monotonic_now = time.monotonic()
             if (
                 not force
@@ -450,7 +450,8 @@ class OwnershipStatsService:
                     f"elapsed_seconds={time.monotonic() - check_started:.3f}"
                 )
                 return False
-            self.store.replace_operator_catalog(
+            await asyncio.to_thread(
+                self.store.replace_operator_catalog,
                 entries,
                 version,
                 revision=CATALOG_MAPPING_REVISION,
@@ -494,7 +495,7 @@ class OwnershipStatsService:
         limit: int | None = None,
     ) -> OwnershipRefreshResult:
         return await self.refresh_roles(
-            self.store.list_all_roles(),
+            await asyncio.to_thread(self.store.list_all_roles),
             cipher,
             now=now,
             force=False,
@@ -524,7 +525,7 @@ class OwnershipStatsService:
             groups = _group_roles(roles)
             snapshots = {
                 (item.server_id, item.role_id): item
-                for item in self.store.list_operator_snapshots(groups.keys())
+                for item in await asyncio.to_thread(self.store.list_operator_snapshots, tuple(groups.keys()))
             }
             due_before = started - self.refresh_interval_seconds
             eligible_items: list[
@@ -588,7 +589,7 @@ class OwnershipStatsService:
                         f"batch_id={batch_id} trigger={trigger} "
                         f"error_type={type(exc).__module__}.{type(exc).__name__}"
                     )
-            catalog = self.store.list_operator_catalog()
+            catalog = await asyncio.to_thread(self.store.list_operator_catalog)
 
             if selected and not catalog:
                 issue = OwnershipRefreshIssue(
@@ -596,7 +597,7 @@ class OwnershipStatsService:
                     "干员目录不可用",
                     len(selected),
                 )
-                self.store.cleanup_orphan_operator_snapshots()
+                await asyncio.to_thread(self.store.cleanup_orphan_operator_snapshots)
                 result = OwnershipRefreshResult(
                     attempted=len(selected),
                     succeeded=0,
@@ -631,7 +632,7 @@ class OwnershipStatsService:
                     "官方社区接口冷却中",
                     len(selected),
                 )
-                self.store.cleanup_orphan_operator_snapshots()
+                await asyncio.to_thread(self.store.cleanup_orphan_operator_snapshots)
                 result = OwnershipRefreshResult(
                     attempted=len(selected),
                     succeeded=0,
@@ -679,7 +680,7 @@ class OwnershipStatsService:
                         "官方社区接口触发保护性熔断",
                     )
                 ] += queue_skipped
-            self.store.cleanup_orphan_operator_snapshots()
+            await asyncio.to_thread(self.store.cleanup_orphan_operator_snapshots)
             result = OwnershipRefreshResult(
                 attempted=len(selected),
                 succeeded=sum(item.status == "success" for item in results),
@@ -827,14 +828,17 @@ class OwnershipStatsService:
             async with ROLE_TASKS.claim(reference):
                 for index, role in enumerate(candidates):
                     try:
-                        token = self.store.decrypt_token(role, cipher)
+                        token = await asyncio.to_thread(self.store.decrypt_token, role, cipher)
                         requested += 1
                         detail = await _background_card_detail(self.client, token, role)
                         # The detail is already here: warm the account cards' images on disk too.
                         prefetch_detail_assets(detail, source="ownership")
-                        members, game_saved_at = parse_operator_snapshot(detail, catalog)
+                        members, game_saved_at = await asyncio.to_thread(
+                            parse_operator_snapshot, detail, catalog
+                        )
                         succeeded_at = fixed_timestamp or int(time.time())
-                        self.store.replace_operator_snapshot(
+                        await asyncio.to_thread(
+                            self.store.replace_operator_snapshot,
                             reference,
                             region,
                             members,
@@ -872,7 +876,8 @@ class OwnershipStatsService:
             base_seconds=self.retry_base_seconds,
             max_seconds=self.retry_max_seconds,
         )
-        self.store.record_operator_snapshot_failure(
+        await asyncio.to_thread(
+            self.store.record_operator_snapshot_failure,
             reference,
             region,
             _safe_refresh_error(last_error),

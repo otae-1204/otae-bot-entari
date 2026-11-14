@@ -382,7 +382,7 @@ class UsageStatsService:
         limit: int | None = None,
     ) -> UsageRefreshResult:
         return await self.refresh_roles(
-            self.store.list_all_roles(),
+            await asyncio.to_thread(self.store.list_all_roles),
             cipher,
             now=now,
             force=False,
@@ -406,10 +406,13 @@ class UsageStatsService:
         batch_id = f"{started:x}-{self._batch_sequence:x}"
         async with self._refresh_lock:
             tasks = _family_tasks(roles)
+            # Store reads/writes run off the event loop: on a loaded host this
+            # query alone stalled the loop for 6 s at every batch start.
             snapshots = {
                 (state.server_id, state.role_id, state.family): state
-                for state in self.store.list_challenge_snapshots(
-                    {key for key, _family in tasks}
+                for state in await asyncio.to_thread(
+                    self.store.list_challenge_snapshots,
+                    {key for key, _family in tasks},
                 )
             }
             due_before = started - self.refresh_interval_seconds
@@ -474,7 +477,7 @@ class UsageStatsService:
             issue_counts: Counter[tuple[str, str]] = Counter(
                 (item.issue_key, item.issue_label) for item in outcomes if item.issue_key
             )
-            self.store.cleanup_orphan_challenge_snapshots()
+            await asyncio.to_thread(self.store.cleanup_orphan_challenge_snapshots)
             return UsageRefreshResult(
                 attempted=len(selected),
                 succeeded=sum(item.status == "success" for item in outcomes),
@@ -573,7 +576,7 @@ class UsageStatsService:
     ) -> _RoleOutcome:
         try:
             async with ROLE_TASKS.claim(role):
-                token = self.store.decrypt_token(role, cipher)
+                token = await asyncio.to_thread(self.store.decrypt_token, role, cipher)
                 raw = await self._fetch(role, family, token)
                 written = await self.persist_raw(
                     role, family, raw, locale=locale, fetched_at=now
@@ -616,8 +619,10 @@ class UsageStatsService:
         issue_key: str,
         issue_label: str,
     ) -> _RoleOutcome:
-        state = self.store.list_challenge_snapshots(
-            [(role.role_id, role.server_id)], family=family
+        state = await asyncio.to_thread(
+            self.store.list_challenge_snapshots,
+            [(role.role_id, role.server_id)],
+            family=family,
         )
         previous = state[0].failure_count if state else 0
         systemic = _systemic_code(issue_key)
@@ -629,7 +634,8 @@ class UsageStatsService:
             base_seconds_override=AUTH_RETRY_BASE_SECONDS if is_auth else None,
             max_seconds_override=AUTH_RETRY_MAX_SECONDS if is_auth else None,
         )
-        self.store.mark_challenge_failure(
+        await asyncio.to_thread(
+            self.store.mark_challenge_failure,
             role.role_id,
             role.server_id,
             family,
