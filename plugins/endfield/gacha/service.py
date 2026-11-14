@@ -182,7 +182,7 @@ class EndfieldGachaService:
         pool_rules: dict[str, GachaPoolRule] | None = None,
     ) -> SyncResult:
         async with ROLE_TASKS.claim(role):
-            account_token = self.store.decrypt_token(role, self.cipher)
+            account_token = await asyncio.to_thread(self.store.decrypt_token, role, self.cipher)
             provider, _raw_account_token = decode_account_credential(account_token)
             u8_token = await self.client.get_u8_token(account_token, role.binding_uid)
             character_names = await self.client.character_pool_names(u8_token, role.server_id)
@@ -246,7 +246,7 @@ class EndfieldGachaService:
         optional: bool = False,
     ) -> StreamSyncResult:
         async with semaphore:
-            state = self.store.get_sync_state(role, stream_key)
+            state = await asyncio.to_thread(self.store.get_sync_state, role, stream_key)
             known_boundary = "" if full else state.newest_seq_id
             cursor = ""
             newest = ""
@@ -270,11 +270,12 @@ class EndfieldGachaService:
                             break
                         fresh.append(record)
                     fetched += len(fresh)
-                    inserted += self.store.insert_gacha_records(fresh)
+                    inserted += await asyncio.to_thread(self.store.insert_gacha_records, fresh)
                     cursor = page.next_seq_id
                     if boundary_hit or not page.has_more or not cursor:
                         break
-                self.store.save_sync_state(
+                await asyncio.to_thread(
+                    self.store.save_sync_state,
                     role, stream_key, newest_seq_id=newest or state.newest_seq_id,
                     page_cursor=cursor, error="",
                 )
@@ -282,7 +283,8 @@ class EndfieldGachaService:
             except EndfieldAPIError as exc:
                 if optional:
                     logger.warning("[endfield] optional gacha stream {} unsupported: {}", stream_key, exc)
-                    self.store.save_sync_state(
+                    await asyncio.to_thread(
+                        self.store.save_sync_state,
                         role, stream_key, newest_seq_id=state.newest_seq_id,
                         page_cursor=cursor or state.page_cursor, error="",
                     )
@@ -290,7 +292,8 @@ class EndfieldGachaService:
                 error = str(exc)[:180]
             except Exception:
                 error = "同步过程中发生未知错误"
-            self.store.save_sync_state(
+            await asyncio.to_thread(
+                self.store.save_sync_state,
                 role, stream_key, newest_seq_id=state.newest_seq_id,
                 page_cursor=cursor or state.page_cursor, error=error,
             )

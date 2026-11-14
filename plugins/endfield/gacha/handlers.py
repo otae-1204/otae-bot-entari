@@ -89,14 +89,14 @@ async def _handle_gacha(
     session, qq_user_id: str, command: ParsedEndfieldCommand, cipher: CredentialCipher, *, group: bool,
     event=None, bot=None,
 ) -> None:
-    role = account_store.resolve_role(qq_user_id, command.account_selector)
+    role = await asyncio.to_thread(account_store.resolve_role, qq_user_id, command.account_selector)
     if role is None:
         await session.send("未找到对应的终末地账号，请先私聊发送 /ef 绑定 进行添加。")
         return
     gacha_service = EndfieldGachaService(account_store, official_client, cipher)
-    states = account_store.list_sync_states(role)
+    states = await asyncio.to_thread(account_store.list_sync_states, role)
     effective_full = command.full or not states
-    existing_records = account_store.list_gacha_records(role, limit=100000)
+    existing_records = await asyncio.to_thread(account_store.list_gacha_records, role, limit=100000)
     existing_pool_rules = await gacha_asset_cache.prepare_pool_rules(existing_records)
     result = await gacha_service.sync(
         role, full=effective_full, pool_rules=existing_pool_rules,
@@ -107,8 +107,8 @@ async def _handle_gacha(
         suffix = "；本地已同步记录将持续保留" if effective_full else ""
         await session.send(f"{role.nickname} 抽卡记录{mode}同步完毕：新增收录 {result.inserted} 条{failed}{suffix}。")
         return
-    records = account_store.list_gacha_records(role, limit=100000)
-    xhh_import = account_store.get_xhh_gacha_import(role)
+    records = await asyncio.to_thread(account_store.list_gacha_records, role, limit=100000)
+    xhh_import = await asyncio.to_thread(account_store.get_xhh_gacha_import, role)
     xhh_names = [item.item_name for item in xhh_import.six_stars] if xhh_import else []
     metadata, pool_rules, xhh_metadata = await asyncio.gather(
         gacha_asset_cache.prepare(records),
@@ -119,7 +119,9 @@ async def _handle_gacha(
         gacha_asset_cache.prepare_keepsakes(pool_rules),
         gacha_asset_cache.prepare_pool_banners(pool_rules),
     )
-    analysis = gacha_service.analysis(
+    # Re-reads every record and builds the whole analysis: keep it off the event loop.
+    analysis = await asyncio.to_thread(
+        gacha_service.analysis,
         role, metadata, pool_rules, xhh_metadata, keepsake_metadata, pool_banners,
     )
     pngs = await draw_gacha_analysis_cards(analysis, uid=role.masked_uid)
@@ -127,17 +129,18 @@ async def _handle_gacha(
 
 
 async def _handle_gacha_history(session, qq_user_id: str, command: ParsedEndfieldCommand, *, group: bool) -> None:
-    role = account_store.resolve_role(qq_user_id, command.account_selector)
+    role = await asyncio.to_thread(account_store.resolve_role, qq_user_id, command.account_selector)
     if role is None:
         await session.send("未找到对应的终末地账号，请先私聊发送 /ef 绑定 进行添加。")
         return
-    total = account_store.count_gacha_records(role, command.pool_filter)
+    total = await asyncio.to_thread(account_store.count_gacha_records, role, command.pool_filter)
     total_pages = max(1, (total + 19) // 20)
     if command.page > total_pages and total:
         await session.send(f"页码超出有效范围，当前记录共 {total_pages} 页。")
         return
-    records = account_store.list_gacha_records(
-        role, page=command.page, page_size=20, pool_filter=command.pool_filter
+    records = await asyncio.to_thread(
+        account_store.list_gacha_records,
+        role, page=command.page, page_size=20, pool_filter=command.pool_filter,
     )
     metadata = await gacha_asset_cache.prepare(records, download_all=True)
     records = apply_gacha_metadata(records, metadata)
@@ -159,7 +162,7 @@ async def _handle_gacha_history(session, qq_user_id: str, command: ParsedEndfiel
 
 
 async def _handle_xhh_import(session, qq_user_id: str, command: ParsedEndfieldCommand) -> None:
-    role = account_store.resolve_role(qq_user_id, command.account_selector)
+    role = await asyncio.to_thread(account_store.resolve_role, qq_user_id, command.account_selector)
     if role is None:
         await session.send("未找到对应的终末地账号，请先私聊发送 /ef 绑定 进行添加。")
         return
@@ -203,7 +206,7 @@ async def _handle_xhh_import(session, qq_user_id: str, command: ParsedEndfieldCo
                 )
                 return
             imported = filter_xhh_import_six_stars(imported, xhh_metadata)
-            account_store.replace_xhh_gacha_import(role, imported)
+            await asyncio.to_thread(account_store.replace_xhh_gacha_import, role, imported)
     finally:
         if xhh_session is not None:
             await xhh_session.close()
