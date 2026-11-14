@@ -7,13 +7,15 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
-from ..models import KIND_LIVE, KIND_VIDEO
+from ..models import KIND_DYNAMIC, KIND_LIVE, KIND_VIDEO
 from .mapping import bvid_from_url
 
 
 BV_RE = re.compile(r"\bBV[0-9A-Za-z]{10}\b")
 URL_RE = re.compile(r"https?://[^\s<>\"]+")
 LIVE_RE = re.compile(r"live\.bilibili\.com/(?:blanc/)?(\d+)")
+T_DYNAMIC_RE = re.compile(r"t\.bilibili\.com/(\d+)")
+OPUS_RE = re.compile(r"bilibili\.com/opus/(\d+)")
 SHORT_LINK_HOST = "b23.tv"
 # Punctuation that commonly trails a pasted link in a chat message.
 LINK_TRAILING_CHARS = "),\uff0c\u3002]"
@@ -21,7 +23,7 @@ LINK_TRAILING_CHARS = "),\uff0c\u3002]"
 
 @dataclass(slots=True)
 class ParsedLink:
-    """One recognised link: kind is live/video, value the room number or bvid."""
+    """One recognised link: kind is live/video/dynamic, value is its id."""
 
     kind: str
     value: str
@@ -38,6 +40,14 @@ async def parse_link(api: Any, text: str) -> ParsedLink | None:
             url = await expand_short_url(api, url)
             parsed = urlparse(url)
             host = parsed.netloc.lower()
+        if "t.bilibili.com" in host:
+            match = T_DYNAMIC_RE.search(url)
+            if match:
+                return ParsedLink(KIND_DYNAMIC, match.group(1), url)
+        if "bilibili.com" in host:
+            match = OPUS_RE.search(url)
+            if match:
+                return ParsedLink(KIND_DYNAMIC, match.group(1), url)
         if "live.bilibili.com" in host:
             match = LIVE_RE.search(url)
             if match:
