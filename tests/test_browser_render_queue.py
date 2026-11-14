@@ -336,14 +336,14 @@ class RoutePatternTests(unittest.IsolatedAsyncioTestCase):
 
 class HostSettingsTests(unittest.TestCase):
     def test_concurrency_setting_is_clamped(self):
-        self.assertEqual(browser._render_concurrency(), 2)
-        self.assertEqual(browser._render_concurrency(3), 3)
+        self.assertEqual(browser._render_concurrency(), 3)
+        self.assertEqual(browser._render_concurrency(2), 2)
         self.assertEqual(browser._render_concurrency(9), 4)
         self.assertEqual(browser._render_concurrency(0), 1)
-        with settings.override({"otae": {"browser": {"concurrency": "3"}}}):
-            self.assertEqual(browser._render_concurrency(), 3)
+        with settings.override({"otae": {"browser": {"concurrency": "4"}}}):
+            self.assertEqual(browser._render_concurrency(), 4)
         with settings.override({"otae": {"browser": {"concurrency": "two"}}}):
-            self.assertEqual(browser._render_concurrency(), 2)
+            self.assertEqual(browser._render_concurrency(), 3)
 
     def test_windows_host_loop_is_proactor(self):
         class FakeProactor:

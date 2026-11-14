@@ -59,7 +59,7 @@ class HttpCacheSettings(Settings):
 class BrowserSettings(Settings):
     """出图用的共享浏览器"""
 
-    concurrency: int = field(default=2, description="同一浏览器同时渲染几张图（1–4；每多一张约多占 150–300 MB 内存）")
+    concurrency: int = field(default=3, description="同一浏览器同时渲染几张图（1–4；每多一张约多占 150–300 MB 内存）")
 
 
 class MediaSettings(Settings):
