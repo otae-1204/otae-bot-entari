@@ -656,6 +656,66 @@ class UploadTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self._sent()[0]["message"][0]["data"]["file"], "https://example.com/a.png")
 
 
+class UnconfirmedSendTests(unittest.IsolatedAsyncioTestCase):
+    """A send LLBot handed to QQ but could not confirm is reported as sent, not failed."""
+
+    def stock(self, outcome):
+        from satori.adapters.onebot11.forward import OneBot11ForwardAdapter
+
+        calls: list[str] = []
+
+        async def call_api(adapter, action, params=None):
+            calls.append(action)
+            if isinstance(outcome, BaseException):
+                raise outcome
+            return outcome
+
+        return patch.object(OneBot11ForwardAdapter, "call_api", call_api), calls
+
+    def adapter(self) -> OneBotBoundaryAdapter:
+        return OneBotBoundaryAdapter(OneBot11ForwardConfig("ws://127.0.0.1:1"))
+
+    async def test_wait_for_self_echo_timeout_counts_as_sent(self):
+        failure = ActionFailed(
+            "1200: {'status': 'failed', 'retcode': 1200, 'message': 'waitForSelfEcho timeout'}",
+            {"status": "failed", "retcode": 1200, "message": "waitForSelfEcho timeout"},
+        )
+        stock, calls = self.stock(failure)
+        with stock, patch("otae_bot.boundary.onebot11.logger") as log:
+            result = await self.adapter().call_api("send_group_msg", {"group_id": 1, "message": []})
+        self.assertEqual(result, {"message_id": ""})
+        self.assertEqual(calls, ["send_group_msg"])  # not retried here either
+        log.warning.assert_called_once()
+
+    async def test_no_reply_before_the_timeout_counts_as_sent(self):
+        stock, _calls = self.stock(TimeoutError())
+        with stock, patch("otae_bot.boundary.onebot11.logger"):
+            result = await self.adapter().call_api("send_group_forward_msg", {"group_id": 1, "messages": []})
+        self.assertEqual(result, {"message_id": ""})
+
+    async def test_other_send_failures_still_raise(self):
+        failure = ActionFailed("1200: {'retcode': 1200, 'message': 'group not found'}", {"retcode": 1200})
+        stock, _calls = self.stock(failure)
+        with stock, self.assertRaises(ActionFailed):
+            await self.adapter().call_api("send_group_msg", {"group_id": 1, "message": []})
+
+    async def test_non_send_actions_keep_their_timeout(self):
+        stock, _calls = self.stock(TimeoutError())
+        with stock, self.assertRaises(TimeoutError):
+            await self.adapter().call_api("get_msg", {"message_id": "1"})
+
+    async def test_unconfirmed_send_yields_a_message_object_with_an_empty_id(self):
+        failure = ActionFailed("1200: waitForSelfEcho timeout", {"retcode": 1200})
+        stock, _calls = self.stock(failure)
+        adapter = self.adapter()
+        login = Login(sn=0, status=LoginStatus.ONLINE, adapter="onebot", platform="qq-client", user=User(SELF))
+        encoder = stock_message.OneBot11MessageEncoder(login, adapter, "123")
+        with stock, patch("otae_bot.boundary.onebot11.logger"):
+            await encoder.render(parse("hello"))
+            await encoder.flush()
+        self.assertEqual([message.id for message in encoder.results], [""])
+
+
 class WiringTests(unittest.TestCase):
     def _create_app(self):
         names = ("install_message_log_redaction", "install_recent_alerts", "install_quote_fetch_fallback",

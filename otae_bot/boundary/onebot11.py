@@ -20,6 +20,10 @@ against LLBot 8.3.2:
   the server's ``internal:…/_tmp/…`` URLs. When LLBot shares the bot's filesystem
   (``otae.media.shared_filesystem``), images, audio and video go as ``file://`` paths
   to the stored upload instead of base64.
+- a send that LLBot handed to QQ but could not confirm (``waitForSelfEcho`` timeout, or
+  no reply before the adapter timeout) counts as sent, with an empty message id: the
+  message reaches the chat in practice, and reporting a failure made every caller that
+  retries post it two or three times.
 """
 
 from __future__ import annotations
@@ -71,6 +75,17 @@ FORWARD_MAX_DEPTH = 3
 FORWARD_MAX_MESSAGES = 200
 _MEDIA_ELEMENTS = frozenset({"img", "image", "audio", "video", "file"})
 _shared_filesystem = False
+_SEND_ACTIONS = frozenset({
+    "send_msg",
+    "send_group_msg",
+    "send_private_msg",
+    "send_forward_msg",
+    "send_group_forward_msg",
+    "send_private_forward_msg",
+})
+# LLBot's wording (retcode 1200) when QQ accepted the message but its own echo did
+# not come back in time.
+_UNCONFIRMED_SEND = "waitForSelfEcho"
 
 
 def share_uploads_by_path(enabled: bool) -> None:
@@ -302,6 +317,25 @@ class OneBotBoundaryAdapter(OneBot11ForwardAdapter):
     def features(self) -> list[str]:
         apis = sorted(path for path in self.routes if not path.startswith("internal/"))
         return [*apis, "guild.plain"]
+
+    async def call_api(self, action: str, params: dict | None = None) -> dict:
+        """Stock call, except that an unconfirmed send is reported as sent.
+
+        Seen on 2026-11-14: every send that failed with ``waitForSelfEcho timeout``
+        had reached the group, and the Bilibili notifier's retries posted one live
+        card three times. Losing a rare send is the lesser harm than duplicates.
+        """
+        if action not in _SEND_ACTIONS:
+            return await super().call_api(action, params)
+        try:
+            return await super().call_api(action, params)
+        except TimeoutError:
+            logger.warning(f"[boundary] {action} got no reply in {self.timeout}s; treating it as sent")
+        except ActionFailed as exc:
+            if _UNCONFIRMED_SEND not in str(exc):
+                raise
+            logger.warning(f"[boundary] {action} sent but not confirmed by QQ (waitForSelfEcho); treating it as sent")
+        return {"message_id": ""}
 
     async def _upload_create(self, request: Request) -> dict[str, str]:
         """The server's default upload store (its temp dir, 600 s, same URL shape).
