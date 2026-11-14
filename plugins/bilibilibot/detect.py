@@ -212,7 +212,7 @@ def detect_dynamic(
         if video_subscribed and bvid_from_card(card):
             marked.append(seen)
             continue
-        if live_subscribed and live_room_from_card(card):
+        if live_subscribed and (card.live_dynamic or live_room_from_card(card)):
             marked.append(seen)
             continue
         card.author = card.author or next_name or prev.uid

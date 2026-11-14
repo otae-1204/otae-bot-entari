@@ -258,6 +258,18 @@ def test_detect_dynamic_marks_live_dynamics_when_live_subscribed(bili):
     assert updated.latest_id == "live"
 
 
+def test_detect_dynamic_marks_live_dynamic_without_room_id(bili):
+    prev = bili.models.TargetInfo("dynamic", "123")
+    card = dynamic_card(bili, "live", NOW)
+    card.live_dynamic = True
+    card.room_id = ""
+    _, events, marked = bili.detect.detect_dynamic(
+        prev, [card], seen_ids=set(), video_subscribed=False, live_subscribed=True
+    )
+    assert events == []
+    assert [item.item_id for item in marked] == ["live"]
+
+
 def test_detect_dynamic_marks_live_link_text_when_live_subscribed(bili):
     prev = bili.models.TargetInfo("dynamic", "123")
     card = dynamic_card(bili, "live-text", NOW, url="https://live.bilibili.com/544803")
