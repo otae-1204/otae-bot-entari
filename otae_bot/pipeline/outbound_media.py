@@ -14,6 +14,10 @@ and ``<quote>`` included — and for every ``img`` / ``audio`` / ``video`` /
 - otherwise, or when the upload fails (one warning), the media stay inline:
   ``data:`` as is, ``file:`` read and turned into ``data:``.
 
+With ``otae.media.webp_above_kb`` set, a PNG image at least that large is
+re-encoded as lossless WebP first (same pixels; kept only when clearly smaller),
+both for uploads and for media that stay inline.
+
 The message is never dropped and the send is never retried; other attributes
 (title, width, height, …) are kept, and the caller's elements are not mutated.
 
@@ -33,9 +37,12 @@ import base64
 import binascii
 import copy
 import dataclasses
+import hashlib
 import mimetypes
+from collections import OrderedDict
 from collections.abc import Iterator, MutableSequence
 from dataclasses import dataclass
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote_to_bytes, urlparse
@@ -47,9 +54,17 @@ from arclet.letoderea import Contexts, ExitState, define
 from loguru import logger
 from satori import Api
 
+from otae_bot.config.settings import core_settings
+from otae_bot.infrastructure.rendering.executor import run_image_render
+
 UPLOAD_FEATURE = "upload.create"
 UPLOAD_TIMEOUT = 30.0
 MEDIA = (Image, Audio, Video, File)
+# A WebP must be under this share of the PNG to replace it.
+WEBP_KEEP_RATIO = 0.9
+_WEBP_CACHE_SIZE = 16
+# sha1(PNG) -> WebP bytes, or None when the PNG stays: cached cards resend the same bytes.
+_webp_cache: OrderedDict[bytes, bytes | None] = OrderedDict()
 
 
 @dataclass(frozen=True)
@@ -105,6 +120,55 @@ def _decode(src: str) -> _Payload:
     path = Path(url2pathname(parsed.path))
     data = path.read_bytes()
     return _Payload(data, mimetypes.guess_type(path.name)[0] or "application/octet-stream", path.name)
+
+
+def _webp_threshold() -> int:
+    """Bytes from which PNG images go out as WebP; 0 when the conversion is off."""
+    return max(0, int(core_settings().media.webp_above_kb or 0)) * 1024
+
+
+def _png_to_webp(data: bytes) -> bytes | None:
+    """Lossless WebP of PNG bytes, or None when it is not clearly smaller."""
+    from PIL import Image as PILImage
+
+    with PILImage.open(BytesIO(data)) as source:
+        source.load()
+        image = source if source.mode in ("RGB", "RGBA") else source.convert(
+            "RGBA" if "A" in source.getbands() or "transparency" in source.info else "RGB"
+        )
+        out = BytesIO()
+        # method 2: most of the size win of slower presets at a fraction of the time.
+        image.save(out, format="WEBP", lossless=True, quality=50, method=2)
+    webp = out.getvalue()
+    return webp if len(webp) < len(data) * WEBP_KEEP_RATIO else None
+
+
+async def _maybe_webp(payload: _Payload, threshold: int) -> _Payload:
+    if threshold <= 0 or payload.mime != "image/png" or len(payload.data) < threshold:
+        return payload
+    key = hashlib.sha1(payload.data).digest()
+    if key in _webp_cache:
+        _webp_cache.move_to_end(key)
+        webp = _webp_cache[key]
+    else:
+        try:
+            webp = await run_image_render(_png_to_webp, payload.data)
+        except (ExitState, asyncio.CancelledError):
+            raise
+        except Exception as exc:  # noqa: BLE001 - the PNG still goes out
+            logger.warning(f"[outbound-media] webp conversion failed, sending png: {type(exc).__name__}: {str(exc)[:120]}")
+            return payload
+        _webp_cache[key] = webp
+        while len(_webp_cache) > _WEBP_CACHE_SIZE:
+            _webp_cache.popitem(last=False)
+        logger.info(
+            f"[outbound-media] png {len(payload.data)} bytes -> "
+            + (f"webp {len(webp)} bytes" if webp is not None else "kept png (webp not smaller)")
+        )
+    if webp is None:
+        return payload
+    filename = str(Path(payload.filename).with_suffix(".webp")) if payload.filename else None
+    return _Payload(webp, "image/webp", filename)
 
 
 def _attrs(element: Any) -> dict[str, Any]:
@@ -192,17 +256,23 @@ async def _upload(account: Any, channel_id: str, slots: list[_Slot]) -> dict[_Pa
 async def prepare(account: Any, channel_id: str, message: MessageChain) -> MessageChain | None:
     """The message to send instead of ``message``, or None if nothing changes."""
     upload = supports_upload(account)
-    if not any(
-        isinstance(el, MEDIA) and _local(el.src) and (upload or el.src[:5].lower() == "file:")
-        for _, _, el in _walk(message)
-    ):
-        return None  # nothing to upload, nothing to read from disk: inline data stays as is
+    webp_threshold = _webp_threshold()
+
+    def handled(element: Any) -> bool:
+        if not (isinstance(element, MEDIA) and _local(element.src)):
+            return False
+        return (
+            upload
+            or element.src[:5].lower() == "file:"
+            or (webp_threshold > 0 and isinstance(element, Image))
+        )
+
+    if not any(handled(el) for _, _, el in _walk(message)):
+        return None  # nothing to upload, convert or read from disk: inline data stays as is
     prepared = copy.deepcopy(message)  # the caller may resend or cache its elements
     slots: list[_Slot] = []
     for parent, index, element in list(_walk(prepared)):
-        if not (isinstance(element, MEDIA) and _local(element.src)):
-            continue
-        if not upload and element.src[:5].lower() == "data:":
+        if not handled(element):
             continue
         try:
             payload = await asyncio.to_thread(_decode, element.src) if element.src[:5].lower() == "file:" \
@@ -215,11 +285,20 @@ async def prepare(account: Any, channel_id: str, message: MessageChain) -> Messa
         slots.append(_Slot(parent, index, element, payload))
     if not slots:
         return None
+    converted: set[int] = set()
+    if webp_threshold > 0:
+        images = [number for number, slot in enumerate(slots) if isinstance(slot.element, Image)]
+        # Pages of one card convert side by side (bounded by the image-render pool).
+        results = await asyncio.gather(*(_maybe_webp(slots[number].payload, webp_threshold) for number in images))
+        for number, webp in zip(images, results):
+            if webp is not slots[number].payload:
+                slots[number].payload = webp
+                converted.add(number)
     urls = await _upload(account, channel_id, slots) if upload else {}
     changed = False
-    for slot in slots:
+    for number, slot in enumerate(slots):
         url = urls.get(slot.payload)
-        if url is None and slot.element.src[:5].lower() == "data:":
+        if url is None and slot.element.src[:5].lower() == "data:" and number not in converted:
             continue  # stays inline as it is
         slot.parent[slot.index] = _with_src(slot.element, url or _data_url(slot.payload), slot.payload)
         changed = True

@@ -69,6 +69,10 @@ class MediaSettings(Settings):
         default=False,
         description="OneBot 接入端（LLBot）与 bot 在同一台机器、以同一用户运行时设 true：上传的图片以 file:// 路径交给它，省去 base64；默认 false",
     )
+    webp_above_kb: int = field(
+        default=0,
+        description="发出的 PNG 超过多少 KB 时改为无损 WebP（像素不变、体积更小；转换后不小于原图 90% 则仍发 PNG）；0 = 关闭",
+    )
 
 
 class CoreSettings(Settings):

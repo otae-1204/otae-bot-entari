@@ -24,6 +24,7 @@ from satori.client.account import Account, ApiInfo
 from satori.exception import ServerException
 from satori.parser import parse
 
+from otae_bot.config import settings
 from otae_bot.delivery import Target, deliver
 from otae_bot.messaging.forward import make_forward
 from otae_bot.pipeline import outbound_media
@@ -83,7 +84,7 @@ def media_srcs(content: str) -> list[tuple[str, str]]:
     return found
 
 
-class OutboundMediaTests(unittest.IsolatedAsyncioTestCase):
+class _OutboundHarness(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         # Entari pins letoderea's tasks to its own loop at import; this test runs on another.
         loop_patch = mock.patch.object(_EventSystem, "loop", asyncio.get_running_loop())
@@ -106,6 +107,8 @@ class OutboundMediaTests(unittest.IsolatedAsyncioTestCase):
     def uploader(self) -> Account:
         return self.account("message.create", "upload.create")
 
+
+class OutboundMediaTests(_OutboundHarness):
     # ── without upload.create ──
 
     async def test_without_upload_feature_data_urls_stay_inline(self):
@@ -290,6 +293,124 @@ class OutboundMediaTests(unittest.IsolatedAsyncioTestCase):
         # no channel.get or other lookup per proactive send
         self.assertEqual({name for name, _ in account.protocol.calls},
                          {"upload.create", "message.create", "user.channel.create"})
+
+
+def ui_png(width: int = 600, height: int = 400) -> bytes:
+    """A card-like PNG (flat colour blocks, thin lines): lossless WebP compresses it well."""
+    import io
+
+    from PIL import Image as PILImage, ImageDraw
+
+    image = PILImage.new("RGB", (width, height), (24, 26, 32))
+    draw = ImageDraw.Draw(image)
+    for row in range(0, height, 40):
+        draw.rectangle((20, row + 6, width - 20, row + 34), fill=(40 + row % 80, 44, 56))
+        draw.line((30, row + 20, width - 30, row + 20), fill=(250, 196, 0), width=2)
+    out = io.BytesIO()
+    image.save(out, format="PNG", compress_level=1)
+    return out.getvalue()
+
+
+def noise_png(size: int = 160) -> bytes:
+    """Random pixels: no lossless WebP gets clearly smaller than the PNG."""
+    import io
+    import os
+
+    from PIL import Image as PILImage
+
+    image = PILImage.frombytes("RGB", (size, size), os.urandom(size * size * 3))
+    out = io.BytesIO()
+    image.save(out, format="PNG")
+    return out.getvalue()
+
+
+def pixels(data: bytes) -> bytes:
+    import io
+
+    from PIL import Image as PILImage
+
+    with PILImage.open(io.BytesIO(data)) as image:
+        return image.convert("RGB").tobytes()
+
+
+class WebpConversionTests(_OutboundHarness):
+    """otae.media.webp_above_kb: large PNGs leave as lossless WebP (same pixels, fewer bytes)."""
+
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        outbound_media._webp_cache.clear()
+        self.addCleanup(outbound_media._webp_cache.clear)
+
+    def webp(self, kb: int):
+        return settings.override({"otae": {"media": {"webp_above_kb": kb}}})
+
+    async def test_off_by_default_png_is_uploaded_unchanged(self):
+        account = self.uploader()
+        data = ui_png()
+        await account.protocol.send_message("g1", MessageChain([Image.of(raw=data)]))
+        (upload,) = account.protocol.uploads
+        self.assertEqual(upload["file0"]["content_type"], "image/png")
+        self.assertEqual(upload["file0"]["value"], data)
+
+    async def test_large_png_is_uploaded_as_lossless_webp(self):
+        account = self.uploader()
+        data = ui_png()
+        with self.webp(1):
+            await account.protocol.send_message("g1", MessageChain([Image.of(raw=data)]))
+        (upload,) = account.protocol.uploads
+        sent = upload["file0"]
+        self.assertEqual(sent["content_type"], "image/webp")
+        self.assertEqual(sent["filename"], "img-0.webp")
+        self.assertTrue(sent["value"].startswith(b"RIFF") and sent["value"][8:12] == b"WEBP")
+        self.assertLess(len(sent["value"]), len(data) * outbound_media.WEBP_KEEP_RATIO)
+        self.assertEqual(pixels(sent["value"]), pixels(data))
+
+    async def test_png_below_the_threshold_stays_png(self):
+        account = self.uploader()
+        data = ui_png()
+        with self.webp(len(data) // 1024 + 10):
+            await account.protocol.send_message("g1", MessageChain([Image.of(raw=data)]))
+        (upload,) = account.protocol.uploads
+        self.assertEqual(upload["file0"]["content_type"], "image/png")
+
+    async def test_png_that_webp_cannot_shrink_stays_png(self):
+        account = self.uploader()
+        data = noise_png()
+        with self.webp(1):
+            await account.protocol.send_message("g1", MessageChain([Image.of(raw=data)]))
+        (upload,) = account.protocol.uploads
+        self.assertEqual(upload["file0"]["content_type"], "image/png")
+        self.assertEqual(upload["file0"]["value"], data)
+
+    async def test_without_upload_inline_png_is_rewritten_as_webp_data(self):
+        account = self.account("message.create")
+        data = ui_png()
+        with self.webp(1):
+            await account.protocol.send_message("g1", MessageChain([Image.of(raw=data)]))
+        (content,) = account.protocol.sent
+        ((_tag, src),) = media_srcs(content)
+        self.assertTrue(src.startswith("data:image/webp;base64,"))
+        self.assertEqual(pixels(base64.b64decode(src.split(",", 1)[1])), pixels(data))
+
+    async def test_resent_png_is_converted_once(self):
+        account = self.uploader()
+        data = ui_png()
+        with self.webp(1), mock.patch.object(
+            outbound_media, "_png_to_webp", wraps=outbound_media._png_to_webp
+        ) as convert:
+            for _ in range(2):
+                await account.protocol.send_message("g1", MessageChain([Image.of(raw=data)]))
+        self.assertEqual(convert.call_count, 1)
+        self.assertEqual([u["file0"]["content_type"] for u in account.protocol.uploads], ["image/webp"] * 2)
+
+    async def test_conversion_failure_sends_the_png(self):
+        account = self.uploader()
+        data = ui_png()
+        with self.webp(1), mock.patch.object(outbound_media, "_png_to_webp", side_effect=OSError("broken")):
+            await account.protocol.send_message("g1", MessageChain([Image.of(raw=data)]))
+        (upload,) = account.protocol.uploads
+        self.assertEqual(upload["file0"]["content_type"], "image/png")
+        self.log.warning.assert_called_once()
 
 
 class InstallTests(unittest.TestCase):
