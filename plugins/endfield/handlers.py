@@ -12,6 +12,7 @@ from arclet.entari.command import Match
 from arclet.letoderea import ExitState
 from loguru import logger
 from nepattern import AnyString
+from satori.exception import ActionFailed
 
 from otae_bot.config.settings import Config
 from otae_bot.hypergryph.attendance_delivery import build_delivery, deliver
@@ -477,6 +478,21 @@ async def _handle_personal_command(session, event: Event, command: ParsedEndfiel
     except aiohttp.ClientConnectionError:
         logger.warning(f"[endfield-account] message connection interrupted: action={command.action}")
         await session.send("网络连接中断，请重新发送指令。")
+        return
+    except ActionFailed as exc:
+        # The query succeeded but QQ did not confirm the reply in time (e.g. LLBot
+        # "waitForSelfEcho timeout" on large images); the reply often still arrives
+        # later, so this must not be reported as an account-service failure.
+        logger.warning(
+            f"[endfield-account] reply send failed: action={command.action} "
+            f"error_type={type(exc).__name__}: {exc}"
+        )
+        try:
+            await session.send("结果图片发送超时，可能稍后才会出现，请勿重复查询。")
+        except ExitState:
+            raise
+        except Exception as notice_exc:
+            logger.warning(f"[endfield-account] send-failure notice also failed: {type(notice_exc).__name__}")
         return
     except ExitState:
         raise
