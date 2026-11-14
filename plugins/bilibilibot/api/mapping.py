@@ -52,28 +52,49 @@ def _forward_text(item: dict[str, Any]) -> str:
     return text or str((dynamic.get("desc") or {}).get("text") or "")
 
 
+def _json_object(value: Any) -> dict[str, Any] | None:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except (TypeError, ValueError):
+            return None
+        return parsed if isinstance(parsed, dict) else None
+    return None
+
+
+def _live_rcmd_major(item: dict[str, Any]) -> dict[str, Any] | None:
+    if not isinstance(item, dict):
+        return None
+    dynamic = (item.get("modules") or {}).get("module_dynamic") or {}
+    major = dynamic.get("major") or {}
+    if (
+        item.get("type") == "DYNAMIC_TYPE_LIVE_RCMD"
+        or major.get("type") == "MAJOR_TYPE_LIVE_RCMD"
+        or major.get("live_rcmd")
+    ):
+        return major
+    orig = item.get("orig")
+    if isinstance(orig, dict) and orig:
+        return _live_rcmd_major(orig)
+    return None
+
+
 def _live_rcmd_room_id(major: dict[str, Any]) -> str:
     """Extract the room id from a live-recommendation dynamic, if present."""
-    rcmd = major.get("live_rcmd") or {}
-    if not isinstance(rcmd, dict):
-        return ""
+    rcmd = _json_object(major.get("live_rcmd")) or {}
     for key in ("room_id", "roomid"):
         value = rcmd.get(key)
         if value:
             return str(value)
-    content = rcmd.get("content")
-    if isinstance(content, str):
-        try:
-            content = json.loads(content)
-        except (TypeError, ValueError):
-            content = None
-    if isinstance(content, dict):
-        info = content.get("live_play_info") or content
-        if isinstance(info, dict):
-            for key in ("room_id", "roomid"):
-                value = info.get(key)
-                if value:
-                    return str(value)
+    content = _json_object(rcmd.get("content"))
+    if content:
+        info = _json_object(content.get("live_play_info")) or content
+        for key in ("room_id", "roomid"):
+            value = info.get(key)
+            if value:
+                return str(value)
     return ""
 
 
@@ -86,11 +107,9 @@ def dynamic_item_to_card(item: dict[str, Any], uid: str) -> BiliCard:
     major = dynamic.get("major") or {}
     opus = major.get("opus") or {}
     additional = dynamic.get("additional") or {}
-    live_dynamic = (
-        item.get("type") == "DYNAMIC_TYPE_LIVE_RCMD"
-        or major.get("type") == "MAJOR_TYPE_LIVE_RCMD"
-    )
-    live_room_id = _live_rcmd_room_id(major) if live_dynamic else ""
+    live_major = _live_rcmd_major(item)
+    live_dynamic = live_major is not None
+    live_room_id = _live_rcmd_room_id(live_major) if live_major is not None else ""
     title = "发布了新动态"
     cover = ""
     url = f"https://t.bilibili.com/{item.get('id_str')}"

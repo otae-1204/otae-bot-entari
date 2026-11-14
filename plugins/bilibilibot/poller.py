@@ -244,12 +244,18 @@ class Poller:
         seen_ids = await self.store.seen_ids(
             KIND_DYNAMIC, target.uid, [card.item_id for card in cards if card.item_id]
         )
+        live_subscribed = await self._live_subscribed(target.uid)
+        live_room_id = ""
+        if live_subscribed:
+            live_target = await self.store.get_target(KIND_LIVE, target.uid)
+            live_room_id = live_target.room_id if live_target else ""
         updated, events, marked = detect_dynamic(
             target,
             cards,
             seen_ids=seen_ids,
             video_subscribed=await self._video_subscribed(target.uid),
-            live_subscribed=await self._live_subscribed(target.uid),
+            live_subscribed=live_subscribed,
+            live_room_id=live_room_id,
         )
         # Video/live dynamics are marked as seen without being pushed.
         return updated, events, seen_items_of(events) + marked

@@ -33,7 +33,7 @@ from .models import (
 LIVE_TIMING_MAX_GAP_SECONDS = 180
 
 BV_RE = re.compile(r"\bBV[0-9A-Za-z]{10}\b")
-LIVE_LINK_RE = re.compile(r"live\.bilibili\.com/(?:blanc/)?(\d+)")
+LIVE_LINK_RE = re.compile(r"(?<![a-z0-9.-])live\.bilibili\.com/(?:blanc/|h5/)?(\d+)")
 
 
 def refined_name(current: str, uid: str, candidate: str) -> str:
@@ -63,7 +63,7 @@ def live_room_from_card(card: BiliCard) -> str:
         match = LIVE_LINK_RE.search(value or "")
         if match:
             return match.group(1)
-    return card.room_id if card.live_dynamic else ""
+    return ""
 
 
 def detect_live(
@@ -178,6 +178,7 @@ def detect_dynamic(
     seen_ids: set[str],
     video_subscribed: bool,
     live_subscribed: bool = False,
+    live_room_id: str = "",
 ) -> tuple[TargetInfo, list[BiliEvent], list[SeenItem]]:
     """Handle a feed page oldest-first.
 
@@ -212,9 +213,13 @@ def detect_dynamic(
         if video_subscribed and bvid_from_card(card):
             marked.append(seen)
             continue
-        if live_subscribed and (card.live_dynamic or live_room_from_card(card)):
-            marked.append(seen)
-            continue
+        if live_subscribed:
+            linked_room = live_room_from_card(card)
+            if card.live_dynamic or (
+                linked_room and (not live_room_id or linked_room == live_room_id)
+            ):
+                marked.append(seen)
+                continue
         card.author = card.author or next_name or prev.uid
         card.avatar_url = card.avatar_url or next_avatar
         events.append(BiliEvent(KIND_DYNAMIC, prev.uid, card, seen=seen))
