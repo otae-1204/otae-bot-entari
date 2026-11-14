@@ -59,7 +59,30 @@ async def test_live_and_video_links_still_parse(bili):
 
 
 @asyncio_test
+async def test_lookalike_hosts_are_not_bilibili_links(bili):
+    api = SimpleNamespace(session=_FakeSession(""))
+    for text in (
+        "https://notbilibili.com/opus/1266116596080836657",
+        "https://t.bilibili.com.evil.tld/1266116596080836657",
+        "https://live.bilibili.com.evil.tld/25731103",
+    ):
+        assert await bili.api.links.parse_link(api, text) is None
+
+
+@asyncio_test
+async def test_query_string_does_not_override_the_path_link(bili):
+    api = SimpleNamespace(session=_FakeSession(""))
+    parsed = await bili.api.links.parse_link(
+        api,
+        "https://www.bilibili.com/video/BV1xx411c7mD?next=https://www.bilibili.com/opus/123",
+    )
+    assert parsed.kind == bili.api.links.KIND_VIDEO
+    assert parsed.value == "BV1xx411c7mD"
+
+
+@asyncio_test
 async def test_card_for_dynamic_link_uses_detail_item(bili):
+    assert hasattr(bili.api.BiliApi, "dynamic_detail")
     detail_item = {
         "id_str": "1266116596080836657",
         "type": "DYNAMIC_TYPE_DRAW",
@@ -90,3 +113,18 @@ async def test_card_for_dynamic_link_uses_detail_item(bili):
     assert card.item_id == "1266116596080836657"
     assert card.description == "下一首应该是一个完全的手癖放出"
     assert card.uid == "341368"
+
+
+@asyncio_test
+async def test_invisible_dynamic_link_raises_for_the_handler_to_skip(bili):
+    async def dynamic_detail(item_id):
+        raise bili.api.BiliAPIError(f"动态 {item_id} 不可见")
+
+    api = SimpleNamespace(dynamic_detail=dynamic_detail)
+    parsed = bili.api.links.ParsedLink(
+        bili.api.links.KIND_DYNAMIC,
+        "1",
+        "https://t.bilibili.com/1",
+    )
+    with pytest.raises(bili.api.BiliAPIError):
+        await bili.api.BiliApi.card_for_link(api, parsed)
