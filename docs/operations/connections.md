@@ -69,6 +69,15 @@ entari-plugin-server 一定会起一个 uvicorn 服务，bot 自己不连它。�
 ### 相关设置
 
 - `otae.media.shared_filesystem`：LLBot 与 bot 在同一台机器、同一用户运行时设 `true`，图片以 `file://` 路径交给 LLBot，省去 base64。默认 `false`。
+  **LLBot 以无头协议运行（`llbot.js --protocol=linux`）时不要开**：2026-11-14 线上实测，LLBot 8.3.2 收到 `file://` 图片后不再回应任何请求（图发不出、账号注册不上），只能重启该 LLBot 实例恢复。
+- `otae.media.webp_above_kb`：超过该大小的 PNG 发送前转无损 WebP，默认 `0`（关闭）。QQ 侧显示尚未实测。
+
+### LLBot 无头模式的发送确认
+
+LLBot 8.3.2 无头协议发群消息时，先发送（PbSendMsg），成功后再等 QQ 把这条消息推回给自己（最多 10 秒）以取得准确的消息序号。推回常常收不到，LLBot 便在消息**已经送达**后报 `retcode 1200 waitForSelfEcho timeout`（2026-11-14：bot-1 无头约 28% 的发送如此，有头时为 0）。
+
+- bot 一侧：OneBot 边界把发送类动作的这种失败、以及 60 秒无回应，按「已发送、消息 ID 为空」处理，不再报错，调用方因此不会重发（`otae_bot/boundary/onebot11.py` 的 `call_api`）。
+- LLBot 一侧：`scripts/ops/patch_llbot_echo.py` 让回显超时直接用 LLBot 自带的兜底结果，并把等待缩短到 3 秒。先停该 LLBot 实例再打补丁，再启动；LLBot 每次升级会覆盖 `llbot.js`，要重新打。原文件留在同目录 `llbot.js.bak-echo`。
 
 ## 账号与发送
 
