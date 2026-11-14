@@ -11,7 +11,8 @@ from .akedata import AKEDATA_HEADERS, _get, fetch_akedata_manifest
 API_CACHE_NAMESPACE = "endfield-api"
 AKEDATA_MAX_TABLE_BYTES = 24 * 1024 * 1024
 AKEDATA_MAX_RESOURCE_BYTES = 6 * 1024 * 1024
-AKEDATA_MAX_ASSET_INDEX_BYTES = 16 * 1024 * 1024
+# asset-sync-index.json was 21.5 MB on 2026-11-14 and keeps growing.
+AKEDATA_MAX_ASSET_INDEX_BYTES = 64 * 1024 * 1024
 
 
 class WarfarinAPIError(Exception):
@@ -170,7 +171,9 @@ class WarfarinClient:
         except httpx.HTTPStatusError as exc:
             raise WarfarinAPIError(f"{source} HTTP {exc.response.status_code}") from exc
         except ValueError as exc:
-            raise WarfarinAPIError(f"{source} 返回了无法解析的 JSON") from exc
+            # Oversized bodies also raise ValueError; keep the reason instead of
+            # reporting every failure as a JSON parse error.
+            raise WarfarinAPIError(f"{source} 返回了无法解析的 JSON ({exc})") from exc
         except httpx.HTTPError as exc:
             raise WarfarinAPIError(f"{source} 请求失败: {exc}") from exc
         return data
