@@ -153,6 +153,54 @@ def test_text_only_dynamic_skips_cover_placeholder(renderer):
     assert empty_body.height == failed_cover_empty_body.height
 
 
+def test_dynamic_with_cover_bytes_but_no_url_still_renders_cover(renderer):
+    source = Image.new("RGB", (400, 200), (20, 120, 220))
+    without_url = _card(renderer, "dynamic", title="标题", description="正文")
+    with_url = _card(
+        renderer,
+        "dynamic",
+        title="标题",
+        description="正文",
+        cover_url="https://example.com/cover.jpg",
+    )
+    rendered_without_url = Image.open(
+        BytesIO(renderer._render_bili_card(without_url, _png(source), None))
+    )
+    rendered_with_url = Image.open(
+        BytesIO(renderer._render_bili_card(with_url, _png(source), None))
+    )
+    assert rendered_without_url.size == rendered_with_url.size
+    assert rendered_without_url.height > 700
+
+
+def test_text_only_dynamic_never_draws_cover_placeholder(renderer, monkeypatch):
+    texts = []
+    original = ImageDraw.ImageDraw.text
+
+    def capture(draw, xy, text, *args, **kwargs):
+        texts.append(str(text))
+        return original(draw, xy, text, *args, **kwargs)
+
+    monkeypatch.setattr(ImageDraw.ImageDraw, "text", capture)
+    renderer._render_bili_card(
+        _card(renderer, "dynamic", title="标题", description="正文"), None, None
+    )
+    assert "封面暂不可用" not in texts
+    texts.clear()
+    renderer._render_bili_card(
+        _card(
+            renderer,
+            "dynamic",
+            title="标题",
+            description="正文",
+            cover_url="https://example.com/missing.jpg",
+        ),
+        None,
+        None,
+    )
+    assert "封面暂不可用" in texts
+
+
 @pytest.mark.parametrize(
     "kind,label",
     [

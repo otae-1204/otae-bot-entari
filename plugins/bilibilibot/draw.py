@@ -91,19 +91,19 @@ def _render_bili_card(
     cover = _decode_image(cover_bytes)
     avatar = _decode_image(avatar_bytes, (64, 64), circle=True)
     cover_panel = _fit_full_cover(cover, CONTENT_W) if cover else None
+    description = _clip(card.description, 240)
+    if description in {"-", "--", "—"}:
+        description = ""
     # 纯文字动态没有封面是正常形态，不占封面占位；封面下载失败仍显示占位。
     text_only_dynamic = (
         card.card_type == "dynamic"
         and cover_panel is None
         and not card.cover_url
-        and bool(card.description.strip())
+        and bool(description.strip())
     )
     # A missing cover still gets an explicit, compact placeholder.
     cover_h = cover_panel.height if cover_panel else (0 if text_only_dynamic else 220)
     title_lines = _wrap(card.title, FONT_TITLE, CONTENT_W, max_lines=3) or ["Bilibili"]
-    description = _clip(card.description, 240)
-    if description in {"-", "--", "—"}:
-        description = ""
     desc_lines = _wrap(
         description,
         FONT_BODY,
@@ -113,7 +113,7 @@ def _render_bili_card(
     meta_lines = _wrap(_meta_text(card), FONT_SMALL, CONTENT_W, max_lines=2)
     url_lines = _wrap(card.url, FONT_SMALL, CONTENT_W, max_lines=2)
     cover_y = 264
-    title_y = cover_y + cover_h + 28
+    title_y = cover_y + (4 if text_only_dynamic else cover_h + 28)
     desc_y = title_y + len(title_lines) * 44 + (14 if desc_lines else 0)
     divider_y = desc_y + len(desc_lines) * 32 + 26
     height = divider_y + 24 + len(meta_lines) * 28 + len(url_lines) * 28 + 40
