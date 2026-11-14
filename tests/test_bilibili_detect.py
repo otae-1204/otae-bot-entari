@@ -245,6 +245,70 @@ def test_detect_dynamic_pushes_video_dynamics_without_video_subscription(bili):
     assert marked == []
 
 
+def test_detect_dynamic_marks_live_dynamics_when_live_subscribed(bili):
+    prev = bili.models.TargetInfo("dynamic", "123")
+    card = dynamic_card(bili, "live", NOW)
+    card.live_dynamic = True
+    card.room_id = "544803"
+    updated, events, marked = bili.detect.detect_dynamic(
+        prev, [card], seen_ids=set(), video_subscribed=False, live_subscribed=True
+    )
+    assert events == []
+    assert [item.item_id for item in marked] == ["live"]
+    assert updated.latest_id == "live"
+
+
+def test_detect_dynamic_marks_live_dynamic_without_room_id(bili):
+    prev = bili.models.TargetInfo("dynamic", "123")
+    card = dynamic_card(bili, "live", NOW)
+    card.live_dynamic = True
+    card.room_id = ""
+    _, events, marked = bili.detect.detect_dynamic(
+        prev, [card], seen_ids=set(), video_subscribed=False, live_subscribed=True
+    )
+    assert events == []
+    assert [item.item_id for item in marked] == ["live"]
+
+
+def test_detect_dynamic_marks_live_link_text_when_live_subscribed(bili):
+    prev = bili.models.TargetInfo("dynamic", "123")
+    card = dynamic_card(bili, "live-text", NOW, url="https://live.bilibili.com/544803")
+    _, events, marked = bili.detect.detect_dynamic(
+        prev, [card], seen_ids=set(), video_subscribed=False, live_subscribed=True
+    )
+    assert events == []
+    assert [item.item_id for item in marked] == ["live-text"]
+
+
+def test_detect_dynamic_skips_only_the_subscribed_live_room(bili):
+    prev = bili.models.TargetInfo("dynamic", "123")
+    own = dynamic_card(bili, "own-live", NOW, url="https://live.bilibili.com/544803")
+    foreign = dynamic_card(bili, "foreign-live", NOW + 1, url="https://live.bilibili.com/999999")
+    _, events, marked = bili.detect.detect_dynamic(
+        prev,
+        [own, foreign],
+        seen_ids=set(),
+        video_subscribed=False,
+        live_subscribed=True,
+        live_room_id="544803",
+    )
+    # A normal dynamic merely linking to someone else's live room must still push.
+    assert [event.card.item_id for event in events] == ["foreign-live"]
+    assert [item.item_id for item in marked] == ["own-live"]
+
+
+def test_detect_dynamic_pushes_live_dynamics_without_live_subscription(bili):
+    prev = bili.models.TargetInfo("dynamic", "123")
+    card = dynamic_card(bili, "live", NOW)
+    card.live_dynamic = True
+    card.room_id = "544803"
+    _, events, marked = bili.detect.detect_dynamic(
+        prev, [card], seen_ids=set(), video_subscribed=False
+    )
+    assert [event.card.item_id for event in events] == ["live"]
+    assert marked == []
+
+
 def test_detect_dynamic_without_cards_keeps_previous_state(bili):
     prev = bili.models.TargetInfo("dynamic", "123", latest_id="x", latest_ts=5)
     updated, events, marked = bili.detect.detect_dynamic(
