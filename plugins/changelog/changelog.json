@@ -1,15 +1,44 @@
 {
   "schema": 2,
-  "head": "4e98f6a",
+  "head": "bf142ea",
   "generated_from": {
     "first_commit": "8e1b455",
     "first_date": "2026-06-17",
     "last_date": "2026-11-14",
-    "commit_count": 541,
+    "commit_count": 543,
     "merge_commit_count": 36,
-    "version_count": 59
+    "version_count": 60
   },
   "releases": [
+    {
+      "version": "v2.0.4",
+      "date": "2026-11-14",
+      "from": "2026-11-14",
+      "to": "2026-11-14",
+      "title": "运维说明",
+      "summary": "补充无头 LLBot 的运维说明与补丁脚本。",
+      "tags": [
+        "运维"
+      ],
+      "highlights": [
+        {
+          "kind": "chore",
+          "date": "2026-11-14",
+          "text": "新增 LLBot 无头模式发送确认超时的补丁脚本与说明。",
+          "commits": [
+            "4c4b36c"
+          ]
+        },
+        {
+          "kind": "docs",
+          "date": "2026-11-14",
+          "text": "注明无头 LLBot 下不要开启 shared_filesystem。",
+          "commits": [
+            "bf142ea"
+          ]
+        }
+      ]
+    },
     {
       "version": "v2.0.3",
       "date": "2026-11-14",
