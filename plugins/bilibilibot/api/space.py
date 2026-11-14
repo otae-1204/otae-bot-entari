@@ -236,9 +236,8 @@ async def latest_dynamic(
     items = await api.dynamic_items(uid, deadline=deadline)
     if not items:
         return BiliCard(KIND_DYNAMIC, "暂无动态", uid=uid)
-    if uid == ENDFIELD_OFFICIAL_UID:
-        # 官号会置顶旧动态，订阅基线要按发布时间取最新，而不是列表首条。
-        items = sorted(items, key=_dynamic_pub_ts, reverse=True)
+    # 置顶或旧视频动态可能排在列表首位；订阅基线按发布时间取最新。
+    items = sorted(items, key=_dynamic_pub_ts, reverse=True)
     return dynamic_item_to_card(items[0], uid)
 
 
