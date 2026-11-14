@@ -6,7 +6,6 @@ import hashlib
 import html
 import mimetypes
 import re
-import tempfile
 import base64
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,6 +15,7 @@ from typing import Any, Iterable, Mapping
 from otae_bot.infrastructure.http.client import fetch_many_resilient
 from otae_bot.infrastructure.rendering.browser import BrowserResource, screenshot_web_element
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
+from otae_bot.infrastructure.rendering.temp_files import write_temp_html as _write_temp_html
 from otae_bot.config.root import PROJECT_ROOT
 
 from ..cold_start import shared_image_namespaces
@@ -316,7 +316,7 @@ async def prepare_crisis_contract_html(payload: AccountUiPayload) -> PreparedAcc
 
 
 async def _draw_prepared(prepared: PreparedAccountHtml) -> bytes:
-    path = _write_temp_html(prepared.html)
+    path = await _write_temp_html(prepared.html)
     try:
         return await screenshot_web_element(
             path.resolve().as_uri(),
@@ -912,18 +912,6 @@ def _text(value: Any) -> str:
 
 def _attr(value: Any) -> str:
     return html.escape(str(value or ""), quote=True)
-
-
-def _write_temp_html(content: str) -> Path:
-    handle = tempfile.NamedTemporaryFile(
-        mode="w",
-        encoding="utf-8",
-        suffix=".html",
-        delete=False,
-    )
-    with handle:
-        handle.write(content)
-    return Path(handle.name)
 
 
 def _document(class_name: str, body: str, css: str, assets: Mapping[str, str]) -> str:

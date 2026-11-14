@@ -1179,7 +1179,7 @@ async def draw_gacha_analysis_cards(view: GachaAnalysis, *, uid: str) -> tuple[b
 
 
 async def _evaluate_html(document: str, script: str):
-    html_path = _write_temp_html(document)
+    html_path = await _write_temp_html(document)
     try:
         return await evaluate_web_page(
             html_path.resolve().as_uri(), script, viewport=(GACHA_CARD_WIDTH, 900), device_scale_factor=2.0,
@@ -1191,7 +1191,7 @@ async def _evaluate_html(document: str, script: str):
 async def _draw_gacha_shell(document: str) -> bytes:
     """抽卡专用外壳截图：token 与 cards._draw_neutral_card 相同（该函数多卡共用，不改），
     单页上限 GACHA_PAGE_MAX_HEIGHT，并检查栏、卡片、记录行与页眉的溢出。"""
-    html_path = _write_temp_html(document)
+    html_path = await _write_temp_html(document)
     try:
         output = await screenshot_web_element(
             html_path.resolve().as_uri(), ".gacha-analysis-card", viewport=(GACHA_CARD_WIDTH, 1), timeout_ms=15000,

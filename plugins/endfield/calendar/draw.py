@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import html
-import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from pathlib import Path
 from time import perf_counter
 
 from loguru import logger
@@ -12,6 +10,7 @@ from loguru import logger
 from otae_bot.infrastructure.rendering.executor import run_image_render
 from otae_bot.infrastructure.rendering.browser import BrowserResource, screenshot_timing, screenshot_web_element
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
+from otae_bot.infrastructure.rendering.temp_files import write_temp_html as _write_temp_html
 
 from ..cold_start import REMOTE_ASSET_NAMESPACE, note_remote_assets
 from ..rendering.cards import _prepare_assets, optimize_png_container
@@ -49,7 +48,7 @@ async def draw_version_calendar(calendar: VersionCalendar) -> bytes:
     started = perf_counter()
     prepared = await prepare_version_calendar_html(calendar)
     assets_seconds = perf_counter() - started
-    html_path = _write_temp_html(prepared.html)
+    html_path = await _write_temp_html(prepared.html)
     try:
         screenshot_started = perf_counter()
         with screenshot_timing() as timing:
@@ -686,12 +685,6 @@ def _phase_boundary(
 
 def _class_token(value: str) -> str:
     return "".join(char for char in value if char.isalnum() or char in {"-", "_"})
-
-
-def _write_temp_html(content: str) -> Path:
-    with tempfile.NamedTemporaryFile("w", suffix=".html", encoding="utf-8", delete=False) as file:
-        file.write(content)
-        return Path(file.name)
 
 
 def _esc(value: object) -> str:

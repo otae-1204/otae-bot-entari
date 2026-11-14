@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import html
-import tempfile
 from functools import lru_cache
-from pathlib import Path
 
 from loguru import logger
 
@@ -21,6 +19,7 @@ from otae_bot.config.root import PROJECT_ROOT
 from ..rendering.cards import _prepare_assets, optimize_png_container
 from .models import KINDS, AnnouncementDigest, local_time
 from .presentation import activity_state, remaining
+from otae_bot.infrastructure.rendering.temp_files import write_temp_html
 
 CARD_WIDTH = 1080
 MAX_HEIGHT = 20000
@@ -144,11 +143,7 @@ async def draw_digest(digest: AnnouncementDigest) -> bytes:
             "[endfield-announcements] artwork timeout; rendering placeholders"
         )
     rendered = render_digest_html(digest, assets)
-    with tempfile.NamedTemporaryFile(
-        "w", suffix=".html", encoding="utf-8", delete=False
-    ) as file:
-        file.write(rendered)
-        path = Path(file.name)
+    path = await write_temp_html(rendered)
     try:
         png = await screenshot_web_element(
             path.as_uri(),

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import html
-import tempfile
-from pathlib import Path
 from time import perf_counter
 
 from loguru import logger
@@ -10,6 +8,7 @@ from loguru import logger
 from otae_bot.infrastructure.rendering.executor import run_image_render
 from otae_bot.infrastructure.rendering.browser import screenshot_timing, screenshot_web_element
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
+from otae_bot.infrastructure.rendering.temp_files import write_temp_html as _write_temp_html
 
 from ..cold_start import REMOTE_ASSET_NAMESPACE, note_remote_assets
 from ..rendering.cards import _prepare_assets, optimize_png_container
@@ -31,7 +30,7 @@ async def draw_official_version_calendar(calendar: OfficialVersionCalendar) -> b
         if not prepared.urls.get(asset.url) or len(prepared.contents.get(asset.url, b"")) < 8_000:
             raise OfficialCalendarDiscoveryError(f"官网日历素材不可用：{asset.key}")
     rendered_html = render_official_version_calendar_html(calendar, prepared.urls)
-    html_path = _write_temp_html(rendered_html)
+    html_path = await _write_temp_html(rendered_html)
     assets_seconds = perf_counter() - started
     target_height = official_calendar_height(calendar)
     try:
@@ -135,12 +134,6 @@ html, body {{ margin: 0; padding: 0; background: #050505; }}
 </main>
 </body>
 </html>"""
-
-
-def _write_temp_html(content: str) -> Path:
-    with tempfile.NamedTemporaryFile("w", suffix=".html", encoding="utf-8", delete=False) as file:
-        file.write(content)
-        return Path(file.name)
 
 
 def _esc_attr(value: object) -> str:

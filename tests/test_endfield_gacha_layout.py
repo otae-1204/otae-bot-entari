@@ -688,7 +688,7 @@ class GachaRenderTests(unittest.IsolatedAsyncioTestCase):
         with (
             mock.patch.object(draw, "evaluate_web_page", evaluate),
             mock.patch.object(draw, "_draw_gacha_shell", shell_mock),
-            mock.patch.object(draw, "_write_temp_html", return_value=Path("/nonexistent/gacha-measure.html")),
+            mock.patch.object(draw, "_write_temp_html", mock.AsyncMock(return_value=Path("/nonexistent/gacha-measure.html"))),
             mock.patch.object(draw, "schedule_temp_file_cleanup"),
             # 浏览器已打桩：不往每页 HTML 里塞约 33 MB 的 base64 字体（字体嵌入由 GachaTypographyTests 覆盖）。
             mock.patch.object(draw, "gacha_font_face_css", return_value=""),

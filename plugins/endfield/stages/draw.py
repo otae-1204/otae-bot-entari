@@ -184,7 +184,7 @@ async def _draw_stage_html(
     kind: str,
     resources: Mapping[str, BrowserResource] | None,
 ) -> bytes:
-    html_path = _write_temp_html(document)
+    html_path = await _write_temp_html(document)
     started = perf_counter()
     try:
         with screenshot_timing() as timing:

@@ -17,13 +17,12 @@ from __future__ import annotations
 import hashlib
 import io
 import random
-import tempfile
 from dataclasses import dataclass
 from html import escape
-from pathlib import Path
 
 from otae_bot.infrastructure.rendering import art_frame
 from otae_bot.infrastructure.rendering.browser import screenshot_web_element
+from .temp_files import write_temp_html
 
 THEME = art_frame.HelpTheme()
 CARD_WIDTH = THEME.page_width
@@ -95,9 +94,7 @@ def _remember(key: str, height: int) -> None:
 
 
 async def _shoot(card: ArtCard, art: art_frame.Artwork) -> bytes:
-    with tempfile.NamedTemporaryFile("w", suffix=".html", encoding="utf-8", delete=False) as file:
-        file.write(card_html(card, art))
-        path = Path(file.name)
+    path = await write_temp_html(card_html(card, art))
     try:
         return await screenshot_web_element(
             path.as_uri(),

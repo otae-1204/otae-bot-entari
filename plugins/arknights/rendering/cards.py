@@ -11,11 +11,10 @@ from __future__ import annotations
 
 import html
 import re
-import tempfile
-from pathlib import Path
 
 from otae_bot.infrastructure.rendering.browser import screenshot_web_element
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
+from otae_bot.infrastructure.rendering.temp_files import write_temp_html as _write_temp_html
 
 from ..models import AttendanceCardView, daily_progress_value
 from .icons import reward_icon_url
@@ -200,17 +199,11 @@ def _render_milestone_track(milestones, progress: tuple[bool, ...]) -> str:
     )
 
 
-def _write_temp_html(content: str) -> Path:
-    with tempfile.NamedTemporaryFile("w", suffix=".html", encoding="utf-8", delete=False) as file:
-        file.write(content)
-        return Path(file.name)
-
-
 async def draw_attendance_card(view: AttendanceCardView) -> bytes:
     """Screenshot the card through the shared browser renderer."""
     if len(view.roles) > MAX_CARD_ROWS:
         raise ValueError("Too many roles for one image; use the complete text report")
-    html_path = _write_temp_html(render_attendance_card_html(view))
+    html_path = await _write_temp_html(render_attendance_card_html(view))
     try:
         return await screenshot_web_element(
             html_path.resolve().as_uri(),

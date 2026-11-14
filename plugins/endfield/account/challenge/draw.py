@@ -369,7 +369,7 @@ async def _render_challenge(
     page: int = 0,
     page_count: int = 0,
 ) -> bytes:
-    html_path = _write_temp_html(document)
+    html_path = await _write_temp_html(document)
     try:
         screenshot_started = perf_counter()
         try:

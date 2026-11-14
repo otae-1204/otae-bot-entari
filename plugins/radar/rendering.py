@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import base64
 import re
-import tempfile
 from functools import lru_cache
 from pathlib import Path
 
@@ -12,6 +11,7 @@ from otae_bot.infrastructure.rendering.browser import screenshot_web_element
 
 from .matrix import MATRIX_MAX_HEIGHT, MATRIX_SAMPLE_REMINDER, MATRIX_WIDTH
 from .presentation import RadarPage, notice, stamp, text
+from otae_bot.infrastructure.rendering.temp_files import write_temp_html
 
 #: Phone-first canvas: rendered at 2x, it reads at roughly half size on a phone.
 CARD_WIDTH = 820
@@ -161,11 +161,7 @@ def _matrix_html(page: RadarPage, *, preview: bool = False) -> str:
 
 
 async def render_page(page: RadarPage) -> bytes:
-    with tempfile.NamedTemporaryFile(
-        "w", suffix=".html", encoding="utf-8", delete=False
-    ) as file:
-        file.write(page_html(page))
-        path = Path(file.name)
+    path = await write_temp_html(page_html(page))
     matrix = page.layout == "matrix"
     # The CSS budget is in layout pixels; the rasteriser multiplies it by
     # DEVICE_SCALE_FACTOR, so the device-pixel ceiling has to be divided back out.

@@ -14,7 +14,6 @@ import hashlib
 import mimetypes
 import re
 import struct
-import tempfile
 import unicodedata
 import zlib
 from collections import OrderedDict
@@ -43,6 +42,7 @@ from otae_bot.infrastructure.rendering.browser import (
 )
 from otae_bot.infrastructure.rendering.pages import render_pages
 from otae_bot.infrastructure.rendering.temp_files import schedule_temp_file_cleanup
+from otae_bot.infrastructure.rendering.temp_files import write_temp_html as _write_temp_html
 
 from ..catalog.models import (
     ArchiveDiffView,
@@ -180,7 +180,7 @@ class _PreparedAssets:
 async def draw_operator_card(view: OperatorView) -> bytes:
     started = perf_counter()
     prepared = await prepare_operator_card_html(view)
-    html_path = _write_temp_html(prepared.html)
+    html_path = await _write_temp_html(prepared.html)
     assets_seconds = perf_counter() - started
     try:
         screenshot_started = perf_counter()
@@ -222,7 +222,7 @@ async def draw_operator_card(view: OperatorView) -> bytes:
 async def draw_weapon_card(view: WeaponView) -> bytes:
     started = perf_counter()
     prepared = await prepare_weapon_card_html(view)
-    html_path = _write_temp_html(prepared.html)
+    html_path = await _write_temp_html(prepared.html)
     assets_seconds = perf_counter() - started
     try:
         screenshot_started = perf_counter()
@@ -257,7 +257,7 @@ async def draw_weapon_card(view: WeaponView) -> bytes:
 async def draw_equipment_card(view: EquipmentView) -> bytes:
     started = perf_counter()
     prepared = await prepare_equipment_card_html(view)
-    html_path = _write_temp_html(prepared.html)
+    html_path = await _write_temp_html(prepared.html)
     assets_seconds = perf_counter() - started
     try:
         screenshot_started = perf_counter()
@@ -634,7 +634,7 @@ async def _draw_daily_card(selector: str, body: str, *, extra_css: str = "") -> 
     {extra_css}
     """
     document = f"<!doctype html><html><head><meta charset='utf-8'><style>{css}</style></head><body><div class='{selector}'>{body}</div></body></html>"
-    html_path = _write_temp_html(document)
+    html_path = await _write_temp_html(document)
     try:
         output = await screenshot_web_element(
             html_path.resolve().as_uri(), f".{selector}", viewport=(width, 1), timeout_ms=15000,
@@ -1195,7 +1195,7 @@ async def _draw_neutral_card(selector: str, body: str, *, extra_css: str = "") -
     {extra_css}
     """
     document = f"<!doctype html><html><head><meta charset='utf-8'><style>{css}</style></head><body><div class='{selector}'>{body}</div></body></html>"
-    html_path = _write_temp_html(document)
+    html_path = await _write_temp_html(document)
     try:
         output = await screenshot_web_element(
             html_path.resolve().as_uri(), f".{selector}", viewport=(width, 1), timeout_ms=15000,
@@ -2060,7 +2060,7 @@ async def draw_archive_progress_card(view: ArchiveProgressView) -> tuple[bytes, 
 async def draw_equipment_catalog_card(view: EquipmentCatalogView) -> bytes:
     started = perf_counter()
     prepared = await prepare_equipment_catalog_card_html(view)
-    html_path = _write_temp_html(prepared.html)
+    html_path = await _write_temp_html(prepared.html)
     assets_seconds = perf_counter() - started
     try:
         screenshot_started = perf_counter()
@@ -2135,7 +2135,7 @@ async def _draw_gallery_catalog(
     overflow_selectors: tuple[str, ...],
     kind: str,
 ) -> bytes:
-    html_path = _write_temp_html(prepared.html)
+    html_path = await _write_temp_html(prepared.html)
     try:
         screenshot_started = perf_counter()
         with screenshot_timing() as timing:
@@ -3510,12 +3510,6 @@ def _equipment_attribute_icon_filename(label: str) -> str:
         "超域伤害加成": "icon_ether_damage_taken_scalar.png",
     }
     return exact.get(label, "")
-
-
-def _write_temp_html(content: str) -> Path:
-    with tempfile.NamedTemporaryFile("w", suffix=".html", encoding="utf-8", delete=False) as file:
-        file.write(content)
-        return Path(file.name)
 
 
 def estimate_card_height(view: OperatorView) -> int:

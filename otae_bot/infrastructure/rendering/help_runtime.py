@@ -26,6 +26,7 @@ from otae_bot.infrastructure.rendering.browser import screenshot_web_element
 from otae_bot.config.core import CoreSettings
 from otae_bot.config.root import PROJECT_ROOT
 from otae_bot.config.settings import core_settings
+from .temp_files import write_temp_html
 
 #: Runtime cache location; override with ``otae.help_cache_path`` in entari.yml.
 DEFAULT_CACHE_PATH = CoreSettings().help_cache_path
@@ -132,9 +133,7 @@ async def _render(
     theme: help_cards.HelpTheme,
 ) -> bytes:
     """Render one page/artwork pair to PNG bytes, byte-identical to the offline pipeline."""
-    with tempfile.NamedTemporaryFile("w", suffix=".html", encoding="utf-8", delete=False) as handle:
-        handle.write(help_cards.render_html(page, art, theme))
-        html_path = Path(handle.name)
+    html_path = await write_temp_html(help_cards.render_html(page, art, theme))
     try:
         png = await screenshot_web_element(
             html_path.as_uri(),
