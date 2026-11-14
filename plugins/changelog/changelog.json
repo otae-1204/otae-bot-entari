@@ -30,6 +30,15 @@
             "abdd14b",
             "e91626b"
           ]
+        },
+        {
+          "kind": "feat",
+          "date": "2026-11-14",
+          "text": "支持 t.bilibili.com 与 Opus 动态链接预览。",
+          "commits": [
+            "166df74",
+            "72fd754"
+          ]
         }
       ]
     },
