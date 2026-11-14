@@ -84,6 +84,12 @@ class BiliApi:
                 json.dumps(item, ensure_ascii=False).encode("utf-8")
             ),
         )
+        # 空壳动态的 detail 回查失败也缓存一小段时间，避免每次轮询重复请求。
+        self._dynamic_detail_misses: AsyncTTLCache[str, bool] = AsyncTTLCache(
+            ttl_seconds=300,
+            max_entries=64,
+            max_bytes=64 * 1024,
+        )
         # Transport, cookies, WBI keys and risk-control live in the session.
         self.session = BiliSession(
             timeout=timeout,
@@ -392,7 +398,18 @@ class BiliApi:
     async def dynamic_detail(
         self, item_id: str, *, deadline: float | None = None
     ) -> dict[str, Any]:
-        return await space_api.dynamic_detail(self, item_id, deadline=deadline)
+        if self._dynamic_detail_misses.peek(item_id):
+            raise BiliAPIError(f"动态 {item_id} 不可见")
+        try:
+            return await self._dynamic_details.get_or_create(
+                item_id,
+                lambda: space_api.dynamic_detail(self, item_id, deadline=deadline),
+            )
+        except BiliAPIError as exc:
+            # 只缓存“确实不可见”；超时/风控等临时失败留待下一轮重试。
+            if "不可见" in str(exc):
+                self._dynamic_detail_misses.put(item_id, True)
+            raise
 
     async def official_dynamic_detail(
         self, item_id: str, *, deadline: float | None = None

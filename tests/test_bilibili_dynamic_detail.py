@@ -67,6 +67,9 @@ class _FakeApi:
     async def _within(self, label, deadline, factory):
         return await factory()
 
+    async def dynamic_detail(self, item_id: str, *, deadline=None):
+        return await self.space.dynamic_detail(self, item_id, deadline=deadline)
+
     async def _get_json_with_risk_retry(self, url, label, params=None):
         if url == self.space.DYNAMIC_URL:
             return {"data": {"items": self.feed}}
@@ -85,6 +88,34 @@ def test_content_check_distinguishes_empty_draw_from_opus_text(bili):
     assert not bili.api.space._dynamic_has_content(_empty_draw("1"))
     assert bili.api.space._dynamic_has_content(_opus_detail("1", "正文"))
     assert bili.api.space._dynamic_has_content(_text_item("1", "正文"))
+
+
+def test_content_check_accepts_ugc_when_mapping_renders_it(bili):
+    item = {
+        "id_str": "1",
+        "type": "DYNAMIC_TYPE_DRAW",
+        "modules": {
+            "module_author": {"pub_ts": 1},
+            "module_dynamic": {
+                "desc": None,
+                "major": None,
+                "additional": {
+                    "type": "ADDITIONAL_TYPE_UGC",
+                    "ugc": {"title": "视频标题", "cover": "https://example.com/c.jpg"},
+                },
+            },
+        },
+    }
+    assert bili.api.space._dynamic_has_content(item)
+
+
+def test_ugc_additional_does_not_mask_an_empty_draw(bili):
+    item = _empty_draw("1")
+    item["modules"]["module_dynamic"]["additional"] = {
+        "type": "ADDITIONAL_TYPE_UGC",
+        "ugc": {"title": "视频标题", "cover": "https://example.com/c.jpg"},
+    }
+    assert not bili.api.space._dynamic_has_content(item)
 
 
 @asyncio_test
@@ -131,3 +162,14 @@ async def test_invisible_detail_keeps_the_feed_item(bili):
 
     assert items[0] is feed[0]
     assert not bili.api.space._dynamic_has_content(items[0])
+
+
+@asyncio_test
+async def test_official_feed_never_calls_generic_detail(bili):
+    feed = [_text_item("1", "官号正文")]
+    api = _fake(bili, feed, {})
+
+    items = await bili.api.space.dynamic_items(api, "1265652806")
+
+    assert api.detail_calls == []
+    assert items[0]["id_str"] == "1"

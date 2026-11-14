@@ -310,9 +310,13 @@ async def _enrich_empty_dynamic_items(
     still has the Opus text. Only empty items are queried and the number of
     extra requests is capped, so a normal page stays one request.
     """
+    loop = asyncio.get_running_loop()
+    budget_deadline = loop.time() + 5.0
+    if deadline is not None:
+        budget_deadline = min(budget_deadline, deadline)
     fetched = 0
     for index, item in enumerate(items):
-        if fetched >= DYNAMIC_DETAIL_LIMIT:
+        if fetched >= DYNAMIC_DETAIL_LIMIT or loop.time() >= budget_deadline - 0.25:
             return
         if not isinstance(item, dict) or _dynamic_has_content(item):
             continue
@@ -321,53 +325,25 @@ async def _enrich_empty_dynamic_items(
             continue
         fetched += 1
         try:
-            items[index] = await dynamic_detail(api, item_id, deadline=deadline)
+            items[index] = await api.dynamic_detail(item_id, deadline=budget_deadline)
         except BiliAPIError:
             continue
 
 
 def _dynamic_has_content(item: dict[str, Any]) -> bool:
-    dynamic = (item.get("modules") or {}).get("module_dynamic") or {}
-    desc = dynamic.get("desc") or {}
-    major = dynamic.get("major") or {}
-    additional = dynamic.get("additional") or {}
-
-    if str(desc.get("text") or "").strip() or desc.get("rich_text_nodes"):
-        return True
-
-    major_type = str(major.get("type") or "")
-    if major_type == "MAJOR_TYPE_OPUS":
-        opus = major.get("opus") or {}
-        summary = opus.get("summary") or {}
-        return bool(
-            str(summary.get("text") or "").strip()
-            or summary.get("rich_text_nodes")
-            or opus.get("pics")
-            or opus.get("title")
-        )
-    if major_type == "MAJOR_TYPE_DRAW":
-        return bool((major.get("draw") or {}).get("items"))
-    if major_type == "MAJOR_TYPE_ARTICLE":
-        article = major.get("article") or {}
-        return bool(article.get("title") or article.get("covers"))
-    if major_type == "MAJOR_TYPE_ARCHIVE":
-        archive = major.get("archive") or {}
-        return bool(archive.get("title") or archive.get("cover"))
-    if major_type == "MAJOR_TYPE_COMMON":
-        common = major.get("common") or {}
-        return bool(common.get("title") or common.get("cover") or common.get("desc"))
-    if major_type:
-        suffix = major_type.removeprefix("MAJOR_TYPE_").lower()
-        if major.get(suffix):
-            return True
-
-    if additional.get("type") == "ADDITIONAL_TYPE_UGC":
-        ugc = additional.get("ugc") or {}
-        if ugc.get("title") or ugc.get("cover"):
-            return True
-
-    orig = item.get("orig")
-    return isinstance(orig, dict) and _dynamic_has_content(orig)
+    """Whether mapping this item would produce anything beyond the generic shell."""
+    if not isinstance(item, dict):
+        return False
+    author = (item.get("modules") or {}).get("module_author") or {}
+    card = dynamic_item_to_card(item, str(author.get("mid") or ""))
+    description = card.description.strip()
+    if description in {"-", "--", "—"}:
+        description = ""
+    return bool(
+        card.cover_url.strip()
+        or description
+        or card.title not in {"", "发布了新动态", "Bilibili"}
+    )
 
 
 async def dynamic_detail(
