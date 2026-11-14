@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 import importlib
 import importlib.util
 import re
@@ -460,8 +459,8 @@ class GachaTypographyTests(unittest.TestCase):
         for _weight, name in draw.GACHA_FONT_FILES:
             path = draw.GACHA_FONT_DIR / name
             self.assertTrue(name.startswith("HarmonyOS_Sans_SC_") and path.is_file(), path)
-            head = base64.b64encode(path.read_bytes()[:48]).decode("ascii")
-            self.assertIn(f"url(data:font/ttf;base64,{head}", faces)
+            self.assertIn(f'url("{path.resolve().as_uri()}")', faces)
+        self.assertNotIn("data:font", faces)
         document = draw._document("<div></div>")
         self.assertLess(document.index("@font-face"), document.index(draw.GACHA_CSS))
 
@@ -690,7 +689,7 @@ class GachaRenderTests(unittest.IsolatedAsyncioTestCase):
             mock.patch.object(draw, "_draw_gacha_shell", shell_mock),
             mock.patch.object(draw, "_write_temp_html", mock.AsyncMock(return_value=Path("/nonexistent/gacha-measure.html"))),
             mock.patch.object(draw, "schedule_temp_file_cleanup"),
-            # 浏览器已打桩：不往每页 HTML 里塞约 33 MB 的 base64 字体（字体嵌入由 GachaTypographyTests 覆盖）。
+            # 浏览器已打桩：字体声明由 GachaTypographyTests 覆盖。
             mock.patch.object(draw, "gacha_font_face_css", return_value=""),
         ):
             pages = await draw.draw_gacha_analysis_cards(view, uid="****1234")

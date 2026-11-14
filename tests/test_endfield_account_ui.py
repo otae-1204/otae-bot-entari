@@ -271,7 +271,7 @@ class EndfieldAccountUiTests(unittest.TestCase):
 
 
 class EndfieldAccountUiAsyncTests(unittest.IsolatedAsyncioTestCase):
-    async def test_prepare_assets_registers_local_ui_fonts_and_icons(self):
+    async def test_prepare_assets_maps_fonts_to_files_and_registers_icons(self):
         prepared = await _prepare_assets([], inline=False)
         for virtual_url, path, _weight in FONT_ASSETS.values():
             if str(path).startswith("C:/Windows/") and not path.exists():
@@ -279,8 +279,9 @@ class EndfieldAccountUiAsyncTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn(virtual_url, prepared.resources)
                 continue  # Optional Windows HUD fonts have CSS fallbacks on Linux.
             self.assertTrue(path.exists())
-            self.assertIn(virtual_url, prepared.urls)
-            self.assertIn(virtual_url, prepared.resources)
+            # Fonts load from disk by file:// URL instead of through a route.
+            self.assertEqual(prepared.urls[virtual_url], path.resolve().as_uri())
+            self.assertNotIn(virtual_url, prepared.resources)
         for virtual_url, path in UI_ASSETS.values():
             self.assertTrue(path.exists())
             self.assertIn(virtual_url, prepared.urls)

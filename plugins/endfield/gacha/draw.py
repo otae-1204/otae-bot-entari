@@ -1000,17 +1000,18 @@ def _document(body: str) -> str:
 
 @lru_cache(maxsize=1)
 def gacha_font_face_css() -> str:
-    """HarmonyOS Sans SC 400 / 500 / 700 的 @font-face（data: URL，进程内只读盘编码一次）。
+    """HarmonyOS Sans SC 400 / 500 / 700 的 @font-face，按 file:// 地址从磁盘加载。
+    抽卡页本身是 file:// 临时文件，Chromium 直接读字体文件；以前内嵌成 data: URL，
+    每页 HTML 多出约 33 MB，写盘与解析都要数秒。
     缺文件时跳过该字重并记 warning，版面回退到 GACHA_CSS 里的系统字体栈。"""
     faces = []
     for weight, name in GACHA_FONT_FILES:
-        try:
-            data = base64.b64encode((GACHA_FONT_DIR / name).read_bytes()).decode("ascii")
-        except OSError as exc:
-            logger.warning(f"[endfield-gacha] font {name} unavailable, falling back to system fonts: {exc}")
+        path = GACHA_FONT_DIR / name
+        if not path.is_file():
+            logger.warning(f"[endfield-gacha] font {name} unavailable, falling back to system fonts: {path}")
             continue
         faces.append(f'@font-face{{font-family:"{GACHA_FONT_FAMILY}";font-weight:{weight};font-style:normal;'
-                     f'font-display:block;src:url(data:font/ttf;base64,{data}) format("truetype")}}')
+                     f'font-display:block;src:url("{path.resolve().as_uri()}") format("truetype")}}')
     return "".join(faces)
 
 

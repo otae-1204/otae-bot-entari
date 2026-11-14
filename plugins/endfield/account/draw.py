@@ -455,13 +455,14 @@ async def _prepare_assets(urls: Iterable[Any], *, inline: bool) -> _PreparedAsse
     for virtual_url, path, _weight in FONT_ASSETS.values():
         if not path.exists():
             continue
-        content = path.read_bytes()
-        mime = "font/ttf"
         if inline:
-            output[virtual_url] = f"data:{mime};base64,{base64.b64encode(content).decode('ascii')}"
+            content = path.read_bytes()
+            output[virtual_url] = f"data:font/ttf;base64,{base64.b64encode(content).decode('ascii')}"
         else:
-            output[virtual_url] = virtual_url
-            browser_resources[virtual_url] = BrowserResource(content, mime)
+            # The page itself is a file:// document, so Chromium loads the font
+            # straight from disk. Serving it through a route sent every multi-MB
+            # font across the Playwright pipe again on each page load.
+            output[virtual_url] = path.resolve().as_uri()
     for virtual_url, path in UI_ASSETS.values():
         if not path.exists():
             continue
