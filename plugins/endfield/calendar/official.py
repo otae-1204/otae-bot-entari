@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import html
 import re
 from dataclasses import dataclass
@@ -58,7 +59,10 @@ class OfficialVersionCalendarSource:
             ttl_seconds=1800.0,
             max_bytes=4 * 1024 * 1024,
         )
-        calendar = discover_zh_cn_calendar(layout.content.decode("utf-8", errors="replace"))
+        # Regex search over the multi-MB site bundle took ~4 s on the loaded host.
+        calendar = await asyncio.to_thread(
+            discover_zh_cn_calendar, layout.content.decode("utf-8", errors="replace")
+        )
         resources = await fetch_many(
             (asset.url for asset in calendar.assets),
             namespace=HTTP_NAMESPACE,
