@@ -1,11 +1,11 @@
 {
   "schema": 2,
-  "head": "d54b210",
+  "head": "4e98f6a",
   "generated_from": {
     "first_commit": "8e1b455",
     "first_date": "2026-06-17",
     "last_date": "2026-11-14",
-    "commit_count": 540,
+    "commit_count": 541,
     "merge_commit_count": 36,
     "version_count": 59
   },
@@ -23,6 +23,14 @@
         "渲染"
       ],
       "highlights": [
+        {
+          "kind": "fix",
+          "date": "2026-11-14",
+          "text": "修复开播等推送在发送确认超时时被重复发送多次。",
+          "commits": [
+            "4e98f6a"
+          ]
+        },
         {
           "kind": "fix",
           "date": "2026-11-14",
