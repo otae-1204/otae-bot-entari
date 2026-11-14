@@ -94,6 +94,7 @@ def _render_bili_card(
     # 纯文字动态没有封面是正常形态，不占封面占位；封面下载失败仍显示占位。
     text_only_dynamic = (
         card.card_type == "dynamic"
+        and cover_panel is None
         and not card.cover_url
         and bool(card.description.strip())
     )
