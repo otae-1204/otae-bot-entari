@@ -398,17 +398,18 @@ class BiliApi:
     async def dynamic_detail(
         self, item_id: str, *, deadline: float | None = None
     ) -> dict[str, Any]:
-        if self._dynamic_detail_misses.peek(item_id):
+        cache_key = f"generic:{item_id}"
+        if self._dynamic_detail_misses.peek(cache_key):
             raise BiliAPIError(f"动态 {item_id} 不可见")
         try:
             return await self._dynamic_details.get_or_create(
-                item_id,
+                cache_key,
                 lambda: space_api.dynamic_detail(self, item_id, deadline=deadline),
             )
         except BiliAPIError as exc:
             # 只缓存“确实不可见”；超时/风控等临时失败留待下一轮重试。
             if "不可见" in str(exc):
-                self._dynamic_detail_misses.put(item_id, True)
+                self._dynamic_detail_misses.put(cache_key, True)
             raise
 
     async def official_dynamic_detail(
