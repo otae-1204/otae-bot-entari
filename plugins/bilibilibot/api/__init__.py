@@ -27,6 +27,7 @@ from . import live as live_api
 from . import rsshub as rsshub_api
 from . import space as space_api
 from .links import ParsedLink
+from .mapping import dynamic_item_to_card
 from .session import BiliAPIError, BiliRiskControlError, BiliSession
 
 
@@ -83,6 +84,12 @@ class BiliApi:
             sizeof=lambda item: len(
                 json.dumps(item, ensure_ascii=False).encode("utf-8")
             ),
+        )
+        # 空壳动态的 detail 回查失败也缓存一小段时间，避免每次轮询重复请求。
+        self._dynamic_detail_misses: AsyncTTLCache[str, bool] = AsyncTTLCache(
+            ttl_seconds=300,
+            max_entries=64,
+            max_bytes=64 * 1024,
         )
         # Transport, cookies, WBI keys and risk-control live in the session.
         self.session = BiliSession(
@@ -389,6 +396,23 @@ class BiliApi:
     ) -> list[dict[str, Any]]:
         return await space_api.dynamic_items(self, uid, deadline=deadline)
 
+    async def dynamic_detail(
+        self, item_id: str, *, deadline: float | None = None
+    ) -> dict[str, Any]:
+        cache_key = f"generic:{item_id}"
+        if self._dynamic_detail_misses.peek(cache_key):
+            raise BiliAPIError(f"动态 {item_id} 不可见")
+        try:
+            return await self._dynamic_details.get_or_create(
+                cache_key,
+                lambda: space_api.dynamic_detail(self, item_id, deadline=deadline),
+            )
+        except BiliAPIError as exc:
+            # 只缓存“确实不可见”；超时/风控等临时失败留待下一轮重试。
+            if "不可见" in str(exc):
+                self._dynamic_detail_misses.put(cache_key, True)
+            raise
+
     async def official_dynamic_detail(
         self, item_id: str, *, deadline: float | None = None
     ) -> dict[str, Any]:
@@ -498,6 +522,10 @@ class BiliApi:
             # A live link always carries a room number, never a UID.
             target = await self.resolve_live_by_room(parsed.value)
             return await self.live_card(target)
+        if parsed.kind == KIND_DYNAMIC:
+            item = await self.dynamic_detail(parsed.value)
+            author = (item.get("modules") or {}).get("module_author") or {}
+            return dynamic_item_to_card(item, str(author.get("mid") or ""))
         raise BiliAPIError(f"unsupported link type: {parsed.kind}")
 
 

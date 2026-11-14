@@ -35,6 +35,7 @@ DYNAMIC_DETAIL_URL = "https://api.bilibili.com/x/polymer/web-dynamic/v1/detail"
 VIDEO_ROUTE = "/bilibili/user/video/{uid}"
 DYNAMIC_ROUTE = "/bilibili/user/dynamic/{uid}"
 DYNAMIC_ITEM_LIMIT = 10
+DYNAMIC_DETAIL_LIMIT = 5
 COMPACT_ERROR_LIMIT = 220
 # Spelled out in every source-failure summary so the user knows the knobs.
 FALLBACK_HINT = "可配置 BILI_SESSDATA/BILI_BUVID3 或 BILI_DM_IMG_* 提高稳定性"
@@ -264,6 +265,8 @@ async def dynamic_items(
         if uid == ENDFIELD_OFFICIAL_UID:
             for item in items:
                 validate_official_dynamic(item)
+        else:
+            await _enrich_empty_dynamic_items(api, items, deadline=deadline)
         return items
     except BiliAPIError as primary_error:
         if uid == ENDFIELD_OFFICIAL_UID:
@@ -296,6 +299,69 @@ def _dynamic_pub_ts(item: dict[str, Any]) -> int:
         return int(author.get("pub_ts") or 0)
     except (TypeError, ValueError):
         return 0
+
+
+async def _enrich_empty_dynamic_items(
+    api: Any, items: list[dict[str, Any]], *, deadline: float | None = None
+) -> None:
+    """Replace feed shells with the detail item before detection.
+
+    The feed occasionally returns an empty DRAW shell while the detail endpoint
+    still has the Opus text. Only empty items are queried and the number of
+    extra requests is capped, so a normal page stays one request.
+    """
+    loop = asyncio.get_running_loop()
+    budget_deadline = loop.time() + 5.0
+    if deadline is not None:
+        budget_deadline = min(budget_deadline, deadline)
+    fetched = 0
+    for index, item in enumerate(items):
+        if fetched >= DYNAMIC_DETAIL_LIMIT or loop.time() >= budget_deadline - 0.25:
+            return
+        if not isinstance(item, dict) or _dynamic_has_content(item):
+            continue
+        item_id = str(item.get("id_str") or "")
+        if not item_id:
+            continue
+        fetched += 1
+        try:
+            items[index] = await api.dynamic_detail(item_id, deadline=budget_deadline)
+        except BiliAPIError:
+            continue
+
+
+def _dynamic_has_content(item: dict[str, Any]) -> bool:
+    """Whether mapping this item would produce anything beyond the generic shell."""
+    if not isinstance(item, dict):
+        return False
+    author = (item.get("modules") or {}).get("module_author") or {}
+    card = dynamic_item_to_card(item, str(author.get("mid") or ""))
+    description = card.description.strip()
+    if description in {"-", "--", "—"}:
+        description = ""
+    return bool(
+        card.cover_url.strip()
+        or description
+        or card.title not in {"", "发布了新动态", "Bilibili"}
+    )
+
+
+async def dynamic_detail(
+    api: Any, item_id: str, *, deadline: float | None = None
+) -> dict[str, Any]:
+    data = await api._within(
+        f"dynamic detail {item_id}",
+        deadline,
+        lambda: api._get_json_with_risk_retry(
+            DYNAMIC_DETAIL_URL,
+            f"dynamic detail {item_id}",
+            params={"id": item_id, "features": "itemOpusStyle"},
+        ),
+    )
+    item = (data.get("data") or {}).get("item") or {}
+    if str(item.get("id_str") or "") != item_id or not _dynamic_has_content(item):
+        raise BiliAPIError(f"动态 {item_id} 不可见")
+    return item
 
 
 async def official_dynamic_detail(
@@ -455,8 +521,10 @@ def rss_card_to_dynamic_item(card: BiliCard, uid: str) -> dict[str, Any]:
 
 
 __all__ = [
+    "DYNAMIC_DETAIL_LIMIT",
     "DYNAMIC_ITEM_LIMIT",
     "compact_error",
+    "dynamic_detail",
     "dynamic_items",
     "dynamic_latest_video",
     "dynamic_item_to_card",
