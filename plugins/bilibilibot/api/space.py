@@ -234,11 +234,11 @@ async def latest_dynamic(
     api: Any, uid: str, *, deadline: float | None = None
 ) -> BiliCard:
     items = await api.dynamic_items(uid, deadline=deadline)
-    if not items:
+    candidates = [item for item in items if isinstance(item, dict)]
+    if not candidates:
         return BiliCard(KIND_DYNAMIC, "暂无动态", uid=uid)
     # 置顶或旧视频动态可能排在列表首位；订阅基线按发布时间取最新。
-    items = sorted(items, key=_dynamic_pub_ts, reverse=True)
-    return dynamic_item_to_card(items[0], uid)
+    return dynamic_item_to_card(max(candidates, key=_dynamic_pub_ts), uid)
 
 
 async def dynamic_items(
