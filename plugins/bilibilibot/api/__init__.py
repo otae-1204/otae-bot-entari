@@ -389,6 +389,11 @@ class BiliApi:
     ) -> list[dict[str, Any]]:
         return await space_api.dynamic_items(self, uid, deadline=deadline)
 
+    async def dynamic_detail(
+        self, item_id: str, *, deadline: float | None = None
+    ) -> dict[str, Any]:
+        return await space_api.dynamic_detail(self, item_id, deadline=deadline)
+
     async def official_dynamic_detail(
         self, item_id: str, *, deadline: float | None = None
     ) -> dict[str, Any]:

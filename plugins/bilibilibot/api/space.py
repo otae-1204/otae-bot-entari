@@ -35,6 +35,7 @@ DYNAMIC_DETAIL_URL = "https://api.bilibili.com/x/polymer/web-dynamic/v1/detail"
 VIDEO_ROUTE = "/bilibili/user/video/{uid}"
 DYNAMIC_ROUTE = "/bilibili/user/dynamic/{uid}"
 DYNAMIC_ITEM_LIMIT = 10
+DYNAMIC_DETAIL_LIMIT = 5
 COMPACT_ERROR_LIMIT = 220
 # Spelled out in every source-failure summary so the user knows the knobs.
 FALLBACK_HINT = "可配置 BILI_SESSDATA/BILI_BUVID3 或 BILI_DM_IMG_* 提高稳定性"
@@ -264,6 +265,8 @@ async def dynamic_items(
         if uid == ENDFIELD_OFFICIAL_UID:
             for item in items:
                 validate_official_dynamic(item)
+        else:
+            await _enrich_empty_dynamic_items(api, items, deadline=deadline)
         return items
     except BiliAPIError as primary_error:
         if uid == ENDFIELD_OFFICIAL_UID:
@@ -296,6 +299,93 @@ def _dynamic_pub_ts(item: dict[str, Any]) -> int:
         return int(author.get("pub_ts") or 0)
     except (TypeError, ValueError):
         return 0
+
+
+async def _enrich_empty_dynamic_items(
+    api: Any, items: list[dict[str, Any]], *, deadline: float | None = None
+) -> None:
+    """Replace feed shells with the detail item before detection.
+
+    The feed occasionally returns an empty DRAW shell while the detail endpoint
+    still has the Opus text. Only empty items are queried and the number of
+    extra requests is capped, so a normal page stays one request.
+    """
+    fetched = 0
+    for index, item in enumerate(items):
+        if fetched >= DYNAMIC_DETAIL_LIMIT:
+            return
+        if not isinstance(item, dict) or _dynamic_has_content(item):
+            continue
+        item_id = str(item.get("id_str") or "")
+        if not item_id:
+            continue
+        fetched += 1
+        try:
+            items[index] = await dynamic_detail(api, item_id, deadline=deadline)
+        except BiliAPIError:
+            continue
+
+
+def _dynamic_has_content(item: dict[str, Any]) -> bool:
+    dynamic = (item.get("modules") or {}).get("module_dynamic") or {}
+    desc = dynamic.get("desc") or {}
+    major = dynamic.get("major") or {}
+    additional = dynamic.get("additional") or {}
+
+    if str(desc.get("text") or "").strip() or desc.get("rich_text_nodes"):
+        return True
+
+    major_type = str(major.get("type") or "")
+    if major_type == "MAJOR_TYPE_OPUS":
+        opus = major.get("opus") or {}
+        summary = opus.get("summary") or {}
+        return bool(
+            str(summary.get("text") or "").strip()
+            or summary.get("rich_text_nodes")
+            or opus.get("pics")
+            or opus.get("title")
+        )
+    if major_type == "MAJOR_TYPE_DRAW":
+        return bool((major.get("draw") or {}).get("items"))
+    if major_type == "MAJOR_TYPE_ARTICLE":
+        article = major.get("article") or {}
+        return bool(article.get("title") or article.get("covers"))
+    if major_type == "MAJOR_TYPE_ARCHIVE":
+        archive = major.get("archive") or {}
+        return bool(archive.get("title") or archive.get("cover"))
+    if major_type == "MAJOR_TYPE_COMMON":
+        common = major.get("common") or {}
+        return bool(common.get("title") or common.get("cover") or common.get("desc"))
+    if major_type:
+        suffix = major_type.removeprefix("MAJOR_TYPE_").lower()
+        if major.get(suffix):
+            return True
+
+    if additional.get("type") == "ADDITIONAL_TYPE_UGC":
+        ugc = additional.get("ugc") or {}
+        if ugc.get("title") or ugc.get("cover"):
+            return True
+
+    orig = item.get("orig")
+    return isinstance(orig, dict) and _dynamic_has_content(orig)
+
+
+async def dynamic_detail(
+    api: Any, item_id: str, *, deadline: float | None = None
+) -> dict[str, Any]:
+    data = await api._within(
+        f"dynamic detail {item_id}",
+        deadline,
+        lambda: api._get_json_with_risk_retry(
+            DYNAMIC_DETAIL_URL,
+            f"dynamic detail {item_id}",
+            params={"id": item_id, "features": "itemOpusStyle"},
+        ),
+    )
+    item = (data.get("data") or {}).get("item") or {}
+    if str(item.get("id_str") or "") != item_id or not _dynamic_has_content(item):
+        raise BiliAPIError(f"动态 {item_id} 不可见")
+    return item
 
 
 async def official_dynamic_detail(
@@ -455,8 +545,10 @@ def rss_card_to_dynamic_item(card: BiliCard, uid: str) -> dict[str, Any]:
 
 
 __all__ = [
+    "DYNAMIC_DETAIL_LIMIT",
     "DYNAMIC_ITEM_LIMIT",
     "compact_error",
+    "dynamic_detail",
     "dynamic_items",
     "dynamic_latest_video",
     "dynamic_item_to_card",
