@@ -1,11 +1,11 @@
 {
   "schema": 2,
-  "head": "9bf6374",
+  "head": "d54b210",
   "generated_from": {
     "first_commit": "8e1b455",
     "first_date": "2026-06-17",
     "last_date": "2026-11-14",
-    "commit_count": 537,
+    "commit_count": 540,
     "merge_commit_count": 36,
     "version_count": 59
   },
@@ -16,10 +16,11 @@
       "from": "2026-11-14",
       "to": "2026-11-14",
       "title": "响应卡顿优化",
-      "summary": "减少后台任务与出图时整个机器人卡住的情况。",
+      "summary": "减少出图与后台任务时整个机器人卡住的情况，出图更快。",
       "tags": [
         "性能",
-        "终末地"
+        "终末地",
+        "渲染"
       ],
       "highlights": [
         {
@@ -40,6 +41,23 @@
             "0988bdf",
             "f152d8b",
             "9bf6374"
+          ]
+        },
+        {
+          "kind": "perf",
+          "date": "2026-11-14",
+          "text": "出图字体改为从磁盘加载，抽卡分析出图约快一倍；渲染并发由 2 调到 3。",
+          "commits": [
+            "2ebabfa",
+            "3306737"
+          ]
+        },
+        {
+          "kind": "feat",
+          "date": "2026-11-14",
+          "text": "大图可在发送前转为无损 WebP，体积更小（默认关闭）。",
+          "commits": [
+            "d54b210"
           ]
         }
       ]
