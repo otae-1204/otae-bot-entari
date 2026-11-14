@@ -67,7 +67,7 @@ class MediaSettings(Settings):
 
     shared_filesystem: bool = field(
         default=False,
-        description="OneBot 接入端（LLBot）与 bot 在同一台机器、以同一用户运行时设 true：上传的图片以 file:// 路径交给它，省去 base64；默认 false",
+        description="OneBot 接入端（LLBot）与 bot 在同一台机器、以同一用户运行时设 true：上传的图片以 file:// 路径交给它，省去 base64；默认 false。LLBot 无头协议（--protocol=linux）下不要开：它收到 file:// 图片会卡住",
     )
     webp_above_kb: int = field(
         default=0,
