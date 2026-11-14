@@ -33,6 +33,7 @@ from .models import (
 LIVE_TIMING_MAX_GAP_SECONDS = 180
 
 BV_RE = re.compile(r"\bBV[0-9A-Za-z]{10}\b")
+LIVE_LINK_RE = re.compile(r"live\.bilibili\.com/(?:blanc/)?(\d+)")
 
 
 def refined_name(current: str, uid: str, candidate: str) -> str:
@@ -54,6 +55,15 @@ def bvid_from_card(card: BiliCard) -> str:
         if match:
             return match.group(0)
     return ""
+
+
+def live_room_from_card(card: BiliCard) -> str:
+    """The live room a dynamic card points at, if any."""
+    for value in (card.url, card.description):
+        match = LIVE_LINK_RE.search(value or "")
+        if match:
+            return match.group(1)
+    return card.room_id if card.live_dynamic else ""
 
 
 def detect_live(
@@ -167,12 +177,13 @@ def detect_dynamic(
     *,
     seen_ids: set[str],
     video_subscribed: bool,
+    live_subscribed: bool = False,
 ) -> tuple[TargetInfo, list[BiliEvent], list[SeenItem]]:
     """Handle a feed page oldest-first.
 
     Returns the new state, the events to push and the items that are only to be
-    recorded. The third list carries video dynamics when the same UP is also
-    watched for videos: the video subscription already pushes them, so the
+    recorded. The third list carries video/live dynamics when the same UP is
+    also watched for videos/live: those subscriptions already push them, so the
     dynamic copy is marked as read without a second notification.
     """
     if not cards:
@@ -199,6 +210,9 @@ def detect_dynamic(
             marked.append(seen)
             continue
         if video_subscribed and bvid_from_card(card):
+            marked.append(seen)
+            continue
+        if live_subscribed and live_room_from_card(card):
             marked.append(seen)
             continue
         card.author = card.author or next_name or prev.uid
@@ -230,6 +244,7 @@ __all__ = [
     "detect_dynamic",
     "detect_live",
     "detect_video",
+    "live_room_from_card",
     "refined_name",
     "seen_items_of",
 ]

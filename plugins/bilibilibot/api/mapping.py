@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -51,6 +52,31 @@ def _forward_text(item: dict[str, Any]) -> str:
     return text or str((dynamic.get("desc") or {}).get("text") or "")
 
 
+def _live_rcmd_room_id(major: dict[str, Any]) -> str:
+    """Extract the room id from a live-recommendation dynamic, if present."""
+    rcmd = major.get("live_rcmd") or {}
+    if not isinstance(rcmd, dict):
+        return ""
+    for key in ("room_id", "roomid"):
+        value = rcmd.get(key)
+        if value:
+            return str(value)
+    content = rcmd.get("content")
+    if isinstance(content, str):
+        try:
+            content = json.loads(content)
+        except (TypeError, ValueError):
+            content = None
+    if isinstance(content, dict):
+        info = content.get("live_play_info") or content
+        if isinstance(info, dict):
+            for key in ("room_id", "roomid"):
+                value = info.get(key)
+                if value:
+                    return str(value)
+    return ""
+
+
 def dynamic_item_to_card(item: dict[str, Any], uid: str) -> BiliCard:
     """Map one dynamic feed entry to a card (public form of the old private helper)."""
     modules = item.get("modules") or {}
@@ -60,9 +86,16 @@ def dynamic_item_to_card(item: dict[str, Any], uid: str) -> BiliCard:
     major = dynamic.get("major") or {}
     opus = major.get("opus") or {}
     additional = dynamic.get("additional") or {}
+    live_dynamic = (
+        item.get("type") == "DYNAMIC_TYPE_LIVE_RCMD"
+        or major.get("type") == "MAJOR_TYPE_LIVE_RCMD"
+    )
+    live_room_id = _live_rcmd_room_id(major) if live_dynamic else ""
     title = "发布了新动态"
     cover = ""
     url = f"https://t.bilibili.com/{item.get('id_str')}"
+    if live_room_id:
+        url = f"https://live.bilibili.com/{live_room_id}"
 
     if major.get("type") == "MAJOR_TYPE_OPUS":
         title = str(opus.get("title") or title)
@@ -117,8 +150,10 @@ def dynamic_item_to_card(item: dict[str, Any], uid: str) -> BiliCard:
         url=url,
         badge="DYNAMIC",
         uid=uid,
+        room_id=live_room_id,
         item_id=bvid_from_url(url) or str(item.get("id_str") or ""),
         published_at=int(author.get("pub_ts") or 0),
+        live_dynamic=live_dynamic,
         lottery_reason=lottery_reason(item) if applies_to(uid) else "",
     )
 
