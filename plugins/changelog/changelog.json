@@ -1,15 +1,36 @@
 {
   "schema": 2,
-  "head": "5adcfd3",
+  "head": "ef30255",
   "generated_from": {
     "first_commit": "8e1b455",
     "first_date": "2026-06-17",
-    "last_date": "2026-11-13",
-    "commit_count": 530,
+    "last_date": "2026-11-14",
+    "commit_count": 531,
     "merge_commit_count": 36,
-    "version_count": 57
+    "version_count": 58
   },
   "releases": [
+    {
+      "version": "v2.0.2",
+      "date": "2026-11-14",
+      "from": "2026-11-14",
+      "to": "2026-11-14",
+      "title": "关卡数据修复",
+      "summary": "修复关卡卡片敌人属性缺少出生加成。",
+      "tags": [
+        "终末地"
+      ],
+      "highlights": [
+        {
+          "kind": "fix",
+          "date": "2026-11-14",
+          "text": "修复关卡卡片敌人生命等属性未计入出生加成。",
+          "commits": [
+            "ef30255"
+          ]
+        }
+      ]
+    },
     {
       "version": "v2.0.1",
       "date": "2026-11-13",
