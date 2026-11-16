@@ -1,15 +1,110 @@
 {
   "schema": 2,
-  "head": "bf142ea",
+  "head": "fa5433d",
   "generated_from": {
     "first_commit": "8e1b455",
     "first_date": "2026-06-17",
-    "last_date": "2026-11-14",
-    "commit_count": 543,
+    "last_date": "2026-11-16",
+    "commit_count": 560,
     "merge_commit_count": 36,
-    "version_count": 60
+    "version_count": 61
   },
   "releases": [
+    {
+      "version": "v2.0.5",
+      "date": "2026-11-16",
+      "from": "2026-11-16",
+      "to": "2026-11-16",
+      "title": "卡顿再优化",
+      "summary": "各插件的读写盘与数据库操作移出主线程，并减少失效账号的反复重试。",
+      "tags": [
+        "性能",
+        "终末地",
+        "稳定性"
+      ],
+      "highlights": [
+        {
+          "kind": "fix",
+          "date": "2026-11-16",
+          "text": "终末地使用率刷新遇到凭据失效的账号时按小时退避，不再反复重试。",
+          "commits": [
+            "95c5264"
+          ]
+        },
+        {
+          "kind": "perf",
+          "date": "2026-11-16",
+          "text": "终末地数据库改用 WAL 模式，读写互不阻塞。",
+          "commits": [
+            "b81eab1"
+          ]
+        },
+        {
+          "kind": "perf",
+          "date": "2026-11-16",
+          "text": "终末地、明日方舟、Tibo 雷达的数据库操作移出主线程。",
+          "commits": [
+            "cfb5dcd",
+            "4c7f2bb",
+            "2db29f1"
+          ]
+        },
+        {
+          "kind": "perf",
+          "date": "2026-11-16",
+          "text": "叉出去、群功能开关、MCSM、Steam 的读写盘移出主线程。",
+          "commits": [
+            "0993c60",
+            "14a7eb4",
+            "7716a41",
+            "fd030dc",
+            "eb1ef00"
+          ]
+        },
+        {
+          "kind": "perf",
+          "date": "2026-11-16",
+          "text": "出图截图、帮助卡、账号卡素材和图片上传的读写盘移出主线程。",
+          "commits": [
+            "bcd9c41",
+            "8d81310",
+            "48e75ae"
+          ]
+        },
+        {
+          "kind": "refactor",
+          "date": "2026-11-16",
+          "text": "B 站推送发件箱调用简化。",
+          "commits": [
+            "14f8f27"
+          ]
+        },
+        {
+          "kind": "test",
+          "date": "2026-11-16",
+          "text": "新增守卫：禁止在协程里直接做同步读写。",
+          "commits": [
+            "fa5433d"
+          ]
+        },
+        {
+          "kind": "test",
+          "date": "2026-11-16",
+          "text": "修正拥有统计用例对并发顺序的断言。",
+          "commits": [
+            "7335792"
+          ]
+        },
+        {
+          "kind": "docs",
+          "date": "2026-11-16",
+          "text": "注明无头 LLBot 下不要开启 WebP 发图。",
+          "commits": [
+            "a12c019"
+          ]
+        }
+      ]
+    },
     {
       "version": "v2.0.4",
       "date": "2026-11-14",
