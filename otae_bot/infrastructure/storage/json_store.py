@@ -2,18 +2,29 @@
 
 from __future__ import annotations
 
+import asyncio
+import itertools
 import json
 from pathlib import Path
+import threading
 from typing import Any, Dict, Optional
 from functools import wraps
 
 
 class JsonStore:
-    """基于文件的 JSON 键值存储，自动初始化 + 线程安全写入."""
+    """基于文件的 JSON 键值存储，自动初始化 + 线程安全写入.
+
+    内存里的 ``_data`` 只在调用方线程（通常是事件循环）上修改；协程里用
+    ``set_async`` / ``save_async``：在调用方线程序列化出一致的快照，再到工作线程
+    写盘。每次保存带递增版本号，旧快照不会覆盖已经写下的新快照。
+    """
 
     def __init__(self, file_path: str | Path) -> None:
         self._path = Path(file_path)
         self._data: Dict[str, Any] = {}
+        self._versions = itertools.count(1)  # next() is atomic: callers may be on any thread
+        self._written_version = 0
+        self._write_lock = threading.Lock()
         self._load()
 
     def _load(self) -> None:
@@ -23,10 +34,23 @@ class JsonStore:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             self._save()
 
+    def _dump(self) -> str:
+        return json.dumps(self._data, indent=4, ensure_ascii=False)
+
+    def _write(self, version: int, text: str) -> None:
+        with self._write_lock:
+            if version <= self._written_version:
+                return  # a newer snapshot is already on disk
+            self._path.write_text(text, encoding="utf-8")
+            self._written_version = version
+
     def _save(self) -> None:
-        self._path.write_text(
-            json.dumps(self._data, indent=4, ensure_ascii=False), encoding="utf-8"
-        )
+        self._write(next(self._versions), self._dump())
+
+    async def save_async(self) -> None:
+        """Snapshot ``_data`` on the calling thread, write the file in a worker thread."""
+        version, text = next(self._versions), self._dump()
+        await asyncio.to_thread(self._write, version, text)
 
     # ── dict-like access ──
     def get(self, key: str, default: Any = None) -> Any:
@@ -35,6 +59,14 @@ class JsonStore:
     def set(self, key: str, value: Any) -> None:
         self._data[key] = value
         self._save()
+
+    async def set_async(self, key: str, value: Any) -> None:
+        self._data[key] = value
+        await self.save_async()
+
+    def setdefault(self, key: str, default: Any) -> Any:
+        """Insert ``default`` in memory only; persist with ``save_async()``."""
+        return self._data.setdefault(key, default)
 
     def delete(self, key: str) -> bool:
         if key in self._data:
