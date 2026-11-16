@@ -71,7 +71,7 @@ class MediaSettings(Settings):
     )
     webp_above_kb: int = field(
         default=0,
-        description="发出的 PNG 超过多少 KB 时改为无损 WebP（像素不变、体积更小；转换后不小于原图 90% 则仍发 PNG）；0 = 关闭",
+        description="发出的 PNG 超过多少 KB 时改为无损 WebP（像素不变、体积更小；转换后不小于原图 90% 则仍发 PNG）；0 = 关闭。LLBot 无头协议下不要开：实测 QQ 里显示为空消息",
     )
 
 

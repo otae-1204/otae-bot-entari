@@ -85,7 +85,7 @@ otae:
   # 媒体发送（图片、语音、视频、文件）
   media:
     shared_filesystem: false   # OneBot 接入端（LLBot）与 bot 在同一台机器、以同一用户运行时设 true：上传的图片以 file:// 路径交给它，省去 base64；默认 false。LLBot 无头协议（--protocol=linux）下不要开：它收到 file:// 图片会卡住
-    webp_above_kb: 0   # 发出的 PNG 超过多少 KB 时改为无损 WebP（像素不变、体积更小；转换后不小于原图 90% 则仍发 PNG）；0 = 关闭
+    webp_above_kb: 0   # 发出的 PNG 超过多少 KB 时改为无损 WebP（像素不变、体积更小；转换后不小于原图 90% 则仍发 PNG）；0 = 关闭。LLBot 无头协议下不要开：实测 QQ 里显示为空消息
   help_cache_path: "data/cache/help-cards"   # 运行时帮助卡片缓存目录（相对仓库根）
 plugins:
   # OneBot 11 接入（可选）：由进程内的 otae_bot/boundary 把 LLBot 的 OneBot 11 正向 WebSocket

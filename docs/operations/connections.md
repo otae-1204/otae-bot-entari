@@ -70,7 +70,7 @@ entari-plugin-server 一定会起一个 uvicorn 服务，bot 自己不连它。�
 
 - `otae.media.shared_filesystem`：LLBot 与 bot 在同一台机器、同一用户运行时设 `true`，图片以 `file://` 路径交给 LLBot，省去 base64。默认 `false`。
   **LLBot 以无头协议运行（`llbot.js --protocol=linux`）时不要开**：2026-11-14 线上实测，LLBot 8.3.2 收到 `file://` 图片后不再回应任何请求（图发不出、账号注册不上），只能重启该 LLBot 实例恢复。
-- `otae.media.webp_above_kb`：超过该大小的 PNG 发送前转无损 WebP，默认 `0`（关闭）。QQ 侧显示尚未实测。
+- `otae.media.webp_above_kb`：超过该大小的 PNG 发送前转无损 WebP，默认 `0`（关闭）。2026-11-16 在测试群实测：经 LLBot 无头协议（`--protocol=linux`）发出的 WebP 图，LLBot 返回成功，但 QQ 里只显示一条空消息（同批的 PNG 正常），所以接 LLBot 无头协议时不要开。
 
 ### LLBot 无头模式的发送确认
 
