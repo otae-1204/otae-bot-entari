@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from arclet.alconna import Alconna, Args, MultiVar
 from arclet.entari import Session, command
 from arclet.entari.command import Match
@@ -70,7 +71,7 @@ async def handle_group_features(session: Session, rest: Match[tuple[str, ...]]):
             await session.send("基础管理及全局核心插件为系统内置保护插件，不支持群内开关。")
             return
         enabled = actions[parts[0].casefold()]
-        changed = feature_store.set_enabled(scope, name, enabled)
+        changed = await asyncio.to_thread(feature_store.set_enabled, scope, name, enabled)
     except (OSError, ValueError) as exc:
         logger.error("[group_manager] switch storage failed error_type={}", type(exc).__name__)
         await session.send("插件开关配置保存失败，请联系管理员检查 data/group_manager/switches.json 及目录读写权限。")
