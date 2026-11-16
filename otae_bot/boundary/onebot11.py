@@ -352,7 +352,7 @@ class OneBotBoundaryAdapter(OneBot11ForwardAdapter):
             filename = Path(data.filename or "").name
             filename = filename or f"{name}{mimetypes.guess_extension(data.content_type or '') or '.bin'}"
             file = root / f"{secrets.token_urlsafe(16)}-{filename}"
-            file.write_bytes(await data.read())
+            await asyncio.to_thread(file.write_bytes, await data.read())
             result[name] = f"internal:{request.platform}/{request.self_id}/_tmp/{file.name}"
             asyncio.get_running_loop().call_later(600, file.unlink, True)
         return result
