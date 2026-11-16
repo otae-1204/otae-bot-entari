@@ -9,6 +9,7 @@ fault) must never stop the remaining characters from being signed in.  Both
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Sequence
 from time import time
 
@@ -75,7 +76,7 @@ async def sign_one(
     """
     active = registry if registry is not None else ROLE_TASKS
     try:
-        token = store.decrypt_token(role, cipher)
+        token = await asyncio.to_thread(store.decrypt_token, role, cipher)
     except CredentialKeyError as exc:
         return build_attendance_view(role, AttendanceResult("failed", str(exc)))
     except LookupError as exc:

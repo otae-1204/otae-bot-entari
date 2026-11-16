@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from loguru import logger
 
 from ..account.client import EndfieldAPIError
@@ -56,7 +57,7 @@ async def _handle_archive_progress(
     session, qq_user_id: str, command: ParsedEndfieldCommand, cipher: CredentialCipher, *, group: bool
 ) -> None:
     """查询绑定账号的档案收集进度。森空岛只给 docNum 总数、无逐条明细，仅展示已获得/总数。"""
-    role = account_store.resolve_role(qq_user_id, command.account_selector)
+    role = await asyncio.to_thread(account_store.resolve_role, qq_user_id, command.account_selector)
     if role is None:
         await session.send("未找到对应的终末地账号，请先私聊发送 /ef 绑定 进行添加。")
         return
@@ -67,7 +68,7 @@ async def _handle_archive_progress(
         return
     try:
         async with ROLE_TASKS.claim(role):
-            token = account_store.decrypt_token(role, cipher)
+            token = await asyncio.to_thread(account_store.decrypt_token, role, cipher)
             raw_detail = await official_client.endfield_card_detail(token, role)
     except EndfieldAPIError as exc:
         logger.warning(f"[endfield-archive] player progress API failed: {exc}")

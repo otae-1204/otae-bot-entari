@@ -89,12 +89,12 @@ async def _handle_usage_stats(
             )
             await session.send("获取本群成员列表失败，已终止统计任务。")
             return
-        roles = account_store.list_all_roles(member_ids)
+        roles = await asyncio.to_thread(account_store.list_all_roles, member_ids)
     else:
-        roles = account_store.list_all_roles()
+        roles = await asyncio.to_thread(account_store.list_all_roles)
     if mentions:
         # @群友:只看这个人绑定的角色，其余人不下场。
-        roles = account_store.list_all_roles(list(mentions))
+        roles = await asyncio.to_thread(account_store.list_all_roles, list(mentions))
         if not roles:
             await session.send("该群友暂未绑定终末地账号，无法查询使用率。")
             return

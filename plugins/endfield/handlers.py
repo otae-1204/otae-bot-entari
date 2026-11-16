@@ -401,13 +401,13 @@ async def _handle_personal_command(session, event: Event, command: ParsedEndfiel
             cipher = CredentialCipher.from_settings()
             return await _handle_account_currency(session, qq_user_id, command, cipher, group=is_group(event))
         if command.action == "primary":
-            role = account_store.set_primary(qq_user_id, command.account_selector)
+            role = await asyncio.to_thread(account_store.set_primary, qq_user_id, command.account_selector)
             await session.send(
                 f"已将 {role.nickname}（{role.role_id}）设为默认主账号。" if role else "未找到指定账号，发送 /ef 账号 可查看有效编号。"
             )
             return
         if command.action == "unbind":
-            role = account_store.unbind(qq_user_id, command.account_selector)
+            role = await asyncio.to_thread(account_store.unbind, qq_user_id, command.account_selector)
             if role is not None:
                 await _forget_card_detail(role)
             await session.send(
@@ -555,7 +555,7 @@ async def _handle_attendance(
     *,
     bot=None,
 ) -> None:
-    roles = account_store.resolve_roles(qq_user_id, command.account_selector)
+    roles = await asyncio.to_thread(account_store.resolve_roles, qq_user_id, command.account_selector)
     if not roles:
         await session.send("未找到对应的终末地账号，请先私聊发送 /ef 绑定 进行添加。")
         return
@@ -606,7 +606,7 @@ async def _companion_attendance(user_id: str, *, group: bool) -> AttendanceResul
     ``group`` is part of the capability contract; this game's attendance card
     always carries masked UIDs, so there is nothing to hide or reveal here.
     """
-    roles = account_store.list_roles(user_id)
+    roles = await asyncio.to_thread(account_store.list_roles, user_id)
     if not roles:
         return AttendanceResult(ok=False, text="尚未绑定终末地账号，请私聊使用 /zmd 绑定。")
     try:

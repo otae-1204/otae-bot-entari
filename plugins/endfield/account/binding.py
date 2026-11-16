@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 import unicodedata
 
@@ -139,9 +140,9 @@ async def _run_binding(session, qq_user_id: str, cipher: CredentialCipher) -> No
         )
         return
     selected = await _select_binding_roles(session, roles, qq_user_id)
-    previous_roles = account_store.list_roles(qq_user_id)
+    previous_roles = await asyncio.to_thread(account_store.list_roles, qq_user_id)
     previous_keys = {(role.role_id, role.server_id) for role in previous_roles}
-    bound_roles = account_store.bind_roles(qq_user_id, account_token, selected, cipher)
+    bound_roles = await asyncio.to_thread(account_store.bind_roles, qq_user_id, account_token, selected, cipher)
     added_count = sum(
         (role.role_id, role.server_id) not in previous_keys for role in selected
     )

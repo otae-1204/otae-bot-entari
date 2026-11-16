@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from arclet.entari import Event, MessageChain
 from loguru import logger
 
@@ -66,9 +67,9 @@ async def _handle_ownership_stats(
             )
             await session.send("获取本群成员列表失败，已终止统计任务。")
             return
-        roles = account_store.list_all_roles(member_ids)
+        roles = await asyncio.to_thread(account_store.list_all_roles, member_ids)
     else:
-        roles = account_store.list_all_roles()
+        roles = await asyncio.to_thread(account_store.list_all_roles)
 
     refresh = None
     if command.action == "ownership_refresh":

@@ -72,7 +72,7 @@ async def _handle_challenge(
         return
 
     target_user_id = mentioned_users[0] if mentioned_users else qq_user_id
-    roles = account_store.list_roles(target_user_id)
+    roles = await asyncio.to_thread(account_store.list_roles, target_user_id)
     if not roles:
         if mentioned_users:
             await session.send("所选群友暂未绑定终末地账号。")
@@ -82,7 +82,8 @@ async def _handle_challenge(
     # Mention queries deliberately use the target user's primary account.  An
     # account selector remains meaningful only for the command sender's own
     # bindings, so it cannot expose a target user's secondary account by index.
-    role = account_store.resolve_role(
+    role = await asyncio.to_thread(
+        account_store.resolve_role,
         target_user_id,
         "" if mentioned_users else command.account_selector,
     )
@@ -104,7 +105,7 @@ async def _handle_challenge(
             await session.send("未找到指定账号，发送 /ef 账号 可查看有效编号。")
             return
 
-    token = account_store.decrypt_token(role, cipher)
+    token = await asyncio.to_thread(account_store.decrypt_token, role, cipher)
     provider, _raw_token = decode_account_credential(token)
     if provider == ACCOUNT_PROVIDER_SKPORT or is_asia_role(role):
         await session.send("影拓丰碑与战争回响目前仅支持国服角色，亚服暂未接入。")

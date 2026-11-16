@@ -63,12 +63,12 @@ from .store import EndfieldRole
 async def _handle_accounts(
     session, qq_user_id: str, command: ParsedEndfieldCommand, cipher: CredentialCipher, *, group: bool
 ) -> None:
-    roles = account_store.list_roles(qq_user_id)
+    roles = await asyncio.to_thread(account_store.list_roles, qq_user_id)
     if not roles:
         await session.send("尚未绑定终末地账号，请先私聊发送 /ef 绑定 进行添加。")
         return
     if command.account_selector:
-        role = account_store.resolve_role(qq_user_id, command.account_selector)
+        role = await asyncio.to_thread(account_store.resolve_role, qq_user_id, command.account_selector)
         if role is None:
             await session.send("未找到指定账号，发送 /ef 账号 可查看有效编号。")
             return
@@ -87,7 +87,7 @@ async def _handle_accounts(
         await session.send("已取消账号查询。")
         return
     selection = parse_candidate_selection(text, len(roles))
-    role = roles[selection] if selection is not None else account_store.resolve_role(qq_user_id, text)
+    role = roles[selection] if selection is not None else await asyncio.to_thread(account_store.resolve_role, qq_user_id, text)
     if role is None:
         await session.send(f"序号输入有误，请输入 1–{len(roles)}。")
         return
@@ -149,7 +149,7 @@ async def _render_account_detail(
     session, role: EndfieldRole, cipher: CredentialCipher, *, group: bool
 ) -> None:
     with cold_start_command(session):
-        token = account_store.decrypt_token(role, cipher)
+        token = await asyncio.to_thread(account_store.decrypt_token, role, cipher)
         await notice_default_ake_public()
         async def load_currency_balances() -> dict[int, int]:
             try:
@@ -203,12 +203,12 @@ async def _handle_account_investment(
     *,
     group: bool,
 ) -> None:
-    roles = account_store.list_roles(qq_user_id)
+    roles = await asyncio.to_thread(account_store.list_roles, qq_user_id)
     if not roles:
         await session.send("尚未绑定终末地账号，请先私聊发送 /ef 绑定 进行添加。")
         return
     if command.account_selector:
-        role = account_store.resolve_role(qq_user_id, command.account_selector)
+        role = await asyncio.to_thread(account_store.resolve_role, qq_user_id, command.account_selector)
         if role is None:
             await session.send("未找到指定账号，发送 /ef 账号 可查看有效编号。")
             return
@@ -227,7 +227,7 @@ async def _handle_account_investment(
         await session.send("已取消账号养成统计查询。")
         return
     selection = parse_candidate_selection(text, len(roles))
-    role = roles[selection] if selection is not None else account_store.resolve_role(qq_user_id, text)
+    role = roles[selection] if selection is not None else await asyncio.to_thread(account_store.resolve_role, qq_user_id, text)
     if role is None:
         await session.send(f"序号输入有误，请输入 1–{len(roles)}。")
         return
@@ -241,7 +241,7 @@ async def _render_account_investment(
     *,
     group: bool,
 ) -> None:
-    token = account_store.decrypt_token(role, cipher)
+    token = await asyncio.to_thread(account_store.decrypt_token, role, cipher)
     provider, _raw_token = decode_account_credential(token)
     if provider == ACCOUNT_PROVIDER_SKPORT or is_asia_role(role):
         await session.send("养成统计功能目前仅支持国服角色，亚服暂未接入。")
@@ -285,12 +285,12 @@ async def _handle_account_currency(
     *,
     group: bool,
 ) -> None:
-    roles = account_store.list_roles(qq_user_id)
+    roles = await asyncio.to_thread(account_store.list_roles, qq_user_id)
     if not roles:
         await session.send("尚未绑定终末地账号，请先私聊发送 /ef 绑定 进行添加。")
         return
     if command.account_selector:
-        role = account_store.resolve_role(qq_user_id, command.account_selector)
+        role = await asyncio.to_thread(account_store.resolve_role, qq_user_id, command.account_selector)
         if role is None:
             await session.send("未找到指定账号，发送 /ef 账号 可查看有效编号。")
             return
@@ -309,7 +309,7 @@ async def _handle_account_currency(
         await session.send("已取消资源流水查询。")
         return
     selection = parse_candidate_selection(text, len(roles))
-    role = roles[selection] if selection is not None else account_store.resolve_role(qq_user_id, text)
+    role = roles[selection] if selection is not None else await asyncio.to_thread(account_store.resolve_role, qq_user_id, text)
     if role is None:
         await session.send(f"序号输入有误，请输入 1–{len(roles)}。")
         return
@@ -324,7 +324,7 @@ async def _render_account_currency(
     *,
     group: bool,
 ) -> None:
-    token = account_store.decrypt_token(role, cipher)
+    token = await asyncio.to_thread(account_store.decrypt_token, role, cipher)
     provider, _raw_token = decode_account_credential(token)
     if provider == ACCOUNT_PROVIDER_SKPORT or is_asia_role(role):
         await session.send("资源流水查询目前仅支持国服角色，亚服暂未接入。")
@@ -357,15 +357,15 @@ async def _render_account_currency(
         end_ts=None,
         change_type=0,
     )
-    backed_up = sum(
-        account_store.upsert_currency_logs(role, items)
-        for items in fetched_logs.values()
-    )
+    backed_up = 0
+    for items in fetched_logs.values():
+        backed_up += await asyncio.to_thread(account_store.upsert_currency_logs, role, tuple(items))
     logger.info(
         f"[endfield] currency log backup role={role.masked_uid} fetched={backed_up}"
     )
     if command.all_history:
-        backed_up_logs = account_store.list_currency_logs(
+        backed_up_logs = await asyncio.to_thread(
+            account_store.list_currency_logs,
             role,
             currency_types,
             start_ts=None,
@@ -379,7 +379,8 @@ async def _render_account_currency(
         )
     else:
         period_label = f"{start.isoformat()} ~ {end.isoformat()}"
-    logs = account_store.list_currency_logs(
+    logs = await asyncio.to_thread(
+        account_store.list_currency_logs,
         role,
         currency_types,
         start_ts=display_start_ts,
@@ -429,12 +430,12 @@ async def _handle_account_base(
     *,
     group: bool,
 ) -> None:
-    roles = account_store.list_roles(qq_user_id)
+    roles = await asyncio.to_thread(account_store.list_roles, qq_user_id)
     if not roles:
         await session.send("尚未绑定终末地账号，请先私聊发送 /ef 绑定 进行添加。")
         return
     if command.account_selector:
-        role = account_store.resolve_role(qq_user_id, command.account_selector)
+        role = await asyncio.to_thread(account_store.resolve_role, qq_user_id, command.account_selector)
         if role is None:
             await session.send("未找到指定账号，发送 /ef 账号 可查看有效编号。")
             return
@@ -453,7 +454,7 @@ async def _handle_account_base(
         await session.send("已取消账号查询。")
         return
     selection = parse_candidate_selection(text, len(roles))
-    role = roles[selection] if selection is not None else account_store.resolve_role(qq_user_id, text)
+    role = roles[selection] if selection is not None else await asyncio.to_thread(account_store.resolve_role, qq_user_id, text)
     if role is None:
         await session.send(f"序号输入有误，请输入 1–{len(roles)}。")
         return
@@ -468,7 +469,7 @@ async def _render_account_base(
     group: bool,
 ) -> None:
     with cold_start_command(session):
-        token = account_store.decrypt_token(role, cipher)
+        token = await asyncio.to_thread(account_store.decrypt_token, role, cipher)
         await notice_default_ake_public()
 
         async def load_name_map():
@@ -508,7 +509,7 @@ async def _handle_exploration(
     session, qq_user_id: str, command: ParsedEndfieldCommand, cipher: CredentialCipher, *, group: bool
 ) -> None:
     # Resolve only the caller's roles. An empty selector uses their primary account.
-    role = account_store.resolve_role(qq_user_id, command.account_selector)
+    role = await asyncio.to_thread(account_store.resolve_role, qq_user_id, command.account_selector)
     if role is None:
         if command.account_selector:
             await session.send("未找到对应账号，请发送 /ef 账号 查看编号，再使用 /ef 探索 <编号>。")
@@ -516,7 +517,7 @@ async def _handle_exploration(
         await session.send("尚未绑定终末地账号，请先私聊发送 /ef 绑定。")
         return
     with cold_start_command(session):
-        token = account_store.decrypt_token(role, cipher)
+        token = await asyncio.to_thread(account_store.decrypt_token, role, cipher)
         # A cold version lookup can take a while; overlap it with the account fetch.
         data_started = perf_counter()
         detail, game_version = await asyncio.gather(
@@ -610,14 +611,14 @@ async def _handle_daily(
     group: bool,
 ) -> None:
     """日常仪表盘：逐账号读取森空岛 card/detail，展示理智/活跃度/每周事务/通行证。"""
-    roles = account_store.resolve_roles(qq_user_id, command.account_selector)
+    roles = await asyncio.to_thread(account_store.resolve_roles, qq_user_id, command.account_selector)
     if not roles:
         await session.send("未找到对应的终末地账号，请先私聊发送 /ef 绑定 进行添加。")
         return
 
     async def load(role: EndfieldRole) -> DailyAccountView:
         try:
-            token = account_store.decrypt_token(role, cipher)
+            token = await asyncio.to_thread(account_store.decrypt_token, role, cipher)
             # card_detail 返回已解包的 data.detail；endfield_card_detail 是完整响应，
             # 仅供奖章/档案等自行解包的视图使用。与账号查询共用 60 秒缓存，没取新数据就不再预取。
             detail, reused = await _fetch_card_detail(token, role)
