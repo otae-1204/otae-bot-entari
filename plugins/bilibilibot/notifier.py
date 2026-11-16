@@ -10,7 +10,6 @@ picked up again after a restart.
 from __future__ import annotations
 
 import asyncio
-import inspect
 import json
 import time
 from collections import OrderedDict
@@ -93,18 +92,6 @@ class _RenderCache:
 
     def __len__(self) -> int:
         return len(self._items)
-
-
-async def _resolve(value: Any) -> Any:
-    """Accept both store generations.
-
-    Phase 4 adds the outbox methods to the still synchronous store, phase 5
-    turns them into coroutine functions. Awaiting whatever comes back keeps
-    the notifier unchanged across that switch.
-    """
-    if inspect.isawaitable(value):
-        return await value
-    return value
 
 
 def _error_text(exc: BaseException) -> str:
@@ -228,7 +215,7 @@ class Notifier:
         threshold = self.high_watermark if limit is None else int(limit)
         if threshold <= 0:
             return
-        count = await _resolve(self.store.outbox_count())
+        count = await self.store.outbox_count()
         if count < threshold:
             return
         leader = await self._backlog_leader()
@@ -261,7 +248,7 @@ class Notifier:
                 except TimeoutError:
                     pass
                 waiter.clear()
-                count = await _resolve(self.store.outbox_count())
+                count = await self.store.outbox_count()
                 if count < threshold:
                     break
         finally:
@@ -281,7 +268,7 @@ class Notifier:
         getter = getattr(self.store, "outbox_backlog_leader", None)
         if getter is None:
             return None
-        return await _resolve(getter())
+        return await getter()
 
     # -- dispatcher --------------------------------------------------------
 
@@ -319,12 +306,12 @@ class Notifier:
     async def _dispatch_once(self) -> int:
         """Send one batch; returns the number of records handled."""
         now = int(self.clock())
-        expired = await _resolve(self.store.outbox_expire(now, dict(OUTBOX_MAX_AGE)))
+        expired = await self.store.outbox_expire(now, dict(OUTBOX_MAX_AGE))
         if expired:
             logger.warning(
                 f"[bilibilibot] dropped {expired} expired notification(s) from the outbox"
             )
-        rows = await _resolve(self.store.due_outbox(now, DISPATCH_BATCH_LIMIT))
+        rows = await self.store.due_outbox(now, DISPATCH_BATCH_LIMIT)
         if not rows:
             return 0
         heads = _head_rows(rows)
@@ -352,7 +339,7 @@ class Notifier:
             # 过滤器装上之前入队的抽奖动态也要在这里丢掉，不再渲染或发送。
             card = _card_from_row(row)
             if suppress_dynamic(card, uid=getattr(row, "uid", "") or card.uid):
-                await _resolve(self.store.outbox_done(row.id))
+                await self.store.outbox_done(row.id)
                 return
             png = await self._render(row)
             await self.send(row, png)
@@ -360,13 +347,11 @@ class Notifier:
             raise
         except SenderUnavailable as exc:
             now = int(self.clock())
-            await _resolve(
-                self.store.outbox_retry(
-                    row.id,
-                    attempts=int(row.attempts or 0),
-                    next_attempt_at=now + SENDER_UNAVAILABLE_DELAY_SECONDS,
-                    error=_error_text(exc),
-                )
+            await self.store.outbox_retry(
+                row.id,
+                attempts=int(row.attempts or 0),
+                next_attempt_at=now + SENDER_UNAVAILABLE_DELAY_SECONDS,
+                error=_error_text(exc),
             )
             logger.debug(
                 f"[bilibilibot] notifier paused, bot unavailable for {recipient}: {exc}"
@@ -377,12 +362,12 @@ class Notifier:
             self._dropped_per_recipient.pop(
                 (row.subscriber_type, row.subscriber_id), None
             )
-            await _resolve(self.store.outbox_done(row.id))
+            await self.store.outbox_done(row.id)
 
     async def _record_failure(self, row: Any, recipient: str, exc: Exception) -> None:
         attempts = int(row.attempts or 0) + 1
         if attempts >= MAX_ATTEMPTS:
-            await _resolve(self.store.outbox_drop(row.id))
+            await self.store.outbox_drop(row.id)
             logger.error(
                 f"[bilibilibot] dropping notification for {recipient} after {attempts} attempts "
                 f"(event {row.event_key}): {exc}"
@@ -390,13 +375,11 @@ class Notifier:
             self._report_repeated_drops(row, recipient, exc)
             return
         delay = min(RETRY_BASE_SECONDS * 2 ** (attempts - 1), RETRY_MAX_SECONDS)
-        await _resolve(
-            self.store.outbox_retry(
-                row.id,
-                attempts=attempts,
-                next_attempt_at=int(self.clock()) + delay,
-                error=_error_text(exc),
-            )
+        await self.store.outbox_retry(
+            row.id,
+            attempts=attempts,
+            next_attempt_at=int(self.clock()) + delay,
+            error=_error_text(exc),
         )
         logger.warning(
             f"[bilibilibot] notification for {recipient} failed ({attempts}/{MAX_ATTEMPTS}), "
