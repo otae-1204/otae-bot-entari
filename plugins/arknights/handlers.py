@@ -7,6 +7,7 @@ plugin never touches ``data/`` or opens a socket.
 
 from __future__ import annotations
 
+import asyncio
 import re
 import sys
 from pathlib import Path
@@ -246,8 +247,9 @@ async def _handle_bind(session: Session, user_id: str) -> None:
         )
         return
     store = _store_instance()
-    previous = {(role.uid, role.game_id) for role in store.list_roles(user_id)}
-    bound = store.bind_roles(user_id, account_token, roles, cipher)
+    previous_roles = await asyncio.to_thread(store.list_roles, user_id)
+    previous = {(role.uid, role.game_id) for role in previous_roles}
+    bound = await asyncio.to_thread(store.bind_roles, user_id, account_token, roles, cipher)
     selected = {(role.uid, role.game_id) for role in roles}
     added = len(selected - previous)
     updated = len(selected) - added
@@ -360,7 +362,7 @@ async def _handle_primary(session: Session, user_id: str, selector: str, *, reve
         await session.send(PRIMARY_NEEDS_SELECTOR)
         return
     store = _store_instance()
-    resolution = store.set_primary(user_id, selector)
+    resolution = await asyncio.to_thread(store.set_primary, user_id, selector)
     if not resolution.resolved or resolution.role is None:
         await session.send(format_selector_failure(resolution, reveal_uid=reveal_uid))
         return
@@ -375,7 +377,7 @@ async def _handle_unbind(session: Session, user_id: str, selector: str, *, revea
         await session.send(UNBIND_NEEDS_SELECTOR)
         return
     store = _store_instance()
-    resolution = store.unbind(user_id, selector)
+    resolution = await asyncio.to_thread(store.unbind, user_id, selector)
     if not resolution.resolved or resolution.role is None:
         await session.send(format_selector_failure(resolution, reveal_uid=reveal_uid))
         return
@@ -395,7 +397,7 @@ async def _handle_attendance(session: Session, user_id: str, selector: str) -> N
     group = is_group(event)
     cipher = ArknightsCipher.from_settings()
     store = _store_instance()
-    roles, resolution = store.resolve_roles(user_id, selector)
+    roles, resolution = await asyncio.to_thread(store.resolve_roles, user_id, selector)
     if not roles:
         await session.send(format_selector_failure(resolution, reveal_uid=not group))
         return
@@ -445,7 +447,7 @@ def _companion_roles(user_id: str) -> list:
 async def _companion_attendance(user_id: str, *, group: bool) -> AttendanceResult:
     """Sign every bound Arknights role after ``/ef 签到`` signed Endfield."""
     store = _store_instance()
-    roles = store.list_roles(user_id)
+    roles = await asyncio.to_thread(store.list_roles, user_id)
     if not roles:
         return AttendanceResult(ok=False, text="尚未绑定明日方舟账号，请私聊使用 /ak 绑定。")
     try:
