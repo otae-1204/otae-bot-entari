@@ -21,7 +21,12 @@ from ..account.challenge.models import (
 )
 from ..account.challenge.i18n import get_challenge_locale
 from ..account.challenge.parsing import parse_monument, parse_war_echoes
-from ..account.client import EndfieldAPIError, EndfieldOfficialClient, is_asia_role
+from ..account.client import (
+    EndfieldAPIError,
+    EndfieldOfficialClient,
+    is_asia_role,
+    is_authentication_error,
+)
 from ..account.crypto import CredentialCipher, CredentialKeyError
 from ..account.store import (
     ChallengeMemberRow,
@@ -588,6 +593,11 @@ class UsageStatsService:
         except CredentialKeyError as exc:
             return await self._fail(role, family, now, "auth:凭据不可用", str(exc))
         except EndfieldAPIError as exc:
+            if is_authentication_error(exc):
+                # An expired login (e.g. grant code 3) was retried every few hours as
+                # a plain API error: 37 roles failed ~6300 times, each one costing an
+                # exchange slot that foreground queries also wait for.
+                return await self._fail(role, family, now, "auth:凭据失效", "账号凭据失效")
             return await self._fail(
                 role, family, now, _api_issue_key(family, exc), _api_issue_label(exc)
             )

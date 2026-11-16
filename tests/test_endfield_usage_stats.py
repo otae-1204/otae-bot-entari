@@ -917,3 +917,23 @@ def test_refresh_writes_snapshot_and_records_failure(tmp_path):
     state = store.list_challenge_snapshots([("r2", "1")], family=FAMILY_MONUMENT)[0]
     assert state.failure_count == 1
     assert state.next_attempt_at > 0
+
+
+def test_expired_login_backs_off_for_hours(tmp_path):
+    """A rejected grant (code 3) is a credential problem: hours of backoff, not minutes."""
+    from plugins.endfield.account.client import EndfieldAPIError
+    from plugins.endfield.usage.service import AUTH_RETRY_BASE_SECONDS
+
+    store = _store(tmp_path)
+    _seed(store)
+    _bind(store, _role("r3", qq="10003"))
+    store.decrypt_token = lambda role, cipher: "token"  # type: ignore[assignment]
+    service = UsageStatsService(store, _StubClient({}, error=EndfieldAPIError("账号授权", code="3")))
+    now = 1_800_000_000
+    result = asyncio.run(
+        service.refresh_roles([_role("r3", qq="10003")], cipher=None, force=True, now=now)  # type: ignore[arg-type]
+    )
+    assert result.failed == 1
+    state = store.list_challenge_snapshots([("r3", "1")], family=FAMILY_MONUMENT)[0]
+    assert state.last_error == "auth:凭据失效"
+    assert state.next_attempt_at - now >= AUTH_RETRY_BASE_SECONDS

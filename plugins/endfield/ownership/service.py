@@ -13,7 +13,12 @@ from typing import Any, Literal
 from loguru import logger
 
 
-from ..account.client import EndfieldAPIError, EndfieldOfficialClient, is_asia_role
+from ..account.client import (
+    EndfieldAPIError,
+    EndfieldOfficialClient,
+    is_asia_role,
+    is_authentication_error,
+)
 from ..account.crypto import CredentialCipher, CredentialKeyError
 from ..account.i18n import localized_text, semantic_label
 from ..account.prefetch import prefetch_detail_assets
@@ -1269,9 +1274,7 @@ def _field(value: Any, name: str) -> Any:
 
 
 def _is_authentication_error(error: EndfieldAPIError) -> bool:
-    if error.operation in {"账号授权", "获取社区凭据", "刷新社区签名"}:
-        return True
-    return str(error.code).casefold() in {"401", "403", "10001", "10002", "10003", "10004"}
+    return is_authentication_error(error)
 
 
 def _systemic_community_error_code(error: Exception | None) -> str:

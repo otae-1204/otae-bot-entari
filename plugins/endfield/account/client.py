@@ -162,6 +162,19 @@ class EndfieldAPIError(RuntimeError):
         self.retry_after_seconds = max(0.0, float(retry_after_seconds))
 
 
+# Steps that exchange the stored account token for community credentials. A failure
+# here (e.g. code 3 from the grant: the login expired) will not heal by retrying soon.
+CREDENTIAL_OPERATIONS = frozenset({"账号授权", "获取社区凭据", "刷新社区签名"})
+_AUTHENTICATION_CODES = frozenset({"401", "403", "10001", "10002", "10003", "10004"})
+
+
+def is_authentication_error(error: EndfieldAPIError) -> bool:
+    """The stored credential itself is rejected: back off for hours, not minutes."""
+    if error.operation in CREDENTIAL_OPERATIONS:
+        return True
+    return str(error.code).casefold() in _AUTHENTICATION_CODES
+
+
 class HypergryphCaptchaRequired(EndfieldAPIError):
     """发送短信前官方要求先过极验；``captcha`` 是原始 ``data.captcha``。"""
 
