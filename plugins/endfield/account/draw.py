@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from ..rendering.health import record_asset_seconds, record_assets, record_batch_stats
 
+import asyncio
 import hashlib
 import html
 import mimetypes
 import re
 import base64
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Iterable, Mapping
@@ -419,6 +421,16 @@ class _PreparedAssets:
     resources: dict[str, BrowserResource]
 
 
+@lru_cache(maxsize=1)
+def _ui_asset_contents() -> tuple[tuple[str, bytes, str], ...]:
+    """The bundled UI icons (about 4 MiB) as (virtual URL, bytes, MIME); read once per process."""
+    return tuple(
+        (virtual_url, path.read_bytes(), mimetypes.guess_type(path.name)[0] or "image/png")
+        for virtual_url, path in UI_ASSETS.values()
+        if path.exists()
+    )
+
+
 async def _prepare_assets(urls: Iterable[Any], *, inline: bool) -> _PreparedAssets:
     started = perf_counter()
     unique_urls = tuple(
@@ -456,18 +468,14 @@ async def _prepare_assets(urls: Iterable[Any], *, inline: bool) -> _PreparedAsse
         if not path.exists():
             continue
         if inline:
-            content = path.read_bytes()
+            content = await asyncio.to_thread(path.read_bytes)
             output[virtual_url] = f"data:font/ttf;base64,{base64.b64encode(content).decode('ascii')}"
         else:
             # The page itself is a file:// document, so Chromium loads the font
             # straight from disk. Serving it through a route sent every multi-MB
             # font across the Playwright pipe again on each page load.
             output[virtual_url] = path.resolve().as_uri()
-    for virtual_url, path in UI_ASSETS.values():
-        if not path.exists():
-            continue
-        content = path.read_bytes()
-        mime = mimetypes.guess_type(path.name)[0] or "image/png"
+    for virtual_url, content, mime in await asyncio.to_thread(_ui_asset_contents):
         if inline:
             output[virtual_url] = f"data:{mime};base64,{base64.b64encode(content).decode('ascii')}"
         else:
