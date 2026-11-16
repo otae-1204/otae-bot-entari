@@ -803,7 +803,8 @@ class OwnershipRefreshAndGroupTests(unittest.TestCase):
         with mock.patch.object(service, "refresh_catalog", mock.AsyncMock(return_value=False)):
             result = asyncio.run(service.refresh_due(self.cipher, now=NOW))
 
-        self.assertEqual(client.roles, [missing.role_id, oldest.role_id])
+        # Two workers run concurrently and decrypt off the loop, so the call order is not fixed.
+        self.assertCountEqual(client.roles, [missing.role_id, oldest.role_id])
         self.assertEqual((result.eligible, result.attempted, result.deferred), (3, 2, 1))
         self.assertEqual((result.requested, result.succeeded), (2, 2))
 
