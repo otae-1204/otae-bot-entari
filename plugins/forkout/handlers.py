@@ -1,5 +1,6 @@
 """Forkout image command and per-group ranking."""
 
+import asyncio
 import io
 import os
 import re
@@ -24,6 +25,7 @@ from PIL import Image
 
 from otae_bot.config.paths import IMAGE_PATH
 from otae_bot.infrastructure.http.tls import ashared_ssl_context
+from otae_bot.infrastructure.rendering.executor import run_image_render
 from otae_bot.infrastructure.storage.json_store import JsonStore
 from otae_bot.messaging import media
 
@@ -92,12 +94,12 @@ async def _extract_reply_id(event: Event) -> str | None:
     return None
 
 
-def _increment_fork_count(group_id: str | None, user_id: str):
+async def _increment_fork_count(group_id: str | None, user_id: str):
     if not group_id:
         return
     key = f"{group_id}.{user_id}"
     current = _fork_store.get(key, 0)
-    _fork_store[key] = current + 1
+    await _fork_store.set_async(key, current + 1)
 
 
 _QQ_AVATAR_APIS = [
@@ -129,32 +131,33 @@ async def _download_avatar(account: Account | None, satori_url: str | None, qq_n
     return None
 
 
-async def _make_fork_image(qq_number: str, satori_url: str | None, account: Account | None = None) -> str | None:
-    fork_img_path = imgpath + "forkout.jpg"
-    if not os.path.exists(fork_img_path):
-        return None
-
-    img = Image.open(fork_img_path)
-    avatar_data = await _download_avatar(account, satori_url, qq_number)
-
+def _compose_fork_image(base_path: str, avatar_data: bytes | None) -> bytes:
+    """The base image with the avatar pasted on, as JPEG bytes (runs in the image executor)."""
     if not avatar_data:
-        return fork_img_path
-
+        return Path(base_path).read_bytes()
+    with Image.open(base_path) as base:
+        img = base.copy()
     avatar = Image.open(io.BytesIO(avatar_data))
     avatar = avatar.resize((192, 192), Image.LANCZOS)
     img.paste(avatar, (40, 263))
+    out = io.BytesIO()
+    img.save(out, format="JPEG")
+    return out.getvalue()
 
-    result_path = imgpath + "forkout_result.jpg"
-    img.save(result_path)
-    return result_path
+
+async def _make_fork_image(qq_number: str, satori_url: str | None, account: Account | None = None) -> bytes | None:
+    fork_img_path = imgpath + "forkout.jpg"
+    if not os.path.exists(fork_img_path):
+        return None
+    avatar_data = await _download_avatar(account, satori_url, qq_number)
+    return await run_image_render(_compose_fork_image, fork_img_path, avatar_data)
 
 
-async def _send_fork_image(session: Session, path: str, reply_id: str | None = None):
+async def _send_fork_image(session: Session, data: bytes, reply_id: str | None = None):
     segments = []
     if reply_id:
         segments.append(Quote(reply_id))
-    # Read each time: the result file is rewritten for every fork.
-    segments.append(media.image(Path(path).read_bytes()))
+    segments.append(media.image(data))
     await session.send(MessageChain(segments))
     session.stop()
 
@@ -189,7 +192,7 @@ async def handle_forkout(session: Session, account: Account):
             session.stop()
             return
 
-        _increment_fork_count(group_id, target_uid)
+        await _increment_fork_count(group_id, target_uid)
         await _send_fork_image(session, result, reply_id)
         return
 
@@ -198,7 +201,7 @@ async def handle_forkout(session: Session, account: Account):
         await session.send("底图资源缺失，无法生成叉出去图片。")
         session.stop()
         return
-    await _send_fork_image(session, fork_img, reply_id)
+    await _send_fork_image(session, await asyncio.to_thread(Path(fork_img).read_bytes), reply_id)
 
 
 @command.on(fork_rank)
