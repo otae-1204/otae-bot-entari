@@ -82,12 +82,12 @@ class TiboRadarService:
                 grouped.setdefault(source.source_name, []).append(source)
                 if source.state.last_success_at is not None:
                     success = True
-                for post in source.posts:
-                    self.store.upsert_post(post)
-                for event in source.events:
-                    self.store.upsert_event(event)
-            for source_name, collections in grouped.items():
-                self.store.upsert_source_state(self._merge_source_states(source_name, [item.state for item in collections]))
+            # SQLite writes run off the event loop; the store serialises them with its own lock.
+            await asyncio.to_thread(
+                self._persist,
+                tuple(result.sources),
+                tuple((name, tuple(items)) for name, items in grouped.items()),
+            )
             self._refresh_count += 1
             logger.info(
                 "[tibo_radar] refresh finished success={} posts={} events={} cycle={}",
@@ -117,6 +117,19 @@ class TiboRadarService:
             last_error="; ".join(dict.fromkeys(state.last_error for state in failed if state.last_error)),
             consecutive_failures=0 if successful else max((state.consecutive_failures for state in states), default=1),
         )
+
+    def _persist(
+        self,
+        sources: tuple[SourceCollection, ...],
+        grouped: tuple[tuple[str, tuple[SourceCollection, ...]], ...],
+    ) -> None:
+        for source in sources:
+            for post in source.posts:
+                self.store.upsert_post(post)
+            for event in source.events:
+                self.store.upsert_event(event)
+        for source_name, collections in grouped:
+            self.store.upsert_source_state(self._merge_source_states(source_name, [item.state for item in collections]))
 
     def snapshot(self, *, post_limit: int = 6, event_limit: int = 20) -> RadarSnapshot:
         return RadarSnapshot(

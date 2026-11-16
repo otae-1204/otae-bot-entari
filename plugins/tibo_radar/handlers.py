@@ -197,7 +197,7 @@ async def _notify_subscriptions(bot: Bot, *, initialize_baselines: bool = True) 
 async def _deliver_subscriptions(bot: Bot, *, initialize_baselines: bool) -> None:
     """Deliver posts after each group's persisted cursor in X-style cards."""
 
-    subscriptions = store.subscriptions()
+    subscriptions = await asyncio.to_thread(store.subscriptions)
     if not subscriptions:
         return
     for subscription in subscriptions:
@@ -214,13 +214,14 @@ async def _deliver_subscriptions(bot: Bot, *, initialize_baselines: bool) -> Non
             continue
         if subscription.baseline_pending:
             if initialize_baselines:
-                store.mark_subscription_initialized(subscription.group_id)
+                await asyncio.to_thread(store.mark_subscription_initialized, subscription.group_id)
                 logger.info("[tibo_radar] subscription baseline initialized group={}", subscription.group_id)
             continue
         if subscription.retry_after and subscription.retry_after > datetime.now(timezone.utc):
             continue
         cursor_at = subscription.last_notified_at.astimezone(timezone.utc).isoformat() if subscription.last_notified_at else ""
-        pending = store.posts_after(
+        pending = await asyncio.to_thread(
+            store.posts_after,
             cursor_at,
             subscription.last_notified_post_id,
             limit=min(SUBSCRIPTION_BATCH, 3 * SUBSCRIPTION_MAX_PAGES),
@@ -230,7 +231,7 @@ async def _deliver_subscriptions(bot: Bot, *, initialize_baselines: bool) -> Non
         pages = _chunk(pending)
         for page_index, page_posts in enumerate(pages, 1):
             # A group may unsubscribe while an earlier group's network I/O runs.
-            current = store.subscription(subscription.group_id)
+            current = await asyncio.to_thread(store.subscription, subscription.group_id)
             if current is None or not current.enabled:
                 break
             try:
@@ -249,7 +250,7 @@ async def _deliver_subscriptions(bot: Bot, *, initialize_baselines: bool) -> Non
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                store.mark_subscription_failed(subscription.group_id, type(exc).__name__)
+                await asyncio.to_thread(store.mark_subscription_failed, subscription.group_id, type(exc).__name__)
                 logger.warning(
                     "[tibo_radar] subscription delivery failed group={} error_type={} cursor=retained retry=deferred",
                     subscription.group_id, type(exc).__name__,
@@ -257,7 +258,7 @@ async def _deliver_subscriptions(bot: Bot, *, initialize_baselines: bool) -> Non
                 break
 
             cursor_at, post_id = _post_cursor(page_posts[-1])
-            store.mark_subscription_delivered(subscription.group_id, cursor_at, post_id, mode=mode, account_key=_account_key(delivery_bot))
+            await asyncio.to_thread(store.mark_subscription_delivered, subscription.group_id, cursor_at, post_id, mode=mode, account_key=_account_key(delivery_bot))
             logger.info("[tibo_radar] subscription delivered group={} mode={} posts={} cursor={}",
                         subscription.group_id, mode, len(page_posts), post_id)
 
@@ -411,7 +412,7 @@ async def handle_tibo(rest: Match[tuple[str, ...]], session: Session):
             await session.send(_subscription_permission_text())
             return
         _remember_account(bot)
-        already_enabled, _subscription = store.subscribe(group_id, get_channel_id(event) or group_id, account_key=_account_key(bot))
+        already_enabled, _subscription = await asyncio.to_thread(store.subscribe, group_id, get_channel_id(event) or group_id, account_key=_account_key(bot))
         if already_enabled:
             await session.send("本群此前已启用 Tibo 新帖订阅，新动态将依采集周期自动推送。")
         else:
@@ -425,7 +426,7 @@ async def handle_tibo(rest: Match[tuple[str, ...]], session: Session):
         if not await _is_subscription_manager(bot, event, group_id, event_user_id(event)):
             await session.send(_subscription_permission_text())
             return
-        if store.unsubscribe(group_id):
+        if await asyncio.to_thread(store.unsubscribe, group_id):
             await session.send("已成功关闭本群的 Tibo 新帖推送服务。")
         else:
             await session.send("本群当前尚未启用 Tibo 新帖订阅，无需退订。")
@@ -435,7 +436,7 @@ async def handle_tibo(rest: Match[tuple[str, ...]], session: Session):
         if not group_id:
             await session.send("使用场景限制：Tibo 新帖订阅仅限在群聊中配置。")
             return
-        subscription = store.subscription(group_id)
+        subscription = await asyncio.to_thread(store.subscription, group_id)
         if subscription and subscription.enabled:
             cursor = subscription.last_notified_at.astimezone().strftime("%Y-%m-%d %H:%M:%S") if subscription.last_notified_at else "尚未推送"
             mode = {"image": "图片", "text": "文字兜底"}.get(subscription.last_delivery_mode, "暂无")
@@ -445,7 +446,7 @@ async def handle_tibo(rest: Match[tuple[str, ...]], session: Session):
             await session.send("当前群尚未启用 Tibo 新帖订阅；可使用 /tibo 订阅 进行开启。")
         return
     if action in {"总览", "概览"}:
-        sections, links = _overview_sections()
+        sections, links = await asyncio.to_thread(_overview_sections)
         await _send_card(session, "Tibo 雷达总览", f"本地缓存查询 · 最近采集周期 {REFRESH_MINUTES} 分钟", sections, links)
         return
     if action == "动态":
@@ -453,7 +454,7 @@ async def handle_tibo(rest: Match[tuple[str, ...]], session: Session):
         if error:
             await session.send(error + "；格式示例：/tibo 动态 6")
             return
-        posts = service.latest_posts(count or 6)
+        posts = await asyncio.to_thread(service.latest_posts, count or 6)
         if not posts:
             await _send_card(session, "Tibo 最新动态", "本地历史中暂无直接或间接相关内容", [CardSection("动态", ["暂无记录；无关动态不会显示在此列表中"], CYAN)], _source_links())
             return
@@ -476,7 +477,7 @@ async def handle_tibo(rest: Match[tuple[str, ...]], session: Session):
             await session.send(MessageChain(segments))
         return
     if action == "状态":
-        current = service.status()
+        current = await asyncio.to_thread(service.status)
         links = _event_links([current.event] if current.event else []) + _source_links()
         lines = [current.label, current.detail]
         if current.event:
@@ -484,7 +485,7 @@ async def handle_tibo(rest: Match[tuple[str, ...]], session: Session):
         await _send_card(session, "Tibo 重置状态", "只区分预告、窗口、疑似和已确认，不把预测写成事实", [CardSection("当前状态", lines, GREEN if current.active else AMBER)], links)
         return
     if action == "最近":
-        latest = service.latest_confirmed()
+        latest = await asyncio.to_thread(service.latest_confirmed)
         if latest is None:
             await _send_card(session, "最近一次重置", "本地历史中暂无严格核验完成记录", [CardSection("状态", ["暂无已确认完成的全局重置"], CYAN)], _source_links())
         else:
@@ -502,7 +503,7 @@ async def handle_tibo(rest: Match[tuple[str, ...]], session: Session):
         if error:
             await session.send(error + "；格式示例：/tibo 历史 6")
             return
-        events = service.history(count or 6)
+        events = await asyncio.to_thread(service.history, count or 6)
         if not events:
             await _send_card(session, "Tibo 重置历史", "本地缓存查询", [CardSection("历史", ["暂无记录"], CYAN)], _source_links())
             return

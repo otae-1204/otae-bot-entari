@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Iterable
+from functools import wraps
+from typing import Any, Callable, Iterable, TypeVar
 from zoneinfo import ZoneInfo
 
 from .models import (
@@ -69,22 +71,39 @@ def _timezone(name: str):
             return timezone.utc
 
 
+_Method = TypeVar("_Method", bound=Callable[..., Any])
+
+
+def _locked(method: _Method) -> _Method:
+    """Serialise access to the shared connection; handlers call the store via asyncio.to_thread."""
+
+    @wraps(method)
+    def wrapper(self: "TiboStore", *args: Any, **kwargs: Any) -> Any:
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    return wrapper  # type: ignore[return-value]
+
+
 class TiboStore:
     def __init__(self, db_path: str | Path = DB_PATH):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(self.db_path)
+        self._lock = threading.RLock()
+        self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA busy_timeout=5000")
         self.init_schema()
 
+    @_locked
     def close(self) -> None:
         connection = self.conn
         self.conn = None
         if connection is not None:
             connection.close()
 
+    @_locked
     def init_schema(self) -> None:
         self.conn.executescript(
             """
@@ -186,6 +205,7 @@ class TiboStore:
                 self.conn.execute(f"ALTER TABLE tibo_subscriptions ADD COLUMN {name} {definition}")
         self.conn.commit()
 
+    @_locked
     def upsert_post(self, post: TiboPost) -> bool:
         """Persist a post and return ``True`` only when it is first seen."""
 
@@ -253,6 +273,7 @@ class TiboStore:
             _ts(now),
         )
 
+    @_locked
     def upsert_event(self, event: ResetEvent) -> None:
         now = _now()
         existing = self.conn.execute("SELECT * FROM tibo_events WHERE event_id = ?", (event.event_id,)).fetchone()
@@ -316,6 +337,7 @@ class TiboStore:
             _ts(event.last_seen_at or now), _json(sources), _ts(now), event.event_id,
         )
 
+    @_locked
     def upsert_source_state(self, state: SourceState) -> None:
         now = _now()
         existing = self.conn.execute("SELECT * FROM tibo_source_state WHERE source_name = ?", (state.source_name,)).fetchone()
@@ -340,6 +362,7 @@ class TiboStore:
             )
         self.conn.commit()
 
+    @_locked
     def posts(self, *, relevant_only: bool = False, limit: int = 6) -> list[TiboPost]:
         limit = max(1, min(int(limit), 100))
         where = "WHERE relevance != 'none'" if relevant_only else ""
@@ -350,6 +373,7 @@ class TiboStore:
         ).fetchall()
         return [self._post_from_row(row) for row in rows]
 
+    @_locked
     def latest_post_cursor(self) -> tuple[str, str]:
         """Return the newest persisted post cursor, or now for an empty store."""
 
@@ -362,6 +386,7 @@ class TiboStore:
             return str(row["cursor_at"]), str(row["post_id"])
         return _ts(_now()), ""
 
+    @_locked
     def posts_after(self, cursor_at: str = "", cursor_post_id: str = "", *, limit: int = 100) -> list[TiboPost]:
         """Read posts strictly after a subscription cursor, oldest first."""
 
@@ -379,6 +404,7 @@ class TiboStore:
         ).fetchall()
         return [self._post_from_row(row) for row in rows]
 
+    @_locked
     def subscribe(self, group_id: str | int, channel_id: str | int = "", *, account_key: str = "") -> tuple[bool, TiboSubscription]:
         """Enable a group subscription and start at the current newest post."""
 
@@ -431,6 +457,7 @@ class TiboStore:
             raise RuntimeError("failed to persist Tibo subscription")
         return bool(existing and existing["enabled"]), subscription
 
+    @_locked
     def unsubscribe(self, group_id: str | int) -> bool:
         gid = str(group_id).strip()
         if not gid:
@@ -442,18 +469,21 @@ class TiboStore:
         self.conn.commit()
         return updated.rowcount > 0
 
+    @_locked
     def subscription(self, group_id: str | int) -> TiboSubscription | None:
         row = self.conn.execute(
             "SELECT * FROM tibo_subscriptions WHERE group_id = ?", (str(group_id).strip(),)
         ).fetchone()
         return self._subscription_from_row(row) if row else None
 
+    @_locked
     def subscriptions(self) -> list[TiboSubscription]:
         rows = self.conn.execute(
             "SELECT * FROM tibo_subscriptions WHERE enabled=1 ORDER BY group_id"
         ).fetchall()
         return [self._subscription_from_row(row) for row in rows]
 
+    @_locked
     def mark_subscription_delivered(self, group_id: str | int, cursor_at: str, post_id: str, *, mode: str = "image", account_key: str = "") -> None:
         self.conn.execute(
             """
@@ -469,6 +499,7 @@ class TiboStore:
         )
         self.conn.commit()
 
+    @_locked
     def mark_subscription_failed(self, group_id: str | int, error_type: str, *, now: datetime | None = None) -> None:
         """Keep the delivery cursor and persist backoff, including across restarts."""
         current = self.subscription(group_id)
@@ -484,6 +515,7 @@ class TiboStore:
         )
         self.conn.commit()
 
+    @_locked
     def mark_subscription_initialized(self, group_id: str | int) -> None:
         """Discard the initial snapshot without sending it to a new subscriber."""
 
@@ -498,12 +530,14 @@ class TiboStore:
         )
         self.conn.commit()
 
+    @_locked
     def events(self, *, limit: int = 20, include_rejected: bool = True) -> list[ResetEvent]:
         limit = max(1, min(int(limit), 100))
         where = "" if include_rejected else "WHERE status != 'rejected'"
         rows = self.conn.execute(f"SELECT * FROM tibo_events {where} ORDER BY COALESCE(effective_at,announced_at) DESC LIMIT ?", (limit,)).fetchall()
         return [self._event_from_row(row) for row in rows]
 
+    @_locked
     def latest_confirmed(self) -> ResetEvent | None:
         row = self.conn.execute(
             "SELECT * FROM tibo_events WHERE status = ? ORDER BY COALESCE(effective_at,announced_at) DESC LIMIT 1",
@@ -511,6 +545,7 @@ class TiboStore:
         ).fetchone()
         return self._event_from_row(row) if row else None
 
+    @_locked
     def source_states(self) -> list[SourceState]:
         rows = self.conn.execute("SELECT * FROM tibo_source_state ORDER BY source_name").fetchall()
         return [
@@ -522,6 +557,7 @@ class TiboStore:
             for row in rows
         ]
 
+    @_locked
     def reset_stats(self) -> dict:
         events = self.events(limit=1000, include_rejected=False)
         confirmed = [event for event in events if event.status == EVENT_CONFIRMED]
