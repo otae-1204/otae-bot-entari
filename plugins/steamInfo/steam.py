@@ -4,6 +4,7 @@ import asyncio
 import json
 import time
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import List, Optional, Union
 from lxml import html as lxml_html
@@ -1696,11 +1697,40 @@ async def get_owned_game(
     return None
 
 
+@lru_cache(maxsize=None)
+def _resource_bytes(name: str) -> bytes:
+    """A bundled default image under IMAGE_PATH/steamInfo; read once, then from memory."""
+    return (Path(IMAGE_PATH) / "steamInfo" / name).read_bytes()
+
+
+def _default_user_images() -> tuple[bytes, bytes, bytes, bytes]:
+    return (
+        _resource_bytes("bg_dots.png"),
+        _resource_bytes("unknown_avatar.jpg"),
+        _resource_bytes("default_achievement_image.png"),
+        _resource_bytes("default_header_image.jpg"),
+    )
+
+
+def _read_cache(cache_file: Path) -> Optional[bytes]:
+    try:
+        return cache_file.read_bytes()
+    except FileNotFoundError:
+        return None
+
+
+def _write_cache(cache_file: Path, content: bytes) -> None:
+    cache_file.parent.mkdir(parents=True, exist_ok=True)
+    cache_file.write_bytes(content)
+
+
 async def _fetch(
     url: str, default: bytes, cache_file: Optional[Path] = None, proxy: str = None
 ) -> bytes:
-    if cache_file is not None and cache_file.exists():
-        return cache_file.read_bytes()
+    if cache_file is not None:
+        cached = await asyncio.to_thread(_read_cache, cache_file)
+        if cached is not None:
+            return cached
 
     for request_proxy in _request_proxy_candidates(url, proxy):
         try:
@@ -1710,8 +1740,7 @@ async def _fetch(
                         raise ValueError(f"status {resp.status}")
                     content = await resp.read()
                     if cache_file is not None:
-                        cache_file.parent.mkdir(parents=True, exist_ok=True)
-                        cache_file.write_bytes(content)
+                        await asyncio.to_thread(_write_cache, cache_file, content)
                     return content
         except Exception as exc:
             logger.warning(f"Failed to fetch Steam asset {url}: {exc}")
@@ -1724,7 +1753,7 @@ async def fetch_app_icon(
     cache_path: Path,
     proxy: str = None,
 ) -> bytes:
-    default_icon = (Path(IMAGE_PATH) / "steamInfo/default_header_image.jpg").read_bytes()
+    default_icon = await asyncio.to_thread(_resource_bytes, "default_header_image.jpg")
     if not icon_hash:
         return default_icon
 
@@ -1802,11 +1831,9 @@ def _match_first(patterns: List[str], text: str) -> Optional[str]:
 async def get_user_data(
     steam_id: int, cache_path: Path, proxy: str = None
 ) -> PlayerData:
-    res_path = Path(IMAGE_PATH) / "steamInfo"
-    default_background = (res_path / "bg_dots.png").read_bytes()
-    default_avatar = (res_path / "unknown_avatar.jpg").read_bytes()
-    default_achievement_image = (res_path / "default_achievement_image.png").read_bytes()
-    default_header_image = (res_path / "default_header_image.jpg").read_bytes()
+    default_background, default_avatar, default_achievement_image, default_header_image = (
+        await asyncio.to_thread(_default_user_images)
+    )
 
     result = {
         "steamid": str(steam_id),

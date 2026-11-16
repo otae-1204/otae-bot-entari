@@ -600,7 +600,7 @@ async def to_image_data(image: Image) -> Union[BytesIO, bytes]:
         file_path = unquote(parsed.path)
         if re.match(r"^/[A-Za-z]:/", file_path):
             file_path = file_path[1:]
-        return Path(file_path).read_bytes()
+        return await asyncio.to_thread(Path(file_path).read_bytes)
 
     if src.startswith(("http://", "https://")):
         async with aiohttp.ClientSession() as session:
