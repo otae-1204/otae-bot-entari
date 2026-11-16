@@ -27,12 +27,23 @@ from otae_bot.infrastructure.storage.json_store import JsonStore
 
 
 class MCSMStore:
-    """Per-group panel, group-admin, and instance binding storage."""
+    """Per-group panel, group-admin, and instance binding storage.
+
+    Reads come from memory. Mutators are coroutines: they change memory on the
+    event loop and write the file in a worker thread (``JsonStore.save_async``).
+    """
 
     def __init__(self, file_path: str = "data/mcsm/bindings.json") -> None:
         self._store = JsonStore(file_path)
         # In-memory DM wait state: {user_id: (group_id, panel_url)}
         self._pending_keys: Dict[str, tuple[str, str]] = {}
+        # Upgrade legacy rows once at load, so reads never have to write.
+        changed = False
+        for group in self._store.values():
+            if isinstance(group, dict) and self._normalize_group(group):
+                changed = True
+        if changed:
+            self._store._save()
 
     def _normalize_group(self, group: dict) -> bool:
         changed = False
@@ -62,18 +73,15 @@ class MCSMStore:
         return changed
 
     def _group(self, group_id: str | int) -> dict:
-        gid = str(group_id)
-        if gid not in self._store:
-            self._store[gid] = {"instances": {}, "admins": []}
-        group = self._store[gid]
-        if self._normalize_group(group):
-            self._store._save()
+        """The group's record, created in memory if missing; the caller saves."""
+        group = self._store.setdefault(str(group_id), {"instances": {}, "admins": []})
+        self._normalize_group(group)
         return group
 
     def _existing_group(self, group_id: str | int) -> dict | None:
         group = self._store.get(str(group_id))
-        if group and self._normalize_group(group):
-            self._store._save()
+        if group:
+            self._normalize_group(group)  # no-op after the load-time upgrade
         return group
 
     def has_panel(self, group_id: str | int) -> bool:
@@ -86,26 +94,26 @@ class MCSMStore:
             return None
         return (group["panel_url"], group["api_key"])
 
-    def set_panel_url(self, group_id: str | int, url: str) -> None:
+    async def set_panel_url(self, group_id: str | int, url: str) -> None:
         self._group(group_id)["panel_url"] = url.rstrip("/")
-        self._store._save()
+        await self._store.save_async()
 
-    def set_api_key(self, group_id: str | int, api_key: str) -> None:
+    async def set_api_key(self, group_id: str | int, api_key: str) -> None:
         self._group(group_id)["api_key"] = api_key
-        self._store._save()
+        await self._store.save_async()
 
-    def set_owner(self, group_id: str | int, user_id: str) -> None:
+    async def set_owner(self, group_id: str | int, user_id: str) -> None:
         group = self._group(group_id)
         group["owner"] = str(user_id)
         if str(user_id) not in group.setdefault("admins", []):
             group["admins"].append(str(user_id))
-        self._store._save()
+        await self._store.save_async()
 
     def get_owner(self, group_id: str | int) -> str:
         group = self._existing_group(group_id)
         return str(group.get("owner", "")) if group else ""
 
-    def clear_panel(self, group_id: str | int) -> None:
+    async def clear_panel(self, group_id: str | int) -> None:
         """Clear panel credentials and all instance bindings, keeping group admins."""
         group = self._existing_group(group_id)
         if not group:
@@ -114,7 +122,7 @@ class MCSMStore:
         group.pop("api_key", None)
         group["instances"] = {}
         self._normalize_group(group)
-        self._store._save()
+        await self._store.save_async()
 
     def set_pending_key(self, user_id: str, group_id: str, panel_url: str) -> None:
         self._pending_keys[str(user_id)] = (str(group_id), panel_url)
@@ -131,21 +139,21 @@ class MCSMStore:
             return {}
         return group.get("instances", {})
 
-    def bind_instance(self, group_id: str | int, alias: str, uuid: str, daemon_id: str) -> None:
+    async def bind_instance(self, group_id: str | int, alias: str, uuid: str, daemon_id: str) -> None:
         group = self._group(group_id)
         group["instances"][alias] = {
             "uuid": uuid,
             "daemonId": daemon_id,
             "hidden": False,
         }
-        self._store._save()
+        await self._store.save_async()
 
-    def unbind_instance(self, group_id: str | int, alias: str) -> bool:
+    async def unbind_instance(self, group_id: str | int, alias: str) -> bool:
         instances = self.get_group_instances(group_id)
         if alias not in instances:
             return False
         del instances[alias]
-        self._store._save()
+        await self._store.save_async()
         return True
 
     def get_instance(self, group_id: str | int, alias: str) -> Optional[dict]:
@@ -164,12 +172,12 @@ class MCSMStore:
         name_lower = name.lower()
         return [a for a in self.get_group_instances(group_id) if name_lower in a.lower()]
 
-    def set_hidden(self, group_id: str | int, alias: str, hidden: bool) -> bool:
+    async def set_hidden(self, group_id: str | int, alias: str, hidden: bool) -> bool:
         inst = self.get_instance(group_id, alias)
         if inst is None:
             return False
         inst["hidden"] = hidden
-        self._store._save()
+        await self._store.save_async()
         return True
 
     def get_visible_instances(self, group_id: str | int) -> Dict[str, dict]:
@@ -179,22 +187,22 @@ class MCSMStore:
             if not inst.get("hidden")
         }
 
-    def add_admin(self, group_id: str | int, user_id: str) -> bool:
+    async def add_admin(self, group_id: str | int, user_id: str) -> bool:
         admins = self._group(group_id).setdefault("admins", [])
         user_id = str(user_id)
         if user_id in admins:
             return False
         admins.append(user_id)
-        self._store._save()
+        await self._store.save_async()
         return True
 
-    def remove_admin(self, group_id: str | int, user_id: str) -> bool:
+    async def remove_admin(self, group_id: str | int, user_id: str) -> bool:
         admins = self._group(group_id).setdefault("admins", [])
         user_id = str(user_id)
         if user_id not in admins:
             return False
         admins.remove(user_id)
-        self._store._save()
+        await self._store.save_async()
         return True
 
     def get_admins(self, group_id: str | int) -> List[str]:

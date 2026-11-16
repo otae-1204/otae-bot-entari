@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -155,19 +156,23 @@ async def preflight_qflash_archive(item: QFlashArchive) -> None:
 async def download_qflash_archive(item: QFlashArchive, target: Path) -> None:
     """Stream the resolved QQ flash transfer archive to a local temporary file."""
     url = qflash_download_url(item)
-    target.parent.mkdir(parents=True, exist_ok=True)
+    # Disk work runs in worker threads; the archive can be hundreds of MiB.
+    await asyncio.to_thread(target.parent.mkdir, parents=True, exist_ok=True)
     try:
         async with httpx.AsyncClient(timeout=None, follow_redirects=True, trust_env=False, verify=await ashared_ssl_context(trust_env=False)) as client:
             async with client.stream("GET", url, headers={"User-Agent": USER_AGENT}) as resp:
                 if resp.status_code != 200:
                     raise QFlashError(f"下载闪传压缩包失败（HTTP {resp.status_code}）。")
-                with target.open("wb") as fp:
+                fp = await asyncio.to_thread(target.open, "wb")
+                try:
                     async for chunk in resp.aiter_bytes(1024 * 1024):
                         if chunk:
-                            fp.write(chunk)
+                            await asyncio.to_thread(fp.write, chunk)
+                finally:
+                    await asyncio.to_thread(fp.close)
     except httpx.HTTPError as exc:
         raise QFlashError(f"下载闪传压缩包时发生网络异常：{exc}。") from exc
-    if target.stat().st_size <= 0:
+    if (await asyncio.to_thread(target.stat)).st_size <= 0:
         raise QFlashError("下载闪传压缩包失败：下载所得文件为空。")
 
 

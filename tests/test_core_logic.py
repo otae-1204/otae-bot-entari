@@ -1610,29 +1610,47 @@ class CoreLogicTests(unittest.TestCase):
         MCSMStore = _load_mcsm_store_class()
         with TemporaryDirectory() as tmp:
             store = MCSMStore(str(Path(tmp) / "bindings.json"))
-            store.set_panel_url("10001", "http://panel.example/")
-            store.set_api_key("10001", "secret-key")
-            self.assertEqual(store.get_group_instances("10001"), {})
-            store.set_owner("10001", "246")
-            store.bind_instance("10001", "survival", "uuid-1", "daemon-1")
 
-            self.assertTrue(store.has_panel("10001"))
-            self.assertEqual(store.get_panel("10001"), ("http://panel.example", "secret-key"))
-            self.assertEqual(store.get_owner("10001"), "246")
-            self.assertIn("246", store.get_admins("10001"))
-            self.assertFalse(store.get_instance("10001", "survival").get("hidden"))
-            self.assertNotIn("admins", store.get_instance("10001", "survival"))
+            async def scenario():
+                await store.set_panel_url("10001", "http://panel.example/")
+                await store.set_api_key("10001", "secret-key")
+                self.assertEqual(store.get_group_instances("10001"), {})
+                await store.set_owner("10001", "246")
+                await store.bind_instance("10001", "survival", "uuid-1", "daemon-1")
 
-            self.assertTrue(store.add_admin("10001", "135"))
-            self.assertFalse(store.add_admin("10001", "135"))
-            self.assertTrue(store.check_instance_permission("10001", "survival", "135"))
+                self.assertTrue(store.has_panel("10001"))
+                self.assertEqual(store.get_panel("10001"), ("http://panel.example", "secret-key"))
+                self.assertEqual(store.get_owner("10001"), "246")
+                self.assertIn("246", store.get_admins("10001"))
+                self.assertFalse(store.get_instance("10001", "survival").get("hidden"))
+                self.assertNotIn("admins", store.get_instance("10001", "survival"))
 
-            self.assertTrue(store.set_hidden("10001", "survival", True))
-            self.assertEqual(store.get_visible_instances("10001"), {})
-            store.clear_panel("10001")
-            self.assertFalse(store.has_panel("10001"))
-            self.assertEqual(store.get_group_instances("10001"), {})
-            self.assertIn("135", store.get_admins("10001"))
+                self.assertTrue(await store.add_admin("10001", "135"))
+                self.assertFalse(await store.add_admin("10001", "135"))
+                self.assertTrue(store.check_instance_permission("10001", "survival", "135"))
+
+                self.assertTrue(await store.set_hidden("10001", "survival", True))
+                self.assertEqual(store.get_visible_instances("10001"), {})
+                reopened = MCSMStore(str(Path(tmp) / "bindings.json"))
+                self.assertEqual(reopened.get_panel("10001"), ("http://panel.example", "secret-key"))
+                self.assertTrue(reopened.get_instance("10001", "survival")["hidden"])
+                await store.clear_panel("10001")
+                self.assertFalse(store.has_panel("10001"))
+                self.assertEqual(store.get_group_instances("10001"), {})
+                self.assertIn("135", store.get_admins("10001"))
+
+            asyncio.run(scenario())
+
+    def test_mcsm_store_upgrades_legacy_rows_once_at_load(self):
+        MCSMStore = _load_mcsm_store_class()
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "bindings.json"
+            path.write_text(json.dumps({"1": {"owner": "9", "instances": {"a": {"uuid": "u", "admins": ["x"]}}}}),
+                            encoding="utf-8")
+            MCSMStore(str(path))
+            saved = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(saved["1"]["admins"], ["9"])
+            self.assertEqual(saved["1"]["instances"]["a"], {"uuid": "u", "hidden": False})
 
     def test_mcsm_client_get_all_instances_keeps_partial_results(self):
         mcsm_client = _load_module("mcsm_client_for_test", "plugins/mcsm/client.py")

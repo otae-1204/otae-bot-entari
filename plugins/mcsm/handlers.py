@@ -347,7 +347,7 @@ async def handle_dm_key(session: Session):
     # 取消绑定
     if api_key in ("取消", "cancel", "Cancel", "q", "Q"):
         _store.clear_pending_key(user_id)
-        _store.clear_panel(group_id)
+        await _store.clear_panel(group_id)
         await _finish_dm_notice(session, bot, user_id, "MCSM 面板绑定已取消", (), "warning")
         return
 
@@ -395,7 +395,7 @@ async def handle_dm_key(session: Session):
         return
 
     # 保存 API Key
-    _store.set_api_key(group_id, api_key)
+    await _store.set_api_key(group_id, api_key)
     _store.clear_pending_key(user_id)
     _clear_client(group_id)
 
@@ -1117,7 +1117,7 @@ async def _cmd_deploy(session: Session, group_id: str, user_id: str, args_text: 
                         if not remediated and actions:
                             raise RuntimeError(f"启动后自动修复失败: {remediation_summary(actions)}")
 
-                _store.bind_instance(group_id, options.alias, uuid, did)
+                await _store.bind_instance(group_id, options.alias, uuid, did)
                 lines = [
                     f"别名: {options.alias}",
                     f"节点: {daemon_name(daemon)} ({did[:8]})",
@@ -1155,7 +1155,8 @@ async def _cmd_deploy(session: Session, group_id: str, user_id: str, args_text: 
                 qflash_archive = await _refresh_qflash_download(options.url, qflash_archive, summary)
                 await download_qflash_archive(qflash_archive, local_file)
                 summary["transfer_status"] = "已下载到 Bot 临时目录"
-                archive_start_command, archive_start_source = detect_archive_start_command(
+                archive_start_command, archive_start_source = await _asyncio.to_thread(
+                    detect_archive_start_command,
                     local_file,
                     options.memory_mb,
                     options.command,
@@ -1307,7 +1308,7 @@ async def _cmd_deploy(session: Session, group_id: str, user_id: str, args_text: 
                 if not remediated and actions:
                     raise RuntimeError(f"启动后自动修复失败: {remediation_summary(actions)}")
 
-        _store.bind_instance(group_id, options.alias, uuid, did)
+        await _store.bind_instance(group_id, options.alias, uuid, did)
         lines = [
             f"别名: {options.alias}",
             f"节点: {daemon_name(daemon)} ({did[:8]})",
@@ -1403,7 +1404,7 @@ async def handle_dm_bind(session: Session):
         if _store.alias_exists(group_id, alias):
             skipped.append(f"{index}: 别名 {alias} 已存在")
             continue
-        _store.bind_instance(group_id, alias, uuid, daemon_id)
+        await _store.bind_instance(group_id, alias, uuid, daemon_id)
         added.append(f"{alias} ({uuid[:8]})")
 
     _pending_bind_sessions.pop(_bind_session_key(user_id), None)
@@ -1596,8 +1597,8 @@ async def _cmd_bind_panel(
     if not url.startswith("http"):
         url = f"http://{url}"
 
-    _store.set_panel_url(group_id, url)
-    _store.set_owner(group_id, user_id)
+    await _store.set_panel_url(group_id, url)
+    await _store.set_owner(group_id, user_id)
     _store.set_pending_key(user_id, group_id, url)
 
     try:
@@ -1609,7 +1610,7 @@ async def _cmd_bind_panel(
         ))]))
     except Exception as e:
         _store.clear_pending_key(user_id)
-        _store.clear_panel(group_id)
+        await _store.clear_panel(group_id)
         await _finish_notice(session, "私聊消息发送失败", (f"请先添加机器人为好友以接收私信: {e}",), "error")
         return
 
@@ -1628,7 +1629,7 @@ async def _cmd_unbind_panel(session: Session, group_id: str, user_id: str):
     if not _store.has_panel(group_id):
         await _finish_notice(session, "本群尚未关联 MCSM 面板", (), "warning")
         return
-    _store.clear_panel(group_id)
+    await _store.clear_panel(group_id)
     _clear_client(group_id)
     await _finish_notice(session, "MCSM 面板解绑成功", ("已清除当前群聊的所有实例关联数据。",), "success")
 
@@ -1826,7 +1827,7 @@ async def _cmd_bind_instance(
             )
             return
 
-    _store.bind_instance(group_id, alias, uuid, daemon_id)
+    await _store.bind_instance(group_id, alias, uuid, daemon_id)
     fallback = f"实例绑定成功\n别名: {alias}\nUUID: {uuid}\n节点: {daemon_id[:24]}...\n\n/mcsm admin add @某人  添加本群 MCSM 管理员"
     await _finish_image_or_text(session, draw_bind_result, fallback, alias, uuid, daemon_id)
 
@@ -1848,7 +1849,7 @@ async def _cmd_unbind(
     if not _store.alias_exists(group_id, alias):
         await _finish_error(session, f"未找到别名为 {alias} 的实例。")
         return
-    _store.unbind_instance(group_id, alias)
+    await _store.unbind_instance(group_id, alias)
     await _finish_notice(session, "实例关联已解除", (f"实例: {alias}",), "success")
 
 
@@ -1904,7 +1905,7 @@ async def _cmd_delete_instance(
         await _finish_notice(session, "删除实例失败", (str(exc),), "error")
         return
 
-    _store.unbind_instance(group_id, alias)
+    await _store.unbind_instance(group_id, alias)
     lines = [
         f"别名: {alias}",
         f"实例: {uuid[:8]}",
@@ -2371,7 +2372,7 @@ async def _cmd_hide(
         await _finish_error(session, perm_err)
         return
 
-    ok = _store.set_hidden(group_id, alias, hidden)
+    ok = await _store.set_hidden(group_id, alias, hidden)
     if ok:
         await _finish_notice(session, f"实例已设定为{action_text}", (f"实例: {alias}",), "success")
     else:
@@ -2422,7 +2423,7 @@ async def _cmd_admin(
     if action == "add":
         added, skipped = [], []
         for target_uid in at_users:
-            if _store.add_admin(group_id, target_uid):
+            if await _store.add_admin(group_id, target_uid):
                 added.append(target_uid)
             else:
                 skipped.append(target_uid)
@@ -2440,7 +2441,7 @@ async def _cmd_admin(
             if not _is_superuser(user_id) and target_uid == user_id:
                 skipped.append(f"{target_uid}（不可移除当前执行者自身）")
                 continue
-            if _store.remove_admin(group_id, target_uid):
+            if await _store.remove_admin(group_id, target_uid):
                 removed.append(target_uid)
             else:
                 skipped.append(target_uid)
