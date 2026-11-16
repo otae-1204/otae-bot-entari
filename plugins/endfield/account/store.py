@@ -241,6 +241,13 @@ class EndfieldStore:
         self._lock = threading.RLock()
         self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
+        # WAL like the bot's other stores: readers no longer wait for a writer's
+        # commit, and a commit stops creating and deleting a -journal file each
+        # time (slow on the Windows host). The mode persists in the file; back up
+        # with the sqlite backup API, not by copying endfield.db alone.
+        self.conn.execute("PRAGMA busy_timeout = 5000")
+        self.conn.execute("PRAGMA journal_mode = WAL")
+        self.conn.execute("PRAGMA synchronous = NORMAL")
         self._init_schema()
 
     def close(self) -> None:

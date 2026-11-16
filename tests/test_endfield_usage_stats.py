@@ -937,3 +937,10 @@ def test_expired_login_backs_off_for_hours(tmp_path):
     state = store.list_challenge_snapshots([("r3", "1")], family=FAMILY_MONUMENT)[0]
     assert state.last_error == "auth:凭据失效"
     assert state.next_attempt_at - now >= AUTH_RETRY_BASE_SECONDS
+
+
+def test_endfield_store_uses_wal(tmp_path):
+    """endfield.db runs in WAL mode like the bot's other stores."""
+    store = _store(tmp_path)
+    assert store.conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+    assert store.conn.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
