@@ -14,6 +14,7 @@ same template share them; they are re-exported here for existing callers.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import io
 import json
@@ -412,6 +413,11 @@ async def launch_browser(playwright):
     raise RuntimeError("No browser found. Run: playwright install chromium") from last_error
 
 
+def _write_page(html_path: Path, html: str) -> None:
+    html_path.parent.mkdir(parents=True, exist_ok=True)
+    html_path.write_text(html, encoding="utf-8")
+
+
 async def render_target(
     browser,
     page: HelpPage,
@@ -420,8 +426,7 @@ async def render_target(
     theme: HelpTheme = HelpTheme(),
 ) -> tuple[bytes, dict[str, Any]]:
     """Render one page with one artwork; returns raw PNG bytes and the layout report."""
-    html_path.parent.mkdir(parents=True, exist_ok=True)
-    html_path.write_text(render_html(page, art, theme), encoding="utf-8")
+    await asyncio.to_thread(_write_page, html_path, render_html(page, art, theme))
     tab = await browser.new_page(viewport={"width": theme.page_width, "height": 900}, device_scale_factor=1)
     external: list[str] = []
     tab.on("request", lambda request: external.append(request.url)

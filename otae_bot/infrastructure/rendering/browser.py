@@ -801,6 +801,11 @@ async def _launch_browser(playwright, proxy_conf):
     raise RuntimeError("No browser found. Install Chrome/Edge or run: playwright install chromium")
 
 
+def _save_png(path: Path, png: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(png)
+
+
 async def WebImageBuilders(fill_name: str = None, web_url: str = None, **kwargs):
     """截图指定网页并保存（使用系统 Chrome/Edge，无需额外安装浏览器）."""
     fill_name = fill_name or kwargs.get("fillName")
@@ -809,5 +814,4 @@ async def WebImageBuilders(fill_name: str = None, web_url: str = None, **kwargs)
         raise TypeError("WebImageBuilders requires fill_name/web_url")
 
     png = await screenshot_web_element(web_url, "body")
-    Path(TEMP_PATH).mkdir(parents=True, exist_ok=True)
-    (Path(TEMP_PATH) / f"{fill_name}.png").write_bytes(png)
+    await asyncio.to_thread(_save_png, Path(TEMP_PATH) / f"{fill_name}.png", png)
