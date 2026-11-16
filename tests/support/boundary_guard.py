@@ -6,7 +6,9 @@ framework private APIs and platform-name branching belong to the boundary
 bytes; local paths in media elements and direct ``upload.create`` calls are
 only allowed in the outbound pipeline and the boundary (rule R9). Imports must follow the layering in
 ``docs/development/architecture_conventions.md`` (rules L1-L4), and nothing may still use
-the NoneBot-style compatibility layer ``otae_bot/compat`` (rule C1). The checks
+the NoneBot-style compatibility layer ``otae_bot/compat`` (rule C1). Coroutines must not
+block the event loop with synchronous file, SQLite or process I/O or with calls on
+storage objects; such work goes through ``asyncio.to_thread`` (rule A1). The checks
 are AST heuristics run over ``otae_bot/`` and ``plugins/``.
 
 Today they are report-only: the current inventory is the checked-in baseline,
@@ -48,6 +50,7 @@ RULES = {
     "L3": "infrastructure-upward-import",
     "L4": "core-imports-plugins",
     "C1": "compat-import",
+    "A1": "sync-io-in-async",
 }
 
 # L2: only the boundary itself and the module that wires it may import these.
@@ -107,6 +110,23 @@ MEDIA_EXEMPT = ("otae_bot/pipeline/", "otae_bot/boundary/")
 MEDIA_CLASSES = frozenset({"Image", "Audio", "Video", "File"})
 MEDIA_SOURCES = frozenset({"src", "url"})
 UPLOAD_NAMES = frozenset({"upload_create", "UPLOAD_CREATE"})
+
+# A1: blocking calls directly inside an ``async def`` (nested sync defs and lambdas excluded).
+# Builtins / module functions by dotted name, Path-style methods by attribute name.
+BLOCKING_CALLS = frozenset({
+    "open", "io.open", "json.dump", "json.load", "time.sleep", "sqlite3.connect",
+    "tempfile.NamedTemporaryFile", "tempfile.TemporaryFile", "tempfile.mkstemp", "tempfile.mkdtemp",
+    "shutil.copy", "shutil.copy2", "shutil.copyfile", "shutil.copytree", "shutil.move", "shutil.rmtree",
+    "os.replace", "os.remove", "os.unlink", "os.rename",
+    "subprocess.run", "subprocess.call", "subprocess.check_call", "subprocess.check_output",
+})
+BLOCKING_METHODS = frozenset({"read_text", "read_bytes", "write_text", "write_bytes"})
+# Calls that run a callable in a worker thread, with the callable's argument position:
+# `asyncio.to_thread(fn, ...)`, `run_image_render(fn, ...)`, `loop.run_in_executor(pool, fn, ...)`.
+# Only the callable is exempt; the other arguments are still evaluated on the loop.
+OFFLOADERS = {"to_thread": 0, "run_image_render": 0, "run_in_executor": 1}
+# Storage objects (`store`, `account_store`, `self._store`, `TiboStore`) are synchronous unless awaited.
+STORE_RECEIVER = re.compile(r"(^|_)store$|Store$")
 
 # R6: receivers whose string comparison means "which platform/adapter is this".
 PLATFORM_ATTRS = frozenset({"platform", "adapter"})
@@ -178,6 +198,18 @@ def _is_platform_receiver(node: ast.AST) -> bool:
     return False
 
 
+def _dotted(node: ast.AST) -> str:
+    """``a.b.c`` for a Name/Attribute chain ('' if it does not end in a name)."""
+    parts: list[str] = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if not isinstance(node, ast.Name):
+        return ""
+    parts.append(node.id)
+    return ".".join(reversed(parts))
+
+
 def _within(name: str, prefixes: tuple[str, ...] | str) -> bool:
     """``name`` is one of ``prefixes`` or a submodule of one."""
     if isinstance(prefixes, str):
@@ -235,7 +267,38 @@ class _Scanner(ast.NodeVisitor):
             if isinstance(body, list) and body and isinstance(body[0], ast.Expr):
                 self.docstrings.add(body[0].value)
         self.visit(tree)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.AsyncFunctionDef):
+                for statement in node.body:
+                    self._blocking(statement)
         return list(self.found.values())
+
+    # A1: synchronous I/O on the event loop
+    def _blocking(self, node: ast.AST) -> None:
+        """Flag blocking calls in a coroutine body; nested defs are scanned on their own."""
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+            return
+        skipped = None
+        if isinstance(node, ast.Call):
+            position = OFFLOADERS.get(_name(node.func))
+            if position is not None and len(node.args) > position:
+                skipped = node.args[position]  # the callable runs in the worker thread
+            if self._blocking_call(node):
+                self.add("A1", node)
+        for child in ast.iter_child_nodes(node):
+            if child is not skipped:
+                self._blocking(child)
+
+    def _blocking_call(self, node: ast.Call) -> bool:
+        func = node.func
+        if _dotted(func) in BLOCKING_CALLS:
+            return True
+        if not isinstance(func, ast.Attribute):
+            return False
+        if func.attr in BLOCKING_METHODS:
+            return True
+        return (bool(STORE_RECEIVER.search(_name(func.value)))
+                and not isinstance(self.parents.get(node), ast.Await))
 
     def add(self, rule: str, node: ast.AST) -> None:
         if rule.startswith("R") and not self.protocol:

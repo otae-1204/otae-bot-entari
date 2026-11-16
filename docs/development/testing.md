@@ -92,8 +92,23 @@ with settings.override({"otae": {"browser": {"concurrency": "3"}}}):
 | L3 | infrastructure-upward-import | `infrastructure` / `config` import Entari、satori、`plugins` 或其他 `otae_bot` 包（`config` 可用 `arclet.entari.config`） |
 | L4 | core-imports-plugins | `otae_bot` import `plugins` |
 | C1 | compat-import | import 已删除的 `otae_bot.compat` |
+| A1 | sync-io-in-async | `async def` 里直接调用的同步 I/O：`open()`、`read_text` / `read_bytes` / `write_text` / `write_bytes`、`json.dump` / `json.load`、`tempfile`、`shutil` 复制移动删除、`os.replace` / `os.remove`、`time.sleep`、`subprocess.run` 等、`sqlite3.connect`；以及没有 `await` 的 store 方法调用（接收者名为 `store`、以 `_store` 或 `Store` 结尾） |
 
 R1–R7 不适用于 `otae_bot/boundary/`；R9 不适用于 `otae_bot/pipeline/` 和 `otae_bot/boundary/`。
+A1 不看嵌套的同步函数和 lambda，也不看交给 `asyncio.to_thread`、`run_image_render`、`run_in_executor`
+执行的那个可调用对象（其余参数仍在循环上求值，照查）。
+
+A1 基线里留下的都是有意不动的，原因如下（新增同类调用照样会失败，需要先想清楚再决定是否放进线程）：
+
+| 位置 | 原因 |
+|---|---|
+| `plugins/mcsm/handlers.py` 的 `_store` 查询（`get_instance`、`has_panel`、`is_admin`、`*_pending_key` 等） | 只读写内存字典，字典只在循环上改、没有锁，不能放进线程；写盘的变更方法已是协程 |
+| `plugins/endfield` 的 `archive_store` / `medal_store` / `target.store` 的 `load_*_view` | JsonStore 内存视图，不碰磁盘 |
+| `plugins/hyw/handlers.py` 的 `history_store` | 纯内存 LRU，没有锁 |
+| `plugins/forkout/handlers.py` 的 `_fork_store.get` / `.items()` | JsonStore 内存读取；写盘已改为 `set_async` |
+| `feature_store.is_enabled`（`otae_bot/pipeline/feature_gate.py`、`plugins/group_manager`） | 读内存缓存，只有进程内第一次调用读文件 |
+| `store.close()`（arknights、tibo_radar、`command_usage/recorder.py`） | 只在 Cleanup / 退出时执行一次 |
+| `plugins/eft_helper/data_source.py` 的 `open()` | `update_ammo_from_api` 没有调用方；其 SQLite 走单线程连接 |
 
 ## 已知失败与不稳定用例
 

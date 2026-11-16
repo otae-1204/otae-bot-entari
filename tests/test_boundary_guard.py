@@ -31,7 +31,8 @@ class BoundaryGuardTests(unittest.TestCase):
         violations = guard.scan()
         new, gone = guard.compare(violations, guard.load_baseline())
         self.assertFalse(new, "new violations (protocol code belongs in otae_bot/boundary/; imports follow "
-                         "docs/development/architecture_conventions.md §2):\n"
+                         "docs/development/architecture_conventions.md §2; blocking I/O in a coroutine goes "
+                         "through asyncio.to_thread):\n"
                          + "\n".join(f"  {v.rule} {v.file}:{v.line}  {v.snippet}" for v in new))
         self.assertFalse(gone, f"violations fixed but still in the baseline; run `{REGENERATE}`:\n"
                          + "\n".join(f"  {r} {f}  {s}" for (r, f, s) in sorted(gone)))
@@ -142,6 +143,58 @@ def g(cmd, self, store):
         source = "from plugins.a import x\nimport plugins\nfrom plugins import a\n"
         self.assertEqual(_layering("otae_bot/groups/features.py", source), ["core-imports-plugins"] * 3)
         self.assertEqual(_layering("otae_bot/boundary/onebot11.py", source), ["core-imports-plugins"] * 3)
+
+    def test_blocking_io_in_coroutines_is_flagged(self):
+        source = '''
+import json, os, shutil, sqlite3, subprocess, tempfile, time
+from pathlib import Path
+async def handler(path, account_store, self, TiboStore):
+    data = path.read_bytes()
+    Path("x").write_text("y")
+    with open("f") as handle:
+        json.load(handle)
+    time.sleep(1)
+    shutil.rmtree("d")
+    os.replace("a", "b")
+    sqlite3.connect("db")
+    subprocess.run(["ls"])
+    tempfile.NamedTemporaryFile()
+    roles = account_store.list_roles("1")
+    self._store.set_api_key("g", "k")
+    store.close()
+    await asyncio.to_thread(work, path.read_text())  # arguments are evaluated on the loop
+    if True:
+        TiboStore.subscriptions()
+'''
+        self.assertEqual(_scan_source(source, "plugins/a/handlers.py").count("sync-io-in-async"), 15)
+        # The boundary is not exempt: its coroutines share the loop too.
+        self.assertEqual(guard._Scanner("otae_bot/boundary/onebot11.py", source, protocol=False).run(
+            ast.parse(source)).__len__(), 15)
+
+    def test_offloaded_awaited_and_synchronous_io_is_not_flagged(self):
+        source = '''
+import asyncio, json
+from functools import partial
+def sync_helper(path, store):
+    store.save()
+    return path.read_bytes()
+async def handler(path, account_store, self, loop, restore, datastore):
+    data = await asyncio.to_thread(path.read_bytes)
+    roles = await asyncio.to_thread(account_store.list_roles, "1")
+    await loop.run_in_executor(None, partial(self._store.save, 1))
+    png = await run_image_render(draw, data)
+    await self._store.set_api_key("g", "k")
+    def nested():
+        return open("f").read()
+    later = lambda: account_store.close()
+    class Local:
+        def method(self):
+            return self.store.get()
+    json.dumps({}), json.loads("{}")
+    restore.run(), datastore.get()
+    text = await response.text()
+'''
+        self.assertEqual(_scan_source(source, "plugins/a/handlers.py"), [])
 
     def test_only_the_compat_layer_imports_itself(self):
         source = ("from otae_bot.compat.entari import cmd\nfrom otae_bot.compat import entari\n"

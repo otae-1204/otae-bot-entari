@@ -62,6 +62,7 @@
 3. **不替换框架的函数和属性**（不做 monkeypatch）。要拦截出站调用，用 `APIRequest` 等公开事件。
 4. **停止信号要放行。** 凡是写 `except Exception` 的地方，前面必须先有 `except ExitState: raise`，否则 `finish()` 会被当成错误吞掉。`asyncio.CancelledError` 同理。
 5. **全局机制只装一次。** 群功能开关、指令统计这类对所有插件生效的东西，在应用启动时统一挂载，不依赖插件加载事件重复安装。
+6. **不阻塞事件循环。** 所有指令、监听和定时任务共用一个事件循环，`async def` 里不直接做同步的磁盘、SQLite、子进程 I/O，也不 `time.sleep`。这类调用经 `await asyncio.to_thread(fn, *args)` 放进线程（图片渲染用 `run_image_render`），跨线程只传不可变快照（`tuple(...)` 而不是字典视图）。只有自带锁（如 `threading.RLock`）的对象才能整体放进线程；内存数据只在循环上修改、又没有锁的对象（如 `JsonStore`），在循环上序列化、在线程里写盘（`JsonStore.save_async`）。〔守卫 A1〕原因：线上一次几秒的同步写盘会让所有指令一起停顿。
 
 ## 6. 插件
 

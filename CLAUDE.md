@@ -30,7 +30,7 @@
 ## 测试与守卫
 
 - 全量：`.venv/bin/python -m pytest -q -p no:cacheprovider`（约 2–3 分钟）。
-- 守卫：`.venv/bin/python -m tests.support.boundary_guard --report` 查看清单；`--write` 重写基线 `tests/fixtures/boundary_guard_baseline.json`。基线只许缩小，不能靠 `--write` 放行新违规。规则 R1–R7 管协议边界，R8 禁止在 `otae_bot/config/` 之外直接读环境变量，R9 禁止媒体带本地路径与管线外直接上传，L1–L4 管分层，C1 禁止 import 已删除的兼容层 `otae_bot.compat`。
+- 守卫：`.venv/bin/python -m tests.support.boundary_guard --report` 查看清单；`--write` 重写基线 `tests/fixtures/boundary_guard_baseline.json`。基线只许缩小，不能靠 `--write` 放行新违规。规则 R1–R7 管协议边界，R8 禁止在 `otae_bot/config/` 之外直接读环境变量，R9 禁止媒体带本地路径与管线外直接上传，L1–L4 管分层，C1 禁止 import 已删除的兼容层 `otae_bot.compat`，A1 禁止在 `async def` 里直接做同步文件 / SQLite / 子进程 I/O 或调用未 await 的 store 方法（改用 `await asyncio.to_thread(...)`）。
 - 已知失败与不稳定用例的唯一清单在 `docs/development/testing.md`：全量时 `tests/test_hyw_retry.py`（执行顺序）与 `tests/test_changelog.py::DataIntegrityTests`（有未收录的提交时）会失败，另有几个计时用例负载下偶发。失败时单独重跑确认，并在提交说明里写明。
 - 启动冒烟：`cp entari.example.yml entari.yml`，把 `basic.network` 唯一一条的端口改成 `1`，然后 `timeout -s INT 25 .venv/bin/python bot.py`，应加载 20 个插件，除连接失败外无 ERROR/Traceback；跑完删掉 `entari.yml`（它不进 Git）。
 
