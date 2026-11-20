@@ -1,15 +1,36 @@
 {
   "schema": 2,
-  "head": "fa5433d",
+  "head": "146eb1d",
   "generated_from": {
     "first_commit": "8e1b455",
     "first_date": "2026-06-17",
-    "last_date": "2026-11-16",
-    "commit_count": 560,
+    "last_date": "2026-11-20",
+    "commit_count": 561,
     "merge_commit_count": 36,
-    "version_count": 61
+    "version_count": 62
   },
   "releases": [
+    {
+      "version": "v2.0.6",
+      "date": "2026-11-20",
+      "from": "2026-11-20",
+      "to": "2026-11-20",
+      "title": "资源流水原因",
+      "summary": "资源流水的来源名称与官方一致，补上缺失的类型。",
+      "tags": [
+        "终末地"
+      ],
+      "highlights": [
+        {
+          "kind": "fix",
+          "date": "2026-11-20",
+          "text": "资源流水来源改用官方名称，补上三种未识别类型，活动商店兑换不再只标为信用交易所。",
+          "commits": [
+            "146eb1d"
+          ]
+        }
+      ]
+    },
     {
       "version": "v2.0.5",
       "date": "2026-11-16",
