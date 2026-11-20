@@ -24,29 +24,37 @@ CHANGE_TYPE_NAMES = {
     2: "消耗",
 }
 
-# The service uses the same reason code table for all three currencies.  Keep
-# unknown values visible instead of silently presenting an incorrect label.
+# Labels follow the official customer-service front end (gamelogs page chunk,
+# checked 2026-11-20); it has no entry for 0 or 1 and shows "其他" for them.
+# 10 keeps "干员寻访": the official "干员寻访赠送" misreads on 嵌晶玉 spending.
+# The server files every shop exchange under 22: the daily 嵌晶玉 ×25 from the
+# credit shop as well as event shops such as 危机合约「机密圣所」 (嵌晶玉 ×2000 on
+# 2026-06-19 and 2026-11-05), so the label names both.  Keep unknown values
+# visible instead of silently presenting an incorrect label.
 CHANGE_REASON_NAMES = {
     "0": "其他",
     "2": "邮件领取",
-    "3": "采购中心-源石交易所",
+    "3": "源石交易所获取",
     "4": "采购中心-组合包",
     "5": "购买月卡立得",
     "6": "解锁源石配给",
-    "7": "源石兑换嵌晶玉",
+    "7": "兑换嵌晶玉",
     "8": "衍质源石兑换武库配额",
-    "9": "源石恢复理智",
+    "9": "恢复理智",
     "10": "干员寻访",
-    "11": "寻访自动兑换找零",
+    "11": "寻访消耗剩余",
     "12": "协议通行证奖励",
     "13": "任务奖励",
     "14": "世界探索奖励",
     "15": "副本奖励",
     "16": "活动中心奖励",
     "17": "提交醚质后获得",
+    "18": "行动手册节点奖励",
     "19": "行动手册日常活跃度奖励",
+    "20": "权限等阶提升奖励",
     "21": "月卡每日领取",
-    "22": "信用交易所兑换",
+    "22": "信用交易所/活动商店兑换",
+    "23": "购买通行证等级",
     "24": "系统玩法奖励",
     "25": "武库交易所消耗",
 }

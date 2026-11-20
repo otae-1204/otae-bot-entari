@@ -2343,6 +2343,14 @@ class EndfieldOfficialClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("类型汇总", report)
         self.assertNotIn("变动后", report)
 
+    def test_reason_labels_cover_every_official_code(self):
+        # Codes 2-25 of the official customer-service front end; 22 also covers event shops.
+        for code in range(2, 26):
+            self.assertNotIn("未知原因", currency_module.reason_label(code), code)
+        self.assertEqual(currency_module.reason_label(22), "信用交易所/活动商店兑换")
+        self.assertEqual(currency_module.reason_label(20), "权限等阶提升奖励")
+        self.assertEqual(currency_module.reason_label(99), "未知原因(99)")
+
     async def test_character_and_weapon_record_mapping(self):
         captured_queries = []
         responses = {
