@@ -12,6 +12,8 @@ from otae_bot.scheduling.jobs import close_scheduled_jobs, timer
 from arclet.entari import Account as Bot, Event
 from loguru import logger
 from otae_bot.delivery import FAILED, NO_ACCOUNT, Target, deliver
+from otae_bot.groups.features import scope_from_event
+from otae_bot.groups.permissions import can_manage
 
 from plugins.bilibilibot.api import BiliApi
 from plugins.bilibilibot.config import bili_settings
@@ -191,6 +193,7 @@ async def handle_bili(session: Session, rest: Match[tuple[str, ...]]):
             "/bili unfollow <all|live|video|dynamic> <UID 或 room:直播间号> - 取消关注\n"
             "/bili list [all|live|video|dynamic] - 查看当前订阅列表\n"
             "/bili refresh <all|live|video|dynamic> <UID 或 room:直播间号> - 立即刷新状态\n"
+            "注：群内 follow/unfollow 仅限群主、群管理员或 SUPERUSER。\n"
             "注：输入纯数字默认按 UID 识别；若针对直播间号请加上 room: 前缀。\n"
             "注：动态订阅默认跳过抽奖发起与开奖结算；用 entari.yml 的 plugins.bilibilibot.lottery_filter_uids 可收窄或关闭。"
         )
@@ -210,6 +213,12 @@ async def handle_bili(session: Session, rest: Match[tuple[str, ...]]):
         except ValueError:
             await session.send("订阅类型错误：仅支持 all、live、video 或 dynamic。")
             return
+        if action in {"follow", "unfollow"}:
+            scope = scope_from_event(session.account, event)
+            # 私聊里管理的是自己的订阅；群里只有群主、管理员或 SUPERUSER 可增删。
+            if scope is not None and not await can_manage(session.account, event, scope):
+                await session.send("权限不足：仅群主、群管理员或 SUPERUSER 可以添加或取消本群的B站订阅。")
+                return
         if action == "follow":
             ok, failed = await service.follow(kind_arg, values, subscriber_type, subscriber_id)
             await _handle_result(session, "B站关注处理结果：", ok, failed)

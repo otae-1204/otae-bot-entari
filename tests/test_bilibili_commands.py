@@ -7,11 +7,15 @@ import unittest
 BILI_SCENARIOS = r"""
 from unittest.mock import AsyncMock, patch
 from arclet.entari import Text
+from satori import Member, Role, User
 
 bili = plugin('plugins.bilibilibot.handlers')
 service = bili.service
 HELP = 'B站订阅指令指南：'
 KIND_ERROR = '订阅类型错误：仅支持 all、live、video 或 dynamic。'
+DENIED = '权限不足：仅群主、群管理员或 SUPERUSER 可以添加或取消本群的B站订阅。'
+ADMIN = Member(User('admin'), roles=[Role('admin')])
+OWNER = Member(User('owner'), roles=[Role('owner')])
 
 
 async def main():
@@ -35,11 +39,15 @@ async def main():
         assert await say('/bili unfollow bad 1') == [KIND_ERROR]
         assert not follow.called and not unfollow.called and not refresh.called
         # follow 只回关注结果，不再刷新
-        sent = await say('/bili FOLLOW live 1 2 BV1xx')
+        # 群内普通成员不能增删订阅（查成员失败也按无权处理）
+        assert await say('/bili follow live 1') == [DENIED]
+        assert await say('/bili unfollow all room:3', user='member-1') == [DENIED]
+        assert not follow.called and not unfollow.called
+        sent = await say('/bili FOLLOW live 1 2 BV1xx', user='admin', member=ADMIN)
         assert sent == ['B站关注处理结果：\n成功:\n- UP 1\n失败:\n- UP 2：不存在'], sent
         follow.assert_awaited_once_with('live', ['1', '2', 'BV1xx'], 'group', '100')
         assert not refresh.called and not preview.called
-        sent = await say('/bili unfollow all room:3', group='200')
+        sent = await say('/bili unfollow all room:3', group='200', user='owner', member=OWNER)
         assert sent == ['B站取消关注处理结果：\n成功:\n- UP 1'], sent
         unfollow.assert_awaited_once_with('all', ['room:3'], 'group', '200')
         sent = await say('/bili refresh dynamic room:3')
