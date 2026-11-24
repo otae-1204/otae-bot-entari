@@ -1,15 +1,44 @@
 {
   "schema": 2,
-  "head": "5257deb",
+  "head": "da199c9",
   "generated_from": {
     "first_commit": "8e1b455",
     "first_date": "2026-06-17",
     "last_date": "2026-11-24",
-    "commit_count": 562,
+    "commit_count": 564,
     "merge_commit_count": 36,
-    "version_count": 63
+    "version_count": 64
   },
   "releases": [
+    {
+      "version": "v2.0.8",
+      "date": "2026-11-24",
+      "from": "2026-11-24",
+      "to": "2026-11-24",
+      "title": "B站动态修复",
+      "summary": "新订阅不再补发历史动态，纯文字动态卡片去掉空封面。",
+      "tags": [
+        "B站"
+      ],
+      "highlights": [
+        {
+          "kind": "fix",
+          "date": "2026-11-24",
+          "text": "新订阅UP主时不再因置顶动态补发一整页历史动态。",
+          "commits": [
+            "6f3c54f"
+          ]
+        },
+        {
+          "kind": "fix",
+          "date": "2026-11-24",
+          "text": "纯文字动态卡片不再显示空白封面占位。",
+          "commits": [
+            "da199c9"
+          ]
+        }
+      ]
+    },
     {
       "version": "v2.0.7",
       "date": "2026-11-24",
