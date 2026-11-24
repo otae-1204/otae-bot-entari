@@ -104,19 +104,50 @@ async def test_links_followed_by_cjk_punctuation_still_parse(bili):
         api, f"https://www.bilibili.com/opus/{item_id}，很好看"
     )
     assert (parsed.kind, parsed.value) == (dynamic, item_id)
+    assert parsed.url == f"https://www.bilibili.com/opus/{item_id}"
     parsed = await bili.api.links.parse_link(api, f"https://live.bilibili.com/{value}！")
     assert (parsed.kind, parsed.value) == (live, value)
-    # Every stop mark ends the URL, not just the three reported ones.
-    for mark in bili.api.links.LINK_STOP_CHARS:
+    assert parsed.url == f"https://live.bilibili.com/{value}"
+    # Any non-ASCII tail ends the URL: opening brackets, Chinese quotes and
+    # text pasted with no separator at all. A blacklist of full-width marks
+    # kept missing these and swallowed the rest of the sentence.
+    for tail in (
+        "速来",
+        "（开播了）",
+        "【直播】",
+        "「直播间」",
+        "《直播》",
+        "」",
+        "。。",
+    ):
         parsed = await bili.api.links.parse_link(
-            api, f"https://live.bilibili.com/{value}{mark}速来"
+            api, f"https://live.bilibili.com/{value}{tail}"
         )
-        assert (parsed.kind, parsed.value) == (live, value), mark
+        assert (parsed.kind, parsed.value) == (live, value), tail
+    parsed = await bili.api.links.parse_link(
+        api, f"「https://t.bilibili.com/{item_id}」"
+    )
+    assert (parsed.kind, parsed.value) == (dynamic, item_id)
     # ASCII brackets still only trim at the end of the match.
     parsed = await bili.api.links.parse_link(
         api, f"(https://live.bilibili.com/{value})"
     )
     assert (parsed.kind, parsed.value) == (live, value)
+
+
+@asyncio_test
+async def test_url_stops_at_astral_chars_and_markdown_wrappers(bili):
+    api = SimpleNamespace(session=_FakeSession(""))
+    live, value = bili.api.links.KIND_LIVE, "25731103"
+    url = f"https://live.bilibili.com/{value}"
+    for tail in ("🎉", "\x7f速来"):
+        parsed = await bili.api.links.parse_link(api, f"看直播 {url}{tail}")
+        assert (parsed.kind, parsed.value) == (live, value), repr(tail)
+        assert parsed.url == url
+    for wrapped in (f"`{url}`", f"**{url}**", f"~~{url}~~", f"|{url}|"):
+        parsed = await bili.api.links.parse_link(api, wrapped)
+        assert (parsed.kind, parsed.value) == (live, value), wrapped
+        assert parsed.url == url
 
 
 @asyncio_test

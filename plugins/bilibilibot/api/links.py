@@ -12,15 +12,12 @@ from .mapping import bvid_from_url
 
 
 BV_RE = re.compile(r"\bBV[0-9A-Za-z]{10}\b")
-# Chat text pastes links straight into the sentence, so the match must end at
-# the first full-width mark: those never appear in a Bilibili link (they would
-# arrive percent-encoded), and swallowing them made the anchored path patterns
-# below reject the whole URL.
-LINK_STOP_CHARS = (
-    "\uff0c\u3002\uff01\uff1f\u3001\uff1b\uff1a\uff09\u3011\u300b\u201d\u2019"
-    "\u2026\u301c\uff5e\u3000"
-)
-URL_RE = re.compile(rf"https?://[^\s<>\"{LINK_STOP_CHARS}]+")
+# Chat text pastes links straight into the sentence. Bilibili links are ASCII,
+# so stop at whitespace, angle quotes, control characters and any non-ASCII
+# character (CJK punctuation or Chinese text directly after the URL). A
+# punctuation blacklist always missed a variant and swallowed the following
+# sentence, which made the anchored path patterns below reject the whole URL.
+URL_RE = re.compile(r"https?://[^\s<>\"\x00-\x1f\x7f-\U0010ffff]+")
 # Path-only patterns: the host is checked separately, and a full match keeps
 # unrelated pages (e.g. live.bilibili.com/activity/...) from parsing as ids.
 LIVE_RE = re.compile(r"^/(?:blanc/|h5/)?(\d+)/?$")
@@ -28,8 +25,9 @@ T_DYNAMIC_RE = re.compile(r"^/(\d+)/?$")
 OPUS_RE = re.compile(r"^/opus/(\d+)/?$")
 DYNAMIC_RE = re.compile(r"^/dynamic/(\d+)/?$")
 SHORT_LINK_HOST = "b23.tv"
-# ASCII punctuation that commonly trails a pasted link in a chat message.
-LINK_TRAILING_CHARS = ")]}>,.;:!?'\""
+# ASCII punctuation that commonly trails a pasted link in a chat message,
+# including the wrappers used by Markdown and inline-code formatting.
+LINK_TRAILING_CHARS = ")]}>,.;:!?'\"`*~|"
 
 
 def _hostname(parsed: Any) -> str:
