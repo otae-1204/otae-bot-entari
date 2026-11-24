@@ -27,7 +27,13 @@ from . import live as live_api
 from . import rsshub as rsshub_api
 from . import space as space_api
 from .links import ParsedLink
-from .session import BiliAPIError, BiliRiskControlError, BiliSession
+from .session import (
+    BiliAPIError,
+    BiliRiskControlError,
+    BiliSession,
+    DynamicDetailUnavailable,
+    DynamicEnrichDeferred,
+)
 
 
 class BiliApi:
@@ -84,6 +90,23 @@ class BiliApi:
                 json.dumps(item, ensure_ascii=False).encode("utf-8")
             ),
         )
+        # 普通动态空壳的详情单独一档：键空间与官号互不相干，官号回查不会把
+        # 普通动态挤出缓存。
+        self._generic_dynamic_details: AsyncTTLCache[str, dict[str, Any]] = AsyncTTLCache(
+            ttl_seconds=300,
+            max_entries=64,
+            max_bytes=4 * 1024 * 1024,
+            sizeof=lambda item: len(
+                json.dumps(item, ensure_ascii=False).encode("utf-8")
+            ),
+        )
+        # 确实不可见（已删除/被隐藏）的详情缓存更久：这类结果不会自愈，重查只是
+        # 无谓请求；临时失败（超时/风控）不进这里。
+        self._dynamic_detail_misses: AsyncTTLCache[str, bool] = AsyncTTLCache(
+            ttl_seconds=1800,
+            max_entries=256,
+            max_bytes=256 * 1024,
+        )
         # Transport, cookies, WBI keys and risk-control live in the session.
         self.session = BiliSession(
             timeout=timeout,
@@ -97,6 +120,8 @@ class BiliApi:
 
     async def aclose(self) -> None:
         await self._dynamic_details.close()
+        await self._generic_dynamic_details.close()
+        await self._dynamic_detail_misses.close()
         await self.session.aclose()
 
     @property
@@ -387,7 +412,53 @@ class BiliApi:
     async def dynamic_items(
         self, uid: str, *, deadline: float | None = None
     ) -> list[dict[str, Any]]:
+        """Raw feed page; enrichment is deliberately a separate, opt-in step."""
         return await space_api.dynamic_items(self, uid, deadline=deadline)
+
+    async def enrich_empty_dynamic_items(
+        self,
+        items: list[dict[str, Any]],
+        *,
+        deadline: float | None = None,
+        after_ts: int = 0,
+        limit: int = space_api.DYNAMIC_DETAIL_LIMIT,
+        release_ids: set[str] | None = None,
+        skip_ids: set[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Fill empty shells among exactly the items the poller selected."""
+        return await space_api.enrich_empty_dynamic_items(
+            self,
+            items,
+            deadline=deadline,
+            after_ts=after_ts,
+            limit=limit,
+            release_ids=release_ids,
+            skip_ids=skip_ids,
+        )
+
+    def has_cached_dynamic_detail(self, item_id: str) -> bool:
+        """Whether a lookup would be answered by a completed success/miss entry.
+
+        Used by enrichment so a cache hit is not reported as new progress.
+        """
+        return self._dynamic_detail_misses.contains(
+            item_id
+        ) or self._generic_dynamic_details.contains(item_id)
+
+    async def dynamic_detail(
+        self, item_id: str, *, deadline: float | None = None
+    ) -> dict[str, Any]:
+        if self._dynamic_detail_misses.peek(item_id):
+            raise DynamicDetailUnavailable(f"动态 {item_id} 不可见")
+        try:
+            return await self._generic_dynamic_details.get_or_create(
+                item_id,
+                lambda: space_api.dynamic_detail(self, item_id, deadline=deadline),
+            )
+        except DynamicDetailUnavailable:
+            # 只有“确实不可见”值得记 miss；超时/风控等临时失败留待下一轮重试。
+            self._dynamic_detail_misses.put(item_id, True)
+            raise
 
     async def official_dynamic_detail(
         self, item_id: str, *, deadline: float | None = None
@@ -506,5 +577,7 @@ __all__ = [
     "BiliApi",
     "BiliRiskControlError",
     "BiliSession",
+    "DynamicDetailUnavailable",
+    "DynamicEnrichDeferred",
     "ParsedLink",
 ]
