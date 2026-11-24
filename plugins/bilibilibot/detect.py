@@ -167,13 +167,16 @@ def detect_dynamic(
     *,
     seen_ids: set[str],
     video_subscribed: bool,
+    live_subscribed: bool = False,
+    live_room_id: str = "",
 ) -> tuple[TargetInfo, list[BiliEvent], list[SeenItem]]:
     """Handle a feed page oldest-first.
 
     Returns the new state, the events to push and the items that are only to be
     recorded. The third list carries video dynamics when the same UP is also
-    watched for videos: the video subscription already pushes them, so the
-    dynamic copy is marked as read without a second notification.
+    watched for videos, and live-recommendation dynamics when the same UP is
+    watched for live: those subscriptions already push them, so the dynamic copy
+    is marked as read without a second notification.
     """
     if not cards:
         return prev, [], []
@@ -201,6 +204,12 @@ def detect_dynamic(
         if video_subscribed and bvid_from_card(card):
             marked.append(seen)
             continue
+        if live_subscribed and card.live_dynamic:
+            # 只去重「直播推荐动态」本身，正文里链到直播间的普通动态照常推送。
+            # 两端直播间都已知且不同 = 推的是别的直播间，不是订阅开播的重复卡。
+            if not (live_room_id and card.room_id and live_room_id != card.room_id):
+                marked.append(seen)
+                continue
         card.author = card.author or next_name or prev.uid
         card.avatar_url = card.avatar_url or next_avatar
         events.append(BiliEvent(KIND_DYNAMIC, prev.uid, card, seen=seen))

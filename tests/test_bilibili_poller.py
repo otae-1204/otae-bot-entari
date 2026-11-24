@@ -7,6 +7,7 @@ transaction, outbox fan-out, crash replay and backlog back-pressure.
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 import threading
 from time import perf_counter
@@ -646,6 +647,141 @@ async def test_dynamic_first_poll_uses_newest_published_item(bili, tmp_path):
         )
         await poller.tick_dynamic()
         assert await store.outbox_count() == 1
+    finally:
+        await store.close()
+
+
+# --- live-recommendation dynamics --------------------------------------------
+
+
+LIVE_RCMD_ID = "1269827911680000004"
+
+
+def _live_rcmd_item(room_id: int | None, item_id: str = LIVE_RCMD_ID):
+    """A top-level live-recommendation feed entry, in the real feed shape."""
+    live_info = {"title": "试试新麦"}
+    if room_id is not None:
+        live_info["room_id"] = room_id
+    return {
+        "id_str": item_id,
+        "type": "DYNAMIC_TYPE_LIVE_RCMD",
+        "modules": {
+            "module_author": {"pub_ts": 1794493250, "name": "UP"},
+            "module_dynamic": {
+                "desc": None,
+                "major": {
+                    "type": "MAJOR_TYPE_LIVE_RCMD",
+                    "live_rcmd": {"content": json.dumps({"live_play_info": live_info})},
+                },
+            },
+        },
+    }
+
+
+async def _open_live_and_dynamic_subscription(bili, tmp_path, room_id: str):
+    """The real wiring: live target + subscription, plus a dynamic subscription."""
+    store = await open_store(bili, tmp_path)
+    await store.upsert_target(
+        bili.models.TargetInfo("live", "341368", room_id=room_id)
+    )
+    await store.add_subscription("live", "341368", "group", "900")
+    await store.upsert_target(bili.models.TargetInfo("dynamic", "341368"))
+    await store.add_subscription("dynamic", "341368", "group", "900")
+    return store
+
+
+@asyncio_test
+async def test_live_recommendation_for_the_subscribed_room_is_seen_not_pushed(
+    bili, tmp_path
+):
+    store = await _open_live_and_dynamic_subscription(bili, tmp_path, "544803")
+    try:
+        api = FakeApi(items={"341368": [_live_rcmd_item(544803)]})
+        poller = bili.poller.Poller(api, store, intervals={"dynamic": 0})
+        await poller.tick_dynamic()
+        # 开播卡已经由直播订阅推送，动态副本只记录已读，不进 outbox。
+        assert await store.outbox_count() == 0
+        assert await store.seen_ids("dynamic", "341368", [LIVE_RCMD_ID]) == {
+            LIVE_RCMD_ID
+        }
+    finally:
+        await store.close()
+
+
+@asyncio_test
+async def test_live_recommendation_for_a_foreign_room_is_pushed(bili, tmp_path):
+    store = await _open_live_and_dynamic_subscription(bili, tmp_path, "544803")
+    try:
+        api = FakeApi(items={"341368": [_live_rcmd_item(999999)]})
+        poller = bili.poller.Poller(api, store, intervals={"dynamic": 0})
+        await poller.tick_dynamic()
+        # 推的是别的直播间，不是订阅开播的重复副本，照常推送。
+        rows = await store.outbox_rows()
+        assert len(rows) == 1
+        card = json.loads(rows[0].card_json)
+        assert card["url"] == "https://live.bilibili.com/999999"
+        assert card["room_id"] == "999999"
+    finally:
+        await store.close()
+
+
+@asyncio_test
+async def test_live_recommendation_is_skipped_when_the_room_was_never_seen(
+    bili, tmp_path
+):
+    store = await _open_live_and_dynamic_subscription(bili, tmp_path, "")
+    try:
+        api = FakeApi(items={"341368": [_live_rcmd_item(544803)]})
+        poller = bili.poller.Poller(api, store, intervals={"dynamic": 0})
+        await poller.tick_dynamic()
+        # 订阅的直播间号还没采到：排除不了是重复副本，按重复处理。
+        assert await store.outbox_count() == 0
+        assert await store.seen_ids("dynamic", "341368", [LIVE_RCMD_ID]) == {
+            LIVE_RCMD_ID
+        }
+    finally:
+        await store.close()
+
+
+@asyncio_test
+async def test_live_recommendation_is_pushed_without_a_live_subscription(
+    bili, tmp_path
+):
+    store = await open_store(bili, tmp_path)
+    try:
+        await store.upsert_target(bili.models.TargetInfo("dynamic", "341368"))
+        await store.add_subscription("dynamic", "341368", "group", "900")
+        api = FakeApi(items={"341368": [_live_rcmd_item(544803)]})
+        poller = bili.poller.Poller(api, store, intervals={"dynamic": 0})
+        await poller.tick_dynamic()
+        # 只订阅动态、没订阅直播：不存在开播卡重复，推荐卡按普通动态推送。
+        rows = await store.outbox_rows()
+        assert len(rows) == 1
+        card = json.loads(rows[0].card_json)
+        assert card["live_dynamic"] is True
+        assert card["url"] == "https://live.bilibili.com/544803"
+    finally:
+        await store.close()
+
+
+@asyncio_test
+async def test_live_recommendation_is_skipped_when_the_live_target_row_is_missing(
+    bili, tmp_path
+):
+    store = await open_store(bili, tmp_path)
+    try:
+        # 直播订阅还在，但目标行没采到 room_id（这里整个目标行都缺失）：
+        # poller 按房间未知传入，detect 按重复处理。
+        await store.add_subscription("live", "341368", "group", "900")
+        await store.upsert_target(bili.models.TargetInfo("dynamic", "341368"))
+        await store.add_subscription("dynamic", "341368", "group", "900")
+        api = FakeApi(items={"341368": [_live_rcmd_item(544803)]})
+        poller = bili.poller.Poller(api, store, intervals={"dynamic": 0})
+        await poller.tick_dynamic()
+        assert await store.outbox_count() == 0
+        assert await store.seen_ids("dynamic", "341368", [LIVE_RCMD_ID]) == {
+            LIVE_RCMD_ID
+        }
     finally:
         await store.close()
 

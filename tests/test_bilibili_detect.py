@@ -245,6 +245,115 @@ def test_detect_dynamic_pushes_video_dynamics_without_video_subscription(bili):
     assert marked == []
 
 
+def test_detect_dynamic_marks_live_dynamics_when_live_subscribed(bili):
+    prev = bili.models.TargetInfo("dynamic", "123")
+    card = dynamic_card(bili, "live", NOW)
+    card.live_dynamic = True
+    card.room_id = "544803"
+    updated, events, marked = bili.detect.detect_dynamic(
+        prev,
+        [card],
+        seen_ids=set(),
+        video_subscribed=False,
+        live_subscribed=True,
+        live_room_id="544803",
+    )
+    # 订阅的直播间已经发过开播卡，这条推荐动态只标记已读。
+    assert events == []
+    assert [item.item_id for item in marked] == ["live"]
+    assert updated.latest_id == "live"
+
+
+def test_detect_dynamic_marks_live_dynamic_without_room_id(bili):
+    prev = bili.models.TargetInfo("dynamic", "123")
+    card = dynamic_card(bili, "live", NOW)
+    card.live_dynamic = True
+    card.room_id = ""
+    _, events, marked = bili.detect.detect_dynamic(
+        prev,
+        [card],
+        seen_ids=set(),
+        video_subscribed=False,
+        live_subscribed=True,
+        live_room_id="544803",
+    )
+    # 卡片没带直播间号时排除不了是订阅直播间，按重复处理更安全。
+    assert events == []
+    assert [item.item_id for item in marked] == ["live"]
+
+
+def test_detect_dynamic_marks_live_dynamic_when_subscribed_room_unknown(bili):
+    prev = bili.models.TargetInfo("dynamic", "123")
+    card = dynamic_card(bili, "live", NOW)
+    card.live_dynamic = True
+    card.room_id = "544803"
+    _, events, marked = bili.detect.detect_dynamic(
+        prev,
+        [card],
+        seen_ids=set(),
+        video_subscribed=False,
+        live_subscribed=True,
+        live_room_id="",
+    )
+    # 订阅的直播间号还没采到时同样按重复处理，宁可少一条动态也不重复推开播。
+    assert events == []
+    assert [item.item_id for item in marked] == ["live"]
+
+
+def test_detect_dynamic_defensively_ignores_room_id_on_a_normal_dynamic(bili):
+    prev = bili.models.TargetInfo("dynamic", "123")
+    card = dynamic_card(bili, "live-text", NOW, url="https://live.bilibili.com/544803")
+    card.description = "今晚八点直播 https://live.bilibili.com/544803"
+    # 防御性用例：映射层只给顶层直播推荐卡写 room_id，普通动态不会带它；
+    # 这里手工构造，钉住 detect 只认 live_dynamic 标记、不扫正文/URL/room_id
+    # 的契约，映射层日后若误写 room_id 也不会吃掉正常动态。
+    card.room_id = "544803"
+    _, events, marked = bili.detect.detect_dynamic(
+        prev,
+        [card],
+        seen_ids=set(),
+        video_subscribed=False,
+        live_subscribed=True,
+        live_room_id="544803",
+    )
+    # 普通动态正文里链到自己的直播间不是直播推荐卡，照常推送。
+    assert [event.card.item_id for event in events] == ["live-text"]
+    assert marked == []
+
+
+def test_detect_dynamic_skips_only_the_subscribed_live_room(bili):
+    prev = bili.models.TargetInfo("dynamic", "123")
+    own = dynamic_card(bili, "own-live", NOW)
+    own.live_dynamic = True
+    own.room_id = "544803"
+    foreign = dynamic_card(bili, "foreign-live", NOW + 1)
+    foreign.live_dynamic = True
+    foreign.room_id = "999999"
+    _, events, marked = bili.detect.detect_dynamic(
+        prev,
+        [own, foreign],
+        seen_ids=set(),
+        video_subscribed=False,
+        live_subscribed=True,
+        live_room_id="544803",
+    )
+    # 推的是别的直播间：不是订阅开播的重复卡，照常推送。
+    assert [event.card.item_id for event in events] == ["foreign-live"]
+    assert [item.item_id for item in marked] == ["own-live"]
+
+
+def test_detect_dynamic_pushes_live_dynamics_without_live_subscription(bili):
+    prev = bili.models.TargetInfo("dynamic", "123")
+    card = dynamic_card(bili, "live", NOW)
+    card.live_dynamic = True
+    card.room_id = "544803"
+    _, events, marked = bili.detect.detect_dynamic(
+        prev, [card], seen_ids=set(), video_subscribed=False
+    )
+    assert [event.card.item_id for event in events] == ["live"]
+    assert marked == []
+
+
 def test_detect_dynamic_without_cards_keeps_previous_state(bili):
     prev = bili.models.TargetInfo("dynamic", "123", latest_id="x", latest_ts=5)
     updated, events, marked = bili.detect.detect_dynamic(
