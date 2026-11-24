@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -51,6 +52,61 @@ def _forward_text(item: dict[str, Any]) -> str:
     return text or str((dynamic.get("desc") or {}).get("text") or "")
 
 
+def _json_object(value: Any) -> dict[str, Any] | None:
+    """Bilibili ships some nested payloads as JSON strings instead of objects."""
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except (TypeError, ValueError):
+            return None
+        return parsed if isinstance(parsed, dict) else None
+    return None
+
+
+def _live_rcmd_major(item: dict[str, Any]) -> dict[str, Any] | None:
+    """The live-recommendation major of a top-level dynamic, if it is one.
+
+    Only the entry itself counts. A forwarded live recommendation is an ordinary
+    forward whose `orig` happens to be a live card, so it must stay a normal
+    dynamic card: no room id, no live URL, and no `live_dynamic` mark that the
+    detection layer could deduplicate against the live subscription.
+
+    Recognition is gated on the explicit type strings only: a genuine live card
+    (`DYNAMIC_TYPE_LIVE` / `MAJOR_TYPE_LIVE`) may also carry a `live_rcmd`
+    payload, and treating that as a live-recommendation dynamic would rewrite
+    its URL and silently deduplicate it.
+    """
+    if not isinstance(item, dict):
+        return None
+    dynamic = (item.get("modules") or {}).get("module_dynamic") or {}
+    major = dynamic.get("major") or {}
+    if (
+        item.get("type") == "DYNAMIC_TYPE_LIVE_RCMD"
+        or major.get("type") == "MAJOR_TYPE_LIVE_RCMD"
+    ):
+        return major
+    return None
+
+
+def _live_rcmd_room_id(major: dict[str, Any]) -> str:
+    """Extract the room id from a live-recommendation dynamic, if present."""
+    rcmd = _json_object(major.get("live_rcmd")) or {}
+    for key in ("room_id", "roomid"):
+        value = rcmd.get(key)
+        if value:
+            return str(value)
+    content = _json_object(rcmd.get("content"))
+    if content:
+        info = _json_object(content.get("live_play_info")) or content
+        for key in ("room_id", "roomid"):
+            value = info.get(key)
+            if value:
+                return str(value)
+    return ""
+
+
 def dynamic_item_to_card(item: dict[str, Any], uid: str) -> BiliCard:
     """Map one dynamic feed entry to a card (public form of the old private helper)."""
     modules = item.get("modules") or {}
@@ -60,9 +116,13 @@ def dynamic_item_to_card(item: dict[str, Any], uid: str) -> BiliCard:
     major = dynamic.get("major") or {}
     opus = major.get("opus") or {}
     additional = dynamic.get("additional") or {}
+    live_major = _live_rcmd_major(item)
+    live_room_id = _live_rcmd_room_id(live_major) if live_major is not None else ""
     title = "发布了新动态"
     cover = ""
     url = f"https://t.bilibili.com/{item.get('id_str')}"
+    if live_room_id:
+        url = f"https://live.bilibili.com/{live_room_id}"
 
     if major.get("type") == "MAJOR_TYPE_OPUS":
         title = str(opus.get("title") or title)
@@ -117,8 +177,10 @@ def dynamic_item_to_card(item: dict[str, Any], uid: str) -> BiliCard:
         url=url,
         badge="DYNAMIC",
         uid=uid,
+        room_id=live_room_id,
         item_id=bvid_from_url(url) or str(item.get("id_str") or ""),
         published_at=int(author.get("pub_ts") or 0),
+        live_dynamic=live_major is not None,
         lottery_reason=lottery_reason(item) if applies_to(uid) else "",
     )
 

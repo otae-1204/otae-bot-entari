@@ -244,13 +244,20 @@ class Poller:
         seen_ids = await self.store.seen_ids(
             KIND_DYNAMIC, target.uid, [card.item_id for card in cards if card.item_id]
         )
+        live_subscribed = await self._live_subscribed(target.uid)
+        live_room_id = ""
+        if live_subscribed:
+            live_target = await self.store.get_target(KIND_LIVE, target.uid)
+            live_room_id = live_target.room_id if live_target else ""
         updated, events, marked = detect_dynamic(
             target,
             cards,
             seen_ids=seen_ids,
             video_subscribed=await self._video_subscribed(target.uid),
+            live_subscribed=live_subscribed,
+            live_room_id=live_room_id,
         )
-        # Video dynamics are marked as seen without being pushed.
+        # Video/live dynamics are marked as seen without being pushed.
         return updated, events, seen_items_of(events) + marked
 
     def log_video_check_failure(self, uid: str, exc: Exception) -> None:
@@ -267,6 +274,10 @@ class Poller:
     async def _video_subscribed(self, uid: str) -> bool:
         """A UP watched for both videos and dynamics must not get a double push."""
         return bool(await self.store.subscriptions_for_target(KIND_VIDEO, uid))
+
+    async def _live_subscribed(self, uid: str) -> bool:
+        """A UP watched for both live and dynamics must not get a double push."""
+        return bool(await self.store.subscriptions_for_target(KIND_LIVE, uid))
 
     async def _recipients_for(self, events: list[BiliEvent]) -> dict[tuple[str, str], list[tuple[str, str]]]:
         """Expand each event into its current subscribers (one query per target)."""
