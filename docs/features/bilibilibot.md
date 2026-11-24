@@ -19,7 +19,7 @@
 
 ## 链接预览
 
-非指令消息中含 `bilibili.com`、`b23.tv` 或 `BV` 时，解析其中的视频（BV 号、`b23.tv` 短链）或直播间链接，回复一张卡片；解析失败静默跳过。
+非指令消息中含 `bilibili.com`、`b23.tv` 或 `BV` 时，解析其中的视频（BV 号、`b23.tv` 短链）、直播间（`live.bilibili.com/<房间号>`，可带 `blanc/` 或 `h5/` 前缀）或动态（`t.bilibili.com/<id>`、`bilibili.com/opus/<id>`、移动端 `m.bilibili.com/dynamic/<id>`，含 `b23.tv` 短链），回复一张卡片。直播间与动态只认锚定整条路径的地址，`live.bilibili.com/activity/...`、`t.bilibili.com/topic/...` 这类页面不会被误当成房间号或动态；解析失败或动态不可见时静默跳过。
 
 ## 配置
 

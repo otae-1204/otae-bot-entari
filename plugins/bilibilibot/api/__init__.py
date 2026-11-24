@@ -27,6 +27,7 @@ from . import live as live_api
 from . import rsshub as rsshub_api
 from . import space as space_api
 from .links import ParsedLink
+from .mapping import dynamic_item_to_card
 from .session import (
     BiliAPIError,
     BiliRiskControlError,
@@ -569,6 +570,10 @@ class BiliApi:
             # A live link always carries a room number, never a UID.
             target = await self.resolve_live_by_room(parsed.value)
             return await self.live_card(target)
+        if parsed.kind == KIND_DYNAMIC:
+            item = await self.dynamic_detail(parsed.value)
+            author = (item.get("modules") or {}).get("module_author") or {}
+            return dynamic_item_to_card(item, str(author.get("mid") or ""))
         raise BiliAPIError(f"unsupported link type: {parsed.kind}")
 
 
