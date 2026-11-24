@@ -1,15 +1,52 @@
 {
   "schema": 2,
-  "head": "da199c9",
+  "head": "e9014cf",
   "generated_from": {
     "first_commit": "8e1b455",
     "first_date": "2026-06-17",
     "last_date": "2026-11-24",
-    "commit_count": 564,
+    "commit_count": 567,
     "merge_commit_count": 36,
-    "version_count": 64
+    "version_count": 71
   },
   "releases": [
+    {
+      "version": "v2.0.9",
+      "date": "2026-11-24",
+      "from": "2026-11-24",
+      "to": "2026-11-24",
+      "title": "B站动态预览与去重修复",
+      "summary": "支持聊天里预览动态与 Opus 链接，修复空壳动态缺正文与直播推荐动态重复推送。",
+      "tags": [
+        "B站"
+      ],
+      "highlights": [
+        {
+          "kind": "feat",
+          "date": "2026-11-24",
+          "text": "支持在聊天消息里自动预览 B 站动态与 Opus 链接（含移动端链接与 b23 短链），并收紧直播与动态路径识别避免误判活动页。",
+          "commits": [
+            "e9014cf"
+          ]
+        },
+        {
+          "kind": "fix",
+          "date": "2026-11-24",
+          "text": "动态流返回无正文空壳时自动回查详情补全正文与发布时间，临时失败时延后重试并避免单条坏动态阻塞后续更新。",
+          "commits": [
+            "048e670"
+          ]
+        },
+        {
+          "kind": "fix",
+          "date": "2026-11-24",
+          "text": "同一 UP 同时订阅直播和动态时不再重复推送直播推荐动态，转发与正文贴直播间链接的普通动态不受影响。",
+          "commits": [
+            "04e319a"
+          ]
+        }
+      ]
+    },
     {
       "version": "v2.0.8",
       "date": "2026-11-24",
