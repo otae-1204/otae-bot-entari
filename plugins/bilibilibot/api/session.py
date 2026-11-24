@@ -31,7 +31,11 @@ RATE_LIMITED_HOSTS = ("api.bilibili.com", "api.live.bilibili.com")
 
 
 class BiliAPIError(Exception):
-    pass
+    """A Bilibili call failed; ``code`` is set when the API answered with one."""
+
+    def __init__(self, message: str = "", *, code: int | None = None):
+        super().__init__(message)
+        self.code = code
 
 
 class DynamicDetailUnavailable(BiliAPIError):
@@ -51,16 +55,34 @@ class DynamicEnrichDeferred(BiliAPIError):
     or outbox rows are written and the cursor stays put, so the same window is
     retried on the next tick instead of pushing or marking an empty shell.
 
-    ``progress`` counts the items this round did resolve (detail filled or
-    confirmed invisible) before it gave up. A round that resolved something is
-    converging — the cached successes make the retry cheaper — so the poller
-    keeps the normal cadence for it and only backs off when rounds stop making
-    progress.
+    ``resolved_ids`` lists the items this round newly resolved (detail filled
+    or newly confirmed invisible); ``progress`` is its size. Cache hits are not
+    included: they were already resolved by an earlier round. The poller also
+    unions these IDs across rounds, so a cache eviction that forces a re-fetch
+    does not look like progress either. A round that resolved something is
+    converging, so the poller keeps the normal cadence for it and only backs
+    off when rounds stop making progress.
+
+    ``item_id`` names the single shell whose transient failure deferred the
+    round, so the poller can require that same item to fail repeatedly before
+    releasing it. ``released_ids`` lists the shells released this round; they
+    count as progress and must not be queried again in the same window.
     """
 
-    def __init__(self, message: str, *, progress: int = 0):
+    def __init__(
+        self,
+        message: str,
+        *,
+        progress: int = 0,
+        resolved_ids=(),
+        item_id: str | None = None,
+        released_ids=(),
+    ):
         super().__init__(message)
+        self.resolved_ids = frozenset(str(item) for item in resolved_ids)
         self.progress = max(0, int(progress))
+        self.item_id = item_id or None
+        self.released_ids = frozenset(str(item) for item in released_ids)
 
 
 class BiliRiskControlError(BiliAPIError):
@@ -292,7 +314,8 @@ class BiliSession:
             raise BiliRiskControlError(label)
         if code != 0:
             raise BiliAPIError(
-                f"Bilibili API error for {label}: {code} {data.get('message') or data.get('msg') or ''}"
+                f"Bilibili API error for {label}: {code} {data.get('message') or data.get('msg') or ''}",
+                code=code,
             )
         return data
 

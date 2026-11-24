@@ -31,6 +31,13 @@ VIDEO_LIST_URL = "https://api.bilibili.com/x/space/wbi/arc/search"
 VIDEO_VIEW_URL = "https://api.bilibili.com/x/web-interface/view"
 DYNAMIC_URL = "https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space"
 DYNAMIC_DETAIL_URL = "https://api.bilibili.com/x/polymer/web-dynamic/v1/detail"
+# Business codes that mean the dynamic can never be shown: deleted, hidden, or
+# an id that does not exist. Retrying these as transient failures would defer
+# the whole window forever and block the UP's newer posts behind it.
+# 4101105 is deliberately absent: public API docs describe it as a retryable
+# "please refresh" error, so it goes through the repeated-failure release path
+# instead of being cached as permanently invisible.
+DYNAMIC_UNAVAILABLE_CODES = frozenset({-404, 4101131})
 
 VIDEO_ROUTE = "/bilibili/user/video/{uid}"
 DYNAMIC_ROUTE = "/bilibili/user/dynamic/{uid}"
@@ -318,24 +325,27 @@ def _dynamic_pub_ts(item: dict[str, Any]) -> int:
         return 0
 
 
-def _carry_feed_pub_ts(shell: dict[str, Any], detail: dict[str, Any]) -> None:
+def _carry_feed_pub_ts(shell: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
     """Keep the feed's publish time when the detail omits or backdates it.
 
     Detection skips any card not newer than the stored cursor. A detail item
     without ``pub_ts`` (or with an older one) would make the filled shell
     silently disappear, so the feed timestamp wins whenever it is newer.
+
+    Returns a copy of the affected path: ``detail`` may be the dict stored in
+    the 300 s cache, and enriching one feed item must not rewrite it for every
+    other caller.
     """
     feed_ts = _dynamic_pub_ts(shell)
     if not feed_ts or _dynamic_pub_ts(detail) >= feed_ts:
-        return
+        return detail
     modules = detail.get("modules")
     if not isinstance(modules, dict):
-        return
+        return detail
     author = modules.get("module_author")
-    if not isinstance(author, dict):
-        author = {}
-        modules["module_author"] = author
+    author = dict(author) if isinstance(author, dict) else {}
     author["pub_ts"] = feed_ts
+    return {**detail, "modules": {**modules, "module_author": author}}
 
 
 async def enrich_empty_dynamic_items(
@@ -345,6 +355,8 @@ async def enrich_empty_dynamic_items(
     deadline: float | None = None,
     after_ts: int = 0,
     limit: int = DYNAMIC_DETAIL_LIMIT,
+    release_ids: set[str] | None = None,
+    skip_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Replace feed shells with the detail item before detection.
 
@@ -358,10 +370,20 @@ async def enrich_empty_dynamic_items(
     budget, or a lookup fails transiently (timeout, risk control), the whole
     round raises `DynamicEnrichDeferred`: pushing a partially filled window
     would advance the cursor past the skipped shell and it would never be
-    retried. The exception carries how many items this round did resolve, so
-    the poller can tell a slowly converging window (retry at once) from one
-    that is stuck (back off). A shell whose detail is reported unavailable
-    keeps its placeholder; that result is cached and has nothing to retry.
+    retried. The exception carries how many items this round *newly* resolved,
+    so the poller can tell a slowly converging window (retry at once) from one
+    that is stuck (back off). Cache hits are excluded from that count: they
+    were resolved by an earlier round and must not keep a stuck window on the
+    normal cadence forever.
+
+    A shell whose detail is reported unavailable keeps its placeholder; that
+    result is cached and has nothing to retry. ``release_ids`` names shells the
+    poller has already seen fail repeatedly: those persistent transient
+    failures release their placeholder instead of deferring forever, and count
+    as progress for the round. Only listed ids qualify, so a shell that first
+    fails in a release round still gets its own retry rounds instead of losing
+    its content immediately. ``skip_ids`` are the shells released in an earlier
+    round: they stay placeholders and are not queried again.
     """
     loop = asyncio.get_running_loop()
     budget_deadline = loop.time() + DYNAMIC_ENRICH_BUDGET_SECONDS
@@ -376,27 +398,56 @@ async def enrich_empty_dynamic_items(
         raise DynamicEnrichDeferred(
             f"本轮有 {len(eligible)} 条动态需要回查详情，超过单轮上限 {limit}"
         )
-    resolved = 0
+    release_ids = release_ids or set()
+    skip_ids = skip_ids or set()
+    resolved_ids: set[str] = set()
+    released_ids: set[str] = set()
     for index in eligible:
         item_id = str(items[index].get("id_str") or "")
+        # A shell released in an earlier round is already a placeholder; asking
+        # again only burns the budget and repeats the warning.
+        if item_id in skip_ids:
+            continue
         if loop.time() >= budget_deadline - 0.25:
             raise DynamicEnrichDeferred(
-                f"动态详情回查预算用完，{item_id} 留待下一轮", progress=resolved
+                f"动态详情回查预算用完，{item_id} 留待下一轮",
+                progress=len(resolved_ids),
+                resolved_ids=resolved_ids,
+                released_ids=released_ids,
             )
+        # A cache hit was resolved by an earlier round; only newly advanced
+        # items may reset the poller's no-progress deferral counter.
+        was_cached = api.has_cached_dynamic_detail(item_id)
         try:
             detail = await api.dynamic_detail(item_id, deadline=budget_deadline)
         except DynamicDetailUnavailable:
             # Deleted/invisible: keep the placeholder shell, nothing to retry.
-            resolved += 1
+            if not was_cached:
+                resolved_ids.add(item_id)
             continue
         except BiliAPIError as exc:
+            if item_id in release_ids:
+                # Releasing one shell lets the window converge instead of
+                # blocking every newer post behind a permanently unreadable
+                # item. It counts as progress and is skipped from now on.
+                resolved_ids.add(item_id)
+                released_ids.add(item_id)
+                logger.warning(
+                    f"[bilibilibot] dynamic {item_id} detail still unavailable "
+                    f"after repeated rounds, releasing its shell to keep newer "
+                    f"posts moving: {compact_error(exc)}"
+                )
+                continue
             raise DynamicEnrichDeferred(
                 f"动态 {item_id} 详情临时不可用，本轮整体延后: {compact_error(exc)}",
-                progress=resolved,
+                progress=len(resolved_ids),
+                resolved_ids=resolved_ids,
+                item_id=item_id,
+                released_ids=released_ids,
             ) from exc
-        _carry_feed_pub_ts(items[index], detail)
-        items[index] = detail
-        resolved += 1
+        items[index] = _carry_feed_pub_ts(items[index], detail)
+        if not was_cached:
+            resolved_ids.add(item_id)
     return items
 
 
@@ -471,15 +522,25 @@ def _dynamic_has_content(item: dict[str, Any]) -> bool:
 async def dynamic_detail(
     api: Any, item_id: str, *, deadline: float | None = None
 ) -> dict[str, Any]:
-    data = await api._within(
-        f"dynamic detail {item_id}",
-        deadline,
-        lambda: api._get_json_with_risk_retry(
-            DYNAMIC_DETAIL_URL,
+    try:
+        data = await api._within(
             f"dynamic detail {item_id}",
-            params={"id": item_id, "features": "itemOpusStyle"},
-        ),
-    )
+            deadline,
+            lambda: api._get_json_with_risk_retry(
+                DYNAMIC_DETAIL_URL,
+                f"dynamic detail {item_id}",
+                params={"id": item_id, "features": "itemOpusStyle"},
+            ),
+        )
+    except BiliAPIError as exc:
+        if exc.code in DYNAMIC_UNAVAILABLE_CODES:
+            # A business code for "deleted/hidden/id does not exist" can never
+            # recover; classify it with the empty-item answer so the miss cache
+            # stops the retries instead of deferring the whole window forever.
+            raise DynamicDetailUnavailable(
+                f"动态 {item_id} 不可见: {compact_error(exc)}"
+            ) from exc
+        raise
     item = (data.get("data") or {}).get("item") or {}
     if str(item.get("id_str") or "") != item_id or not _dynamic_has_content(item):
         raise DynamicDetailUnavailable(f"动态 {item_id} 不可见")

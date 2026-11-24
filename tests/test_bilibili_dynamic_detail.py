@@ -182,7 +182,9 @@ class _FakeApi:
         # cached one is instant (BiliApi keeps successes 300 s, misses 1800 s).
         self.slow_seconds = slow_seconds
         self.clock = clock
+        self.requested_once: set[str] = set()
         self.cached_details: set[str] = set()
+        self.cached_misses: set[str] = set()
         self.detail_calls: list[str] = []
         self.enrich_calls: list[tuple[int, int, int]] = []
 
@@ -198,10 +200,10 @@ class _FakeApi:
             if item_id in self.transient:
                 # Same class as a transport timeout: retryable, not a miss.
                 raise self.space.BiliAPIError(f"Bilibili request timeout: {item_id}")
-            if item_id not in self.cached_details:
+            if item_id not in self.requested_once:
                 if self.clock is not None:
                     self.clock.advance(self.slow_seconds)
-                self.cached_details.add(item_id)
+                self.requested_once.add(item_id)
             return {"data": {"item": self.details.get(item_id, {})}}
         raise AssertionError(url)
 
@@ -209,19 +211,45 @@ class _FakeApi:
         return await self.space.dynamic_items(self, uid, deadline=deadline)
 
     async def dynamic_detail(self, item_id: str, *, deadline=None):
-        return await self.space.dynamic_detail(self, item_id, deadline=deadline)
+        if item_id in self.cached_misses:
+            raise self.space.DynamicDetailUnavailable(f"动态 {item_id} 不可见")
+        if item_id in self.cached_details:
+            return self.details[item_id]
+        try:
+            detail = await self.space.dynamic_detail(self, item_id, deadline=deadline)
+        except self.space.DynamicDetailUnavailable:
+            self.cached_misses.add(item_id)
+            raise
+        self.cached_details.add(item_id)
+        return detail
+
+    def has_cached_dynamic_detail(self, item_id: str) -> bool:
+        return item_id in self.cached_details or item_id in self.cached_misses
 
     async def _enrich_video_card(self, card, *, deadline=None):
         return await self.space.enrich_video_card(self, card, deadline=deadline)
 
     async def enrich_empty_dynamic_items(
-        self, items, *, deadline=None, after_ts=0, limit=None
+        self,
+        items,
+        *,
+        deadline=None,
+        after_ts=0,
+        limit=None,
+        release_ids=None,
+        skip_ids=None,
     ):
         if limit is None:
             limit = self.space.DYNAMIC_DETAIL_LIMIT
         self.enrich_calls.append((after_ts, limit, len(items)))
         return await self.space.enrich_empty_dynamic_items(
-            self, items, deadline=deadline, after_ts=after_ts, limit=limit
+            self,
+            items,
+            deadline=deadline,
+            after_ts=after_ts,
+            limit=limit,
+            release_ids=release_ids,
+            skip_ids=skip_ids,
         )
 
 
@@ -585,6 +613,37 @@ async def test_transient_failure_after_a_success_reports_progress(bili):
 
 
 @asyncio_test
+async def test_release_ids_only_free_the_shells_that_failed_repeatedly(bili):
+    feed = [_empty_draw("old"), _empty_draw("new")]
+    api = _fake(bili, feed, {}, transient={"old", "new"})
+
+    with pytest.raises(bili.api.DynamicEnrichDeferred) as excinfo:
+        await bili.api.space.enrich_empty_dynamic_items(api, feed, release_ids={"old"})
+
+    # The previously stuck shell is released and counts as progress, but the
+    # fresh one still gets its own retry rounds instead of losing its content
+    # on the first failure.
+    assert api.detail_calls == ["old", "new"]
+    assert excinfo.value.item_id == "new"
+    assert excinfo.value.progress == 1
+    assert excinfo.value.resolved_ids == {"old"}
+    assert excinfo.value.released_ids == {"old"}
+
+
+@asyncio_test
+async def test_already_released_shells_are_not_queried_again(bili):
+    feed = [_empty_draw("old")]
+    api = _fake(bili, feed, {}, transient={"old"})
+
+    items = await bili.api.space.enrich_empty_dynamic_items(
+        api, feed, release_ids={"old"}, skip_ids={"old"}
+    )
+
+    assert api.detail_calls == []
+    assert items[0] is feed[0]
+
+
+@asyncio_test
 async def test_invisible_detail_counts_as_progress_for_the_budget(bili, monkeypatch):
     feed = [_empty_draw("1"), _empty_draw("2"), _empty_draw("3")]
     clock = _FakeClock()
@@ -791,7 +850,7 @@ async def test_whole_page_with_six_shells_converges_instead_of_stalling(
 
 
 @asyncio_test
-async def test_three_consecutive_deferrals_back_off_then_success_resets(
+async def test_three_consecutive_deferrals_back_off_then_release_shells(
     bili, poller_env, tmp_path
 ):
     store = await open_store(poller_env, tmp_path)
@@ -843,22 +902,190 @@ async def test_three_consecutive_deferrals_back_off_then_success_resets(
         await poller.tick_dynamic()
         assert len(api.detail_calls) == calls_before
 
-        # Still failing: back off further but do not warn again.
+        # After the backoff, a window that still makes no progress is released:
+        # the unreadable shell gets a placeholder push so the newer posts behind
+        # it are not blocked forever.
         clock[0] = 1120
-        await poller.tick_dynamic()
-        assert poller._failures[("dynamic", "1")] == 2
-        assert poller._next_due[("dynamic", "1")] == 1360
-        assert len([line for line in messages if "failure backoff" in line]) == 1
-
-        # Success resets both the counter and the failure schedule.
-        clock[0] = 1360
-        api.transient.clear()
         await poller.tick_dynamic()
         assert poller._failures[("dynamic", "1")] == 0
         assert ("dynamic", "1") not in poller._deferrals
         assert await store.outbox_count() == 2
+        assert await store.seen_ids("dynamic", "1", ["mid", "newest"]) == {
+            "mid",
+            "newest",
+        }
+        state = await store.get_target("dynamic", "1")
+        assert state.latest_ts == 500
+        assert len([line for line in messages if "failure backoff" in line]) == 1
+        assert any("releasing its shell" in line for line in messages)
+
+        # The released placeholder is pushed exactly once.
+        clock[0] = 1180
+        api.detail_calls.clear()
+        await poller.tick_dynamic()
+        assert await store.outbox_count() == 2
+        assert api.detail_calls == []
     finally:
         logger.remove(sink_id)
+        await store.close()
+
+
+@asyncio_test
+async def test_releasing_a_stuck_shell_counts_as_progress_and_is_not_retried(
+    bili, poller_env, tmp_path
+):
+    store = await open_store(poller_env, tmp_path)
+    try:
+        await store.upsert_target(
+            poller_env.models.TargetInfo("dynamic", "1", latest_ts=100)
+        )
+        await store.add_subscription("dynamic", "1", "group", "900")
+        feed = [
+            _empty_draw("old", pub_ts=400),
+            _empty_draw("new", pub_ts=500),
+        ]
+        api = _fake_in(
+            poller_env.space,
+            feed,
+            {},
+            transient={"old", "new"},
+        )
+        poller = poller_env.poller.Poller(
+            api, store, intervals={"dynamic": 60}, clock=lambda: 1000
+        )
+        key = ("dynamic", "1")
+        poller._next_due[key] = 0
+        poller._detail_failures[key] = {"old": 3}
+        poller._deferrals[key] = 3
+
+        await poller.tick_dynamic()
+
+        # Releasing "old" is real progress, so the target does not keep the
+        # failure backoff; only the still-fresh "new" shell defers the round.
+        assert poller._released_windows[key] == {"old"}
+        assert poller._detail_failures[key] == {"new": 1}
+        assert key not in poller._deferrals
+        assert poller._failures.get(key, 0) == 0
+        assert await store.outbox_count() == 0
+
+        # The released shell is not queried or warned about again.
+        api.detail_calls.clear()
+        await poller.tick_dynamic()
+        assert api.detail_calls == ["new"]
+        assert poller._detail_failures[key] == {"new": 2}
+        assert poller._deferrals[key] == 1
+    finally:
+        await store.close()
+
+
+@asyncio_test
+async def test_cached_detail_hits_do_not_count_as_new_progress(
+    bili, poller_env, tmp_path
+):
+    """A cached success must not hide a permanently failing sibling forever.
+
+    Regression: ``progress`` used to be incremented for cache hits too, so a
+    window with one cached item and one persistently failing item reset the
+    no-progress counter every round and never reached backoff.
+    """
+    store = await open_store(poller_env, tmp_path)
+    try:
+        await store.upsert_target(
+            poller_env.models.TargetInfo("dynamic", "1", latest_ts=100)
+        )
+        await store.add_subscription("dynamic", "1", "group", "900")
+        feed = [
+            _empty_draw("cached", pub_ts=400),
+            _empty_draw("failing", pub_ts=500),
+            _text_item("newest", "最新正文", pub_ts=600),
+        ]
+        api = _fake_in(
+            poller_env.space,
+            feed,
+            {
+                "cached": _opus_detail("cached", "已缓存正文", pub_ts=400),
+                "failing": _opus_detail("failing", "补不出来", pub_ts=500),
+            },
+            transient={"failing"},
+        )
+        # An earlier round already resolved this item; this round's lookup is
+        # a cache hit and must not be reported as progress.
+        api.cached_details.add("cached")
+        poller = poller_env.poller.Poller(
+            api, store, intervals={"dynamic": 60}, clock=lambda: 1000
+        )
+        poller._next_due[("dynamic", "1")] = 0
+
+        await poller.tick_dynamic()
+        await poller.tick_dynamic()
+        await poller.tick_dynamic()
+
+        assert api.detail_calls == ["failing"] * 3
+        assert poller._deferrals[("dynamic", "1")] == 3
+        assert poller._failures[("dynamic", "1")] == 1
+        assert await store.outbox_count() == 0
+        assert await store.seen_ids("dynamic", "1", ["cached", "failing"]) == set()
+    finally:
+        await store.close()
+
+
+@asyncio_test
+async def test_cache_eviction_does_not_turn_a_refetch_into_progress(
+    bili, poller_env, tmp_path
+):
+    """A re-fetched shell already resolved in this window is not progress.
+
+    The 300 s cache holds only 64 entries, so a busy poll can evict a success
+    and force the next round to fetch it again. The poller keeps the window's
+    resolved ids, so that re-fetch cannot reset the no-progress counter.
+    """
+    store = await open_store(poller_env, tmp_path)
+    try:
+        await store.upsert_target(
+            poller_env.models.TargetInfo("dynamic", "1", latest_ts=100)
+        )
+        await store.add_subscription("dynamic", "1", "group", "900")
+        feed = [
+            _empty_draw("cached", pub_ts=400),
+            _empty_draw("failing", pub_ts=500),
+        ]
+        api = _fake_in(
+            poller_env.space,
+            feed,
+            {
+                "cached": _opus_detail("cached", "已缓存正文", pub_ts=400),
+                "failing": _opus_detail("failing", "补不出来", pub_ts=500),
+            },
+            transient={"failing"},
+        )
+        poller = poller_env.poller.Poller(
+            api, store, intervals={"dynamic": 60}, clock=lambda: 1000
+        )
+        poller._next_due[("dynamic", "1")] = 0
+
+        # Round 1 resolves "cached" for the first time: that is real progress.
+        await poller.tick_dynamic()
+        assert poller._resolved_windows[("dynamic", "1")] == {"cached"}
+        assert ("dynamic", "1") not in poller._deferrals
+
+        # Evict the success cache between rounds. The refetched "cached" item is
+        # already in the window's resolved-id set, so these rounds still make no
+        # new progress.
+        for _ in range(2):
+            api.cached_details.clear()
+            await poller.tick_dynamic()
+
+        assert poller._deferrals[("dynamic", "1")] == 2
+        assert poller._detail_failures[("dynamic", "1")]["failing"] == 3
+        assert await store.outbox_count() == 0
+
+        # The item that failed three times is released on the next attempt,
+        # rather than keeping the window stuck forever.
+        api.cached_details.clear()
+        await poller.tick_dynamic()
+        assert await store.outbox_count() == 2
+        assert ("dynamic", "1") not in poller._detail_failures
+    finally:
         await store.close()
 
 
@@ -882,15 +1109,16 @@ async def test_progressing_deferral_keeps_the_normal_cadence(
             {"mid": _opus_detail("mid", "补全正文", pub_ts=400)},
         )
         real_enrich = api.enrich_empty_dynamic_items
-        # ``None`` means "let the real enrichment run"; an int is the progress
-        # the simulated deferral reports.
-        state = {"progress": 2}
+        # ``None`` means "let the real enrichment run"; otherwise this is the
+        # simulated deferral's newly-resolved id set.
+        state = {"resolved_ids": {"mid"}}
 
         async def enrich(items, **kwargs):
-            if state["progress"] is not None:
+            if state["resolved_ids"] is not None:
                 raise poller_env.space.DynamicEnrichDeferred(
                     "动态详情回查预算用完，留待下一轮",
-                    progress=state["progress"],
+                    progress=len(state["resolved_ids"]),
+                    resolved_ids=state["resolved_ids"],
                 )
             return await real_enrich(items, **kwargs)
 
@@ -900,8 +1128,9 @@ async def test_progressing_deferral_keeps_the_normal_cadence(
         )
         poller._next_due[("dynamic", "1")] = 0
 
-        for _ in range(2):
-            await poller.tick_dynamic()
+        await poller.tick_dynamic()
+        state["resolved_ids"] = {"mid", "newer"}
+        await poller.tick_dynamic()
 
         # Slow but progressing: the retry stays at the normal cadence and the
         # consecutive-deferral counter is not incremented.
@@ -911,14 +1140,14 @@ async def test_progressing_deferral_keeps_the_normal_cadence(
         assert await store.outbox_count() == 0
 
         # A no-progress round starts counting from zero again, not from three.
-        state["progress"] = 0
+        state["resolved_ids"] = set()
         await poller.tick_dynamic()
         assert poller._deferrals[("dynamic", "1")] == 1
         assert poller._failures.get(("dynamic", "1"), 0) == 0
         assert poller._next_due[("dynamic", "1")] == 0
 
         # The window finally fits: one normal success clears everything.
-        state["progress"] = None
+        state["resolved_ids"] = None
         await poller.tick_dynamic()
         assert ("dynamic", "1") not in poller._deferrals
         assert poller._failures.get(("dynamic", "1"), 0) == 0
@@ -1134,6 +1363,67 @@ async def test_transient_failure_is_not_cached_as_a_miss(bili):
 
     assert detail["id_str"] == "1"
     assert calls == ["1", "1"]
+    await api.aclose()
+
+
+@pytest.mark.parametrize("code", [-404, 4101131])
+@asyncio_test
+async def test_business_unavailable_code_is_cached_as_a_miss(bili, code):
+    api = bili.api.BiliApi(transport=_stub_transport(), min_interval=0)
+    calls: list[str] = []
+
+    async def detail_json(url, *, params=None):
+        calls.append(str((params or {})["id"]))
+        return {"code": code, "message": "请求数据发生错误"}
+
+    api._get_json = detail_json
+    feed = [_empty_draw("1", pub_ts=200)]
+
+    await api.enrich_empty_dynamic_items(feed)
+
+    # Deleted/hidden is a permanent answer: release the shell, remember the
+    # miss, and never defer the whole window over it.
+    assert not bili.api.space._dynamic_has_content(feed[0])
+    assert api._dynamic_detail_misses.contains("1")
+    assert calls == ["1"]
+    with pytest.raises(bili.api.DynamicDetailUnavailable):
+        await api.dynamic_detail("1")
+    assert calls == ["1"]
+    await api.aclose()
+
+
+@pytest.mark.parametrize("code", [500, 4101105])
+@asyncio_test
+async def test_retryable_business_code_stays_a_transient_failure(bili, code):
+    api = bili.api.BiliApi(transport=_stub_transport(), min_interval=0)
+
+    async def detail_json(url, *, params=None):
+        return {"code": code, "message": "加载错误，请稍后再试"}
+
+    api._get_json = detail_json
+    feed = [_empty_draw("1", pub_ts=200)]
+
+    with pytest.raises(bili.api.DynamicEnrichDeferred):
+        await api.enrich_empty_dynamic_items(feed)
+
+    assert not api._dynamic_detail_misses.contains("1")
+    with pytest.raises(bili.api.BiliAPIError) as failure:
+        await api.dynamic_detail("1")
+    assert not isinstance(failure.value, bili.api.DynamicDetailUnavailable)
+    await api.aclose()
+
+
+@asyncio_test
+async def test_pub_ts_carry_does_not_mutate_the_cached_detail(bili):
+    api = bili.api.BiliApi(transport=_stub_transport(), min_interval=0)
+    cached = _opus_detail("1", "正文", pub_ts=50)
+    api._generic_dynamic_details.put("1", cached)
+    feed = [_empty_draw("1", pub_ts=200)]
+
+    await api.enrich_empty_dynamic_items(feed, after_ts=100)
+
+    assert cached["modules"]["module_author"]["pub_ts"] == 50
+    assert feed[0]["modules"]["module_author"]["pub_ts"] == 200
     await api.aclose()
 
 

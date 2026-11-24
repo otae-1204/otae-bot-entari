@@ -98,6 +98,15 @@ class Poller:
         # Consecutive soft deferrals per target, so a window that can never be
         # filled does not retry at debug level forever.
         self._deferrals: dict[tuple[str, str], int] = {}
+        # Per-item transient failures and the ids already resolved in the
+        # current window. Item counts decide which shells may be released after
+        # repeated failures; the resolved-id set keeps a cache eviction from
+        # looking like new progress.
+        self._detail_failures: dict[tuple[str, str], dict[str, int]] = {}
+        self._resolved_windows: dict[tuple[str, str], set[str]] = {}
+        # Shells already released as placeholders in the current window: they
+        # are never queried again until a successful round clears the window.
+        self._released_windows: dict[tuple[str, str], set[str]] = {}
         self._video_failure_log_cache: dict[str, tuple[str, int]] = {}
 
     # --- ticks ------------------------------------------------------------
@@ -230,7 +239,25 @@ class Poller:
                 # rounds are free: no backoff, no state or outbox writes.
                 result.deferred += 1
                 key = (kind, target.uid)
-                if exc.progress > 0:
+                if exc.item_id:
+                    failures = self._detail_failures.setdefault(key, {})
+                    failures[exc.item_id] = failures.get(exc.item_id, 0) + 1
+                # Failures are consecutive per item: a shell resolved in this
+                # round (including one released this round) starts over.
+                failures = self._detail_failures.get(key)
+                if failures:
+                    for item_id in exc.resolved_ids:
+                        failures.pop(item_id, None)
+                    if not failures:
+                        self._detail_failures.pop(key, None)
+                if exc.released_ids:
+                    self._released_windows.setdefault(key, set()).update(
+                        exc.released_ids
+                    )
+                known = self._resolved_windows.setdefault(key, set())
+                newly_resolved = exc.resolved_ids - known
+                known.update(exc.resolved_ids)
+                if newly_resolved:
                     # This round resolved items before running out of budget,
                     # so the window is converging: the cached successes make
                     # the next attempt cheaper. A slow window must keep its
@@ -238,8 +265,9 @@ class Poller:
                     # outlive the 300 s detail cache and it would never finish.
                     self._deferrals.pop(key, None)
                     logger.debug(
-                        f"[bilibilibot] {kind} enrichment resolved {exc.progress} "
-                        f"item(s) for {target.uid} before deferring, retrying next tick: {exc}"
+                        f"[bilibilibot] {kind} enrichment resolved "
+                        f"{len(newly_resolved)} item(s) for {target.uid} before "
+                        f"deferring, retrying next tick: {exc}"
                     )
                     return
                 rounds = self._deferrals.get(key, 0) + 1
@@ -302,11 +330,29 @@ class Poller:
             # 条数上限必须覆盖即将检测的整个窗口（整页账号最多 10 条），否则
             # 超过 5 条空壳的窗口会每轮延后、永不收敛；10 秒预算才是真正的
             # 请求时间上限。
+            # 同一条目连续多轮补不出来后才放行：否则一个永远补不出的条目会把
+            # 该 UP 之后的所有新动态一起挡在游标后面，退避多久都没用。只放行
+            # 已经失败够多次的 id，新到且首次失败的空壳仍会得到自己的重试轮。
+            key = (kind, target.uid)
+            release_ids = {
+                item_id
+                for item_id, attempts in self._detail_failures.get(key, {}).items()
+                if attempts >= DYNAMIC_DEFERRAL_BACKOFF_ROUNDS
+            }
+            window_ids = {
+                str(item.get("id_str") or "")
+                for item in selected
+                if isinstance(item, dict)
+            }
             selected = await self.api.enrich_empty_dynamic_items(
                 selected,
                 deadline=deadline,
                 after_ts=target.latest_ts,
                 limit=max(DYNAMIC_CARD_LIMIT, len(selected)),
+                release_ids=release_ids,
+                # Only the current window matters; a released item that has
+                # already fallen out of the feed needs no skip entry.
+                skip_ids=self._released_windows.get(key, set()) & window_ids,
             )
         cards = [dynamic_item_to_card(item, target.uid) for item in selected]
         seen_ids = await self.store.seen_ids(
@@ -381,6 +427,9 @@ class Poller:
         key = (kind, uid)
         self._failures[key] = 0
         self._deferrals.pop(key, None)
+        self._detail_failures.pop(key, None)
+        self._resolved_windows.pop(key, None)
+        self._released_windows.pop(key, None)
         self._next_due[key] = now + self._interval(kind)
 
     def _fail(self, kind: str, uid: str, now: int) -> None:

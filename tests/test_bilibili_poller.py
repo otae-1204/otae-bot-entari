@@ -67,7 +67,14 @@ class FakeApi:
         return self.items.get(uid, [])
 
     async def enrich_empty_dynamic_items(
-        self, items, *, deadline=None, after_ts=0, limit=5
+        self,
+        items,
+        *,
+        deadline=None,
+        after_ts=0,
+        limit=5,
+        release_ids=None,
+        skip_ids=None,
     ):
         # No shells in these fixtures: record the scope and leave the window alone.
         self.dynamic_enrich_calls.append((after_ts, limit, len(items)))

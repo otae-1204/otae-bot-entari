@@ -422,11 +422,28 @@ class BiliApi:
         deadline: float | None = None,
         after_ts: int = 0,
         limit: int = space_api.DYNAMIC_DETAIL_LIMIT,
+        release_ids: set[str] | None = None,
+        skip_ids: set[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Fill empty shells among exactly the items the poller selected."""
         return await space_api.enrich_empty_dynamic_items(
-            self, items, deadline=deadline, after_ts=after_ts, limit=limit
+            self,
+            items,
+            deadline=deadline,
+            after_ts=after_ts,
+            limit=limit,
+            release_ids=release_ids,
+            skip_ids=skip_ids,
         )
+
+    def has_cached_dynamic_detail(self, item_id: str) -> bool:
+        """Whether a lookup would be answered by a completed success/miss entry.
+
+        Used by enrichment so a cache hit is not reported as new progress.
+        """
+        return self._dynamic_detail_misses.contains(
+            item_id
+        ) or self._generic_dynamic_details.contains(item_id)
 
     async def dynamic_detail(
         self, item_id: str, *, deadline: float | None = None
