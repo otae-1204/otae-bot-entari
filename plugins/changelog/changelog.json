@@ -1,15 +1,36 @@
 {
   "schema": 2,
-  "head": "146eb1d",
+  "head": "5257deb",
   "generated_from": {
     "first_commit": "8e1b455",
     "first_date": "2026-06-17",
-    "last_date": "2026-11-20",
-    "commit_count": 561,
+    "last_date": "2026-11-24",
+    "commit_count": 562,
     "merge_commit_count": 36,
-    "version_count": 62
+    "version_count": 63
   },
   "releases": [
+    {
+      "version": "v2.0.7",
+      "date": "2026-11-24",
+      "from": "2026-11-24",
+      "to": "2026-11-24",
+      "title": "B站订阅权限",
+      "summary": "群内只有群主、管理员和超级用户能增删B站订阅。",
+      "tags": [
+        "B站"
+      ],
+      "highlights": [
+        {
+          "kind": "feat",
+          "date": "2026-11-24",
+          "text": "群内添加、取消B站订阅限群主、管理员和超级用户，其他人只能查看。",
+          "commits": [
+            "5257deb"
+          ]
+        }
+      ]
+    },
     {
       "version": "v2.0.6",
       "date": "2026-11-20",
