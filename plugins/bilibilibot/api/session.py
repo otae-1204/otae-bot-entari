@@ -34,6 +34,35 @@ class BiliAPIError(Exception):
     pass
 
 
+class DynamicDetailUnavailable(BiliAPIError):
+    """The detail endpoint cannot show this dynamic (deleted, hidden or empty).
+
+    Distinct from timeouts and risk control: only this class is safe to cache
+    as a miss, because a transient failure may succeed on the next poll.
+    """
+
+
+class DynamicEnrichDeferred(BiliAPIError):
+    """This round cannot finish filling the selected dynamic window.
+
+    Raised when the detail lookups for the poller's selected window exceed the
+    per-round request limit or the 10 s budget, or when one lookup fails
+    transiently. The poller treats it as a soft deferral: no state, seen marks
+    or outbox rows are written and the cursor stays put, so the same window is
+    retried on the next tick instead of pushing or marking an empty shell.
+
+    ``progress`` counts the items this round did resolve (detail filled or
+    confirmed invisible) before it gave up. A round that resolved something is
+    converging — the cached successes make the retry cheaper — so the poller
+    keeps the normal cadence for it and only backs off when rounds stop making
+    progress.
+    """
+
+    def __init__(self, message: str, *, progress: int = 0):
+        super().__init__(message)
+        self.progress = max(0, int(progress))
+
+
 class BiliRiskControlError(BiliAPIError):
     def __init__(self, label: str):
         super().__init__(

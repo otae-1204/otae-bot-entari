@@ -48,6 +48,7 @@ class FakeApi:
         self.room_calls = []
         self.video_calls = []
         self.dynamic_calls = []
+        self.dynamic_enrich_calls = []
 
     async def batch_live_status(self, uids):
         self.batch_calls.append(list(uids))
@@ -64,6 +65,13 @@ class FakeApi:
     async def dynamic_items(self, uid, *, deadline=None):
         self.dynamic_calls.append(uid)
         return self.items.get(uid, [])
+
+    async def enrich_empty_dynamic_items(
+        self, items, *, deadline=None, after_ts=0, limit=5
+    ):
+        # No shells in these fixtures: record the scope and leave the window alone.
+        self.dynamic_enrich_calls.append((after_ts, limit, len(items)))
+        return items
 
 
 def subscription(bili, kind, uid, subscriber_type="group", subscriber_id="900"):
@@ -595,6 +603,11 @@ async def test_dynamic_tick_writes_seen_marks_and_events(bili, tmp_path):
         poller = bili.poller.Poller(api, store, intervals={"dynamic": 0})
         await poller.tick_dynamic()
         assert await store.outbox_count() == 1
+        # Enrichment is scoped to the target's own baseline and a request cap
+        # that always covers the selected window.
+        assert api.dynamic_enrich_calls == [
+            (0, max(bili.poller.DYNAMIC_CARD_LIMIT, len(items)), len(items))
+        ]
         assert await store.seen_ids("dynamic", "1", ["100"]) == {"100"}
         # The second round sees the same item as already handled.
         await poller.tick_dynamic()

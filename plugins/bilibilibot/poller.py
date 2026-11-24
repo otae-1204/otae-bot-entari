@@ -16,6 +16,7 @@ from typing import Callable
 from loguru import logger
 
 from .api.mapping import dynamic_item_to_card
+from .api.session import DynamicEnrichDeferred
 from .config import bili_settings
 from .detect import detect_dynamic, detect_live, detect_video, seen_items_of
 from .lottery_filter import applies_to
@@ -27,6 +28,11 @@ from .store import BiliStore
 KIND_INTERVALS = {KIND_VIDEO: 120, KIND_DYNAMIC: 60}
 MAX_BACKOFF_SECONDS = 30 * 60
 DYNAMIC_CARD_LIMIT = 5
+# A window that never fits (detail keeps failing) must not retry at debug
+# level forever; after this many consecutive *no-progress* deferrals it joins
+# the failure schedule and logs one warning. Deferrals that resolved something
+# are converging and never count towards this.
+DYNAMIC_DEFERRAL_BACKOFF_ROUNDS = 3
 # A failing UP logs once per half hour; repeats are demoted to debug.
 VIDEO_FAILURE_LOG_INTERVAL = 1800
 def live_batch_enabled() -> bool:
@@ -45,7 +51,7 @@ def event_key(event: BiliEvent, now: int) -> str:
 class _PollResult:
     """One round's outcome, accumulated before the single write transaction."""
 
-    __slots__ = ("updates", "events", "seen", "successes", "failures")
+    __slots__ = ("updates", "events", "seen", "successes", "failures", "deferred")
 
     def __init__(self) -> None:
         self.updates: list[TargetInfo] = []
@@ -53,6 +59,8 @@ class _PollResult:
         self.seen: list[SeenItem] = []
         self.successes = 0
         self.failures = 0
+        # Soft-deferred rounds: no write, no schedule change, retried next tick.
+        self.deferred = 0
 
 
 class Poller:
@@ -87,6 +95,9 @@ class Poller:
         # Schedule state is deliberately in memory: a restart just re-staggers.
         self._next_due: dict[tuple[str, str], float] = {}
         self._failures: dict[tuple[str, str], int] = {}
+        # Consecutive soft deferrals per target, so a window that can never be
+        # filled does not retry at debug level forever.
+        self._deferrals: dict[tuple[str, str], int] = {}
         self._video_failure_log_cache: dict[str, tuple[str, int]] = {}
 
     # --- ticks ------------------------------------------------------------
@@ -141,7 +152,8 @@ class Poller:
             self.notifier.wake()
         logger.info(
             f"[bilibilibot] poll kind={kind} targets={len(targets)} due={len(due)} "
-            f"success={result.successes} failed={result.failures} events={len(result.events)} "
+            f"success={result.successes} failed={result.failures} "
+            f"deferred={result.deferred} events={len(result.events)} "
             f"outbox={rows} backlog_wait={backlog_wait:.3f}s elapsed={perf_counter() - started:.3f}s"
         )
 
@@ -212,8 +224,47 @@ class Poller:
                 result.seen.extend(marked)
                 result.successes += 1
                 self._succeed(kind, target.uid, now)
+            except DynamicEnrichDeferred as exc:
+                # Soft deferral: the subscription baseline and cursor stay put,
+                # so the same window is retried on the next tick. The first
+                # rounds are free: no backoff, no state or outbox writes.
+                result.deferred += 1
+                key = (kind, target.uid)
+                if exc.progress > 0:
+                    # This round resolved items before running out of budget,
+                    # so the window is converging: the cached successes make
+                    # the next attempt cheaper. A slow window must keep its
+                    # normal cadence, otherwise the 120/240/480 s backoff would
+                    # outlive the 300 s detail cache and it would never finish.
+                    self._deferrals.pop(key, None)
+                    logger.debug(
+                        f"[bilibilibot] {kind} enrichment resolved {exc.progress} "
+                        f"item(s) for {target.uid} before deferring, retrying next tick: {exc}"
+                    )
+                    return
+                rounds = self._deferrals.get(key, 0) + 1
+                self._deferrals[key] = rounds
+                if rounds < DYNAMIC_DEFERRAL_BACKOFF_ROUNDS:
+                    logger.debug(
+                        f"[bilibilibot] {kind} enrichment deferred for {target.uid}: {exc}"
+                    )
+                    return
+                # A window that keeps deferring without progress would never
+                # escape otherwise: join the failure schedule and warn once
+                # when crossing over.
+                if rounds == DYNAMIC_DEFERRAL_BACKOFF_ROUNDS:
+                    logger.warning(
+                        f"[bilibilibot] {kind} enrichment deferred {rounds} rounds in a row "
+                        f"without progress for {target.uid}, applying failure backoff: {exc}"
+                    )
+                else:
+                    logger.debug(
+                        f"[bilibilibot] {kind} enrichment still deferred for {target.uid}: {exc}"
+                    )
+                self._fail(kind, target.uid, now)
             except Exception as exc:
                 result.failures += 1
+                self._deferrals.pop((kind, target.uid), None)
                 self._fail(kind, target.uid, now)
                 if kind == KIND_VIDEO:
                     # A persistently broken UP must not flood the log.
@@ -235,11 +286,28 @@ class Poller:
                 already_seen=await self.store.has_seen(KIND_VIDEO, target.uid, card.item_id or ""),
             )
             return updated, events, seen_items_of(events)
-        items = await self.api.dynamic_items(target.uid, deadline=self._deadline())
+        # One absolute deadline covers the feed page and the detail lookups it
+        # triggers, so the whole target stays inside the per-target budget.
+        deadline = self._deadline()
+        items = await self.api.dynamic_items(target.uid, deadline=deadline)
         # 参与过滤的账号与官号都看整页：抽奖动态不该把正常动态挤出前五条，
         # 官号经 RSS 回查得到的详情也不该被截掉。
         whole_page = applies_to(target.uid) or target.uid == ENDFIELD_OFFICIAL_UID
         selected = items if whole_page else items[:DYNAMIC_CARD_LIMIT]
+        # 只为基线之后的新动态回查空壳详情：更早的条目要么已经通知过，要么
+        # 属于首次订阅的存量，不该消耗详情请求预算。回查失败 / 超预算时整轮
+        # 延后（DynamicEnrichDeferred），不推进游标也不推送半成品。
+        # 官号走独立的采集与详情校验路径，绝不调用普通动态的 detail。
+        if target.uid != ENDFIELD_OFFICIAL_UID:
+            # 条数上限必须覆盖即将检测的整个窗口（整页账号最多 10 条），否则
+            # 超过 5 条空壳的窗口会每轮延后、永不收敛；10 秒预算才是真正的
+            # 请求时间上限。
+            selected = await self.api.enrich_empty_dynamic_items(
+                selected,
+                deadline=deadline,
+                after_ts=target.latest_ts,
+                limit=max(DYNAMIC_CARD_LIMIT, len(selected)),
+            )
         cards = [dynamic_item_to_card(item, target.uid) for item in selected]
         seen_ids = await self.store.seen_ids(
             KIND_DYNAMIC, target.uid, [card.item_id for card in cards if card.item_id]
@@ -312,6 +380,7 @@ class Poller:
     def _succeed(self, kind: str, uid: str, now: int) -> None:
         key = (kind, uid)
         self._failures[key] = 0
+        self._deferrals.pop(key, None)
         self._next_due[key] = now + self._interval(kind)
 
     def _fail(self, kind: str, uid: str, now: int) -> None:
