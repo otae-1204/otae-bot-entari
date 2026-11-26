@@ -264,12 +264,17 @@ class CardRenderer:
         if getattr(process, "_hyw_stopped", False):
             return
         process._hyw_stopped = True
+        # Cleanup must never fail the request: on a loaded host taskkill or wait() can
+        # exceed their 5 s, and the answer has usually been rendered already.
         if os.name == "nt":
             if process.poll() is None:
                 # Built into Windows; terminate only the worker tree we launched.
                 killer = Path(os.environ.get("SYSTEMROOT", "C:/Windows")) / "System32/taskkill.exe"
-                subprocess.run([str(killer), "/PID", str(process.pid), "/T", "/F"],
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+                try:
+                    subprocess.run([str(killer), "/PID", str(process.pid), "/T", "/F"],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+                except (subprocess.TimeoutExpired, OSError):
+                    pass
                 if process.poll() is None:
                     process.kill()
         else:
@@ -277,7 +282,10 @@ class CardRenderer:
                 os.killpg(process.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
-        process.wait(timeout=5)
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass  # killed; the OS reaps it, the caller must not wait on it
         for stream in (process.stdin, process.stdout):
             if stream is not None:
                 stream.close()

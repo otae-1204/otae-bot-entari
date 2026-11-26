@@ -8,7 +8,7 @@ import math
 import sys
 import tempfile
 import unittest
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from threading import Event
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -386,3 +386,33 @@ class AnswerFallbackTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     sys.exit(unittest.main())
+
+
+class StopWorkerCleanupTests(unittest.TestCase):
+    """Stopping the render worker is cleanup: a slow taskkill/wait must not fail the request."""
+
+    def _process(self):
+        process = SimpleNamespace(pid=4321, stdin=None, stdout=None)
+        process.poll = lambda: None
+        process.kill = lambda: setattr(process, "killed", True)
+        def wait(timeout=None):
+            raise rendering.subprocess.TimeoutExpired("wait", timeout)
+        process.wait = wait
+        return process
+
+    def test_taskkill_and_wait_timeouts_are_swallowed_on_windows(self):
+        process = self._process()
+        timeout = rendering.subprocess.TimeoutExpired(["taskkill"], 5)
+        with patch.object(rendering.os, "name", "nt"), patch.object(rendering, "Path", PurePosixPath), \
+                patch.object(rendering.subprocess, "run", side_effect=timeout):
+            CardRenderer._stop(process)
+        self.assertTrue(process.killed)
+        self.assertTrue(process._hyw_stopped)
+
+    def test_wait_timeout_is_swallowed_on_posix(self):
+        process = self._process()
+        with patch.object(rendering.os, "name", "posix"), \
+                patch.object(rendering.os, "killpg", create=True), \
+                patch.object(rendering, "signal", SimpleNamespace(SIGKILL=9)):
+            CardRenderer._stop(process)
+        self.assertTrue(process._hyw_stopped)
