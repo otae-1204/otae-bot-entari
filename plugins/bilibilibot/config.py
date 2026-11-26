@@ -18,6 +18,10 @@ class BiliSettings(Settings):
         default_factory=lambda: ["https://rsshub.app", "https://rss.materium.io"],
         description="RSSHub 镜像列表，按顺序尝试",
     )
+    rsshub: bool = field(
+        default=True,
+        description="直连 B 站被拦时是否用 RSSHub 兜底；false 关闭（只剩动态兜底，内置的公共镜像也不再请求）",
+    )
     lottery_filter_uids: str = field(
         default="*", description="动态订阅跳过社交抽奖的账号：* = 所有账号；逗号分隔的 UID 收窄；留空关闭过滤"
     )

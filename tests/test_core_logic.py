@@ -756,6 +756,13 @@ class CoreLogicTests(unittest.TestCase):
         self.assertIn("buvid3=refreshed", sent_cookies[1])
         self.assertIsNone(client.cookies.get("tracker"))
 
+    def test_bili_client_rsshub_can_be_disabled(self):
+        bili_api = _load_bili_new_module("api")
+        client = bili_api.BiliApi(rsshub_base_urls=["https://one.example"], rsshub_enabled=False)
+        self.assertEqual(client.rsshub_base_urls, [])  # built-in mirrors are dropped too
+        with self.assertRaisesRegex(Exception, "no RSSHub base urls configured"):
+            asyncio.run(client._rsshub_first_item("/route"))
+
     def test_bili_client_rsshub_all_failures_are_compacted(self):
         bili_api = _load_bili_new_module("api")
         client = bili_api.BiliApi(rsshub_base_urls=["https://one.example", "https://two.example", "https://three.example", "https://four.example"])

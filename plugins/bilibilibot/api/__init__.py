@@ -66,6 +66,7 @@ class BiliApi:
         dm_img_str: str = "",
         dm_cover_img_str: str = "",
         rsshub_base_urls: list[str] | None = None,
+        rsshub_enabled: bool = True,
         transport: httpx.AsyncBaseTransport | None = None,
         min_interval: float = 0.2,
     ):
@@ -81,7 +82,9 @@ class BiliApi:
             }.items()
             if value
         }
-        self.rsshub_base_urls = rsshub_api.merge_base_urls(rsshub_base_urls)
+        # Disabled: no instance at all, so every RSSHub step fails at once and the
+        # chain moves on (a local RSSHub in browser mode cost GBs per poll round).
+        self.rsshub_base_urls = rsshub_api.merge_base_urls(rsshub_base_urls) if rsshub_enabled else []
         # 官号动态详情按 ID 缓存：RSS 只给列表，正文要逐条回查 detail 接口。
         self._dynamic_details: AsyncTTLCache[str, dict[str, Any]] = AsyncTTLCache(
             ttl_seconds=300,

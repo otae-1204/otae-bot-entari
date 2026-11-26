@@ -108,6 +108,7 @@ plugins:
     dm_img_str: "${{ env.BILI_DM_IMG_STR :- }}"   # 风控参数 dm_img_str（密钥）
     dm_cover_img_str: "${{ env.BILI_DM_COVER_IMG_STR :- }}"   # 风控参数 dm_cover_img_str（密钥）
     rsshub_base_urls: ["https://rsshub.app", "https://rss.materium.io"]   # RSSHub 镜像列表，按顺序尝试
+    rsshub: true   # 直连 B 站被拦时是否用 RSSHub 兜底；false 关闭（只剩动态兜底，内置的公共镜像也不再请求）
     lottery_filter_uids: "*"   # 动态订阅跳过社交抽奖的账号：* = 所有账号；逗号分隔的 UID 收窄；留空关闭过滤
     live_batch: true   # 直播状态走批量接口；false 回到逐个房间查询（回滚开关）
   # 逃离塔科夫弹药查询

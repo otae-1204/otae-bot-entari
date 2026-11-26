@@ -34,6 +34,7 @@ client = BiliApi(
     dm_img_str=_settings.dm_img_str,
     dm_cover_img_str=_settings.dm_cover_img_str,
     rsshub_base_urls=[item.strip() for item in _settings.rsshub_base_urls if item.strip()],
+    rsshub_enabled=_settings.rsshub,
 )
 service = BiliService(store, client)
 
