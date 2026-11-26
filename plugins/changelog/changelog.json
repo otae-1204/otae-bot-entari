@@ -1,15 +1,46 @@
 {
   "schema": 2,
-  "head": "e9014cf",
+  "head": "b6b8619",
   "generated_from": {
     "first_commit": "8e1b455",
     "first_date": "2026-06-17",
-    "last_date": "2026-11-24",
-    "commit_count": 567,
+    "last_date": "2026-11-26",
+    "commit_count": 569,
     "merge_commit_count": 36,
-    "version_count": 71
+    "version_count": 72
   },
   "releases": [
+    {
+      "version": "v2.0.10",
+      "date": "2026-11-26",
+      "from": "2026-11-26",
+      "to": "2026-11-26",
+      "title": "减负与稳定",
+      "summary": "减少 B 站兜底带来的资源占用，HYW 出图后不再误报失败。",
+      "tags": [
+        "稳定性",
+        "B站",
+        "HYW"
+      ],
+      "highlights": [
+        {
+          "kind": "fix",
+          "date": "2026-11-26",
+          "text": "HYW 出图后清理子进程超时，不再误报“处理异常”。",
+          "commits": [
+            "d6f3ced"
+          ]
+        },
+        {
+          "kind": "feat",
+          "date": "2026-11-26",
+          "text": "B 站推送新增 RSSHub 兜底开关，可关闭以省下浏览器开销。",
+          "commits": [
+            "b6b8619"
+          ]
+        }
+      ]
+    },
     {
       "version": "v2.0.9",
       "date": "2026-11-24",
